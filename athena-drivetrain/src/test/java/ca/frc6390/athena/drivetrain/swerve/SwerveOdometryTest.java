@@ -1,6 +1,9 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -10,8 +13,10 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.signal.ImuSource;
+import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +49,64 @@ class SwerveOdometryTest {
         rig.odometry.refresh(rig.context, 1.0, 0.02);
 
         assertPose(rig.odometry.pose(), 5.0, 6.0, Math.PI);
+    }
+
+    @Test
+    void measuredVelocityMatchesKinematicsForMixedModuleStates() {
+        TestRig rig = new TestRig();
+        rig.odometry.refresh(rig.context, 0.0, 0.02);
+
+        rig.drivePositions.put(1, 1.0);
+        rig.drivePositions.put(2, 2.0);
+        rig.drivePositions.put(3, 3.0);
+        rig.drivePositions.put(4, 4.0);
+        rig.moduleAngles.put(21, 0.0);
+        rig.moduleAngles.put(22, 0.125);
+        rig.moduleAngles.put(23, 0.25);
+        rig.moduleAngles.put(24, -0.125);
+        rig.odometry.refresh(rig.context, 1.0, 1.0);
+
+        List<SwerveOdometry.ModulePosition> positions = rig.odometry.modulePositions();
+        RobotVelocity expected = rig.kinematics.velocity(List.of(
+                target(positions.get(0)),
+                target(positions.get(1)),
+                target(positions.get(2)),
+                target(positions.get(3))));
+        assertEquals(expected.xMetersPerSecond(), rig.odometry.velocity().xMetersPerSecond(), 1.0e-9);
+        assertEquals(expected.yMetersPerSecond(), rig.odometry.velocity().yMetersPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void modulePositionSnapshotsAreCachedImmutableAndIndependentOfLaterRefreshes() {
+        TestRig rig = new TestRig();
+        assertEquals(List.of(), rig.odometry.modulePositions());
+        rig.odometry.refresh(rig.context, 0.0, 0.02);
+
+        List<SwerveOdometry.ModulePosition> initial = rig.odometry.modulePositions();
+        assertSame(initial, rig.odometry.modulePositions());
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> initial.add(new SwerveOdometry.ModulePosition(1.0, 0.0)));
+
+        rig.drivePositions.replaceAll((id, ignored) -> 2.0);
+        rig.moduleAngles.replaceAll((id, ignored) -> 0.25);
+        rig.odometry.refresh(rig.context, 1.0, 1.0);
+
+        List<SwerveOdometry.ModulePosition> updated = rig.odometry.modulePositions();
+        assertNotSame(initial, updated);
+        assertSame(updated, rig.odometry.modulePositions());
+        for (SwerveOdometry.ModulePosition position : initial) {
+            assertEquals(0.0, position.distanceMeters(), 1.0e-9);
+            assertEquals(0.0, position.angleRotations(), 1.0e-9);
+        }
+        for (SwerveOdometry.ModulePosition position : updated) {
+            assertEquals(1.0, position.distanceMeters(), 1.0e-9);
+            assertEquals(0.25, position.angleRotations(), 1.0e-9);
+        }
+    }
+
+    private static SwerveModuleTarget target(SwerveOdometry.ModulePosition position) {
+        return new SwerveModuleTarget(position.distanceMeters(), position.angleRotations());
     }
 
     private static void assertPose(PoseSnapshot pose, double x, double y, double heading) {

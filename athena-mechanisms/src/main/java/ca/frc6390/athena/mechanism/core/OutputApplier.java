@@ -45,7 +45,7 @@ final class OutputApplier {
     private final Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-    private boolean captureTrace = true;
+    private boolean captureTrace;
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
         this.context = Objects.requireNonNull(context, "context");
@@ -99,15 +99,23 @@ final class OutputApplier {
         AppliedOutput applied = RuntimeHardwareAccess.current() == context
                 ? resolveControlOutput(output, safeContext)
                 : RuntimeHardwareAccess.call(context, () -> resolveControlOutput(output, safeContext));
-        if (captureTrace && output.request().control() != null) {
+        if (output.request().control() != null) {
             ControlBinding control = output.request().control();
-            controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
+            if (captureTrace) {
+                controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
+            }
             if (control.sink() != null) {
                 applySink(control.sink(), applied.output());
             }
         }
         appliedHandles.clear();
-        for (MotorDevice motor : motors(output.request())) {
+        ControlBinding control = output.request().control();
+        if (control != null) {
+            for (MotorDevice motor : control.motors()) {
+                applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
+            }
+        } else if (output.request().motor() != null) {
+            MotorDevice motor = output.request().motor();
             applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
         }
         if (output.output() instanceof Actions.ControlSysIdVoltage sysId) {
@@ -138,11 +146,13 @@ final class OutputApplier {
             motor.recordCommand(MotorCommandSnapshot.neutral());
             return;
         }
-        motor.recordCommand(command(applied.output()));
+        recordCommand(motor, applied.output());
         if (captureTrace) {
             appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
         }
-        for (ActionContext.SoftwareMotorFollower follower : context.softwareFollowers(motor)) {
+        List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(motor);
+        for (int index = 0; index < followers.size(); index++) {
+            ActionContext.SoftwareMotorFollower follower = followers.get(index);
             applyMotorAndSoftwareFollowers(follower.device(), follower.handle(), applied, appliedHandles);
         }
     }
@@ -164,7 +174,15 @@ final class OutputApplier {
     }
 
     void resetControls() {
-        controlRuntimes.clear();
+        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding control = entry.getKey();
+            ControlRuntimeState state = entry.getValue();
+            if (!state.active) {
+                continue;
+            }
+            resetFromCurrentFeedback(control, state);
+            state.active = false;
+        }
         controlsAppliedThisCycle.clear();
     }
 
@@ -175,18 +193,43 @@ final class OutputApplier {
     }
 
     void endCycle() {
+        if (controlRuntimes.isEmpty()) {
+            controlsAppliedThisCycle.clear();
+            return;
+        }
         activeSinks.clear();
         for (ControlBinding control : controlsAppliedThisCycle) {
             if (control.sink() != null) activeSinks.add(control.sink());
         }
-        controlRuntimes.keySet().removeIf(control -> {
-            boolean inactive = !controlsAppliedThisCycle.contains(control);
-            if (inactive && control.sink() != null && !activeSinks.contains(control.sink())) {
-                control.sink().release();
+        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding control = entry.getKey();
+            ControlRuntimeState state = entry.getValue();
+            boolean applied = controlsAppliedThisCycle.contains(control);
+            if (!applied && state.active) {
+                resetFromCurrentFeedback(control, state);
+                if (control.sink() != null && !activeSinks.contains(control.sink())) {
+                    control.sink().release();
+                }
             }
-            return inactive;
-        });
+            state.active = applied;
+        }
         controlsAppliedThisCycle.clear();
+    }
+
+    private void resetFromCurrentFeedback(ControlBinding control, ControlRuntimeState state) {
+        RuntimeHardwareAccess.call(context, () -> {
+            double position = firstFeedbackPosition(control);
+            double velocity = firstFeedbackVelocity(control);
+            state.lastPosition = finiteOrZero(position);
+            state.lastVelocity = finiteOrZero(velocity);
+            resetControlState(
+                    state,
+                    Outputs.neutral(),
+                    state.lastContext,
+                    state.lastPosition,
+                    state.lastVelocity);
+            return null;
+        });
     }
 
     List<MechanismTraceSnapshot.Control> controlTraces() {
@@ -206,6 +249,9 @@ final class OutputApplier {
         ControlRuntimeState state = controlRuntimes(control);
         double position = firstFeedbackPosition(control);
         double velocity = firstFeedbackVelocity(control);
+        state.lastContext = mechanismContext;
+        state.lastPosition = finiteOrZero(position);
+        state.lastVelocity = finiteOrZero(velocity);
         Output transformed = applyTargetTransforms(
                 control,
                 output.output(),
@@ -715,16 +761,6 @@ final class OutputApplier {
                 closedLoopRequest);
     }
 
-    private static List<MotorDevice> motors(OutputRequest request) {
-        if (request.control() != null) {
-            return request.control().motors();
-        }
-        if (request.motor() != null) {
-            return List.of(request.motor());
-        }
-        return List.of();
-    }
-
     private static void apply(MotorHandle motor, AppliedOutput applied) {
         Output output = applied.output();
         if (output instanceof Output.Percent percent) {
@@ -748,20 +784,24 @@ final class OutputApplier {
         }
     }
 
-    private static MotorCommandSnapshot command(Output output) {
+    private static void recordCommand(MotorDevice motor, Output output) {
         if (output instanceof Output.Percent percent) {
-            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.PERCENT, percent.percent());
+            motor.recordCommand(MotorCommandSnapshot.Mode.PERCENT, percent.percent());
+            return;
         }
         if (output instanceof Output.Voltage voltage) {
-            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VOLTAGE, voltage.volts());
+            motor.recordCommand(MotorCommandSnapshot.Mode.VOLTAGE, voltage.volts());
+            return;
         }
         if (output instanceof Output.Position position) {
-            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.POSITION, position.position());
+            motor.recordCommand(MotorCommandSnapshot.Mode.POSITION, position.position());
+            return;
         }
         if (output instanceof Output.Velocity velocity) {
-            return new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VELOCITY, velocity.velocity());
+            motor.recordCommand(MotorCommandSnapshot.Mode.VELOCITY, velocity.velocity());
+            return;
         }
-        return MotorCommandSnapshot.neutral();
+        motor.recordCommand(MotorCommandSnapshot.neutral());
     }
 
     private static boolean usesDeviceNativeFeedback(ControlBinding control) {
@@ -953,6 +993,10 @@ final class OutputApplier {
         private double cachedRequestFeedforwardVolts;
         private MotorClosedLoopConfig cachedConfig;
         private MotorClosedLoopRequest cachedRequest;
+        private MechanismContext lastContext = MechanismContext.empty();
+        private double lastPosition;
+        private double lastVelocity;
+        private boolean active;
 
         private ControlRuntimeState(ControlBinding binding) {
             this.binding = binding;

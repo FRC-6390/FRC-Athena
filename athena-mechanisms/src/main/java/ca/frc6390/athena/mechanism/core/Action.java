@@ -14,6 +14,13 @@ public interface Action extends DeviceAction {
         request();
     }
 
+    /**
+     * Requests this action through the currently bound robot runtime. Re-requesting the
+     * same instance restarts it and gives its resource lease newest-request precedence.
+     *
+     * @throws IllegalStateException when no robot runtime is bound
+     * @throws IllegalArgumentException when the runtime cannot infer mechanism ownership
+     */
     default void request() {
         ActionRequests.request(this);
     }

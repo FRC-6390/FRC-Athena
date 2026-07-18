@@ -70,6 +70,24 @@ class TelemetrySchemaTest {
                 new MechanismContext(0.04, 0.0, 0.02, true, false, false), EventContext.empty());
         assertTrue(!scheduler.traceSnapshots().get(0).motors().isEmpty());
     }
+
+    @Test
+    void standaloneTraceSummaryIsMaterializedAtItsConfiguredRate() {
+        CommissioningMechanism mechanism = new CommissioningMechanism();
+        MechanismScheduler scheduler = MechanismScheduler.create()
+                .register(mechanism).bindInMemoryRuntime();
+        assertEquals(MechanismTraceLevel.OFF, scheduler.traceLevel());
+        assertEquals(0.10, scheduler.tracePeriodSeconds(), 1.0e-9);
+        scheduler.traceLevel(MechanismTraceLevel.SUMMARY);
+
+        scheduler.request(mechanism.control.percent(0.5));
+        scheduler.periodic(new MechanismContext(0.0, 0.0, 0.02, true, false, false), EventContext.empty());
+        MechanismTraceSnapshot first = scheduler.traceSnapshots().get(0);
+        scheduler.periodic(new MechanismContext(0.02, 0.0, 0.02, true, false, false), EventContext.empty());
+        assertSame(first, scheduler.traceSnapshots().get(0));
+        scheduler.periodic(new MechanismContext(0.10, 0.0, 0.02, true, false, false), EventContext.empty());
+        assertNotSame(first, scheduler.traceSnapshots().get(0));
+    }
     @Test
     void collectionMechanismsRetainFieldAndIndexOwnership() {
         MechanismScheduler scheduler = MechanismScheduler.create()
@@ -131,6 +149,8 @@ class TelemetrySchemaTest {
         CommissioningMechanism mechanism = new CommissioningMechanism();
         MechanismScheduler scheduler = MechanismScheduler.create()
                 .register(mechanism)
+                .traceLevel(MechanismTraceLevel.CAPTURE)
+                .tracePeriodSeconds(0.0)
                 .bindInMemoryRuntime();
         TelemetrySchema schema = scheduler.telemetrySchema();
         var values = schema.values();
@@ -173,6 +193,8 @@ class TelemetrySchemaTest {
         VelocityCommissioningMechanism mechanism = new VelocityCommissioningMechanism();
         MechanismScheduler scheduler = MechanismScheduler.create()
                 .register(mechanism)
+                .traceLevel(MechanismTraceLevel.CAPTURE)
+                .tracePeriodSeconds(0.0)
                 .bindInMemoryRuntime();
         var values = scheduler.telemetrySchema().values();
         String config = "velocityCommissioningMechanism/Controls/control/Config/Constraints/";

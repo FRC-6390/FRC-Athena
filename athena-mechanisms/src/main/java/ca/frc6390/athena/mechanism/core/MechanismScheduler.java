@@ -32,6 +32,7 @@ public final class MechanismScheduler {
     private final ActionContext actionContext;
     private final Map<Mechanism, MechanismRuntime> runtimes = new IdentityHashMap<>();
     private final Map<Action, RequestTarget> actionTargets = new IdentityHashMap<>();
+    private final Map<Action, CompiledAction> compiledActions = new IdentityHashMap<>();
     private final Set<Action> ambiguousActionTargets = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, RequestTarget> declarationTargets = new LinkedHashMap<>();
     private final Set<Object> ambiguousDeclarationTargets = new LinkedHashSet<>();
@@ -40,7 +41,9 @@ public final class MechanismScheduler {
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final Map<Object, LeaseReservation> leaseReservations = new IdentityHashMap<>();
+    private final List<Object> activeLeaseKeys = new ArrayList<>();
     private final List<Object> completedLeaseKeys = new ArrayList<>();
+    private final List<Object> retirementScratch = new ArrayList<>();
     private final Map<Object, Long> reservationScratch = new IdentityHashMap<>();
     private final Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntimeScratch = new IdentityHashMap<>();
     private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -51,7 +54,9 @@ public final class MechanismScheduler {
     private Runnable simulationStep = () -> {
     };
     private volatile TelemetrySchema telemetrySchema;
-    private MechanismTraceLevel traceLevel = MechanismTraceLevel.CAPTURE;
+    private MechanismTraceLevel traceLevel = MechanismTraceLevel.OFF;
+    private double tracePeriodSeconds = 0.10;
+    private int outputCapacityHint;
 
     private MechanismScheduler(OutputResolver resolver, ActionContext hardwareContext) {
         this.resolver = Objects.requireNonNull(resolver, "resolver");
@@ -97,8 +102,10 @@ public final class MechanismScheduler {
         graph.node(mechanism);
         runtimes.computeIfAbsent(mechanism, this::runtime);
         runtimes.get(mechanism).traceLevel(traceLevel);
+        runtimes.get(mechanism).tracePeriodSeconds(tracePeriodSeconds);
         indexActionTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
         indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
+        rebuildCompiledActions();
         refreshDigitalInputs();
         telemetrySchema = null;
         return this;
@@ -128,6 +135,7 @@ public final class MechanismScheduler {
 
     public MechanismScheduler path(PathAction path, PathRuntime runtime) {
         pathRuntimes.put(Objects.requireNonNull(path, "path"), Objects.requireNonNull(runtime, "runtime"));
+        compiledActions.clear();
         return this;
     }
 
@@ -208,6 +216,16 @@ public final class MechanismScheduler {
         return this;
     }
 
+    /** Sets the minimum interval between materialized trace snapshots. Zero captures every cycle. */
+    public MechanismScheduler tracePeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds < 0.0) {
+            throw new IllegalArgumentException("Trace period must be finite and non-negative.");
+        }
+        tracePeriodSeconds = periodSeconds;
+        for (MechanismRuntime runtime : runtimes.values()) runtime.tracePeriodSeconds(periodSeconds);
+        return this;
+    }
+
     /** Associates a runtime-discovered declaration with a registered mechanism. */
     public MechanismScheduler declarationOwner(Object declaration, Mechanism owner) {
         RequestTarget target = declarationTargets.get(Objects.requireNonNull(owner, "owner"));
@@ -224,6 +242,9 @@ public final class MechanismScheduler {
     }
 
     public MechanismTraceLevel traceLevel() { return traceLevel; }
+
+    /** Returns the minimum interval between materialized trace snapshots. */
+    public double tracePeriodSeconds() { return tracePeriodSeconds; }
 
     /** Suppresses one failed declaration and neutralizes it when it is a motor. */
     public void disableDeclaration(Object declaration) {
@@ -471,47 +492,119 @@ public final class MechanismScheduler {
         if (existing != null) {
             releaseLease(key);
         }
-        Map<Mechanism, List<Action>> partitions = partitions(Objects.requireNonNull(action, "action"));
-        List<LeaseRegistration> registrations = new ArrayList<>(partitions.size());
+        CompiledAction compiled = compiledAction(Objects.requireNonNull(action, "action"));
+        List<LeaseRegistration> registrations = new ArrayList<>(compiled.partitions().size());
         long recency = ++requestSequence;
-        leaseReservations.put(key, new LeaseReservation(recency, actionResources(action)));
-        for (Map.Entry<Mechanism, List<Action>> partition : partitions.entrySet()) {
-            Action partitioned = partition.getValue().size() == 1
-                    ? partition.getValue().get(0)
-                    : Actions.parallel(partition.getValue().toArray(Action[]::new));
-            MechanismRuntime runtime = runtimeFor(partition.getKey());
+        leaseReservations.put(key, new LeaseReservation(recency, compiled.resources()));
+        for (Map.Entry<Mechanism, CompiledPartition> entry : compiled.partitions().entrySet()) {
+            CompiledPartition partition = entry.getValue();
+            MechanismRuntime runtime = runtimeFor(entry.getKey());
             Object runtimeKey = new Object();
-            runtime.activateLease(runtimeKey, partitioned, recency, actionResources(partitioned));
+            runtime.activateLease(runtimeKey, partition.action(), recency, partition.resources());
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
+        activeLeaseKeys.add(key);
     }
 
     private void releaseLease(Object key) {
         List<LeaseRegistration> registrations = leaseTargets.remove(key);
         leaseReservations.remove(key);
         if (registrations != null) {
+            removeIdentity(activeLeaseKeys, key);
             for (LeaseRegistration registration : registrations) {
                 registration.runtime().releaseLease(registration.runtimeKey());
             }
         }
     }
 
-    private Map<Mechanism, List<Action>> partitions(Action action) {
+    private CompiledAction compiledAction(Action action) {
+        CompiledAction cached = compiledActions.get(action);
+        if (cached != null) {
+            return cached;
+        }
+        CompiledAction compiled = compileAction(action);
+        compiledActions.put(action, compiled);
+        return compiled;
+    }
+
+    private CompiledAction compileAction(Action action) {
         Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {
             partitions.computeIfAbsent(direct.root(), ignored -> new ArrayList<>()).add(action);
-            return partitions;
-        }
-        if (action instanceof Actions.Parallel parallel) {
+        } else if (action instanceof Actions.Parallel parallel) {
             for (Action child : parallel.Actions()) {
                 addPartition(partitions, child);
             }
         } else {
             addPartition(partitions, action);
         }
-        return partitions;
+
+        Map<Mechanism, CompiledPartition> compiledPartitions = new IdentityHashMap<>();
+        Set<Object> allResources = new LinkedHashSet<>();
+        for (Map.Entry<Mechanism, List<Action>> entry : partitions.entrySet()) {
+            Action partitioned = entry.getValue().size() == 1
+                    ? entry.getValue().get(0)
+                    : Actions.parallel(entry.getValue().toArray(Action[]::new));
+            Set<Object> resources = actionResources(partitioned);
+            if (containsOpaqueRuntimeGraph(partitioned)) {
+                RequestTarget target = targetFor(partitioned);
+                if (target != null) {
+                    Set<Object> conservativeResources = new LinkedHashSet<>(resources);
+                    conservativeResources.addAll(resourcesFor(target.owner()));
+                    resources = Set.copyOf(conservativeResources);
+                }
+            }
+            CompiledPartition compiled = new CompiledPartition(partitioned, resources);
+            compiledPartitions.put(entry.getKey(), compiled);
+            allResources.addAll(resources);
+        }
+        return new CompiledAction(compiledPartitions, allResources);
+    }
+
+    private boolean containsOpaqueRuntimeGraph(Action action) {
+        if (action == null) return false;
+        if (action instanceof PathAction path) {
+            PathRuntime runtime = pathRuntimes.get(path);
+            return runtime == null || runtime.ownership(path).isEmpty();
+        }
+        if (action instanceof Actions.Computed) return false;
+        if (action instanceof Actions.Parallel parallel) {
+            return parallel.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
+        }
+        if (action instanceof Actions.Race race) {
+            return race.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
+        }
+        if (action instanceof Actions.Deadline deadline) {
+            return deadline.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
+        }
+        if (action instanceof Actions.Sequence sequence) {
+            return sequence.steps().stream().anyMatch(step -> containsOpaqueRuntimeGraph(step.action()))
+                    || containsOpaqueRuntimeGraph(sequence.next());
+        }
+        if (action instanceof Actions.Cycle cycle) {
+            return cycle.steps().stream().anyMatch(step -> containsOpaqueRuntimeGraph(step.action()));
+        }
+        if (action instanceof Actions.Choice choice) {
+            return containsOpaqueRuntimeGraph(choice.active()) || containsOpaqueRuntimeGraph(choice.inactive());
+        }
+        if (action instanceof Actions.WhenBranch branch) return containsOpaqueRuntimeGraph(branch.active());
+        if (action instanceof Actions.Timeout timeout) return containsOpaqueRuntimeGraph(timeout.action());
+        if (action instanceof Actions.WithinTolerance within) return containsOpaqueRuntimeGraph(within.action());
+        if (action instanceof Actions.Conditional conditional) {
+            return containsOpaqueRuntimeGraph(conditional.action()) || containsOpaqueRuntimeGraph(conditional.next());
+        }
+        if (action instanceof Action.Conditional conditional) {
+            return containsOpaqueRuntimeGraph(conditional.action()) || containsOpaqueRuntimeGraph(conditional.next());
+        }
+        if (action instanceof Actions.Then then) {
+            return containsOpaqueRuntimeGraph(then.action()) || containsOpaqueRuntimeGraph(then.next());
+        }
+        if (action instanceof Action.Then then) {
+            return containsOpaqueRuntimeGraph(then.action()) || containsOpaqueRuntimeGraph(then.next());
+        }
+        return false;
     }
 
     private void addPartition(Map<Mechanism, List<Action>> partitions, Action action) {
@@ -523,41 +616,98 @@ public final class MechanismScheduler {
         partitions.computeIfAbsent(target.root(), ignored -> new ArrayList<>()).add(action);
     }
 
-    private static Set<Object> actionResources(Action action) {
+    private Set<Object> actionResources(Action action) {
         Set<Object> resources = new LinkedHashSet<>();
         for (Object declaration : actionDeclarations(action)) {
-            if (declaration instanceof ControlBinding control && control.sink() != null) {
-                resources.add(control.sink());
-            }
-            collectActionResources(declaration, resources);
+            collectOwnedResource(declaration, resources);
+        }
+        collectPathResources(action, resources);
+        return Set.copyOf(resources);
+    }
+
+    private Set<Object> resourcesFor(Mechanism owner) {
+        Set<Object> resources = new LinkedHashSet<>();
+        for (Object declaration : graph.declarations(List.of(owner))) {
+            collectOwnedResource(declaration, resources);
         }
         return Set.copyOf(resources);
     }
 
-    private static void collectActionResources(Object declaration, Set<Object> resources) {
+    private void collectOwnedResource(Object declaration, Set<Object> resources) {
+        if (declaration instanceof ControlBinding control && control.sink() != null) {
+            resources.add(control.sink());
+        }
         if (declaration instanceof MotorDevice motor) {
             resources.add(motor);
         } else if (declaration instanceof ControlBinding control) {
             resources.addAll(control.motors());
+        } else if (declaration instanceof Mechanism mechanism) {
+            resources.addAll(resourcesFor(mechanism));
+        } else if (declaration instanceof Action action) {
+            for (Object ownedDeclaration : actionDeclarations(action)) {
+                if (ownedDeclaration != action) collectOwnedResource(ownedDeclaration, resources);
+            }
+            collectPathResources(action, resources);
         } else if (declaration instanceof Iterable<?> values) {
-            values.forEach(value -> collectActionResources(value, resources));
+            values.forEach(value -> collectOwnedResource(value, resources));
         }
     }
 
+    private void collectPathResources(Action action, Set<Object> resources) {
+        if (action == null) return;
+        if (action instanceof PathAction path) {
+            PathRuntime runtime = pathRuntimes.get(path);
+            if (runtime != null) runtime.ownership(path).forEach(value -> collectOwnedResource(value, resources));
+            path.markers().values().forEach(marker -> collectPathResources(marker, resources));
+        } else if (action instanceof Actions.Parallel parallel) {
+            parallel.Actions().forEach(child -> collectPathResources(child, resources));
+        } else if (action instanceof Actions.Race race) {
+            race.Actions().forEach(child -> collectPathResources(child, resources));
+        } else if (action instanceof Actions.Deadline deadline) {
+            deadline.Actions().forEach(child -> collectPathResources(child, resources));
+        } else if (action instanceof Actions.Sequence sequence) {
+            sequence.steps().forEach(step -> collectPathResources(step.action(), resources));
+            collectPathResources(sequence.next(), resources);
+        } else if (action instanceof Actions.Cycle cycle) {
+            cycle.steps().forEach(step -> collectPathResources(step.action(), resources));
+        } else if (action instanceof Actions.Choice choice) {
+            collectPathResources(choice.active(), resources);
+            collectPathResources(choice.inactive(), resources);
+        } else if (action instanceof Actions.WhenBranch branch) {
+            collectPathResources(branch.active(), resources);
+        } else if (action instanceof Actions.Timeout timeout) {
+            collectPathResources(timeout.action(), resources);
+        } else if (action instanceof Actions.WithinTolerance within) {
+            collectPathResources(within.action(), resources);
+        }
+    }
+
+    /**
+     * Requests an action, restarting an existing request and making it the newest lease.
+     * Newer leases win conflicting resources; older leases remain active and may resume
+     * after the newer lease releases.
+     *
+     * @param action action owned by, or targeting a declaration owned by, a registered mechanism
+     * @return this scheduler
+     * @throws IllegalArgumentException when ownership cannot be inferred
+     */
     public MechanismScheduler request(Action action) {
         Action safeAction = Objects.requireNonNull(action, "action");
         activateLease(safeAction, safeAction, true);
         return this;
     }
 
-    /** Cancels an Action and any marker/start leases it launched. */
+    /**
+     * Cancels an action and any marker/start leases it launched. Resources no longer
+     * driven by another lease are neutralized during the next output cycle.
+     */
     public MechanismScheduler cancel(Action action) {
         cancelNested(Objects.requireNonNull(action, "action"),
                 Collections.newSetFromMap(new IdentityHashMap<>()));
         return this;
     }
 
-    /** Returns whether a requested action is actively evaluating. */
+    /** Returns whether a requested action has an active, incomplete lease. */
     public boolean isRunning(Action action) {
         List<LeaseRegistration> registrations = leaseTargets.get(Objects.requireNonNull(action, "action"));
         if (registrations == null) return false;
@@ -567,7 +717,10 @@ public final class MechanismScheduler {
         return false;
     }
 
-    /** Returns whether a requested action has reached completion and remains registered. */
+    /**
+     * Returns whether a requested action reached completion. Cancellation clears completion,
+     * and requesting the same action again restarts it and clears the previous result.
+     */
     public boolean isComplete(Action action) {
         Action safeAction = Objects.requireNonNull(action, "action");
         List<LeaseRegistration> registrations = leaseTargets.get(safeAction);
@@ -627,7 +780,7 @@ public final class MechanismScheduler {
     private List<ResolvedOutput> periodicBound(MechanismContext mechanismContext, EventContext eventContext) {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
         sampleSignals();
-        List<ResolvedOutput> outputs = new ArrayList<>();
+        List<ResolvedOutput> outputs = new ArrayList<>(outputCapacityHint);
         Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = drivenByRuntimeScratch;
         Set<MotorDevice> globallyDriven = globallyDrivenScratch;
         drivenByRuntime.clear();
@@ -649,17 +802,19 @@ public final class MechanismScheduler {
             }
             retireCompletedRequests();
         }
+        outputCapacityHint = Math.max(outputCapacityHint, outputs.size());
         return outputs;
     }
 
     private void retireCompletedRequests() {
-        List<Object> completed = new ArrayList<>();
-        for (Map.Entry<Object, List<LeaseRegistration>> entry : leaseTargets.entrySet()) {
-            if (!(entry.getKey() instanceof Action)) continue;
-            List<LeaseRegistration> registrations = entry.getValue();
-            if (!registrations.isEmpty() && registrations.stream()
-                    .allMatch(registration -> registration.runtime().leaseComplete(registration.runtimeKey()))) {
-                completed.add(entry.getKey());
+        List<Object> completed = retirementScratch;
+        completed.clear();
+        for (int keyIndex = 0; keyIndex < activeLeaseKeys.size(); keyIndex++) {
+            Object key = activeLeaseKeys.get(keyIndex);
+            if (!(key instanceof Action)) continue;
+            List<LeaseRegistration> registrations = leaseTargets.get(key);
+            if (!registrations.isEmpty() && registrationsComplete(registrations)) {
+                completed.add(key);
             }
         }
         for (Object key : completed) {
@@ -679,24 +834,44 @@ public final class MechanismScheduler {
     }
 
     private boolean completed(Object key) {
-        return completedLeaseKeys.stream().anyMatch(existing -> existing == key);
+        for (int index = 0; index < completedLeaseKeys.size(); index++) {
+            if (completedLeaseKeys.get(index) == key) return true;
+        }
+        return false;
     }
 
     private Map<Object, Long> globalLeaseReservations() {
         Map<Object, Long> reservations = reservationScratch;
         reservations.clear();
-        for (Map.Entry<Object, LeaseReservation> entry : leaseReservations.entrySet()) {
-            List<LeaseRegistration> registrations = leaseTargets.get(entry.getKey());
-            if (registrations == null || registrations.stream()
-                    .allMatch(registration -> registration.runtime().leaseComplete(registration.runtimeKey()))) {
+        for (int keyIndex = 0; keyIndex < activeLeaseKeys.size(); keyIndex++) {
+            Object key = activeLeaseKeys.get(keyIndex);
+            List<LeaseRegistration> registrations = leaseTargets.get(key);
+            if (registrations == null || registrationsComplete(registrations)) {
                 continue;
             }
-            LeaseReservation lease = entry.getValue();
+            LeaseReservation lease = leaseReservations.get(key);
             for (Object resource : lease.resources()) {
                 reservations.merge(resource, lease.recency(), Math::max);
             }
         }
         return reservations;
+    }
+
+    private static void removeIdentity(List<Object> values, Object target) {
+        for (int index = 0; index < values.size(); index++) {
+            if (values.get(index) == target) {
+                values.remove(index);
+                return;
+            }
+        }
+    }
+
+    private static boolean registrationsComplete(List<LeaseRegistration> registrations) {
+        for (int index = 0; index < registrations.size(); index++) {
+            LeaseRegistration registration = registrations.get(index);
+            if (!registration.runtime().leaseComplete(registration.runtimeKey())) return false;
+        }
+        return true;
     }
 
     private void refreshDigitalInputs() {
@@ -800,6 +975,29 @@ public final class MechanismScheduler {
         }
     }
 
+    private void rebuildCompiledActions() {
+        compiledActions.clear();
+        Set<Mechanism> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Mechanism root : runtimes.keySet()) {
+            compileDeclaredActions(root, visited);
+        }
+    }
+
+    private void compileDeclaredActions(Mechanism mechanism, Set<Mechanism> visited) {
+        if (!visited.add(mechanism)) {
+            return;
+        }
+        MechanismNode node = graph.node(mechanism);
+        for (Action action : node.Actions().values()) {
+            if (targetFor(action) != null) {
+                compiledActions.put(action, compileAction(action));
+            }
+        }
+        for (Mechanism child : node.children().values()) {
+            compileDeclaredActions(child, visited);
+        }
+    }
+
     private void indexDeclarationTargets(Mechanism root, Mechanism mechanism, Set<Mechanism> visited) {
         if (!visited.add(mechanism)) {
             return;
@@ -840,13 +1038,6 @@ public final class MechanismScheduler {
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {
             return direct;
-        }
-        if (action instanceof Actions.Computed computed) {
-            RequestTarget computedTarget = targetFor(computed.evaluate(MechanismContext.empty()));
-            if (computedTarget != null) {
-                actionTargets.put(action, computedTarget);
-            }
-            return computedTarget;
         }
         Set<Object> declarations = actionDeclarations(action);
         Set<RequestTarget> targets = new HashSet<>();
@@ -889,7 +1080,15 @@ public final class MechanismScheduler {
         if (action instanceof Actions.Parallel parallel) {
             parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
         } else if (action instanceof Actions.Computed computed) {
-            collectActionDeclarations(computed.evaluate(MechanismContext.empty()), declarations);
+            for (Object owner : computed.ownership()) {
+                if (owner instanceof Action ownedAction) collectActionDeclarations(ownedAction, declarations);
+                else if (owner instanceof Iterable<?> values) {
+                    values.forEach(value -> {
+                        if (value instanceof Action ownedAction) collectActionDeclarations(ownedAction, declarations);
+                        else declarations.add(value);
+                    });
+                } else declarations.add(owner);
+            }
         } else if (action instanceof Actions.HardwareComputed computed) {
             declarations.addAll(computed.declarations());
         } else if (action instanceof Actions.VelocityContribution contribution) {
@@ -928,6 +1127,7 @@ public final class MechanismScheduler {
             collectActionDeclarations(then.next(), declarations);
         } else if (action instanceof PathAction path) {
             declarations.add(path);
+            path.markers().values().forEach(marker -> collectActionDeclarations(marker, declarations));
         } else if (action instanceof Actions.MotorNeutral motor) {
             declarations.add(motor.motor());
         } else if (action instanceof Actions.MotorPercent motor) {
@@ -1074,6 +1274,22 @@ public final class MechanismScheduler {
 
     private record LeaseReservation(long recency, Set<Object> resources) {
         private LeaseReservation {
+            resources = Set.copyOf(resources);
+        }
+    }
+
+    private record CompiledAction(
+            Map<Mechanism, CompiledPartition> partitions,
+            Set<Object> resources) {
+        private CompiledAction {
+            partitions = Collections.unmodifiableMap(new IdentityHashMap<>(partitions));
+            resources = Set.copyOf(resources);
+        }
+    }
+
+    private record CompiledPartition(Action action, Set<Object> resources) {
+        private CompiledPartition {
+            action = Objects.requireNonNull(action, "action");
             resources = Set.copyOf(resources);
         }
     }

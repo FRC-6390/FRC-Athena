@@ -21,6 +21,10 @@ import java.util.function.DoubleSupplier;
 
 /**
  * Declarative control binding for one actuator group.
+ *
+ * <p>The runtime binds each control-loop declaration once per binding identity. Target
+ * changes preserve loop and profile state. Neutral, cancellation, loss of arbitration,
+ * and disable reset that state without reconstructing the bound loop.</p>
  */
 public record ControlBinding(
         ControlMode mode,

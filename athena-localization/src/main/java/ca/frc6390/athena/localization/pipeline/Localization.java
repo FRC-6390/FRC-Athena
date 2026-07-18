@@ -8,6 +8,7 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
+import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
@@ -23,10 +24,13 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructPublisher;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 /** One inspectable pose-processing node in a localization graph. */
 public final class Localization implements PoseSignal {
@@ -189,14 +193,14 @@ public final class Localization implements PoseSignal {
     public PoseSignal refresh(ActionContext context, double timestampSeconds, double dtSeconds) {
         synchronized (state) {
             if (Double.compare(state.lastRefreshTimestamp, timestampSeconds) == 0) {
-                return snapshot(state.output);
+                return state.output;
             }
             refreshInputs(context, timestampSeconds, dtSeconds);
             evaluate(timestampSeconds);
             publishPose();
             state.lastRefreshTimestamp = timestampSeconds;
             state.runtimeOwned = true;
-            return snapshot(state.output);
+            return state.output;
         }
     }
 
@@ -206,7 +210,7 @@ public final class Localization implements PoseSignal {
             if (!state.runtimeOwned && strategy != Strategy.KALMAN) {
                 evaluate(Double.NaN);
             }
-            return state.output;
+            return state.output.measurements();
         }
     }
 
@@ -234,8 +238,8 @@ public final class Localization implements PoseSignal {
             synchronized (state) {
                 resetInputs(pose);
                 state.pendingReset = pose;
-                state.output = List.of(outputMeasurement(pose, RobotVelocity.zero(), 0.0,
-                        stateStdDevs, this));
+                state.output = CycleResult.of(List.of(outputMeasurement(
+                        pose, RobotVelocity.zero(), 0.0, stateStdDevs, this)));
                 state.accepted = List.of();
                 state.rejected = List.of();
                 state.lastRefreshTimestamp = Double.NaN;
@@ -312,23 +316,21 @@ public final class Localization implements PoseSignal {
         }
         state.accepted = List.copyOf(accepted);
         state.rejected = List.copyOf(rejected);
-        state.output = switch (strategy) {
-            case FILTER -> List.copyOf(accepted);
+        List<Measurement> output = switch (strategy) {
+            case FILTER -> state.accepted;
             case LATEST_VALID -> latest(accepted);
             case WEIGHTED_AVERAGE -> weightedAverage(accepted);
             case COVARIANCE_INTERSECTION -> covarianceIntersection(accepted);
             case KALMAN -> kalman(odometry, accepted, timestampSeconds);
         };
+        state.output = CycleResult.of(output);
     }
 
     private void publishPose() {
         if (!publishNetworkTables) {
             return;
         }
-        PoseSnapshot latest = poseSamples(state.output).stream()
-                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                .map(PoseMeasurementSample::pose)
-                .orElse(null);
+        PoseSnapshot latest = state.output.latestPose() == null ? null : state.output.latestPose().pose();
         if (latest == null) {
             return;
         }
@@ -351,7 +353,7 @@ public final class Localization implements PoseSignal {
             throw new IllegalStateException("Kalman localization requires one swerve odometry PoseSignal input.");
         }
         if (!Double.isFinite(timestampSeconds)) {
-            return state.output;
+            return state.output.measurements();
         }
         if (state.kalman == null) {
             state.kalman = new KalmanEngine(odometry, stateStdDevs, defaultVisionStdDevs);
@@ -373,10 +375,14 @@ public final class Localization implements PoseSignal {
     }
 
     private List<Measurement> latest(List<Measurement> measurements) {
-        return measurements.stream()
-                .max(Comparator.comparingDouble(Measurement::timestampSeconds))
-                .map(List::of)
-                .orElseGet(List::of);
+        Measurement latest = null;
+        for (Measurement measurement : measurements) {
+            if (latest == null
+                    || Double.compare(measurement.timestampSeconds(), latest.timestampSeconds()) > 0) {
+                latest = measurement;
+            }
+        }
+        return latest == null ? List.of() : List.of(latest);
     }
 
     private List<Measurement> weightedAverage(List<Measurement> measurements) {
@@ -453,26 +459,57 @@ public final class Localization implements PoseSignal {
     }
 
     private List<PoseMeasurementSample> groupedSamples(List<Measurement> measurements) {
-        List<PoseMeasurementSample> samples = poseSamples(measurements);
-        if (samples.isEmpty()) {
-            return samples;
-        }
-        PoseMeasurementSample newest = samples.stream()
-                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                .orElseThrow();
-        List<PoseMeasurementSample> recent = samples.stream()
-                .filter(sample -> newest.timestampSeconds() - sample.timestampSeconds() <= groupWindowSeconds)
-                .toList();
-        List<PoseMeasurementSample> best = List.of();
-        for (PoseMeasurementSample anchor : recent) {
-            List<PoseMeasurementSample> cluster = recent.stream()
-                    .filter(sample -> agrees(anchor, sample))
-                    .toList();
-            if (betterCluster(cluster, best)) {
-                best = cluster;
+        double newestTimestamp = Double.NEGATIVE_INFINITY;
+        boolean foundSample = false;
+        for (Measurement measurement : measurements) {
+            if (measurement instanceof PoseMeasurementSample sample) {
+                foundSample = true;
+                newestTimestamp = Math.max(newestTimestamp, sample.timestampSeconds());
             }
         }
-        return distinctSourceCount(best) >= minimumSourceCount ? best : List.of();
+        if (!foundSample) {
+            return List.of();
+        }
+
+        List<PoseMeasurementSample> recent = new ArrayList<>();
+        for (Measurement measurement : measurements) {
+            if (measurement instanceof PoseMeasurementSample sample
+                    && newestTimestamp - sample.timestampSeconds() <= groupWindowSeconds) {
+                recent.add(sample);
+            }
+        }
+
+        boolean[] candidateMembers = new boolean[recent.size()];
+        boolean[] bestMembers = new boolean[recent.size()];
+        ClusterStats candidate = new ClusterStats();
+        ClusterStats best = new ClusterStats();
+        Set<Object> sources = new HashSet<>();
+        for (PoseMeasurementSample anchor : recent) {
+            candidate.clear();
+            sources.clear();
+            for (int index = 0; index < recent.size(); index++) {
+                PoseMeasurementSample sample = recent.get(index);
+                boolean member = agrees(anchor, sample);
+                candidateMembers[index] = member;
+                if (member) {
+                    candidate.add(sample, sources);
+                }
+            }
+            if (candidate.betterThan(best)) {
+                System.arraycopy(candidateMembers, 0, bestMembers, 0, candidateMembers.length);
+                best.copyFrom(candidate);
+            }
+        }
+        if (best.sourceCount < minimumSourceCount) {
+            return List.of();
+        }
+        List<PoseMeasurementSample> result = new ArrayList<>(best.size);
+        for (int index = 0; index < recent.size(); index++) {
+            if (bestMembers[index]) {
+                result.add(recent.get(index));
+            }
+        }
+        return result;
     }
 
     private boolean agrees(PoseMeasurementSample first, PoseMeasurementSample second) {
@@ -495,38 +532,6 @@ public final class Localization implements PoseSignal {
     private static boolean trustsTranslation(PoseMeasurementSample sample) {
         return sample.stdDevs() == null
                 || (sample.stdDevs().xMeters() < 1.0e6 && sample.stdDevs().yMeters() < 1.0e6);
-    }
-
-    private static boolean betterCluster(
-            List<PoseMeasurementSample> candidate,
-            List<PoseMeasurementSample> current) {
-        int candidateSources = distinctSourceCount(candidate);
-        int currentSources = distinctSourceCount(current);
-        if (candidateSources != currentSources) {
-            return candidateSources > currentSources;
-        }
-        if (candidate.size() != current.size()) {
-            return candidate.size() > current.size();
-        }
-        int candidateTargets = candidate.stream().mapToInt(PoseMeasurementSample::targetCount).sum();
-        int currentTargets = current.stream().mapToInt(PoseMeasurementSample::targetCount).sum();
-        if (candidateTargets != currentTargets) {
-            return candidateTargets > currentTargets;
-        }
-        double candidateAmbiguity = candidate.stream().mapToDouble(PoseMeasurementSample::ambiguity).sum();
-        double currentAmbiguity = current.stream().mapToDouble(PoseMeasurementSample::ambiguity).sum();
-        if (Double.compare(candidateAmbiguity, currentAmbiguity) != 0) {
-            return candidateAmbiguity < currentAmbiguity;
-        }
-        return candidate.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0)
-                > current.stream().mapToDouble(PoseMeasurementSample::timestampSeconds).max().orElse(0.0);
-    }
-
-    private static int distinctSourceCount(List<PoseMeasurementSample> samples) {
-        return (int) samples.stream()
-                .map(sample -> sample.source() == null ? sample : sample.source())
-                .distinct()
-                .count();
     }
 
     private boolean accepts(Measurement measurement, PoseSnapshot pose) {
@@ -566,11 +571,6 @@ public final class Localization implements PoseSignal {
         return new Localization(strategy, inputs, filters, name, publish, groupWindow,
                 translationDisagreement, headingDisagreement, minimumSourceCount,
                 gate, processStdDevs, visionStdDevs, new State());
-    }
-
-    private static PoseSignal snapshot(List<Measurement> measurements) {
-        List<Measurement> values = List.copyOf(measurements);
-        return () -> values;
     }
 
     private static PoseSnapshot pose(Measurement measurement) {
@@ -632,7 +632,7 @@ public final class Localization implements PoseSignal {
     }
 
     private static final class State {
-        private List<Measurement> output = List.of();
+        private CycleResult output = CycleResult.empty();
         private List<Measurement> accepted = List.of();
         private List<Measurement> rejected = List.of();
         private PoseSnapshot pendingReset;
@@ -640,6 +640,114 @@ public final class Localization implements PoseSignal {
         private boolean runtimeOwned;
         private KalmanEngine kalman;
         private StructPublisher<Pose2d> posePublisher;
+    }
+
+    private static final class CycleResult implements PoseSignal, MeasurementSnapshot.CycleView {
+        private static final CycleResult EMPTY = new CycleResult(List.of(), null, null);
+        private final List<Measurement> measurements;
+        private final Measurement latest;
+        private final PoseMeasurementSample latestPose;
+
+        private CycleResult(
+                List<Measurement> measurements,
+                Measurement latest,
+                PoseMeasurementSample latestPose) {
+            this.measurements = measurements;
+            this.latest = latest;
+            this.latestPose = latestPose;
+        }
+
+        private static CycleResult empty() {
+            return EMPTY;
+        }
+
+        private static CycleResult of(List<Measurement> values) {
+            if (values.isEmpty()) {
+                return EMPTY;
+            }
+            Measurement latest = null;
+            PoseMeasurementSample latestPose = null;
+            for (Measurement measurement : values) {
+                if (latest == null
+                        || Double.compare(measurement.timestampSeconds(), latest.timestampSeconds()) > 0) {
+                    latest = measurement;
+                }
+                if (measurement instanceof PoseMeasurementSample pose
+                        && (latestPose == null
+                                || Double.compare(pose.timestampSeconds(), latestPose.timestampSeconds()) > 0)) {
+                    latestPose = pose;
+                }
+            }
+            // Every strategy creates an immutable list before publishing the cycle result.
+            return new CycleResult(values, latest, latestPose);
+        }
+
+        @Override
+        public List<Measurement> measurements() {
+            return measurements;
+        }
+
+        @Override
+        public Optional<Measurement> latestMeasurement() {
+            return Optional.ofNullable(latest);
+        }
+
+        private PoseMeasurementSample latestPose() {
+            return latestPose;
+        }
+    }
+
+    private static final class ClusterStats {
+        private int sourceCount;
+        private int size;
+        private int targetCount;
+        private double ambiguity;
+        private double newestTimestamp;
+
+        private void clear() {
+            sourceCount = 0;
+            size = 0;
+            targetCount = 0;
+            ambiguity = 0.0;
+            newestTimestamp = 0.0;
+        }
+
+        private void add(PoseMeasurementSample sample, Set<Object> sources) {
+            Object source = sample.source() == null ? sample : sample.source();
+            if (sources.add(source)) {
+                sourceCount++;
+            }
+            newestTimestamp = size == 0
+                    ? sample.timestampSeconds()
+                    : Math.max(newestTimestamp, sample.timestampSeconds());
+            size++;
+            targetCount += sample.targetCount();
+            ambiguity += sample.ambiguity();
+        }
+
+        private boolean betterThan(ClusterStats current) {
+            if (sourceCount != current.sourceCount) {
+                return sourceCount > current.sourceCount;
+            }
+            if (size != current.size) {
+                return size > current.size;
+            }
+            if (targetCount != current.targetCount) {
+                return targetCount > current.targetCount;
+            }
+            if (Double.compare(ambiguity, current.ambiguity) != 0) {
+                return ambiguity < current.ambiguity;
+            }
+            return newestTimestamp > current.newestTimestamp;
+        }
+
+        private void copyFrom(ClusterStats source) {
+            sourceCount = source.sourceCount;
+            size = source.size;
+            targetCount = source.targetCount;
+            ambiguity = source.ambiguity;
+            newestTimestamp = source.newestTimestamp;
+        }
     }
 
     private static final class KalmanEngine {

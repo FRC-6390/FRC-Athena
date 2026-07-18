@@ -2,6 +2,7 @@ package ca.frc6390.athena.runtime.measurement;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -65,6 +66,28 @@ class MeasurementSignalPolicyTest {
 
         assertEquals(2.0, snapshot.latestMeasurement().orElseThrow().timestampSeconds(), 1.0e-9);
         assertEquals(2.0, snapshot.measurements().get(0).timestampSeconds(), 1.0e-9);
+    }
+
+    @Test
+    void measurementSnapshotSharesAnImmutableCycleView() {
+        Measurement first = timedPose(1.0, 0.0);
+        Measurement latest = timedPose(2.0, 0.0);
+        List<Measurement> values = List.of(first, latest);
+        MeasurementSnapshot.CycleView cycle = new MeasurementSnapshot.CycleView() {
+            @Override
+            public List<Measurement> measurements() {
+                return values;
+            }
+
+            @Override
+            public java.util.Optional<Measurement> latestMeasurement() {
+                return java.util.Optional.of(latest);
+            }
+        };
+        MeasurementSnapshot snapshot = new MeasurementSnapshot(cycle).refresh();
+
+        assertSame(values, snapshot.measurements());
+        assertSame(latest, snapshot.latestMeasurement().orElseThrow());
     }
 
     @Test

@@ -76,6 +76,11 @@ public final class MechanismTracePublisher implements AutoCloseable {
         };
     }
 
+    /** Returns the runtime capture period needed by the active publication profile. */
+    public double runtimePeriodSeconds() {
+        return activeProfile() == Profile.CAPTURE ? PERIOD_SECONDS : 0.10;
+    }
+
     @Override
     public void close() {
         channels.values().forEach(Channel::close);
@@ -163,7 +168,7 @@ public final class MechanismTracePublisher implements AutoCloseable {
                 candidate.motors().isEmpty() ? 0 : code(candidate.motors().get(0)),
                 candidate.recency(), candidate.order(), candidate.requestedValue(),
                 (byte) ("lease".equals(candidate.source()) ? 1 : 0),
-                outputMode(candidate.outputMode()), candidate.selected());
+                outputMode(candidate.outputMode()), candidate.selected(), code(candidate.decision()));
     }
 
     static ControlFrame controlFrame(MechanismTraceSnapshot.Control control) {
@@ -182,7 +187,8 @@ public final class MechanismTracePublisher implements AutoCloseable {
         return new MotorFrame(
                 code(motor.name()), outputMode(motor.commandMode()), motor.commandValue(),
                 motor.positionRotations(), motor.velocityRotationsPerSecond(), motor.appliedVoltage(),
-                motor.supplyCurrentAmps(), motor.statorCurrentAmps());
+                motor.supplyCurrentAmps(), motor.statorCurrentAmps(),
+                (byte) Channel.flags(motor.disabled(), !motor.connected(), false), code(motor.failure()));
     }
 
     static HookFrame hookFrame(MechanismTraceSnapshot.Hook hook) {
@@ -360,18 +366,26 @@ public final class MechanismTracePublisher implements AutoCloseable {
             double requestedValue,
             byte source,
             byte outputMode,
-            boolean selected) {
+            boolean selected,
+            int decision) {
+        public CandidateFrame(
+                int actionType, int motor, long recency, int order, double requestedValue,
+                byte source, byte outputMode, boolean selected) {
+            this(actionType, motor, recency, order, requestedValue, source, outputMode, selected, 0);
+        }
+
         public static final Struct<CandidateFrame> STRUCT = new FixedStruct<>(
                 CandidateFrame.class,
                 "AthenaActionCandidate",
-                31,
-                "int32 actionType;int32 motor;int64 recency;int32 order;double requestedValue;int8 source;int8 outputMode;bool selected",
+                35,
+                "int32 actionType;int32 motor;int64 recency;int32 order;double requestedValue;int8 source;int8 outputMode;bool selected;int32 decision",
                 buffer -> new CandidateFrame(buffer.getInt(), buffer.getInt(), buffer.getLong(), buffer.getInt(),
-                        buffer.getDouble(), buffer.get(), buffer.get(), getBool(buffer)),
+                        buffer.getDouble(), buffer.get(), buffer.get(), getBool(buffer), buffer.getInt()),
                 (buffer, value) -> {
                     buffer.putInt(value.actionType).putInt(value.motor).putLong(value.recency).putInt(value.order)
                             .putDouble(value.requestedValue).put(value.source).put(value.outputMode);
                     putBool(buffer, value.selected);
+                    buffer.putInt(value.decision);
                 });
     }
 
@@ -432,18 +446,29 @@ public final class MechanismTracePublisher implements AutoCloseable {
             double velocityRotationsPerSecond,
             double appliedVoltage,
             double supplyCurrentAmps,
-            double statorCurrentAmps) {
+            double statorCurrentAmps,
+            byte flags,
+            int failure) {
+        public MotorFrame(
+                int name, byte commandMode, double commandValue, double positionRotations,
+                double velocityRotationsPerSecond, double appliedVoltage,
+                double supplyCurrentAmps, double statorCurrentAmps) {
+            this(name, commandMode, commandValue, positionRotations, velocityRotationsPerSecond,
+                    appliedVoltage, supplyCurrentAmps, statorCurrentAmps, (byte) 0, 0);
+        }
+
         public static final Struct<MotorFrame> STRUCT = new FixedStruct<>(
                 MotorFrame.class,
                 "AthenaMotorTrace",
-                53,
-                "int32 name;int8 commandMode;double commandValue;double positionRotations;double velocityRotationsPerSecond;double appliedVoltage;double supplyCurrentAmps;double statorCurrentAmps",
+                58,
+                "int32 name;int8 commandMode;double commandValue;double positionRotations;double velocityRotationsPerSecond;double appliedVoltage;double supplyCurrentAmps;double statorCurrentAmps;int8 flags;int32 failure",
                 buffer -> new MotorFrame(buffer.getInt(), buffer.get(), buffer.getDouble(), buffer.getDouble(),
-                        buffer.getDouble(), buffer.getDouble(), buffer.getDouble(), buffer.getDouble()),
+                        buffer.getDouble(), buffer.getDouble(), buffer.getDouble(), buffer.getDouble(),
+                        buffer.get(), buffer.getInt()),
                 (buffer, value) -> buffer.putInt(value.name).put(value.commandMode).putDouble(value.commandValue)
                         .putDouble(value.positionRotations).putDouble(value.velocityRotationsPerSecond)
                         .putDouble(value.appliedVoltage).putDouble(value.supplyCurrentAmps)
-                        .putDouble(value.statorCurrentAmps));
+                        .putDouble(value.statorCurrentAmps).put(value.flags).putInt(value.failure));
     }
 
     /** Compact event-hook state. */

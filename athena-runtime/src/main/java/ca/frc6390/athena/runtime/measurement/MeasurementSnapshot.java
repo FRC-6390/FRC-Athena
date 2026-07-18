@@ -8,6 +8,16 @@ import java.util.Optional;
  * Cached measurement signal snapshot owned by a runtime cycle.
  */
 public final class MeasurementSnapshot implements MeasurementSignal {
+    /**
+     * An immutable measurement view computed once for a runtime cycle.
+     *
+     * <p>Implementations guarantee that {@link #measurements()} cannot be mutated and that
+     * {@link #latestMeasurement()} describes that exact list. Snapshots can therefore share the
+     * view without copying or rescanning it.
+     */
+    public interface CycleView extends MeasurementSignal {
+    }
+
     private final MeasurementSignal source;
     private List<Measurement> measurements = List.of();
     private Optional<Measurement> latest = Optional.empty();
@@ -38,6 +48,11 @@ public final class MeasurementSnapshot implements MeasurementSignal {
      */
     public MeasurementSnapshot refresh(MeasurementSignal signal) {
         Objects.requireNonNull(signal, "signal");
+        if (signal instanceof CycleView cycle) {
+            measurements = cycle.measurements();
+            latest = cycle.latestMeasurement();
+            return this;
+        }
         List<Measurement> values = signal.measurements();
         measurements = values == null || values.isEmpty() ? List.of() : List.copyOf(values);
         Measurement newest = null;

@@ -15,6 +15,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;
+import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.api.FailurePolicy;
 
 /**
@@ -31,11 +33,13 @@ final class MechanismRuntime {
     private final StateScheduler scheduler;
     private final Map<Object, ActiveLease> activeLeases = new IdentityHashMap<>();
     private final List<ActiveLease> leasesByRecency = new ArrayList<>();
-    private final Set<MotorDevice> previouslyDrivenMotors = new LinkedHashSet<>();
+    private Set<MotorDevice> previouslyDrivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final List<CandidateOutput> candidateScratch = new ArrayList<>();
+    private final List<CandidateOutput> candidatePool = new ArrayList<>();
     private final List<CandidateOutput> selectedScratch = new ArrayList<>();
+    private final List<ResolvedOutput> resolvedScratch = new ArrayList<>();
     private final Map<Object, CandidateOutput> winnerScratch = new IdentityHashMap<>();
-    private final Set<MotorDevice> drivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private Set<MotorDevice> drivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<PathAction, PathRuntime> pathRuntimes;
     private Runnable simulationStep = () -> {
     };
@@ -44,7 +48,9 @@ final class MechanismRuntime {
     private long actionRecency;
     private long localRecency;
     private MechanismTraceSnapshot traceSnapshot;
-    private MechanismTraceLevel traceLevel = MechanismTraceLevel.CAPTURE;
+    private MechanismTraceLevel traceLevel = MechanismTraceLevel.OFF;
+    private double tracePeriodSeconds = 0.10;
+    private double lastTraceSeconds = Double.NEGATIVE_INFINITY;
 
     private MechanismRuntime(
             MechanismNode node,
@@ -129,9 +135,21 @@ final class MechanismRuntime {
     }
 
     void traceLevel(MechanismTraceLevel level) {
-        traceLevel = Objects.requireNonNull(level, "level");
+        MechanismTraceLevel requested = Objects.requireNonNull(level, "level");
+        if (traceLevel == requested) return;
+        traceLevel = requested;
         applier.captureTrace(level == MechanismTraceLevel.CAPTURE);
+        lastTraceSeconds = Double.NEGATIVE_INFINITY;
         if (level == MechanismTraceLevel.OFF) traceSnapshot = emptyTrace();
+    }
+
+    void tracePeriodSeconds(double periodSeconds) {
+        if (!Double.isFinite(periodSeconds) || periodSeconds < 0.0) {
+            throw new IllegalArgumentException("Trace period must be finite and non-negative.");
+        }
+        if (Double.compare(tracePeriodSeconds, periodSeconds) == 0) return;
+        tracePeriodSeconds = periodSeconds;
+        lastTraceSeconds = Double.NEGATIVE_INFINITY;
     }
 
     public void set(Action action) {
@@ -206,7 +224,7 @@ final class MechanismRuntime {
             applier.stopAll();
             previouslyDrivenMotors.clear();
             simulationStep.run();
-            if (traceLevel == MechanismTraceLevel.OFF) return Set.of();
+            if (!traceDue(safeMechanismContext.nowSeconds())) return Set.of();
             ActiveLease tracedLease = tracedLease();
             Action tracedAction = tracedLease == null ? action : tracedLease.action();
             StateScheduler tracedScheduler = tracedLease == null ? scheduler : tracedLease.scheduler();
@@ -225,6 +243,7 @@ final class MechanismRuntime {
                     List.of(),
                     traceLevel == MechanismTraceLevel.CAPTURE ? motorTraces(Map.of()) : List.of(),
                     traceLevel == MechanismTraceLevel.CAPTURE ? hookTraces() : List.of());
+            lastTraceSeconds = safeMechanismContext.nowSeconds();
             return Set.of();
         }
         if (Double.isNaN(stateStartSeconds)) {
@@ -242,10 +261,16 @@ final class MechanismRuntime {
         }
         List<CandidateOutput> candidates = candidateScratch;
         candidates.clear();
-        addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext));
-        for (ActiveLease lease : leasesByRecency) {
+        addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext), null);
+        for (int leaseIndex = 0; leaseIndex < leasesByRecency.size(); leaseIndex++) {
+            ActiveLease lease = leasesByRecency.get(leaseIndex);
             if (lease.scheduler().complete()) continue;
-            addCandidates(candidates, "lease", lease.recency(), lease.evaluate(safeMechanismContext));
+            addCandidates(
+                    candidates,
+                    "lease",
+                    lease.recency(),
+                    lease.evaluate(safeMechanismContext),
+                    lease.reservedResources());
         }
 
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
@@ -253,19 +278,27 @@ final class MechanismRuntime {
         drivenNow.clear();
         applier.beginCycle();
         try {
-            for (CandidateOutput candidate : selected) {
+            for (int candidateIndex = 0; candidateIndex < selected.size(); candidateIndex++) {
+                CandidateOutput candidate = selected.get(candidateIndex);
                 outputs.add(candidate.output());
-                drivenNow.addAll(candidate.output().request().motors());
+                addMotors(drivenNow, candidate.output().request());
                 applier.apply(candidate.output(), candidate.context());
             }
         } finally {
             applier.endCycle();
         }
         simulationStep.run();
-        if (traceLevel != MechanismTraceLevel.OFF) {
-            traceSnapshot = buildTrace(timedContext, candidates, selected);
+        if (traceDue(timedContext.nowSeconds())) {
+            traceSnapshot = buildTrace(timedContext, candidates, selected, reservations);
+            lastTraceSeconds = timedContext.nowSeconds();
         }
         return drivenNow;
+    }
+
+    private boolean traceDue(double nowSeconds) {
+        if (traceLevel == MechanismTraceLevel.OFF) return false;
+        double elapsed = nowSeconds - lastTraceSeconds;
+        return tracePeriodSeconds == 0.0 || elapsed < 0.0 || elapsed + 1.0e-9 >= tracePeriodSeconds;
     }
 
     void finishOutputCycle(Set<MotorDevice> globallyDriven, Set<MotorDevice> locallyDriven) {
@@ -282,25 +315,64 @@ final class MechanismRuntime {
                 motor.recordCommand(ca.frc6390.athena.hardware.signal.MotorCommandSnapshot.neutral());
             }
         }
-        previouslyDrivenMotors.clear();
-        previouslyDrivenMotors.addAll(locallyDriven);
+        if (locallyDriven == drivenScratch) {
+            Set<MotorDevice> reusable = previouslyDrivenMotors;
+            previouslyDrivenMotors = drivenScratch;
+            drivenScratch = reusable;
+        } else {
+            previouslyDrivenMotors.clear();
+            previouslyDrivenMotors.addAll(locallyDriven);
+        }
     }
 
     private void addCandidates(
             List<CandidateOutput> candidates,
             String source,
             long recency,
-            StateScheduler.Result active) {
-        List<ResolvedOutput> resolved = resolver.resolve(mechanism, active.action(), active.context());
-        for (ResolvedOutput output : resolved) {
-            candidates.add(new CandidateOutput(output, active.context(), source, recency, candidates.size()));
+            StateScheduler.Result active,
+            Set<Object> reservedResources) {
+        resolvedScratch.clear();
+        resolver.resolveInto(mechanism, active.action(), active.context(), resolvedScratch);
+        for (ResolvedOutput output : resolvedScratch) {
+            validateReservedResources(output.request(), reservedResources);
+            int order = candidates.size();
+            CandidateOutput candidate;
+            if (order < candidatePool.size()) {
+                candidate = candidatePool.get(order);
+                candidate.reset(output, active.context(), source, recency, order);
+            } else {
+                candidate = new CandidateOutput(output, active.context(), source, recency, order);
+                candidatePool.add(candidate);
+            }
+            candidates.add(candidate);
+        }
+    }
+
+    private static void validateReservedResources(OutputRequest request, Set<Object> reservedResources) {
+        if (reservedResources == null) {
+            return;
+        }
+        for (int index = 0; index < motorCount(request); index++) {
+            MotorDevice motor = motorAt(request, index);
+            if (!reservedResources.contains(motor)) {
+                throw new IllegalStateException(
+                        "Action emitted motor '" + motor.defaultName()
+                                + "' outside its compiled resource graph. Add it to the computed action ownership.");
+            }
+        }
+        ControlBinding control = request.control();
+        if (control != null && control.sink() != null && !reservedResources.contains(control.sink())) {
+            throw new IllegalStateException(
+                    "Action emitted a control sink outside its compiled resource graph. "
+                            + "Add it to the computed action ownership.");
         }
     }
 
     private MechanismTraceSnapshot buildTrace(
             MechanismContext context,
             List<CandidateOutput> candidates,
-            List<CandidateOutput> selected) {
+            List<CandidateOutput> selected,
+            Map<Object, Long> reservations) {
         ActiveLease tracedLease = tracedLease();
         Action tracedAction = tracedLease == null ? action() : tracedLease.action();
         StateScheduler tracedScheduler = tracedLease == null ? scheduler : tracedLease.scheduler();
@@ -321,6 +393,7 @@ final class MechanismRuntime {
                         candidate.recency(),
                         candidate.order(),
                         winners.contains(candidate),
+                        candidateDecision(candidate, winners, reservations),
                         outputMode(candidate.output().output()),
                         outputValue(candidate.output().output()),
                         candidate.output().request().motors().stream().map(MotorDevice::defaultName).toList()))
@@ -356,6 +429,9 @@ final class MechanismRuntime {
         });
         motors.addAll(commands.keySet());
         List<MechanismTraceSnapshot.Motor> traces = new ArrayList<>(motors.size());
+        HardwareCycleSnapshot hardwareSnapshot = actionContext instanceof HardwareGraph graph
+                ? graph.cycleSnapshot()
+                : null;
         for (MotorDevice motor : motors) {
             MotorHandle handle = actionContext.motor(motor);
             CandidateOutput candidate = commands.get(motor);
@@ -369,17 +445,41 @@ final class MechanismRuntime {
                 commandMode = outputMode(candidate.output().output());
                 commandValue = outputValue(candidate.output().output());
             }
+            HardwareCycleSnapshot.MotorInput input = hardwareSnapshot == null
+                    ? null
+                    : hardwareSnapshot.motor(motor).orElse(null);
             traces.add(new MechanismTraceSnapshot.Motor(
                     motor.defaultName(),
                     commandMode,
                     commandValue,
-                    read(handle::integratedPositionRotations),
-                    read(handle::integratedVelocityRotationsPerSecond),
-                    read(handle::appliedVoltage),
-                    read(handle::supplyCurrentAmps),
-                    read(handle::statorCurrentAmps)));
+                    input == null ? read(handle::integratedPositionRotations) : input.positionRotations(),
+                    input == null ? read(handle::integratedVelocityRotationsPerSecond) : input.velocityRotationsPerSecond(),
+                    input == null ? read(handle::appliedVoltage) : input.appliedVoltage(),
+                    input == null ? read(handle::supplyCurrentAmps) : input.supplyCurrentAmps(),
+                    input == null ? read(handle::statorCurrentAmps) : input.statorCurrentAmps(),
+                    resolver.overrides().disabled(motor),
+                    input == null || input.connected(),
+                    input == null ? "" : input.failure()));
         }
         return List.copyOf(traces);
+    }
+
+    private String candidateDecision(
+            CandidateOutput candidate,
+            Set<CandidateOutput> winners,
+            Map<Object, Long> reservations) {
+        if (winners.contains(candidate)) return "selected";
+        OutputRequest request = candidate.output().request();
+        for (MotorDevice motor : request.motors()) {
+            if (candidate.recency() < reservations.getOrDefault(motor, Long.MIN_VALUE)) {
+                return "rejected: resource reserved by newer action";
+            }
+        }
+        if (request.control() != null && request.control().sink() != null
+                && candidate.recency() < reservations.getOrDefault(request.control().sink(), Long.MIN_VALUE)) {
+            return "rejected: control sink reserved by newer action";
+        }
+        return "rejected: superseded by newer action on shared resource";
     }
 
     private ActiveLease tracedLease() {
@@ -478,9 +578,9 @@ final class MechanismRuntime {
         for (int index = 0; index < candidates.size(); index++) {
             CandidateOutput candidate = candidates.get(index);
             OutputRequest request = candidate.output().request();
-            List<MotorDevice> motors = request.motors();
-            for (int motorIndex = 0; motorIndex < motors.size(); motorIndex++) {
-                selectWinner(motors.get(motorIndex), candidate, reservations, winners);
+            int motorCount = motorCount(request);
+            for (int motorIndex = 0; motorIndex < motorCount; motorIndex++) {
+                selectWinner(motorAt(request, motorIndex), candidate, reservations, winners);
             }
             if (request.control() != null && request.control().sink() != null) {
                 selectWinner(request.control().sink(), candidate, reservations, winners);
@@ -502,7 +602,8 @@ final class MechanismRuntime {
             CandidateOutput candidate,
             Map<Object, Long> reservations,
             Map<Object, CandidateOutput> winners) {
-        if (candidate.recency() < reservations.getOrDefault(resource, Long.MIN_VALUE)) {
+        Long reservation = reservations.get(resource);
+        if (reservation != null && candidate.recency() < reservation.longValue()) {
             return;
         }
         CandidateOutput current = winners.get(resource);
@@ -515,10 +616,10 @@ final class MechanismRuntime {
             CandidateOutput candidate,
             Map<Object, CandidateOutput> winners) {
         OutputRequest request = candidate.output().request();
-        List<MotorDevice> motors = request.motors();
-        boolean hasResource = !motors.isEmpty();
-        for (int index = 0; index < motors.size(); index++) {
-            if (winners.get(motors.get(index)) != candidate) return false;
+        int motorCount = motorCount(request);
+        boolean hasResource = motorCount > 0;
+        for (int index = 0; index < motorCount; index++) {
+            if (winners.get(motorAt(request, index)) != candidate) return false;
         }
         if (request.control() != null && request.control().sink() != null) {
             hasResource = true;
@@ -527,12 +628,57 @@ final class MechanismRuntime {
         return hasResource;
     }
 
-    private record CandidateOutput(
-            ResolvedOutput output,
-            MechanismContext context,
-            String source,
-            long recency,
-            int order) {
+    private static int motorCount(OutputRequest request) {
+        return request.control() != null ? request.control().motors().size() : request.motor() == null ? 0 : 1;
+    }
+
+    private static MotorDevice motorAt(OutputRequest request, int index) {
+        if (request.control() != null) return request.control().motors().get(index);
+        if (index == 0 && request.motor() != null) return request.motor();
+        throw new IndexOutOfBoundsException(index);
+    }
+
+    private static void addMotors(Set<MotorDevice> destination, OutputRequest request) {
+        for (int index = 0; index < motorCount(request); index++) {
+            destination.add(motorAt(request, index));
+        }
+    }
+
+    private static final class CandidateOutput {
+        private ResolvedOutput output;
+        private MechanismContext context;
+        private String source;
+        private long recency;
+        private int order;
+
+        private CandidateOutput(
+                ResolvedOutput output,
+                MechanismContext context,
+                String source,
+                long recency,
+                int order) {
+            reset(output, context, source, recency, order);
+        }
+
+        private void reset(
+                ResolvedOutput output,
+                MechanismContext context,
+                String source,
+                long recency,
+                int order) {
+            this.output = output;
+            this.context = context;
+            this.source = source;
+            this.recency = recency;
+            this.order = order;
+        }
+
+        private ResolvedOutput output() { return output; }
+        private MechanismContext context() { return context; }
+        private String source() { return source; }
+        private long recency() { return recency; }
+        private int order() { return order; }
+
         private boolean newerThan(CandidateOutput other) {
             return recency > other.recency || recency == other.recency && order > other.order;
         }

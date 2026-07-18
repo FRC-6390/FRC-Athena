@@ -17,6 +17,7 @@ import ca.frc6390.athena.runtime.control.VelocityFrame;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SwervePathFollowerTest {
@@ -93,6 +94,7 @@ class SwervePathFollowerTest {
                 RobotVelocity.field(1.5, -0.25, 0.4)), 0.02);
 
         assertSame(sharedDrive, output);
+        assertEquals(List.of(sharedDrive), follower.ownership());
         assertEquals(RobotVelocity.robot(1.5, -0.25, 0.4), auto.velocity());
         follower.stop();
         assertFalse(auto.isActive());

@@ -24,6 +24,9 @@ class MechanismTracePublisherTest {
         NetworkTableInstance instance = NetworkTableInstance.create();
         try (MechanismTracePublisher publisher = new MechanismTracePublisher(instance)) {
             assertEquals(MechanismTraceLevel.SUMMARY, publisher.traceLevel());
+            assertEquals(0.10, publisher.runtimePeriodSeconds(), 1.0e-9);
+            assertEquals(0.02, publisher.profile(MechanismTracePublisher.Profile.CAPTURE)
+                    .runtimePeriodSeconds(), 1.0e-9);
             assertEquals(MechanismTraceLevel.OFF,
                     publisher.profile(MechanismTracePublisher.Profile.OFF).traceLevel());
         } finally {

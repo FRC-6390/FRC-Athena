@@ -223,6 +223,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         if (tracePublisher != null) {
             tracePublisher.profile(effectiveTraceProfile());
             athena().mechanismTraceLevel(tracePublisher.traceLevel());
+            athena().mechanismTracePeriodSeconds(tracePublisher.runtimePeriodSeconds());
         }
         EventContext eventContext = new EventContext(timestamp, dtSeconds, mode, phase, enabled, simulation);
         athena().periodic(

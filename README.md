@@ -265,5 +265,13 @@ Mechanisms are the main robot behavior abstraction. Swerve is not a special runt
 
 Simulation runs through the normal `RobotRuntime` with `SimulationSession` selecting simulated hardware backends. `SimModel` is one composable API for provider-backed leaves, nested models, and custom runtime rules. Production `SwerveKinematics` owns module targeting and forward kinematics and contributes its model automatically, so drive code and simulation share one layout without calling WPILib kinematics. Robot actions are evaluated by the normal runtime tick; simulation periodic advances physics from the already-applied hardware commands.
 
+Action ownership and resource partitions are compiled from the declared graph. Dynamic
+computed actions provide required stable ownership with
+`Actions.compute(resolver, ownership...)`; only the resolver runs each periodic cycle. Control
+bindings retain one bound runtime while safely resetting controller state at neutral,
+cancellation, arbitration loss, and disable boundaries.
+
 The standalone robot examples are indexed in [`example-projects/README.md`](example-projects/README.md).
 The feature coverage matrix is [`example-projects/COVERAGE.md`](example-projects/COVERAGE.md).
+The scheduler's request, arbitration, completion, cancellation, and mode guarantees are defined in
+[`docs/action-runtime-contract.md`](docs/action-runtime-contract.md).

@@ -41,12 +41,27 @@ public record MechanismTraceSnapshot(
             long recency,
             int order,
             boolean selected,
+            String decision,
             String outputMode,
             double requestedValue,
             List<String> motors) {
+        public ActionCandidate(
+                String source,
+                String actionType,
+                long recency,
+                int order,
+                boolean selected,
+                String outputMode,
+                double requestedValue,
+                List<String> motors) {
+            this(source, actionType, recency, order, selected,
+                    selected ? "selected" : "rejected", outputMode, requestedValue, motors);
+        }
+
         public ActionCandidate {
             source = safe(source);
             actionType = safe(actionType);
+            decision = safe(decision);
             outputMode = safe(outputMode);
             motors = motors == null ? List.of() : List.copyOf(motors);
         }
@@ -95,10 +110,27 @@ public record MechanismTraceSnapshot(
             double velocityRotationsPerSecond,
             double appliedVoltage,
             double supplyCurrentAmps,
-            double statorCurrentAmps) {
+            double statorCurrentAmps,
+            boolean disabled,
+            boolean connected,
+            String failure) {
+        public Motor(
+                String name,
+                String commandMode,
+                double commandValue,
+                double positionRotations,
+                double velocityRotationsPerSecond,
+                double appliedVoltage,
+                double supplyCurrentAmps,
+                double statorCurrentAmps) {
+            this(name, commandMode, commandValue, positionRotations, velocityRotationsPerSecond,
+                    appliedVoltage, supplyCurrentAmps, statorCurrentAmps, false, true, "");
+        }
+
         public Motor {
             name = safe(name);
             commandMode = safe(commandMode);
+            failure = safe(failure);
         }
     }
 

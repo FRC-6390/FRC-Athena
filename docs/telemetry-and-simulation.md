@@ -146,6 +146,29 @@ every declared motor, including while disabled, with its actual post-control-loo
 cached feedback/current values. Candidate and hook frames make
 action ownership, leases, sequence progress, and event transitions inspectable.
 
+`RobotRuntime.cycleSnapshot()` exposes the complete immutable cycle boundary used by non-NT
+diagnostics. It contains lifecycle timing, the `HardwareCycleSnapshot`, sampled digital inputs,
+localization measurements, and the completed mechanism traces. Device backends refresh once at
+the beginning of the cycle; hardware input values are copied into that snapshot and trace export
+uses the copy instead of reading a device again.
+
+```java
+RuntimeCycleSnapshot cycle = athena().cycleSnapshot();
+RuntimeInspection.MotorInspection shooter = athena().inspect()
+        .explainMotor("shooter")
+        .orElseThrow();
+
+System.out.println(shooter.owner().decision());
+System.out.println(shooter.control().appliedValue());
+System.out.println(shooter.motor().connected());
+```
+
+`RuntimeInspection` can query mechanisms, motors, controls, and hooks by their telemetry names.
+`explainMotor(...)` joins the winning action candidate, controller calculation, final motor
+command, cached input, disabled state, and connection failure. Rejected action candidates retain a
+decision explaining whether a newer lease reserved the resource or a newer action superseded it.
+Inspection and repeated snapshot reads perform no hardware I/O.
+
 As a rough upper bound, ten candidates, ten controls, ten motors, and ten hooks are about 120 KB/s
 of packed payload at 50 Hz before NT4 framing. `SUMMARY` is appropriate when capture-level detail
 is not needed.

@@ -52,6 +52,8 @@ class MechanismRuntimeTest {
                 .pid(1.0, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(position.position(10.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.traceLevel(MechanismTraceLevel.CAPTURE);
+        runtime.tracePeriodSeconds(0.0);
         runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(2.0), EventContext.empty());
@@ -82,7 +84,8 @@ class MechanismRuntimeTest {
         boolean[] trigger = {true};
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TriggerReleaseMechanism mechanism = new TriggerReleaseMechanism(trigger);
-        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism)
+                .traceLevel(MechanismTraceLevel.CAPTURE).tracePeriodSeconds(0.0);
 
         scheduler.teleopPeriodic(1.0, 0.02);
 
@@ -99,7 +102,8 @@ class MechanismRuntimeTest {
     void traceSchedulerStateFollowsNewestRequestedLease() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         DeclaredMotorMechanism mechanism = new DeclaredMotorMechanism(MOTOR);
-        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism)
+                .traceLevel(MechanismTraceLevel.CAPTURE).tracePeriodSeconds(0.0);
         Action routine = Actions.sequence().forTime(0.02, MOTOR.percent(0.5));
         scheduler.request(routine);
 
@@ -117,7 +121,8 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         DeclaredMotorMechanism child = new DeclaredMotorMechanism(MOTOR);
         DeclaredParentMechanism parent = new DeclaredParentMechanism(child);
-        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(parent);
+        MechanismScheduler scheduler = MechanismScheduler.create(actions).register(parent)
+                .traceLevel(MechanismTraceLevel.CAPTURE).tracePeriodSeconds(0.0);
         scheduler.request(child.initial);
 
         scheduler.teleopPeriodic(0.0, 0.02);
@@ -143,6 +148,8 @@ class MechanismRuntimeTest {
                 .ff(0.5, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(position.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.traceLevel(MechanismTraceLevel.CAPTURE);
+        runtime.tracePeriodSeconds(0.0);
         runtime.set(mechanism.initial);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
@@ -883,6 +890,8 @@ class MechanismRuntimeTest {
                         Constraints.motion(2.0, 2.0));
         MechanismRuntime runtime = MechanismRuntime.of(
                 new TestMechanism(control.position(1.0)), actions);
+        runtime.traceLevel(MechanismTraceLevel.CAPTURE);
+        runtime.tracePeriodSeconds(0.0);
         runtime.set(control.position(1.0));
 
         for (int cycle = 0; cycle < 40; cycle++) {
@@ -1782,7 +1791,7 @@ class MechanismRuntimeTest {
         private final HookBinding driverControl;
 
         private ComputedHookRoot(double[] output) {
-            drive = Actions.compute(() -> Actions.parallel(motor.percent(output[0])));
+            drive = Actions.compute(() -> Actions.parallel(motor.percent(output[0])), motor);
             driverControl = Events.teleopPeriodic().whileActive(drive);
         }
     }

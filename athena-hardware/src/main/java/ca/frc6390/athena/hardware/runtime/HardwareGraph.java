@@ -40,6 +40,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<HardwareIdentity, RefreshBackoff> refreshBackoffs = new LinkedHashMap<>();
     private RefreshTask[] refreshTasks = new RefreshTask[0];
     private int refreshTaskHandleCount = -1;
+    private SnapshotSources snapshotSources = SnapshotSources.empty();
+    private int activeRefreshCycles;
+    private boolean refreshCycleInFlight;
+    private boolean closed;
+    private long refreshSequence;
+    private volatile HardwareCycleSnapshot cycleSnapshot = HardwareCycleSnapshot.empty();
     private final Map<Object, RuntimeException> bindingFailures = new IdentityHashMap<>();
     private final Map<Object, RefreshBackoff> bindingRetryBackoffs = new IdentityHashMap<>();
     private final Map<Object, RuntimeException> operationFailures = new LinkedHashMap<>();
@@ -275,23 +281,161 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     void refreshInputs(long nowNanos) {
-        RefreshTask[] tasks;
         synchronized (this) {
-            retryBindings(nowNanos);
-            int handleCount = motors.size() + encoders.size() + imus.size();
-            if (handleCount != refreshTaskHandleCount) {
-                List<RefreshTask> rebuilt = new ArrayList<>(handleCount);
-                motors.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
-                encoders.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
-                imus.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
-                refreshTasks = rebuilt.toArray(RefreshTask[]::new);
-                refreshTaskHandleCount = handleCount;
+            if (closed || refreshCycleInFlight) return;
+            refreshCycleInFlight = true;
+            activeRefreshCycles++;
+        }
+        try {
+            RefreshTask[] tasks;
+            synchronized (this) {
+                retryBindings(nowNanos);
+                int handleCount = motors.size() + encoders.size() + imus.size();
+                if (handleCount != refreshTaskHandleCount) {
+                    List<RefreshTask> rebuilt = new ArrayList<>(handleCount);
+                    motors.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
+                    encoders.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
+                    imus.forEach((identity, handle) -> rebuilt.add(new RefreshTask(identity, handle::refreshInputs)));
+                    refreshTasks = rebuilt.toArray(RefreshTask[]::new);
+                    snapshotSources = snapshotSources();
+                    refreshTaskHandleCount = handleCount;
+                }
+                tasks = refreshTasks;
             }
-            tasks = refreshTasks;
+            for (RefreshTask task : tasks) {
+                if (!refresh(task, nowNanos)) return;
+            }
+            publishSnapshot(captureSnapshot(nowNanos));
+        } finally {
+            synchronized (this) {
+                refreshCycleInFlight = false;
+                activeRefreshCycles--;
+                notifyAll();
+            }
         }
-        for (RefreshTask task : tasks) {
-            refresh(task, nowNanos);
+    }
+
+    /** Returns the immutable inputs and health captured by the latest graph refresh. */
+    public HardwareCycleSnapshot cycleSnapshot() {
+        return cycleSnapshot;
+    }
+
+    private HardwareCycleSnapshot captureSnapshot(long nowNanos) {
+        SnapshotSources sources;
+        long sequence;
+        Map<HardwareIdentity, RuntimeException> failures;
+        synchronized (this) {
+            sources = snapshotSources;
+            sequence = ++refreshSequence;
+            failures = failureSnapshot(sources);
         }
+
+        Map<HardwareIdentity, HardwareCycleSnapshot.MotorInput> motorInputs = new LinkedHashMap<>();
+        Map<HardwareIdentity, HardwareCycleSnapshot.EncoderInput> encoderInputs = new LinkedHashMap<>();
+        Map<HardwareIdentity, HardwareCycleSnapshot.ImuInput> imuInputs = new LinkedHashMap<>();
+        for (MotorSnapshotSource source : sources.motors()) {
+            MotorHandle handle = source.handle();
+            RuntimeException failure = failures.get(source.identity());
+            motorInputs.put(source.identity(), new HardwareCycleSnapshot.MotorInput(
+                    source.name(),
+                    motorPosition(handle), motorVelocity(handle), motorVoltage(handle),
+                    motorSupplyCurrent(handle), motorStatorCurrent(handle),
+                    failure == null, failureMessage(failure)));
+        }
+        for (EncoderSnapshotSource source : sources.encoders()) {
+            EncoderHandle handle = source.handle();
+            RuntimeException failure = failures.get(source.identity());
+            encoderInputs.put(source.identity(), new HardwareCycleSnapshot.EncoderInput(
+                    source.name(),
+                    encoderPosition(handle), source.absolutePosition(), encoderVelocity(handle),
+                    failure == null, failureMessage(failure)));
+        }
+        for (ImuSnapshotSource source : sources.imus()) {
+            ImuHandle handle = source.handle();
+            RuntimeException failure = failures.get(source.identity());
+            imuInputs.put(source.identity(), new HardwareCycleSnapshot.ImuInput(
+                    source.name(),
+                    imuYaw(handle), imuPitch(handle), imuRoll(handle), imuAngle(handle), imuYawRate(handle),
+                    imuAccelerationX(handle), imuAccelerationY(handle), imuAccelerationZ(handle),
+                    failure == null, failureMessage(failure)));
+        }
+        return new HardwareCycleSnapshot(
+                sequence, nowNanos, motorInputs, encoderInputs, imuInputs);
+    }
+
+    private SnapshotSources snapshotSources() {
+        MotorSnapshotSource[] motorSources = new MotorSnapshotSource[motors.size()];
+        EncoderSnapshotSource[] encoderSources = new EncoderSnapshotSource[encoders.size()];
+        ImuSnapshotSource[] imuSources = new ImuSnapshotSource[imus.size()];
+        int index = 0;
+        for (Map.Entry<HardwareIdentity, MotorHandle> entry : motors.entrySet()) {
+            motorSources[index++] = new MotorSnapshotSource(
+                    entry.getKey(), entry.getValue(), entry.getValue().device().defaultName());
+        }
+        index = 0;
+        for (Map.Entry<HardwareIdentity, EncoderHandle> entry : encoders.entrySet()) {
+            encoderSources[index++] = new EncoderSnapshotSource(
+                    entry.getKey(), entry.getValue(), entry.getValue().device().defaultName());
+        }
+        index = 0;
+        for (Map.Entry<HardwareIdentity, ImuHandle> entry : imus.entrySet()) {
+            imuSources[index++] = new ImuSnapshotSource(
+                    entry.getKey(), entry.getValue(), entry.getValue().device().defaultName());
+        }
+        return new SnapshotSources(motorSources, encoderSources, imuSources);
+    }
+
+    private Map<HardwareIdentity, RuntimeException> failureSnapshot(SnapshotSources sources) {
+        if (refreshFailures.isEmpty() && bindingFailures.isEmpty()) return Map.of();
+        Map<HardwareIdentity, RuntimeException> failures = new LinkedHashMap<>();
+        for (MotorSnapshotSource source : sources.motors()) putFailure(failures, source.identity());
+        for (EncoderSnapshotSource source : sources.encoders()) putFailure(failures, source.identity());
+        for (ImuSnapshotSource source : sources.imus()) putFailure(failures, source.identity());
+        return failures;
+    }
+
+    private void putFailure(Map<HardwareIdentity, RuntimeException> failures, HardwareIdentity identity) {
+        RuntimeException failure = failure(identity);
+        if (failure != null) failures.put(identity, failure);
+    }
+
+    private synchronized void publishSnapshot(HardwareCycleSnapshot snapshot) {
+        if (!closed && snapshot.sequence() > cycleSnapshot.sequence()) cycleSnapshot = snapshot;
+    }
+
+    private static double motorPosition(MotorHandle value) { try { return value.integratedPositionRotations(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double motorVelocity(MotorHandle value) { try { return value.integratedVelocityRotationsPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double motorVoltage(MotorHandle value) { try { return value.appliedVoltage(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double motorSupplyCurrent(MotorHandle value) { try { return value.supplyCurrentAmps(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double motorStatorCurrent(MotorHandle value) { try { return value.statorCurrentAmps(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double encoderPosition(EncoderHandle value) { try { return value.positionRotations(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double encoderVelocity(EncoderHandle value) { try { return value.velocityRotationsPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuYaw(ImuHandle value) { try { return value.yawDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuPitch(ImuHandle value) { try { return value.pitchDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuRoll(ImuHandle value) { try { return value.rollDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuAngle(ImuHandle value) { try { return value.angleDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuYawRate(ImuHandle value) { try { return value.yawRateDegreesPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuAccelerationX(ImuHandle value) { try { return value.linearAccelerationXG(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuAccelerationY(ImuHandle value) { try { return value.linearAccelerationYG(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuAccelerationZ(ImuHandle value) { try { return value.linearAccelerationZG(); } catch (RuntimeException exception) { return Double.NaN; } }
+
+    private static String failureMessage(RuntimeException failure) {
+        return failure == null || failure.getMessage() == null ? "" : failure.getMessage();
+    }
+
+    private RuntimeException failure(HardwareIdentity identity) {
+        RuntimeException refreshFailure = refreshFailures.get(identity);
+        if (refreshFailure != null) return refreshFailure;
+        for (Map.Entry<Object, RuntimeException> entry : bindingFailures.entrySet()) {
+            Object declaration = entry.getKey();
+            HardwareIdentity declarationIdentity = declaration instanceof MotorDevice motor
+                    ? HardwareIdentity.motor(motor)
+                    : declaration instanceof EncoderDevice encoder
+                            ? HardwareIdentity.encoder(encoder)
+                            : declaration instanceof ImuDevice imu ? HardwareIdentity.imu(imu) : null;
+            if (identity.equals(declarationIdentity)) return entry.getValue();
+        }
+        return null;
     }
 
     private void retryBindings(long nowNanos) {
@@ -366,21 +510,44 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         throw new IllegalStateException("No declaration exists for " + identity.key());
     }
 
-    private synchronized void refresh(RefreshTask task, long nowNanos) {
-        RefreshBackoff backoff = refreshBackoffs.get(task.identity());
-        if (backoff != null && nowNanos < backoff.retryAtNanos()) return;
-        try {
-            task.refresh().run();
-            if (refreshFailures.remove(task.identity()) != null) refreshFailureSnapshotDirty = true;
-            refreshBackoffs.remove(task.identity());
-        } catch (RuntimeException exception) {
-            int failureCount = backoff == null ? 1 : backoff.failureCount() + 1;
-            refreshFailures.put(task.identity(), exception);
-            refreshFailureSnapshotDirty = true;
-            refreshBackoffs.put(task.identity(), new RefreshBackoff(
-                    failureCount,
-                    nowNanos + retryDelayMillis(failureCount) * 1_000_000L));
+    private boolean refresh(RefreshTask task, long nowNanos) {
+        synchronized (this) {
+            if (closed || task.inFlight) return false;
+            RefreshBackoff backoff = refreshBackoffs.get(task.identity);
+            if (backoff != null && nowNanos < backoff.retryAtNanos()) return true;
+            task.inFlight = true;
         }
+
+        RuntimeException failure = null;
+        boolean completed = false;
+        try {
+            task.refresh.run();
+            completed = true;
+        } catch (RuntimeException exception) {
+            failure = exception;
+            completed = true;
+        } finally {
+            synchronized (this) {
+                task.inFlight = false;
+                if (completed) recordRefreshResult(task.identity, nowNanos, failure);
+            }
+        }
+        return true;
+    }
+
+    private void recordRefreshResult(HardwareIdentity identity, long nowNanos, RuntimeException failure) {
+        RefreshBackoff backoff = refreshBackoffs.get(identity);
+        if (failure == null) {
+            if (refreshFailures.remove(identity) != null) refreshFailureSnapshotDirty = true;
+            refreshBackoffs.remove(identity);
+            return;
+        }
+        int failureCount = backoff == null ? 1 : backoff.failureCount() + 1;
+        refreshFailures.put(identity, failure);
+        refreshFailureSnapshotDirty = true;
+        refreshBackoffs.put(identity, new RefreshBackoff(
+                failureCount,
+                nowNanos + retryDelayMillis(failureCount) * 1_000_000L));
     }
 
     private static long retryDelayMillis(int failureCount) {
@@ -389,6 +556,15 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
 
     @Override
     public synchronized void close() {
+        closed = true;
+        while (activeRefreshCycles > 0) {
+            try {
+                wait();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for hardware refresh to finish.", exception);
+            }
+        }
         closeAll(runtimeBindings);
         runtimeBindings.clear();
         runtimeBindingHandles.clear();
@@ -407,6 +583,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         bindingRetryBackoffs.clear();
         refreshTasks = new RefreshTask[0];
         refreshTaskHandleCount = -1;
+        cycleSnapshot = HardwareCycleSnapshot.empty();
     }
 
     private static void closeAll(Map<?, ?> handles) {
@@ -560,11 +737,62 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
     }
 
-    private record RefreshTask(HardwareIdentity identity, Runnable refresh) {
-        private RefreshTask {
-            Objects.requireNonNull(identity, "identity");
-            Objects.requireNonNull(refresh, "refresh");
+    private static final class RefreshTask {
+        private final HardwareIdentity identity;
+        private final Runnable refresh;
+        private boolean inFlight;
+
+        private RefreshTask(HardwareIdentity identity, Runnable refresh) {
+            this.identity = Objects.requireNonNull(identity, "identity");
+            this.refresh = Objects.requireNonNull(refresh, "refresh");
         }
+    }
+
+    private record SnapshotSources(
+            MotorSnapshotSource[] motors,
+            EncoderSnapshotSource[] encoders,
+            ImuSnapshotSource[] imus) {
+        private static SnapshotSources empty() {
+            return new SnapshotSources(
+                    new MotorSnapshotSource[0], new EncoderSnapshotSource[0], new ImuSnapshotSource[0]);
+        }
+    }
+
+    private record MotorSnapshotSource(
+            HardwareIdentity identity, MotorHandle handle, String name) {
+    }
+
+    private static final class EncoderSnapshotSource {
+        private final HardwareIdentity identity;
+        private final EncoderHandle handle;
+        private final String name;
+        private boolean absoluteSupported = true;
+
+        private EncoderSnapshotSource(HardwareIdentity identity, EncoderHandle handle, String name) {
+            this.identity = identity;
+            this.handle = handle;
+            this.name = name;
+        }
+
+        private HardwareIdentity identity() { return identity; }
+        private EncoderHandle handle() { return handle; }
+        private String name() { return name; }
+
+        private double absolutePosition() {
+            if (!absoluteSupported) return Double.NaN;
+            try {
+                return handle.absolutePositionRotations();
+            } catch (UnsupportedOperationException exception) {
+                absoluteSupported = false;
+                return Double.NaN;
+            } catch (RuntimeException exception) {
+                return Double.NaN;
+            }
+        }
+    }
+
+    private record ImuSnapshotSource(
+            HardwareIdentity identity, ImuHandle handle, String name) {
     }
 
     private record RefreshBackoff(int failureCount, long retryAtNanos) {

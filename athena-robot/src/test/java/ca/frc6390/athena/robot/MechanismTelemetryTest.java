@@ -142,7 +142,10 @@ class MechanismTelemetryTest {
     @Test
     void tracesIdleMotorsDeclaredOnlyThroughAControlBinding() {
         ControlOnlyMechanism mechanism = new ControlOnlyMechanism();
-        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
+                .register(mechanism)
+                .mechanismTraceLevel(ca.frc6390.athena.mechanism.core.MechanismTraceLevel.CAPTURE)
+                .mechanismTracePeriodSeconds(0.0);
 
         runtime.robotPeriodic(0.0, 0.02);
 

@@ -8,6 +8,7 @@ import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.commands.CommandGraph;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
+import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
@@ -81,12 +82,18 @@ public final class RobotRuntime implements AutoCloseable {
     private final Set<String> reportedFailures = new LinkedHashSet<>();
     private final Set<Object> activeRecoverableFailures = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, Integer> recoverySamples = new IdentityHashMap<>();
+    private long cycleSequence;
+    private volatile RuntimeCycleSnapshot cycleSnapshot;
     private volatile boolean closed;
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
         this.simulationSession = simulationSession;
         mechanisms = MechanismScheduler.create(hardwareGraph);
+        cycleSnapshot = new RuntimeCycleSnapshot(
+                0, 0.0, 0.0, LifecycleMode.ROBOT, LifecyclePhase.PERIODIC,
+                false, false, simulationSession != null, HardwareCycleSnapshot.empty(),
+                List.of(), List.of(), List.of());
     }
 
     /**
@@ -537,6 +544,11 @@ public final class RobotRuntime implements AutoCloseable {
             }
 
             @Override
+            public List<?> ownership(PathAction path) {
+                return delegate.ownership(path);
+            }
+
+            @Override
             public Map<String, Action> activeMarkers(PathAction path, MechanismContext context) {
                 return delegate.activeMarkers(path, context);
             }
@@ -644,11 +656,28 @@ public final class RobotRuntime implements AutoCloseable {
         return mechanisms.traceSnapshots();
     }
 
+    /** Returns the completed immutable snapshot for the latest runtime cycle. */
+    public RuntimeCycleSnapshot cycleSnapshot() {
+        return cycleSnapshot;
+    }
+
+    /** Returns query helpers for explaining the latest runtime cycle. */
+    public RuntimeInspection inspect() {
+        return new RuntimeInspection(cycleSnapshot);
+    }
+
     /** Controls core trace materialization independently of a telemetry transport. */
     public RobotRuntime mechanismTraceLevel(
             ca.frc6390.athena.mechanism.core.MechanismTraceLevel level) {
         ensureOpen();
         mechanisms.traceLevel(level);
+        return this;
+    }
+
+    /** Sets the minimum interval between materialized mechanism trace snapshots. */
+    public RobotRuntime mechanismTracePeriodSeconds(double periodSeconds) {
+        ensureOpen();
+        mechanisms.tracePeriodSeconds(periodSeconds);
         return this;
     }
 
@@ -710,6 +739,10 @@ public final class RobotRuntime implements AutoCloseable {
     public List<ResolvedOutput> simulationPeriodic(double nowSeconds, double dtSeconds) {
         ensureOpen();
         publishSimulationStep(nowSeconds, dtSeconds, true, false);
+        updateCycleSnapshot(
+                new MechanismContext(nowSeconds, 0.0, dtSeconds, true, false, true),
+                new EventContext(nowSeconds, dtSeconds, LifecycleMode.SIMULATION,
+                        LifecyclePhase.PERIODIC, true, true));
         return List.of();
     }
 
@@ -753,6 +786,7 @@ public final class RobotRuntime implements AutoCloseable {
                     safeMechanismContext.enabled(),
                     safeMechanismContext.autonomous());
         }
+        updateCycleSnapshot(safeMechanismContext, safeEventContext);
         return outputs;
     }
 
@@ -777,7 +811,9 @@ public final class RobotRuntime implements AutoCloseable {
                 LifecyclePhase.PERIODIC,
                 enabled,
                 simulation);
-        return runMechanisms(mechanismContext, eventContext);
+        List<ResolvedOutput> outputs = runMechanisms(mechanismContext, eventContext);
+        updateCycleSnapshot(mechanismContext, eventContext);
+        return outputs;
     }
 
     private void publishSimulationStep(double nowSeconds, double dtSeconds, boolean enabled, boolean autonomous) {
@@ -801,6 +837,42 @@ public final class RobotRuntime implements AutoCloseable {
             return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
         }
         return mechanisms.periodic(mechanismContext, eventContext);
+    }
+
+    private void updateCycleSnapshot(MechanismContext context, EventContext eventContext) {
+        List<RuntimeCycleSnapshot.DigitalInput> digitalInputs = mechanisms.digitalInputDevices().stream()
+                .map(input -> new RuntimeCycleSnapshot.DigitalInput(
+                        input.defaultName(), input.channel(), safeDigitalRead(input, true), safeDigitalRead(input, false)))
+                .toList();
+        List<RuntimeCycleSnapshot.LocalizationInput> localizationInputs = new ArrayList<>(localizations.size());
+        for (int index = 0; index < localizations.size(); index++) {
+            Localization localization = localizations.get(index);
+            localizationInputs.add(new RuntimeCycleSnapshot.LocalizationInput(
+                    index,
+                    localization.getClass().getSimpleName(),
+                    localizationSnapshots.get(index).measurements()));
+        }
+        cycleSnapshot = new RuntimeCycleSnapshot(
+                ++cycleSequence,
+                context.nowSeconds(),
+                context.dtSeconds(),
+                eventContext.mode(),
+                eventContext.phase(),
+                context.enabled(),
+                context.autonomous(),
+                context.simulation(),
+                hardwareGraph.cycleSnapshot(),
+                digitalInputs,
+                mechanisms.traceSnapshots(),
+                localizationInputs);
+    }
+
+    private static boolean safeDigitalRead(DigitalInputDevice input, boolean raw) {
+        try {
+            return raw ? input.raw() : input.active();
+        } catch (RuntimeException exception) {
+            return false;
+        }
     }
 
     private void processHardwareBindingFailures() {

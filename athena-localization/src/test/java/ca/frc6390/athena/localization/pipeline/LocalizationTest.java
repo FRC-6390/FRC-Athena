@@ -2,12 +2,14 @@ package ca.frc6390.athena.localization.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
+import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -198,6 +200,62 @@ class LocalizationTest {
                 .minimumSourceCount(2);
 
         assertEquals(1, twoCameras.measurements().size());
+    }
+
+    @Test
+    void refreshPublishesOneImmutableCycleSharedWithRuntimeSnapshots() {
+        Sample sample = sample(2.0, 3.0, 0.1, 1.0, 0.02, 2, 2.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Localization localization = Localizations.filter().input(signal(sample));
+
+        PoseSignal cycle = localization.refresh(null, 1.0, 0.02);
+        MeasurementSnapshot snapshot = new MeasurementSnapshot(localization).refresh(cycle);
+
+        assertSame(cycle, localization.refresh(null, 1.0, 0.02));
+        assertSame(cycle.measurements(), localization.measurements());
+        assertSame(cycle.measurements(), snapshot.measurements());
+        assertSame(sample, snapshot.latestMeasurement().orElseThrow());
+        assertThrows(UnsupportedOperationException.class, () -> cycle.measurements().clear());
+    }
+
+    @Test
+    void covarianceGroupingPreservesAmbiguityThenNewestTimestampTieBreaks() {
+        Object firstA = new Object();
+        Object firstB = new Object();
+        Object secondA = new Object();
+        Object secondB = new Object();
+        Localization lowerAmbiguity = Localizations.covarianceIntersection()
+                .input(signal(
+                        sample(1.0, 1.0, 0.0, 0.90, 0.20, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstA),
+                        sample(1.1, 1.0, 0.0, 0.91, 0.20, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstB),
+                        sample(8.0, 1.0, 0.0, 0.95, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
+                        sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
+                .groupWithinSeconds(0.2)
+                .maxTranslationDisagreementMeters(0.5);
+
+        PoseMeasurementSample ambiguityWinner =
+                (PoseMeasurementSample) lowerAmbiguity.measurements().get(0);
+        assertTrue(ambiguityWinner.pose().xMeters() >= 8.0);
+
+        Localization newer = Localizations.covarianceIntersection()
+                .input(signal(
+                        sample(1.0, 1.0, 0.0, 0.90, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstA),
+                        sample(1.1, 1.0, 0.0, 0.91, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstB),
+                        sample(8.0, 1.0, 0.0, 0.95, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
+                        sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
+                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
+                .groupWithinSeconds(0.2)
+                .maxTranslationDisagreementMeters(0.5);
+
+        PoseMeasurementSample newestWinner = (PoseMeasurementSample) newer.measurements().get(0);
+        assertTrue(newestWinner.pose().xMeters() >= 8.0);
     }
 
     @Test

@@ -8,6 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.Test;
 
@@ -267,6 +273,89 @@ class HardwareGraphTest {
     }
 
     @Test
+    void vendorRefreshRunsOutsideGraphMonitorAndCannotRunTwiceConcurrently() throws Exception {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(motorBackend));
+        FakeMotorHandle motor = assertInstanceOf(
+                FakeMotorHandle.class,
+                graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 15)));
+        motor.blockRefresh();
+        ExecutorService executor = Executors.newFixedThreadPool(3);
+        try {
+            Future<?> firstRefresh = executor.submit(() -> graph.refreshInputs(1_000_000_000L));
+            assertTrue(motor.refreshEntered.await(1, TimeUnit.SECONDS));
+
+            Future<List<HardwareGraph.RefreshFailure>> graphAccess = executor.submit(graph::refreshFailures);
+            assertTrue(graphAccess.get(1, TimeUnit.SECONDS).isEmpty());
+
+            Future<?> overlappingRefresh = executor.submit(() -> graph.refreshInputs(1_000_000_000L));
+            overlappingRefresh.get(1, TimeUnit.SECONDS);
+            assertEquals(1, motor.refreshCalls);
+            assertFalse(graph.cycleSnapshot().captured());
+
+            motor.allowRefresh.countDown();
+            firstRefresh.get(1, TimeUnit.SECONDS);
+            assertEquals(1, motor.refreshCalls);
+            assertTrue(graph.cycleSnapshot().captured());
+        } finally {
+            motor.releaseBlocks();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void snapshotHandleReadsRunOutsideGraphMonitor() throws Exception {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(motorBackend));
+        FakeMotorHandle motor = assertInstanceOf(
+                FakeMotorHandle.class,
+                graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 16)));
+        motor.blockPositionRead();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> refresh = executor.submit(() -> graph.refreshInputs(2_000_000_000L));
+            assertTrue(motor.positionReadEntered.await(1, TimeUnit.SECONDS));
+
+            Future<List<HardwareGraph.RefreshFailure>> graphAccess = executor.submit(graph::refreshFailures);
+            assertTrue(graphAccess.get(1, TimeUnit.SECONDS).isEmpty());
+
+            motor.allowPositionRead.countDown();
+            refresh.get(1, TimeUnit.SECONDS);
+            assertTrue(graph.cycleSnapshot().captured());
+        } finally {
+            motor.releaseBlocks();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void closeWaitsForInFlightVendorRefreshBeforeClosingHandle() throws Exception {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(motorBackend));
+        FakeMotorHandle motor = assertInstanceOf(
+                FakeMotorHandle.class,
+                graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 17)));
+        motor.blockRefresh();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> refresh = executor.submit(() -> graph.refreshInputs());
+            assertTrue(motor.refreshEntered.await(1, TimeUnit.SECONDS));
+            Future<?> close = executor.submit(graph::close);
+
+            assertThrows(TimeoutException.class, () -> close.get(50, TimeUnit.MILLISECONDS));
+            assertEquals(0, motor.closeCalls);
+
+            motor.allowRefresh.countDown();
+            refresh.get(1, TimeUnit.SECONDS);
+            close.get(1, TimeUnit.SECONDS);
+            assertEquals(1, motor.closeCalls);
+        } finally {
+            motor.releaseBlocks();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void integratedEncoderHandleReadsThroughCachedMotorHandle() {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
@@ -523,6 +612,34 @@ class HardwareGraphTest {
     }
 
     @Test
+    void refreshPublishesOneImmutableHardwareSnapshotPerCycle() {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 19);
+        FakeMotorHandle handle = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
+        handle.position = 2.5;
+
+        graph.refreshInputs(100L);
+        HardwareCycleSnapshot first = graph.cycleSnapshot();
+        handle.position = 8.0;
+
+        assertEquals(1, first.sequence());
+        assertEquals(100L, first.timestampNanos());
+        assertEquals(2.5, first.motor(motor).orElseThrow().positionRotations(), 1.0e-9);
+        assertEquals(1, handle.refreshCalls);
+        assertEquals(1, handle.positionReadCalls);
+        assertSame(first, graph.cycleSnapshot());
+
+        graph.refreshInputs(200L);
+
+        assertEquals(2, graph.cycleSnapshot().sequence());
+        assertEquals(8.0, graph.cycleSnapshot().motor(motor).orElseThrow().positionRotations(), 1.0e-9);
+        assertEquals(2, handle.refreshCalls);
+        assertEquals(2, handle.positionReadCalls);
+        assertEquals(2.5, first.motor(motor).orElseThrow().positionRotations(), 1.0e-9);
+    }
+
+    @Test
     void simModelsComposeMotorsEncodersRangesLimitsAndDependencies() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
@@ -639,6 +756,7 @@ class HardwareGraphTest {
         private int activateCalls;
         private int closeCalls;
         private int refreshCalls;
+        private int positionReadCalls;
         private boolean failRefresh;
         private MotorHandle followLeader;
         private boolean followInverted;
@@ -649,6 +767,10 @@ class HardwareGraphTest {
         private double positionTarget;
         private double velocityTarget;
         private int stopCalls;
+        private CountDownLatch refreshEntered;
+        private CountDownLatch allowRefresh;
+        private CountDownLatch positionReadEntered;
+        private CountDownLatch allowPositionRead;
 
         private FakeMotorHandle(MotorDevice device) {
             this.device = device;
@@ -667,6 +789,7 @@ class HardwareGraphTest {
         @Override
         public void refreshInputs() {
             refreshCalls++;
+            signalAndAwait(refreshEntered, allowRefresh);
             if (failRefresh) {
                 throw new IllegalStateException("refresh failed");
             }
@@ -686,7 +809,37 @@ class HardwareGraphTest {
 
         @Override
         public double integratedPositionRotations() {
+            positionReadCalls++;
+            signalAndAwait(positionReadEntered, allowPositionRead);
             return position;
+        }
+
+        private void blockRefresh() {
+            refreshEntered = new CountDownLatch(1);
+            allowRefresh = new CountDownLatch(1);
+        }
+
+        private void blockPositionRead() {
+            positionReadEntered = new CountDownLatch(1);
+            allowPositionRead = new CountDownLatch(1);
+        }
+
+        private void releaseBlocks() {
+            if (allowRefresh != null) allowRefresh.countDown();
+            if (allowPositionRead != null) allowPositionRead.countDown();
+        }
+
+        private static void signalAndAwait(CountDownLatch entered, CountDownLatch release) {
+            if (entered == null || release == null) return;
+            entered.countDown();
+            try {
+                if (!release.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting for blocked test operation to resume.");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while blocking test operation.", exception);
+            }
         }
 
         @Override

@@ -347,6 +347,34 @@ class RobotRuntimeTest {
 
         assertEquals(1, runtime.hardwareRefreshFailures().size());
         assertEquals(HardwareIdentity.motor(mechanism.motor), runtime.hardwareRefreshFailures().get(0).identity());
+        assertEquals(1, runtime.inspect().faults().size());
+        assertEquals(mechanism.motor.defaultName(), runtime.inspect().faults().get(0).name());
+    }
+
+    @Test
+    void exposesImmutableCompletedCycleForRuntimeInspection() {
+        SimulationSession simulation = SimulationSession.create();
+        MotorMechanism mechanism = new MotorMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation)
+                .register(mechanism)
+                .mechanismTraceLevel(ca.frc6390.athena.mechanism.core.MechanismTraceLevel.CAPTURE)
+                .mechanismTracePeriodSeconds(0.0);
+        runtime.request(mechanism.initial);
+
+        runtime.robotPeriodic(1.0, 0.02);
+        RuntimeCycleSnapshot first = runtime.cycleSnapshot();
+
+        assertEquals(1, first.sequence());
+        assertEquals(1.0, first.timestampSeconds(), 1.0e-9);
+        assertTrue(first.hardware().captured());
+        assertEquals("percent", runtime.inspect().motor(mechanism.motor.defaultName()).orElseThrow().commandMode());
+        assertEquals(1.0, runtime.inspect().motor(mechanism.motor.defaultName()).orElseThrow().commandValue(), 1.0e-9);
+
+        runtime.robotPeriodic(1.02, 0.02);
+
+        assertEquals(2, runtime.cycleSnapshot().sequence());
+        assertEquals(1, first.sequence());
+        assertEquals(1.0, first.timestampSeconds(), 1.0e-9);
     }
 
     @Test

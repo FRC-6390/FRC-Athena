@@ -58,7 +58,10 @@ class SchedulerResilienceTest {
         boolean[] selectSecond = new boolean[1];
         RecordingPath first = new RecordingPath("first");
         RecordingPath second = new RecordingPath("second");
-        Action computed = Actions.compute(context -> selectSecond[0] ? second.action : first.action);
+        Action computed = Actions.compute(
+                context -> selectSecond[0] ? second.action : first.action,
+                first.action,
+                second.action);
         TestMechanism mechanism = new TestMechanism(computed);
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, ActionContext.empty())
                 .path(first.action, first)
@@ -114,9 +117,11 @@ class SchedulerResilienceTest {
 
     @Test
     void finiteComputedRequestCompletesAndLeavesActiveLeaseSet() {
-        Action computed = Actions.compute(context -> Actions.doOnce(() -> { }));
+        Action computed = Actions.compute(context -> Actions.doOnce(() -> { }), new Object());
         TestMechanism mechanism = new TestMechanism(computed);
-        MechanismScheduler scheduler = MechanismScheduler.create().register(mechanism);
+        MechanismScheduler scheduler = MechanismScheduler.create().register(mechanism)
+                .traceLevel(MechanismTraceLevel.SUMMARY)
+                .tracePeriodSeconds(0.0);
 
         scheduler.request(computed);
         scheduler.robotPeriodic(0.0, 0.02);

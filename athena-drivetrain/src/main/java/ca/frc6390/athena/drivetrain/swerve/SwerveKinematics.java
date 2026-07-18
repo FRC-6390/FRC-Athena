@@ -85,7 +85,9 @@ public final class SwerveKinematics implements SimModel.Source {
     /** Continuously recomputes module targets from a velocity supplier. */
     public Action drive(Supplier<RobotVelocity> velocity) {
         Supplier<RobotVelocity> safeVelocity = Objects.requireNonNull(velocity, "velocity");
-        return Actions.compute(() -> drive(safeVelocity.get()));
+        return Actions.compute(() -> drive(safeVelocity.get()), modules.stream()
+                .map(Module::module)
+                .toList());
     }
 
     /** Drives one pooled request after normalizing every channel into robot coordinates. */

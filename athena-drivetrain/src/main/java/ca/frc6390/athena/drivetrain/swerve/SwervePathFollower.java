@@ -9,6 +9,7 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import edu.wpi.first.math.geometry.Pose2d;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -84,6 +85,12 @@ public final class SwervePathFollower implements TelemetrySource {
         pooledOutput = Objects.requireNonNull(output, "output");
         pooledDrive = Objects.requireNonNull(driveAction, "driveAction");
         return this;
+    }
+
+    /** Stable drivetrain ownership used to compile path actions without reserving unrelated controls. */
+    public List<?> ownership() {
+        if (pooledDrive != null) return List.of(pooledDrive);
+        return kinematics.modules().stream().map(SwerveKinematics.Module::module).toList();
     }
 
     /** Clears a configured pooled path contribution. */

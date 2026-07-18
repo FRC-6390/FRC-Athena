@@ -31,6 +31,25 @@ class ScalarControlSinkTest {
     }
 
     @Test
+    void traceLevelDoesNotChangeControlSinkBehavior() {
+        for (MechanismTraceLevel traceLevel : MechanismTraceLevel.values()) {
+            AimMechanism mechanism = new AimMechanism();
+            MechanismScheduler scheduler = MechanismScheduler.create()
+                    .register(mechanism)
+                    .traceLevel(traceLevel)
+                    .bindInMemoryRuntime();
+
+            scheduler.request(mechanism.aim).periodic(
+                    new MechanismContext(0.0, 0.0, 0.02, true, false, false),
+                    EventContext.empty());
+
+            assertTrue(mechanism.angular.isActive(), () -> traceLevel + " disabled the control sink");
+            assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9,
+                    () -> traceLevel + " changed the control sink output");
+        }
+    }
+
+    @Test
     void newestActionWinsSharedSinkAndPreviousActionResumes() {
         SharedSinkMechanism mechanism = new SharedSinkMechanism();
         MechanismScheduler scheduler = MechanismScheduler.create()

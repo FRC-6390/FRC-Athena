@@ -26,14 +26,14 @@ public final class TargetingExamples implements Mechanism {
         stop = Actions.compute(() -> {
             drive.targetingVelocity.clear();
             return drive.pooledDrive;
-        });
+        }, drive.pooledDrive);
         aim = Actions.compute(() -> {
             drive.targetingVelocity.set(targets.latest()
                     .map(target -> RobotVelocity.angular(
                             clamp(-target.yawDegrees() * AIM_KP, 1.5)))
                     .orElseGet(RobotVelocity::zero));
             return drive.pooledDrive;
-        });
+        }, drive.pooledDrive);
         approach = Actions.compute(() -> {
             drive.targetingVelocity.set(targets.latest()
                     .map(target -> RobotVelocity.robot(
@@ -42,7 +42,7 @@ public final class TargetingExamples implements Mechanism {
                             clamp(-target.yawDegrees() * AIM_KP, 1.5)))
                     .orElseGet(RobotVelocity::zero));
             return drive.pooledDrive;
-        });
+        }, drive.pooledDrive);
     }
 
     @Telemetry("hasTarget")

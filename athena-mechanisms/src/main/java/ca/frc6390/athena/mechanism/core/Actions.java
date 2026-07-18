@@ -145,24 +145,28 @@ public final class Actions {
     }
 
     /**
-     * Creates an action whose child action tree is recomputed every runtime cycle.
-     *
-     * @param action child action supplier
-     * @return computed action
+     * Creates an action whose child tree is recomputed each cycle with required, stable ownership.
+     * Ownership may contain devices, controls, mechanisms, actions, or iterables of those values.
      */
-    public static Action compute(Supplier<Action> action) {
+    public static Action compute(Supplier<Action> action, Object owner, Object... additionalOwnership) {
         Objects.requireNonNull(action, "action");
-        return compute(context -> action.get());
+        return compute(context -> action.get(), owner, additionalOwnership);
     }
 
-    /**
-     * Creates an action whose child action tree is recomputed every runtime cycle.
-     *
-     * @param action child action resolver
-     * @return computed action
-     */
-    public static Action compute(Function<MechanismContext, Action> action) {
-        return new Computed(action);
+    /** Context-aware form of {@link #compute(Supplier, Object, Object...)}. */
+    public static Action compute(
+            Function<MechanismContext, Action> action,
+            Object owner,
+            Object... additionalOwnership) {
+        Objects.requireNonNull(action, "action");
+        List<Object> ownership = new ArrayList<>();
+        ownership.add(Objects.requireNonNull(owner, "owner"));
+        if (additionalOwnership != null) {
+            for (Object value : additionalOwnership) {
+                ownership.add(Objects.requireNonNull(value, "ownership"));
+            }
+        }
+        return new Computed(ownership, action);
     }
 
     public static Action computeHardware(
@@ -599,8 +603,10 @@ public final class Actions {
         }
     }
 
-    public record Computed(Function<MechanismContext, Action> action) implements Action {
+    public record Computed(List<?> ownership, Function<MechanismContext, Action> action) implements Action {
         public Computed {
+            ownership = List.copyOf(Objects.requireNonNull(ownership, "ownership"));
+            if (ownership.isEmpty()) throw new IllegalArgumentException("Computed actions require ownership.");
             Objects.requireNonNull(action, "action");
         }
 

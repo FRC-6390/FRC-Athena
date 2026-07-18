@@ -58,5 +58,9 @@ public interface OutputRequest {
         public Basic {
             Objects.requireNonNull(output, "output");
         }
+
+        static Basic of(ControlBinding control, MotorDevice motor, Output output) {
+            return new Basic(control, motor, output);
+        }
     }
 }

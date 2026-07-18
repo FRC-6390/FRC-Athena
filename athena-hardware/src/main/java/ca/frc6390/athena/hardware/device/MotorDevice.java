@@ -311,6 +311,12 @@ public record MotorDevice(
         }
     }
 
+    /** Updates the runtime command snapshot, reusing it when the command is unchanged. */
+    public void recordCommand(MotorCommandSnapshot.Mode mode, double value) {
+        RuntimeMotor runtime = RUNTIMES.find(this);
+        if (runtime != null) runtime.command(Objects.requireNonNull(mode, "mode"), value);
+    }
+
     /** Binds this declaration to its owning runtime handle. */
     public AutoCloseable bindRuntime(RuntimeScope scope, MotorHandle handle) {
         return RUNTIMES.bind(this, scope, new RuntimeMotor(handle));
@@ -333,6 +339,13 @@ public record MotorDevice(
         private MotorCommandSnapshot command() { return command; }
 
         private void command(MotorCommandSnapshot value) { command = value; }
+
+        private void command(MotorCommandSnapshot.Mode mode, double value) {
+            MotorCommandSnapshot current = command;
+            if (current.mode() != mode || Double.compare(current.value(), value) != 0) {
+                command = new MotorCommandSnapshot(mode, value);
+            }
+        }
     }
 
     /**

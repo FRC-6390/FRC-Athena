@@ -2,14 +2,18 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
  * Resolves requested mechanism Actions into hardware output requests.
  */
 final class OutputResolver {
+    private static final int STATIC_CACHE_LIMIT = 2048;
     private final RuntimeOverrides overrides;
+    private final Map<Action, ResolvedOutput> staticOutputs = new IdentityHashMap<>();
     private OutputResolver(RuntimeOverrides overrides) {
         this.overrides = Objects.requireNonNull(overrides, "overrides");
     }
@@ -116,7 +120,22 @@ final class OutputResolver {
             resolveRequest(outputRequest(null, null, dynamic.output().apply(context)), outputs);
             return;
         }
-        resolveRequest(outputRequest(control(action), motor(action), output(action)), outputs);
+        ControlBinding control = control(action);
+        MotorDevice motor = motor(action);
+        if (!available(control, motor)) return;
+        Output output = output(action);
+        if (output == null) return;
+        if (staticOutput(action)) {
+            ResolvedOutput resolved = staticOutputs.get(action);
+            if (resolved == null) {
+                if (staticOutputs.size() >= STATIC_CACHE_LIMIT) staticOutputs.clear();
+                resolved = resolve(OutputRequest.Basic.of(control, motor, output));
+                staticOutputs.put(action, resolved);
+            }
+            outputs.add(resolved);
+            return;
+        }
+        resolveRequest(request(control, motor, output), outputs);
     }
 
     private void resolveStates(List<Action> actions, MechanismContext context, List<ResolvedOutput> outputs) {
@@ -132,17 +151,23 @@ final class OutputResolver {
     }
 
     private OutputRequest outputRequest(ControlBinding control, MotorDevice motor, Output output) {
-        if (output == null) {
-            return null;
-        }
+        if (output == null || !available(control, motor)) return null;
+        return request(control, motor, output);
+    }
+
+    private boolean available(ControlBinding control, MotorDevice motor) {
         if (control != null && (overrides.disabled(control)
                 || (control.output() != null && overrides.disabled(control.output())))) {
-            return null;
+            return false;
         }
         if (motor != null && overrides.disabled(motor)) {
-            return null;
+            return false;
         }
-        if (control != null && control.motors().stream().anyMatch(overrides::disabled)) return null;
+        if (control != null && control.motors().stream().anyMatch(overrides::disabled)) return false;
+        return true;
+    }
+
+    private static OutputRequest request(ControlBinding control, MotorDevice motor, Output output) {
         if (control != null) {
             return OutputRequest.of(control, output);
         }
@@ -150,6 +175,17 @@ final class OutputResolver {
             return OutputRequest.of(motor, output);
         }
         return null;
+    }
+
+    private static boolean staticOutput(Action action) {
+        return action instanceof Actions.ControlNeutral
+                || action instanceof Actions.MotorNeutral
+                || action instanceof Actions.MotorPercent
+                || action instanceof Actions.MotorVoltage
+                || action instanceof Actions.ControlPercent
+                || action instanceof Actions.ControlVoltage
+                || action instanceof Actions.ControlPosition
+                || action instanceof Actions.ControlVelocity;
     }
 
     private static ControlBinding control(Action action) {

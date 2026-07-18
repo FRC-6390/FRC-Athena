@@ -202,6 +202,10 @@ public final class ChoreoPathProvider implements PathProvider {
             return requireActive(path).output;
         }
 
+        @Override public List<?> ownership(PathAction path) {
+            return follower == null ? List.of() : follower.ownership();
+        }
+
         @Override public Map<String, Action> activeMarkers(
                 PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
             return java.util.Collections.unmodifiableMap(
