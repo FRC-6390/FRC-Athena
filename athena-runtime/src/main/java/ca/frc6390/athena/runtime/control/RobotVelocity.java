@@ -92,6 +92,26 @@ public record RobotVelocity(
         return times(-1.0);
     }
 
+    /** Returns this velocity with every component reversed. */
+    public RobotVelocity inverted() {
+        return unaryMinus();
+    }
+
+    /**
+     * Returns this velocity with the selected components reversed.
+     *
+     * @param x whether to reverse forward velocity
+     * @param y whether to reverse lateral velocity
+     * @param angular whether to reverse angular velocity
+     */
+    public RobotVelocity inverted(boolean x, boolean y, boolean angular) {
+        return new RobotVelocity(
+                x ? -xMetersPerSecond : xMetersPerSecond,
+                y ? -yMetersPerSecond : yMetersPerSecond,
+                angular ? -angularRadiansPerSecond : angularRadiansPerSecond,
+                frame);
+    }
+
     public RobotVelocity withLinear(double x, double y) {
         return new RobotVelocity(x, y, angularRadiansPerSecond, frame);
     }

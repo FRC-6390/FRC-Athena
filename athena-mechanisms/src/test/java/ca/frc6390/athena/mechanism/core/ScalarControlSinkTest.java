@@ -91,6 +91,23 @@ class ScalarControlSinkTest {
     }
 
     @Test
+    void invertedAngularChannelReversesControlBindingOutput() {
+        RobotVelocityPool pool = new RobotVelocityPool();
+        RobotVelocityPool.AngularChannel angular = pool.angularChannel().inverted();
+        ControlBinding control = Controls.position(angular)
+                .feedback(() -> 0.0, () -> 0.0)
+                .pid(2.0, 0.0, 0.0)
+                .constraint(Constraints.clamp(1.5));
+        Output target = Outputs.position(4.0);
+
+        OutputApplier.using(ActionContext.empty())
+                .apply(new ResolvedOutput(OutputRequest.of(control, target), target));
+
+        assertEquals(-1.5, angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(-1.5, pool.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+    }
+
+    @Test
     void continuousPositionUsesShortestWrappedError() {
         double measurement = Math.toRadians(179.0);
         RobotVelocityPool.AngularChannel angular = new RobotVelocityPool().angularChannel();

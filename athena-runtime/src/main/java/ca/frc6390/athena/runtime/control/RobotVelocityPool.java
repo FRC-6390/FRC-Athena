@@ -55,7 +55,7 @@ public final class RobotVelocityPool {
             }
         }
         if (angular != null) {
-            combined = combined.withAngular(angular.value);
+            combined = combined.withAngular(angular.radiansPerSecond());
         }
         return combined;
     }
@@ -65,6 +65,7 @@ public final class RobotVelocityPool {
         private volatile double value;
         private volatile boolean active;
         private volatile long sequence;
+        private volatile boolean inverted;
 
         @Override
         public void apply(double value) {
@@ -87,7 +88,25 @@ public final class RobotVelocityPool {
         }
 
         public double radiansPerSecond() {
-            return active ? value : 0.0;
+            if (!active) {
+                return 0.0;
+            }
+            return inverted ? -value : value;
+        }
+
+        /** Reverses values applied by a control binding. */
+        public AngularChannel inverted() {
+            return inverted(true);
+        }
+
+        /** Configures whether values applied by a control binding are reversed. */
+        public AngularChannel inverted(boolean inverted) {
+            this.inverted = inverted;
+            return this;
+        }
+
+        public boolean isInverted() {
+            return inverted;
         }
     }
 
@@ -96,6 +115,9 @@ public final class RobotVelocityPool {
         private volatile Supplier<RobotVelocity> source;
         private volatile BooleanSupplier enabled = () -> true;
         private volatile DoubleSupplier weight = () -> 1.0;
+        private volatile boolean invertX;
+        private volatile boolean invertY;
+        private volatile boolean invertAngular;
 
         public Channel set(RobotVelocity velocity) {
             RobotVelocity safe = Objects.requireNonNull(velocity, "velocity");
@@ -131,6 +153,24 @@ public final class RobotVelocityPool {
             return this;
         }
 
+        /** Reverses every component contributed by this channel. */
+        public Channel inverted() {
+            return inverted(true);
+        }
+
+        /** Configures whether every component contributed by this channel is reversed. */
+        public Channel inverted(boolean inverted) {
+            return inverted(inverted, inverted, inverted);
+        }
+
+        /** Configures inversion independently for each velocity component. */
+        public Channel inverted(boolean x, boolean y, boolean angular) {
+            invertX = x;
+            invertY = y;
+            invertAngular = angular;
+            return this;
+        }
+
         public boolean isActive() {
             return source != null && enabled.getAsBoolean();
         }
@@ -150,7 +190,9 @@ public final class RobotVelocityPool {
                 return null;
             }
             double currentWeight = weight.getAsDouble();
-            return velocity.times(Double.isFinite(currentWeight) ? currentWeight : 0.0);
+            return velocity
+                    .inverted(invertX, invertY, invertAngular)
+                    .times(Double.isFinite(currentWeight) ? currentWeight : 0.0);
         }
     }
 }

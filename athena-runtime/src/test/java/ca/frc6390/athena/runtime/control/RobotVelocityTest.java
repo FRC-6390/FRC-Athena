@@ -18,6 +18,8 @@ class RobotVelocityTest {
         assertEquals(RobotVelocity.robot(4.0, -2.0, 1.0), first.times(2.0));
         assertEquals(first, first.times(2.0).div(2.0));
         assertEquals(RobotVelocity.robot(-2.0, 1.0, -0.5), first.unaryMinus());
+        assertEquals(RobotVelocity.robot(-2.0, 1.0, -0.5), first.inverted());
+        assertEquals(RobotVelocity.robot(-2.0, -1.0, -0.5), first.inverted(true, false, true));
         assertEquals(RobotVelocity.robot(2.0, -1.0, 0.0), first.linearOnly());
         assertEquals(RobotVelocity.robot(0.0, 0.0, 0.5), first.angularOnly());
         assertEquals(Math.sqrt(5.0), first.linearMagnitude(), 1.0e-9);
@@ -103,5 +105,29 @@ class RobotVelocityTest {
 
         first.apply(3.0);
         assertEquals(3.0, pool.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void channelInversionCanReverseSelectedVelocityComponents() {
+        RobotVelocityPool pool = new RobotVelocityPool();
+        pool.channel()
+                .set(RobotVelocity.robot(2.0, -3.0, 0.75))
+                .inverted(true, false, true);
+
+        assertEquals(RobotVelocity.robot(-2.0, -3.0, -0.75), pool.robotRelative(0.0));
+    }
+
+    @Test
+    void angularControlChannelInvertsAppliedPidEffort() {
+        RobotVelocityPool pool = new RobotVelocityPool();
+        RobotVelocityPool.AngularChannel aim = pool.angularChannel().inverted();
+
+        aim.apply(1.25);
+        assertTrue(aim.isInverted());
+        assertEquals(-1.25, aim.radiansPerSecond(), 1.0e-9);
+        assertEquals(-1.25, pool.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+
+        aim.inverted(false);
+        assertEquals(1.25, pool.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
     }
 }
