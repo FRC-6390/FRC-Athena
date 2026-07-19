@@ -583,7 +583,7 @@ public final class RobotRuntime implements AutoCloseable {
                     try {
                         var preview = provider.preview(path);
                         if (preview.isPresent()) {
-                            paths.add(preview.get());
+                            paths.add(previewGeometry(path, preview.get()));
                             found = true;
                             break;
                         }
@@ -600,6 +600,14 @@ public final class RobotRuntime implements AutoCloseable {
         cachedAutoPreviews = List.copyOf(previews);
         cachedAutoPreviewRevision = revision;
         return cachedAutoPreviews;
+    }
+
+    private static PathPreview previewGeometry(PathAction action, PathPreview preview) {
+        if (!action.onlyResetsPose()) return preview;
+        List<PathPreview.Pose> initialPose = preview.poses().isEmpty()
+                ? List.of()
+                : List.of(preview.poses().get(0));
+        return new PathPreview(preview.key(), initialPose, List.of());
     }
 
     /**

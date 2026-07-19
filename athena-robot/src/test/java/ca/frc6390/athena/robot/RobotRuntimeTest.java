@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.auto.PathProvider;
+import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.api.RecoveryPolicy;
 import ca.frc6390.athena.commands.CommandAction;
@@ -324,6 +325,18 @@ class RobotRuntimeTest {
         assertEquals(6.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
         assertTrue(runtime.selectedAutoPreviews().get(0).steps().stream()
                 .anyMatch(step -> step.contains("PATH test:leave")));
+    }
+
+    @Test
+    void resetPoseOnlyPreviewPublishesOnlyTheStartingPose() {
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
+                .register(new ResetPreviewMechanism());
+
+        PathPreview preview = runtime.selectedAutoPreviews().get(0).paths().get(0);
+
+        assertEquals(1, preview.poses().size());
+        assertEquals(new PathPreview.Pose(1.0, 2.0, 0.25), preview.poses().get(0));
+        assertTrue(preview.events().isEmpty());
     }
 
     @Test
@@ -872,6 +885,27 @@ class RobotRuntimeTest {
         public void close() {
             closeCalls++;
         }
+    }
+
+    private static final class ResetPreviewMechanism
+            implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final PathProvider paths = new PathProvider() {
+            @Override public String source() { return "preview"; }
+            @Override public PathRuntime runtime() {
+                return new PathRuntime() {
+                    @Override public boolean isFinished(PathAction path, MechanismContext context) { return true; }
+                };
+            }
+            @Override public java.util.Optional<PathPreview> preview(PathAction path) {
+                return java.util.Optional.of(new PathPreview(path.key(), List.of(
+                        new PathPreview.Pose(1.0, 2.0, 0.25),
+                        new PathPreview.Pose(3.0, 4.0, 0.5)), List.of(
+                        new PathPreview.Event("shoot", 0.5,
+                                new PathPreview.Pose(2.0, 3.0, 0.4)))));
+            }
+        };
+        private final AutoChooser autos = Autos.chooser("Reset Preview")
+                .defaultAuto("Reset", Paths.of("preview", "start").resetPoseOnly());
     }
 
     private static final class CountingOutputMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
