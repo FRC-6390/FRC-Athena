@@ -11,6 +11,7 @@ import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.commands.PathPlannerAuto;
 import edu.wpi.first.wpilibj2.command.Command;
 
 /**
@@ -68,7 +69,9 @@ public final class PathPlannerPathProvider implements PathProvider {
      * @return path runtime
      */
     public PathRuntime runtime() {
-        return new CommandPathRuntime(path -> command(path.name()));
+        return new CommandPathRuntime(path -> path.onlyResetsPose()
+                ? client.resetPose(path.name())
+                : command(path.name()));
     }
 
     /**
@@ -91,6 +94,8 @@ public final class PathPlannerPathProvider implements PathProvider {
 
     interface PathPlannerClient {
         Command buildAuto(String autoName);
+
+        Command resetPose(String autoName);
 
         List<String> autoNames();
     }
@@ -141,6 +146,16 @@ public final class PathPlannerPathProvider implements PathProvider {
         @Override
         public Command buildAuto(String autoName) {
             return AutoBuilder.buildAuto(autoName);
+        }
+
+        @Override
+        public Command resetPose(String autoName) {
+            Command auto = AutoBuilder.buildAuto(autoName);
+            if (!(auto instanceof PathPlannerAuto pathPlannerAuto) || pathPlannerAuto.getStartingPose() == null) {
+                throw new IllegalArgumentException(
+                        "PathPlanner auto '" + autoName + "' does not define an initial pose.");
+            }
+            return AutoBuilder.resetOdom(pathPlannerAuto.getStartingPose());
         }
 
         @Override

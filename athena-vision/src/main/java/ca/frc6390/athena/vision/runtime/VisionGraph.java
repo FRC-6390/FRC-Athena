@@ -70,14 +70,23 @@ public final class VisionGraph {
      * Refreshes cached measurements for every camera.
      */
     public void refresh() {
+        refresh(System.nanoTime() * 1.0e-9);
+    }
+
+    /** Refreshes cached measurements using the supplied monotonic runtime timestamp. */
+    public void refresh(double nowSeconds) {
         List<Measurement> poses = new ArrayList<>();
         List<Measurement> targets = new ArrayList<>();
         List<RefreshFailure> failures = new ArrayList<>();
         for (CameraRuntime camera : cameraList) {
+            if (!camera.shouldAttempt(nowSeconds)) {
+                failures.add(new RefreshFailure(camera.camera(), camera.lastFailure));
+                continue;
+            }
             try {
-                camera.refresh();
+                camera.refresh(nowSeconds);
             } catch (RuntimeException exception) {
-                camera.failed();
+                camera.failed(exception, nowSeconds);
                 failures.add(new RefreshFailure(camera.camera(), exception));
             }
             poses.addAll(camera.poseMeasurements());
@@ -175,6 +184,8 @@ public final class VisionGraph {
         private List<Measurement> poseMeasurements = List.of();
         private List<Measurement> targetMeasurements = List.of();
         private boolean manuallyDisabled;
+        private RuntimeException lastFailure;
+        private double retryAtSeconds = Double.NEGATIVE_INFINITY;
 
         private CameraRuntime(CameraDevice camera) {
             this.camera = Objects.requireNonNull(camera, "camera");
@@ -189,6 +200,10 @@ public final class VisionGraph {
          * Refreshes this camera's cached signal values.
          */
         public void refresh() {
+            refresh(System.nanoTime() * 1.0e-9);
+        }
+
+        private void refresh(double nowSeconds) {
             if (manuallyDisabled) {
                 poseMeasurements = List.of();
                 targetMeasurements = List.of();
@@ -196,14 +211,22 @@ public final class VisionGraph {
             }
             poseMeasurements = snapshot(poseSignal.measurements());
             targetMeasurements = snapshot(targetSignal.measurements());
+            lastFailure = null;
+            retryAtSeconds = Double.NEGATIVE_INFINITY;
             if (owner != null) {
                 owner.aggregateDirty = true;
             }
         }
 
-        private void failed() {
+        private boolean shouldAttempt(double nowSeconds) {
+            return manuallyDisabled || lastFailure == null || nowSeconds >= retryAtSeconds;
+        }
+
+        private void failed(RuntimeException exception, double nowSeconds) {
             poseMeasurements = List.of();
             targetMeasurements = List.of();
+            lastFailure = Objects.requireNonNull(exception, "exception");
+            retryAtSeconds = nowSeconds + camera.recoveryPolicy().retryIntervalSeconds();
             if (owner != null) {
                 owner.aggregateDirty = true;
             }
@@ -211,7 +234,9 @@ public final class VisionGraph {
 
         private void disable() {
             manuallyDisabled = true;
-            failed();
+            poseMeasurements = List.of();
+            targetMeasurements = List.of();
+            if (owner != null) owner.aggregateDirty = true;
         }
 
         /**

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.api.hardware.CameraKinds;
 import ca.frc6390.athena.api.FailurePolicy;
+import ca.frc6390.athena.api.RecoveryPolicy;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
@@ -190,6 +191,30 @@ class CameraDeviceTest {
         assertTrue(graph.poseMeasurements().isEmpty());
         graph.refresh();
 
+        assertEquals(List.of(pose), graph.poseMeasurements());
+        assertTrue(graph.refreshFailures().isEmpty());
+    }
+
+    @Test
+    void cameraRecoveryPolicyWaitsForItsRetryInterval() {
+        AtomicInteger reads = new AtomicInteger();
+        PoseMeasurementSample pose = Measurements.pose(new PoseSnapshot(4.0, 2.0, 0.25));
+        CameraDevice camera = Cameras.photonVision("paced-recovery")
+                .failurePolicy(FailurePolicy.DISABLE_DEVICE)
+                .onRecovery(RecoveryPolicy.retryEverySeconds(0.1).healthySamples(1))
+                .bindPose(() -> {
+                    if (reads.incrementAndGet() == 1) throw new IllegalStateException("network dropped");
+                    return List.of(pose);
+                });
+        VisionGraph graph = VisionGraph.of(camera);
+
+        graph.refresh(1.0);
+        graph.refresh(1.05);
+        assertEquals(1, reads.get());
+        assertEquals(1, graph.refreshFailures().size());
+
+        graph.refresh(1.1);
+        assertEquals(2, reads.get());
         assertEquals(List.of(pose), graph.poseMeasurements());
         assertTrue(graph.refreshFailures().isEmpty());
     }

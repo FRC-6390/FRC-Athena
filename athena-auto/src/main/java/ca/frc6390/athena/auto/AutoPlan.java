@@ -31,7 +31,9 @@ public record AutoPlan(List<String> steps, List<PathAction> paths) {
             return;
         }
         if (action instanceof PathAction path) {
-            steps.add(prefix + "PATH " + path.key() + (path.resetsOdometry() ? " [reset pose]" : ""));
+            steps.add(prefix + "PATH " + path.key()
+                    + (path.onlyResetsPose() ? " [reset pose only]"
+                            : path.resetsOdometry() ? " [reset pose]" : ""));
             paths.add(path);
             path.markers().forEach((name, marker) -> {
                 steps.add(prefix + "  MARKER " + name);

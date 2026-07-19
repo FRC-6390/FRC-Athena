@@ -90,9 +90,25 @@ class PathPlannerPathProviderTest {
         assertEquals(List.of("initialize", "execute", "isFinished", "end:true"), client.commands.get(0).events);
     }
 
+    @Test
+    void resetPoseOnlyUsesResetCommandWithoutBuildingTheAutoRuntime() {
+        FakeClient client = new FakeClient(List.of("Start Here"));
+        PathRuntime runtime = new PathPlannerPathProvider(client).runtime();
+        PathAction path = Paths.pathPlanner("Start Here").resetPoseOnly();
+
+        runtime.initialize(path, null);
+        runtime.execute(path, null);
+        runtime.end(path, null, false);
+
+        assertEquals(List.of("Start Here"), client.resetPoseNames);
+        assertTrue(client.buildAutoNames.isEmpty());
+        assertEquals(List.of("initialize", "execute", "end:false"), client.commands.get(0).events);
+    }
+
     private static final class FakeClient implements PathPlannerPathProvider.PathPlannerClient {
         private final List<String> autoNames;
         private final List<String> buildAutoNames = new ArrayList<>();
+        private final List<String> resetPoseNames = new ArrayList<>();
         private final List<FakeCommand> commands = new ArrayList<>();
         private int autoNameCalls;
         private FakeCommand lastCommand;
@@ -108,6 +124,14 @@ class PathPlannerPathProviderTest {
             if (autoName.equals(missingAutoName)) {
                 throw new IllegalArgumentException("Missing PathPlanner auto '" + autoName + "'.");
             }
+            lastCommand = new FakeCommand();
+            commands.add(lastCommand);
+            return lastCommand;
+        }
+
+        @Override
+        public Command resetPose(String autoName) {
+            resetPoseNames.add(autoName);
             lastCommand = new FakeCommand();
             commands.add(lastCommand);
             return lastCommand;

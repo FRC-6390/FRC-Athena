@@ -2,6 +2,7 @@ package frc.robot;
 
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.Autos;
+import ca.frc6390.athena.mechanism.core.Paths;
 import ca.frc6390.athena.vendor.choreo.ChoreoPathProvider;
 import ca.frc6390.athena.vendor.pathplanner.PathPlannerPathProvider;
 import ca.frc6390.athena.wpilib.lifecycle.AthenaRobot;
@@ -26,6 +27,8 @@ public final class Robot extends AthenaRobot {
     public final CommandInteropExamples commandInterop = new CommandInteropExamples(this);
     public final AutoChooser autos = Autos.chooser()
             .defaultAuto(ChoreoMarkersAuto.create(autoContext))
+            .auto("Reset Choreo Start Pose Only",
+                    Paths.choreo("Choreo-Markers-And-States").resetPoseOnly())
             .auto(ChoreoMultiPathSplitAuto.create(autoContext))
             .auto(ConditionalChoreoAuto.create(autoContext))
             .auto("PathPlanner Two Piece", PathPlannerAuto.create())

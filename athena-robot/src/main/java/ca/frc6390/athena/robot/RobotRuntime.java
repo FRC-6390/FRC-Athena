@@ -761,7 +761,7 @@ public final class RobotRuntime implements AutoCloseable {
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         workers.runDue(safeMechanismContext.nowSeconds());
         hardwareGraph.refreshInputs();
-        refreshFailures();
+        refreshFailures(safeMechanismContext.nowSeconds());
         refreshLocalizations(safeMechanismContext);
         boolean autonomous = safeEventContext.mode() == LifecycleMode.AUTONOMOUS && safeEventContext.enabled();
         // Autonomous-init hooks select the routine. Start it on the first periodic cycle,
@@ -801,7 +801,7 @@ public final class RobotRuntime implements AutoCloseable {
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
         workers.runDue(nowSeconds);
         hardwareGraph.refreshInputs();
-        refreshFailures();
+        refreshFailures(nowSeconds);
         refreshLocalizations(mechanismContext);
         commands.periodic();
         EventContext eventContext = new EventContext(
@@ -822,7 +822,7 @@ public final class RobotRuntime implements AutoCloseable {
         }
         simulationSession.step(dtSeconds);
         hardwareGraph.refreshInputs();
-        refreshFailures();
+        refreshFailures(nowSeconds + dtSeconds);
         refreshLocalizations(new MechanismContext(
                 nowSeconds + dtSeconds,
                 0.0,
@@ -881,7 +881,7 @@ public final class RobotRuntime implements AutoCloseable {
         }
     }
 
-    private void refreshFailures() {
+    private void refreshFailures(double nowSeconds) {
         Set<Object> failedThisCycle = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         for (HardwareGraph.BindingFailure failure : hardwareGraph.drainOperationFailures()) {
             failedThisCycle.add(failure.declaration());
@@ -892,7 +892,7 @@ public final class RobotRuntime implements AutoCloseable {
             handleHardwareFailure("refresh", failure.declaration(), failure.exception());
         }
         for (VisionGraph graph : visionGraphs) {
-            graph.refresh();
+            graph.refresh(nowSeconds);
             for (VisionGraph.RefreshFailure failure : graph.refreshFailures()) {
                 failedThisCycle.add(failure.camera());
                 handleFailure("camera", failure.camera(), failure.camera().failurePolicy(), failure.exception());
@@ -959,7 +959,10 @@ public final class RobotRuntime implements AutoCloseable {
                 continue;
             }
             int healthySamples = recoverySamples.merge(declaration, 1, Integer::sum);
-            if (healthySamples < 3) continue;
+            int requiredSamples = declaration instanceof CameraDevice camera
+                    ? camera.recoveryPolicy().healthySamples()
+                    : 3;
+            if (healthySamples < requiredSamples) continue;
             mechanisms.recoverFailure(declaration);
             activeRecoverableFailures.remove(declaration);
             recoverySamples.remove(declaration);

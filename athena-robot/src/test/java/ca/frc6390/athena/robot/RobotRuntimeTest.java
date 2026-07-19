@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.auto.PathProvider;
+import ca.frc6390.athena.api.FailurePolicy;
+import ca.frc6390.athena.api.RecoveryPolicy;
 import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
@@ -530,6 +532,30 @@ class RobotRuntimeTest {
 
         assertEquals(1, reads.get());
         assertEquals(List.of(measurement), vision.targetMeasurements());
+    }
+
+    @Test
+    void cameraOutageRetriesAtConfiguredRuntimeIntervalAndRestoresMeasurements() {
+        AtomicInteger reads = new AtomicInteger();
+        Measurement measurement = Measurements.pose(new PoseSnapshot(2.0, 1.0, 0.25));
+        CameraDevice camera = Cameras.photonVision("recovering")
+                .failurePolicy(FailurePolicy.DISABLE_DEVICE)
+                .onRecovery(RecoveryPolicy.retryEverySeconds(0.1).healthySamples(1))
+                .bindPose(() -> {
+                    if (reads.incrementAndGet() == 1) throw new IllegalStateException("camera offline");
+                    return List.of(measurement);
+                });
+        VisionGraph vision = VisionGraph.of(camera);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).vision(vision);
+
+        runtime.robotPeriodic(1.0, 0.02);
+        runtime.robotPeriodic(1.05, 0.02);
+        assertEquals(1, reads.get());
+        assertTrue(vision.poseMeasurements().isEmpty());
+
+        runtime.robotPeriodic(1.1, 0.02);
+        assertEquals(2, reads.get());
+        assertEquals(List.of(measurement), vision.poseMeasurements());
     }
 
     @Test

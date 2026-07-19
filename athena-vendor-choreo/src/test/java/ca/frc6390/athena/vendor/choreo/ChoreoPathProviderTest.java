@@ -77,6 +77,33 @@ class ChoreoPathProviderTest {
         assertEquals(2, followCalls.get());
     }
 
+    @Test
+    void resetPoseOnlyDoesNotEvaluateFollowerOutputOrPathMarkers() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        AtomicInteger resetCalls = new AtomicInteger();
+        AtomicInteger followCalls = new AtomicInteger();
+        Action reset = Actions.waitSeconds(0.0);
+        ChoreoPathProvider provider = new ChoreoPathProvider(
+                client,
+                Pose2d::new,
+                pose -> { resetCalls.incrementAndGet(); return reset; },
+                sample -> { followCalls.incrementAndGet(); return Actions.neutral(); },
+                () -> false);
+        PathAction path = Paths.choreo("Score").resetPoseOnly();
+        PathRuntime runtime = provider.runtime();
+
+        runtime.initialize(path, context(0.0));
+        runtime.execute(path, context(0.5));
+
+        assertSame(reset, runtime.activeMarkers(path, context(0.5)).get("@resetOdometry"));
+        assertEquals(0, followCalls.get());
+        assertEquals(1, resetCalls.get());
+        assertEquals(null, runtime.output(path, context(0.5)));
+        assertTrue(runtime.ownership(path).isEmpty());
+        assertFalse(runtime.isFinished(path, context(0.5)));
+        assertTrue(runtime.isFinished(path, context(0.52)));
+    }
+
     private static MechanismContext context(double time) {
         return new MechanismContext(time, time, 0.02, true, true, true);
     }

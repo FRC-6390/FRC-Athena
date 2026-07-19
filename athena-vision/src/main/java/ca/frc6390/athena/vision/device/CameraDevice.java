@@ -5,6 +5,7 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
 import ca.frc6390.athena.api.FailurePolicy;
+import ca.frc6390.athena.api.RecoveryPolicy;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
@@ -19,6 +20,14 @@ public interface CameraDevice {
 
     /** Returns a camera declaration with the requested failure response. */
     CameraDevice failurePolicy(FailurePolicy policy);
+
+    /** Returns the retry and re-enable policy used after this camera fails. */
+    default RecoveryPolicy recoveryPolicy() {
+        return RecoveryPolicy.DEFAULT;
+    }
+
+    /** Returns a camera declaration with the requested recovery behavior. */
+    CameraDevice onRecovery(RecoveryPolicy policy);
 
     /**
      * Returns the camera kind.

@@ -14,6 +14,7 @@ public record PathAction(
         int splitIndex,
         double expectedSeconds,
         boolean resetsOdometry,
+        boolean onlyResetsPose,
         Map<String, Action> markers) implements Action {
     public PathAction {
         source = source == null || source.isBlank() ? "path" : source.trim();
@@ -23,26 +24,31 @@ public record PathAction(
     }
 
     public PathAction(String source, String name) {
-        this(source, name, -1, Double.NaN, false, Map.of());
+        this(source, name, -1, Double.NaN, false, false, Map.of());
     }
 
     public PathAction(String source, String name, double expectedSeconds) {
-        this(source, name, -1, expectedSeconds, false, Map.of());
+        this(source, name, -1, expectedSeconds, false, false, Map.of());
     }
 
     public PathAction seconds(double seconds) {
-        return copy(splitIndex, seconds, resetsOdometry, markers);
+        return copy(splitIndex, seconds, resetsOdometry, onlyResetsPose, markers);
     }
 
     /** Returns an Action for one zero-based split of this path. */
     public PathAction split(int index) {
         if (index < 0) throw new IllegalArgumentException("Path split index must be non-negative.");
-        return copy(index, expectedSeconds, resetsOdometry, markers);
+        return copy(index, expectedSeconds, resetsOdometry, onlyResetsPose, markers);
     }
 
     /** Resets localization to the path's initial pose when this Action starts. */
     public PathAction resetOdometry() {
-        return copy(splitIndex, expectedSeconds, true, markers);
+        return copy(splitIndex, expectedSeconds, true, false, markers);
+    }
+
+    /** Resets localization to the path's initial pose without following the path. */
+    public PathAction resetPoseOnly() {
+        return copy(splitIndex, expectedSeconds, true, true, Map.of());
     }
 
     /** Starts an ordinary Athena Action when the named path marker is crossed. */
@@ -52,7 +58,7 @@ public record PathAction(
         if (updated.putIfAbsent(key, Objects.requireNonNull(action, "action")) != null) {
             throw new IllegalArgumentException("Duplicate path marker '" + key + "'.");
         }
-        return copy(splitIndex, expectedSeconds, resetsOdometry, updated);
+        return copy(splitIndex, expectedSeconds, resetsOdometry, onlyResetsPose, updated);
     }
 
     public OptionalDouble expectedDurationSeconds() {
@@ -70,7 +76,12 @@ public record PathAction(
                 && splitIndex == other.splitIndex;
     }
 
-    private PathAction copy(int split, double seconds, boolean reset, Map<String, Action> markerActions) {
-        return new PathAction(source, name, split, seconds, reset, markerActions);
+    private PathAction copy(
+            int split,
+            double seconds,
+            boolean reset,
+            boolean resetOnly,
+            Map<String, Action> markerActions) {
+        return new PathAction(source, name, split, seconds, reset, resetOnly, markerActions);
     }
 }

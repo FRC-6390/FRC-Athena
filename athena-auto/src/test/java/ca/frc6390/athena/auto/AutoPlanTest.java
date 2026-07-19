@@ -27,4 +27,13 @@ class AutoPlanTest {
         assertTrue(plan.steps().stream().anyMatch(step -> step.contains("TRUE PATH choreo:score")));
         assertTrue(plan.steps().stream().anyMatch(step -> step.contains("FALSE PATH choreo:exit")));
     }
+
+    @Test
+    void identifiesResetPoseOnlyPathActions() {
+        var reset = Paths.choreo("starting-position").resetPoseOnly();
+
+        assertTrue(reset.resetsOdometry());
+        assertTrue(reset.onlyResetsPose());
+        assertTrue(AutoPlan.inspect(reset).steps().get(0).contains("[reset pose only]"));
+    }
 }

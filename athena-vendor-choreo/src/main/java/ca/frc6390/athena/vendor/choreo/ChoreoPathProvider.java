@@ -184,6 +184,7 @@ public final class ChoreoPathProvider implements PathProvider {
 
         @Override public void execute(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
             ActivePath state = requireActive(path);
+            if (path.onlyResetsPose()) return;
             double time = Math.max(0.0, context.timeInStateSeconds());
             state.trajectory.sampleAt(time, state.mirrored).ifPresent(sample -> {
                 if (!(sample instanceof SwerveSample swerve))
@@ -199,11 +200,11 @@ public final class ChoreoPathProvider implements PathProvider {
         }
 
         @Override public Action output(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
-            return requireActive(path).output;
+            return path.onlyResetsPose() ? null : requireActive(path).output;
         }
 
         @Override public List<?> ownership(PathAction path) {
-            return follower == null ? List.of() : follower.ownership();
+            return follower == null || path.onlyResetsPose() ? List.of() : follower.ownership();
         }
 
         @Override public Map<String, Action> activeMarkers(
@@ -214,6 +215,13 @@ public final class ChoreoPathProvider implements PathProvider {
 
         @Override public boolean isFinished(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
             ActivePath state = requireActive(path);
+            if (path.onlyResetsPose()) {
+                if (!state.finalSampleEvaluated) {
+                    state.finalSampleEvaluated = true;
+                    return false;
+                }
+                return true;
+            }
             if (context.timeInStateSeconds() < state.trajectory.getTotalTime()) return false;
             if (!state.finalSampleEvaluated) {
                 state.finalSampleEvaluated = true;

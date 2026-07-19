@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 import ca.frc6390.athena.api.hardware.CameraKind;
 import ca.frc6390.athena.api.hardware.CameraKinds;
 import ca.frc6390.athena.api.FailurePolicy;
+import ca.frc6390.athena.api.RecoveryPolicy;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.signal.HeliosPoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
@@ -34,6 +35,12 @@ public final class HeliosDevice implements CameraDevice {
     @Override
     public HeliosDevice failurePolicy(FailurePolicy policy) {
         return new HeliosDevice(camera.failurePolicy(policy));
+    }
+
+    @Override public RecoveryPolicy recoveryPolicy() { return camera.recoveryPolicy(); }
+
+    @Override public HeliosDevice onRecovery(RecoveryPolicy policy) {
+        return new HeliosDevice(camera.onRecovery(policy));
     }
 
     @Override
