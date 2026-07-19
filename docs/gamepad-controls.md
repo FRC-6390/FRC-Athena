@@ -22,6 +22,12 @@ names remain available as position-based aliases, so shared bindings can accept 
 cross maps to A, circle to B, square to X, and triangle to Y. `Controllers.ps4(port)` is an alias
 for `Controllers.playstation(port)`.
 
+On Windows simulation, Athena automatically adapts the SDL DualShock axis order used by USB
+controllers: axes 0–3 are the two sticks and axes 4–5 are L2/R2. Simulated trigger values are
+normalized from `-1..1` to the same `0..1` range used by WPILib. Robot deployments continue to use
+WPILib's native Driver Station PS4 layout. One-count center noise from the simulated Windows HID
+path is reported as exactly zero.
+
 Xbox gamepads also expose the PlayStation-style names for the equivalent controls. This lets code
 using `cross`, `circle`, `square`, `triangle`, `l1`/`r1`, `share`, `options`, `l3`/`r3`, and
 `l2Axis`/`r2Axis` move to Xbox without rewriting bindings. On Xbox, digital `l2()` and `r2()`

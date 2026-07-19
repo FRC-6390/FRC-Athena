@@ -38,6 +38,25 @@ class PlayStationGamepadTest {
         assertTrue(ControlSignalTest.sample(gamepad.touchpad(), 0.0));
     }
 
+    @Test
+    void remapsWindowsSimulationAxesAndNormalizesTriggers() {
+        FakeInput input = new FakeInput();
+        PlayStationGamepad gamepad = new PlayStationGamepad(input, true);
+        input.axes[2] = 1.0 / 256.0;
+        input.axes[3] = -1.0 / 256.0;
+        input.axes[4] = -1.0;
+        input.axes[5] = 1.0;
+
+        assertEquals(0.0, gamepad.rightX().toSupplier().getAsDouble(), 1.0e-9);
+        assertEquals(0.0, gamepad.rightY().toSupplier().getAsDouble(), 1.0e-9);
+        input.axes[2] = 0.2;
+        input.axes[3] = -0.3;
+        assertEquals(0.2, gamepad.rightX().toSupplier().getAsDouble(), 1.0e-9);
+        assertEquals(-0.3, gamepad.rightY().toSupplier().getAsDouble(), 1.0e-9);
+        assertEquals(0.0, gamepad.l2Axis().toSupplier().getAsDouble(), 1.0e-9);
+        assertEquals(1.0, gamepad.r2Axis().toSupplier().getAsDouble(), 1.0e-9);
+    }
+
     private static final class FakeInput implements Gamepad.Input {
         private final double[] axes = new double[8];
         private final boolean[] buttons = new boolean[20];
