@@ -56,4 +56,16 @@ public interface DeviceAction extends ActionBinding, Runnable {
             throw new IllegalStateException("Device action composition requires athena-mechanisms on the classpath.", exception);
         }
     }
+
+    /**
+     * Runs this action for the supplied duration, then completes it.
+     *
+     * @param seconds action duration in seconds
+     * @param <T> resulting Athena action type
+     * @return duration-wrapped action
+     */
+    @SuppressWarnings("unchecked")
+    default <T extends DeviceAction> T forTime(Number seconds) {
+        return (T) timeout(seconds);
+    }
 }
