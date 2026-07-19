@@ -32,6 +32,7 @@ public final class MechanismScheduler {
     private final ActionContext actionContext;
     private final Map<Mechanism, MechanismRuntime> runtimes = new IdentityHashMap<>();
     private final Map<Action, RequestTarget> actionTargets = new IdentityHashMap<>();
+    private final Map<Action, List<String>> actionDeclarationLocations = new IdentityHashMap<>();
     private final Map<Action, CompiledAction> compiledActions = new IdentityHashMap<>();
     private final Set<Action> ambiguousActionTargets = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, RequestTarget> declarationTargets = new LinkedHashMap<>();
@@ -103,7 +104,11 @@ public final class MechanismScheduler {
         runtimes.computeIfAbsent(mechanism, this::runtime);
         runtimes.get(mechanism).traceLevel(traceLevel);
         runtimes.get(mechanism).tracePeriodSeconds(tracePeriodSeconds);
-        indexActionTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
+        indexActionTargets(
+                mechanism,
+                mechanism,
+                graph.node(mechanism).name(),
+                Collections.newSetFromMap(new IdentityHashMap<>()));
         indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
         rebuildCompiledActions();
         refreshDigitalInputs();
@@ -500,7 +505,12 @@ public final class MechanismScheduler {
             CompiledPartition partition = entry.getValue();
             MechanismRuntime runtime = runtimeFor(entry.getKey());
             Object runtimeKey = new Object();
-            runtime.activateLease(runtimeKey, partition.action(), recency, partition.resources());
+            runtime.activateLease(
+                    runtimeKey,
+                    partition.action(),
+                    recency,
+                    partition.resources(),
+                    actionRootPath(action) + " partition[" + graph.node(entry.getKey()).name() + "]");
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
@@ -531,7 +541,7 @@ public final class MechanismScheduler {
     private CompiledAction compileAction(Action action) {
         Actions.validate(action);
         validateConcurrentResourceConflicts(
-                action, "root", Collections.newSetFromMap(new IdentityHashMap<>()));
+                action, actionRootPath(action), Collections.newSetFromMap(new IdentityHashMap<>()));
         Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {
@@ -639,9 +649,20 @@ public final class MechanismScheduler {
         }
     }
 
-    private static String actionDescription(Action action) {
+    private String actionDescription(Action action) {
         String type = action.getClass().getSimpleName();
-        return type.isBlank() ? action.getClass().getName() : type;
+        String safeType = type.isBlank() ? action.getClass().getName() : type;
+        List<String> locations = actionDeclarationLocations.get(action);
+        return locations == null || locations.isEmpty()
+                ? safeType + " (inline/undeclared)"
+                : safeType + " declared as " + String.join(" or ", locations);
+    }
+
+    private String actionRootPath(Action action) {
+        List<String> locations = actionDeclarationLocations.get(action);
+        if (locations != null && !locations.isEmpty()) return String.join("|", locations);
+        String type = action.getClass().getSimpleName();
+        return "requestedAction<" + (type.isBlank() ? action.getClass().getName() : type) + ">";
     }
 
     private static String resourceDescription(Object resource) {
@@ -1041,12 +1062,20 @@ public final class MechanismScheduler {
         return runtime;
     }
 
-    private void indexActionTargets(Mechanism root, Mechanism mechanism, Set<Mechanism> visited) {
+    private void indexActionTargets(
+            Mechanism root,
+            Mechanism mechanism,
+            String mechanismPath,
+            Set<Mechanism> visited) {
         if (!visited.add(mechanism)) {
             return;
         }
         MechanismNode node = graph.node(mechanism);
-        for (Action action : node.Actions().values()) {
+        for (Map.Entry<String, Action> entry : node.Actions().entrySet()) {
+            Action action = entry.getValue();
+            String declarationLocation = mechanismPath + ".actions[\"" + entry.getKey() + "\"]";
+            List<String> locations = actionDeclarationLocations.computeIfAbsent(action, ignored -> new ArrayList<>());
+            if (!locations.contains(declarationLocation)) locations.add(declarationLocation);
             if (ambiguousActionTargets.contains(action)) {
                 continue;
             }
@@ -1059,8 +1088,8 @@ public final class MechanismScheduler {
             }
             actionTargets.put(action, target);
         }
-        for (Mechanism child : node.children().values()) {
-            indexActionTargets(root, child, visited);
+        for (Map.Entry<String, Mechanism> entry : node.children().entrySet()) {
+            indexActionTargets(root, entry.getValue(), mechanismPath + "." + entry.getKey(), visited);
         }
     }
 

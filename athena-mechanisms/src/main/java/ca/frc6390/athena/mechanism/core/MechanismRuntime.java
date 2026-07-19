@@ -163,12 +163,17 @@ final class MechanismRuntime {
         this.scheduler.reset();
     }
 
-    void activateLease(Object key, Action action, long recency, Set<Object> reservedResources) {
+    void activateLease(
+            Object key,
+            Action action,
+            long recency,
+            Set<Object> reservedResources,
+            String diagnosticLocation) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(action, "action");
         if (!activeLeases.containsKey(key)) {
             ActiveLease lease = new ActiveLease(
-                    action, recency, actionContext, pathRuntimes, reservedResources);
+                    action, recency, actionContext, pathRuntimes, reservedResources, diagnosticLocation);
             activeLeases.put(key, lease);
             leasesByRecency.add(lease);
             leasesByRecency.sort(Comparator.comparingLong(ActiveLease::recency));
@@ -261,7 +266,13 @@ final class MechanismRuntime {
         }
         List<CandidateOutput> candidates = candidateScratch;
         candidates.clear();
-        addCandidates(candidates, "base", actionRecency, scheduler.evaluate(action, timedContext), null);
+        addCandidates(
+                candidates,
+                "base",
+                actionRecency,
+                scheduler.evaluate(action, timedContext),
+                null,
+                baseActionLocation(action));
         for (int leaseIndex = 0; leaseIndex < leasesByRecency.size(); leaseIndex++) {
             ActiveLease lease = leasesByRecency.get(leaseIndex);
             if (lease.scheduler().complete()) continue;
@@ -270,7 +281,8 @@ final class MechanismRuntime {
                     "lease",
                     lease.recency(),
                     lease.evaluate(safeMechanismContext),
-                    lease.reservedResources());
+                    lease.reservedResources(),
+                    lease.diagnosticLocation());
         }
 
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
@@ -330,10 +342,11 @@ final class MechanismRuntime {
             String source,
             long recency,
             StateScheduler.Result active,
-            Set<Object> reservedResources) {
+            Set<Object> reservedResources,
+            String diagnosticLocation) {
         resolvedScratch.clear();
         resolver.resolveInto(mechanism, active.action(), active.context(), resolvedScratch);
-        validateNoDuplicateOutputs(resolvedScratch, source, active.action());
+        validateNoDuplicateOutputs(resolvedScratch, source, active.action(), diagnosticLocation);
         for (ResolvedOutput output : resolvedScratch) {
             validateReservedResources(output.request(), reservedResources);
             int order = candidates.size();
@@ -352,18 +365,21 @@ final class MechanismRuntime {
     private static void validateNoDuplicateOutputs(
             List<ResolvedOutput> outputs,
             String source,
-            Action scheduledOutput) {
+            Action scheduledOutput,
+            String diagnosticLocation) {
         Map<Object, Integer> claimed = new LinkedHashMap<>();
         for (int outputIndex = 0; outputIndex < outputs.size(); outputIndex++) {
             ResolvedOutput output = outputs.get(outputIndex);
             OutputRequest request = output.request();
             for (int index = 0; index < motorCount(request); index++) {
                 requireUnclaimedOutputResource(
-                        claimed, motorAt(request, index), outputs, outputIndex, source, scheduledOutput);
+                        claimed, motorAt(request, index), outputs, outputIndex,
+                        source, scheduledOutput, diagnosticLocation);
             }
             if (request.control() != null && request.control().sink() != null) {
                 requireUnclaimedOutputResource(
-                        claimed, request.control().sink(), outputs, outputIndex, source, scheduledOutput);
+                        claimed, request.control().sink(), outputs, outputIndex,
+                        source, scheduledOutput, diagnosticLocation);
             }
         }
     }
@@ -374,16 +390,27 @@ final class MechanismRuntime {
             List<ResolvedOutput> outputs,
             int outputIndex,
             String source,
-            Action scheduledOutput) {
+            Action scheduledOutput,
+            String diagnosticLocation) {
         Integer existingIndex = claimed.putIfAbsent(resource, outputIndex);
         if (existingIndex != null) {
             throw new IllegalStateException(
-                    "Runtime output conflict in " + source + " action " + actionType(scheduledOutput)
+                    "Runtime output conflict at " + diagnosticLocation + " while evaluating "
+                            + source + " action " + actionType(scheduledOutput)
                             + ": output[" + existingIndex + "] " + outputDescription(outputs.get(existingIndex))
                             + " and output[" + outputIndex + "] " + outputDescription(outputs.get(outputIndex))
                             + " both claim " + outputResourceDescription(resource)
                             + ". Put them in a sequence or remove one of the duplicate outputs.");
         }
+    }
+
+    private String baseActionLocation(Action baseAction) {
+        List<String> names = new ArrayList<>();
+        for (Map.Entry<String, Action> entry : node.Actions().entrySet()) {
+            if (entry.getValue() == baseAction) names.add(node.name() + ".actions[\"" + entry.getKey() + "\"]");
+        }
+        if (!names.isEmpty()) return String.join(" or ", names);
+        return node.name() + ".baseAction<" + actionType(baseAction) + ">";
     }
 
     private static String actionType(Action action) {
@@ -755,6 +782,7 @@ final class MechanismRuntime {
         private final long recency;
         private final StateScheduler scheduler;
         private final Set<Object> reservedResources;
+        private final String diagnosticLocation;
         private double startSeconds = Double.NaN;
 
         private ActiveLease(
@@ -762,11 +790,14 @@ final class MechanismRuntime {
                 long recency,
                 ActionContext actionContext,
                 Map<PathAction, PathRuntime> pathRuntimes,
-                Set<Object> reservedResources) {
+                Set<Object> reservedResources,
+                String diagnosticLocation) {
             this.action = action;
             this.recency = recency;
             this.scheduler = new StateScheduler(actionContext, pathRuntimes);
             this.reservedResources = reservedResources == null ? Set.of() : Set.copyOf(reservedResources);
+            this.diagnosticLocation = diagnosticLocation == null || diagnosticLocation.isBlank()
+                    ? "requestedAction" : diagnosticLocation;
         }
 
         private long recency() {
@@ -779,6 +810,10 @@ final class MechanismRuntime {
 
         private Set<Object> reservedResources() {
             return reservedResources;
+        }
+
+        private String diagnosticLocation() {
+            return diagnosticLocation;
         }
 
         private StateScheduler scheduler() {

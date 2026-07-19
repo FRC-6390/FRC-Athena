@@ -20,6 +20,21 @@ class ActionArbitrationTest {
     private static final MotorDevice ROLLERS = MotorDevice.of(MotorKinds.KRAKEN_X44, 2);
 
     @Test
+    void conflictNamesOwningMechanismDeclaredActionAndBothOffendingDeclarations() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> MechanismScheduler.create(new RecordingContext()).register(new NamedConflictMechanism()));
+
+        String message = error.getMessage();
+        assertTrue(message.contains("namedConflictMechanism.actions[\"offendingAction\"].parallel"));
+        assertTrue(message.contains("child[0] MotorPercent declared as "
+                + "namedConflictMechanism.actions[\"firstAction\"]"));
+        assertTrue(message.contains("child[1] MotorVoltage declared as "
+                + "namedConflictMechanism.actions[\"secondAction\"]"));
+        assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
+    }
+
+    @Test
     void concurrentChildrenCannotSilentlyOverrideTheSameMotor() {
         DirectActions mechanism = new DirectActions();
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
@@ -31,7 +46,8 @@ class ActionArbitrationTest {
             IllegalArgumentException error = assertThrows(
                     IllegalArgumentException.class, () -> scheduler.request(conflicting));
             String message = error.getMessage();
-            assertTrue(message.contains("Concurrent action conflict at root."
+            assertTrue(message.contains("Concurrent action conflict at requestedAction<"
+                    + conflicting.getClass().getSimpleName() + ">."
                     + conflicting.getClass().getSimpleName().toLowerCase()));
             assertTrue(message.contains("child[0]"));
             assertTrue(message.contains("child[1]"));
@@ -51,7 +67,7 @@ class ActionArbitrationTest {
                 IllegalArgumentException.class, () -> scheduler.request(conflicting));
 
         String message = error.getMessage();
-        assertTrue(message.contains("root.sequence.step[0].parallel"));
+        assertTrue(message.contains("requestedAction<Sequence>.sequence.step[0].parallel"));
         assertTrue(message.contains("child[0] MotorPercent"));
         assertTrue(message.contains("child[1] MotorPercent"));
         assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
@@ -69,7 +85,9 @@ class ActionArbitrationTest {
                 IllegalStateException.class, () -> scheduler.teleopPeriodic(0.0, 0.02));
 
         String message = error.getMessage();
-        assertTrue(message.contains("Runtime output conflict in lease action ScheduledOutputs"));
+        assertTrue(message.contains("Runtime output conflict at requestedAction<Computed>"));
+        assertTrue(message.contains("partition[singleMotorMechanism]"));
+        assertTrue(message.contains("while evaluating lease action ScheduledOutputs"));
         assertTrue(message.contains("output[0] MotorPercent"));
         assertTrue(message.contains("output[1] MotorVoltage"));
         assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
@@ -518,6 +536,13 @@ class ActionArbitrationTest {
         private final Action firstArm = ARM.percent(0.15);
         private final Action secondArm = ARM.percent(-0.75);
         private final Action rollers = ROLLERS.percent(0.55);
+    }
+
+    private static final class NamedConflictMechanism implements Mechanism {
+        private final MotorDevice arm = ARM;
+        private final Action firstAction = arm.percent(0.20);
+        private final Action secondAction = arm.voltage(4.0);
+        private final Action offendingAction = Actions.parallel(firstAction, secondAction);
     }
 
     private static final class SingleMotorMechanism implements Mechanism {
