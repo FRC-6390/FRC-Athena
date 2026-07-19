@@ -138,6 +138,74 @@ class CommandActionTest {
     }
 
     @Test
+    void commandScheduledFromConflictEndOwnsRequirementWithoutGhostOwner() {
+        CommandGraph graph = new CommandGraph();
+        AtomicInteger displacedExecute = new AtomicInteger();
+        AtomicInteger requestedExecute = new AtomicInteger();
+        CommandAction displaced = CommandAction.create("displaced")
+                .requires("arm")
+                .onExecute(displacedExecute::incrementAndGet)
+                .build();
+        CommandAction requested = CommandAction.create("requested")
+                .requires("arm")
+                .onExecute(requestedExecute::incrementAndGet)
+                .build();
+        CommandAction original = CommandAction.create("original")
+                .requires("arm")
+                .onEnd(() -> graph.schedule(displaced))
+                .build();
+
+        graph.schedule(original).schedule(requested);
+        graph.periodic();
+
+        // The callback request is ordered after the outer request, so it wins. Before mutation
+        // serialization both commands remained active while only one appeared to own "arm".
+        assertEquals(SetOrder.of("displaced"), new java.util.LinkedHashSet<>(graph.activeCommandNames()));
+        assertEquals(1, displacedExecute.get());
+        assertEquals(0, requestedExecute.get());
+    }
+
+    @Test
+    void lifecycleCallbacksMayMutateGraphAcrossEveryTransition() {
+        CommandGraph graph = new CommandGraph();
+        AtomicInteger finalExecutions = new AtomicInteger();
+        CommandAction terminal = CommandAction.create("terminal")
+                .requires("arm")
+                .onExecute(finalExecutions::incrementAndGet)
+                .build();
+        CommandAction fromEnd = CommandAction.create("fromEnd")
+                .requires("arm")
+                .onInitialize(() -> graph.schedule(terminal))
+                .build();
+        CommandAction fromExecute = CommandAction.create("fromExecute")
+                .requires("arm")
+                .onExecute(() -> graph.cancel("fromExecute"))
+                .onEnd(() -> graph.schedule(fromEnd))
+                .build();
+
+        graph.schedule(fromExecute);
+        assertDoesNotThrow(graph::periodic);
+        assertEquals(SetOrder.of("terminal"), new java.util.LinkedHashSet<>(graph.activeCommandNames()));
+
+        graph.periodic();
+        assertEquals(1, finalExecutions.get());
+    }
+
+    @Test
+    void cancelAllIsSafeWhenEndCallbacksScheduleCommands() {
+        CommandGraph graph = new CommandGraph();
+        CommandAction afterCancel = CommandAction.create("afterCancel").requires("arm").build();
+        graph.schedule(CommandAction.create("first")
+                .requires("arm")
+                .onEnd(() -> graph.schedule(afterCancel))
+                .build());
+
+        assertDoesNotThrow(graph::cancelAll);
+
+        assertEquals(SetOrder.of("afterCancel"), new java.util.LinkedHashSet<>(graph.activeCommandNames()));
+    }
+
+    @Test
     void activeCommandNamesIsAnImmutableSnapshot() {
         AtomicInteger end = new AtomicInteger();
         CommandGraph graph = new CommandGraph().schedule(CommandAction.create("drive")

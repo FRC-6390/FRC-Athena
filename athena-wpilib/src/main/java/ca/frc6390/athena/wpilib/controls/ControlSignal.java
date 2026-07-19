@@ -22,7 +22,7 @@ public class ControlSignal implements BooleanSupplier {
         boolean evaluate(EventContext context);
     }
 
-    private final Gamepad owner;
+    private final ControlOwner owner;
     private final String name;
     private final Evaluator evaluator;
     private final EventBinding event;
@@ -30,11 +30,11 @@ public class ControlSignal implements BooleanSupplier {
     private EventContext lastContext;
     private boolean cachedValue;
 
-    ControlSignal(Gamepad owner, String name, Evaluator evaluator) {
+    ControlSignal(ControlOwner owner, String name, Evaluator evaluator) {
         this(owner, name, evaluator, false);
     }
 
-    ControlSignal(Gamepad owner, String name, Evaluator evaluator, boolean pulse) {
+    ControlSignal(ControlOwner owner, String name, Evaluator evaluator, boolean pulse) {
         this.owner = owner;
         this.name = sanitizeName(name);
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
@@ -230,7 +230,7 @@ public class ControlSignal implements BooleanSupplier {
         return binding;
     }
 
-    final Gamepad owner() {
+    final ControlOwner owner() {
         return owner;
     }
 

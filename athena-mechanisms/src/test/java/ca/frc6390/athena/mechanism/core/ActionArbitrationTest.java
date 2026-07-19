@@ -1,6 +1,9 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
@@ -8,12 +11,68 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class ActionArbitrationTest {
     private static final MotorDevice ARM = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final MotorDevice ROLLERS = MotorDevice.of(MotorKinds.KRAKEN_X44, 2);
+
+    @Test
+    void concurrentChildrenCannotSilentlyOverrideTheSameMotor() {
+        DirectActions mechanism = new DirectActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
+
+        for (Action conflicting : List.of(
+                Actions.parallel(ARM.percent(0.25), ARM.voltage(4.0)),
+                Actions.race(ARM.percent(0.25), ARM.voltage(4.0)),
+                Actions.deadline(Actions.waitSeconds(1.0).then(ARM.percent(0.25)), ARM.voltage(4.0)))) {
+            IllegalArgumentException error = assertThrows(
+                    IllegalArgumentException.class, () -> scheduler.request(conflicting));
+            assertTrue(error.getMessage().contains("concurrently control the same resource"));
+        }
+    }
+
+    @Test
+    void sequenceStartCannotSilentlyOverrideAStageUsingTheSameMotor() {
+        DirectActions mechanism = new DirectActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
+        Action conflicting = Actions.sequence()
+                .start(ARM.percent(0.20))
+                .forTime(0.5, ARM.percent(0.80));
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class, () -> scheduler.request(conflicting));
+
+        assertTrue(error.getMessage().contains("concurrently control the same resource"));
+    }
+
+    @Test
+    void runtimeGeneratedConflictFailsInsteadOfUsingTraversalOrder() {
+        SingleMotorMechanism mechanism = new SingleMotorMechanism(ARM, 0.0);
+        MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
+        Action dynamicConflict = Actions.compute(
+                () -> Actions.parallel(ARM.percent(0.20), ARM.voltage(4.0)), ARM);
+
+        scheduler.request(dynamicConflict);
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class, () -> scheduler.teleopPeriodic(0.0, 0.02));
+
+        assertTrue(error.getMessage().contains("multiple outputs for the same resource"));
+    }
+
+    @Test
+    void sequentialReuseAndParallelDisjointResourcesRemainValid() {
+        DirectActions mechanism = new DirectActions();
+        MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
+
+        assertDoesNotThrow(() -> scheduler.request(Actions.sequence()
+                .forTime(0.1, mechanism.firstArm)
+                .then(mechanism.secondArm)));
+        assertDoesNotThrow(() -> scheduler.request(Actions.parallel(
+                mechanism.firstArm, mechanism.rollers)));
+    }
 
     @Test
     void disjointHeldActionsWithinOneMechanismRunTogether() {
@@ -441,6 +500,8 @@ class ActionArbitrationTest {
     }
 
     private static final class DirectActions implements Mechanism {
+        private final MotorDevice arm = ARM;
+        private final MotorDevice rollersMotor = ROLLERS;
         private final Action firstArm = ARM.percent(0.15);
         private final Action secondArm = ARM.percent(-0.75);
         private final Action rollers = ROLLERS.percent(0.55);

@@ -169,6 +169,19 @@ class MechanismTelemetryTest {
                 .containsKey("embeddedLoopMechanism/Controls/control/Devices/0/Config/Disabled"));
     }
 
+    @Test
+    void interpolatedActionsPublishCurveVisualizationWithoutAnotherDeclaration() {
+        InterpolationTelemetryMechanism mechanism = new InterpolationTelemetryMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+
+        assertTrue(runtime.mechanismTelemetrySchema().values().containsKey(
+                "interpolationTelemetryMechanism/Values/shot/Visualization/Points"));
+        assertTrue(runtime.mechanismTelemetrySchema().values().containsKey(
+                "interpolationTelemetryMechanism/Values/shot/Visualization/Curve"));
+        assertTrue(runtime.mechanismTelemetrySchema().values().containsKey(
+                "interpolationTelemetryMechanism/Values/shot/Visualization/Current"));
+    }
+
     private static final class TunedMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         final EncoderDevice encoder = motor.encoder();
@@ -188,6 +201,15 @@ class MechanismTelemetryTest {
     private static final class EmbeddedLoopMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 10);
         final ControlBinding control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+    }
+
+    private static final class InterpolationTelemetryMechanism implements Mechanism {
+        private final ControlBinding velocity = Controls.velocity(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 11));
+        public final Action shot = velocity
+                .interpolate(ca.frc6390.athena.mechanism.interpolation.InterpolationKinds.LINEAR, () -> 2.0)
+                .at(1.0, 20.0)
+                .at(3.0, 40.0);
     }
 
     private static final class DashboardMechanism implements Mechanism {

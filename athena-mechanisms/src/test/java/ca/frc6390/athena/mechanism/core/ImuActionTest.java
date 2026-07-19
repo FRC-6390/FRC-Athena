@@ -31,6 +31,28 @@ class ImuActionTest {
     }
 
     @Test
+    void invertedSourceRetainsPhysicalOwnershipAndTranslatesSetYaw() {
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 1);
+        RecordingImuHandle handle = new RecordingImuHandle(imu);
+        ActionContext context = new ActionContext() {
+            @Override
+            public ImuHandle imu(ImuDevice requested) {
+                return handle;
+            }
+        };
+        InvertedImuMechanism mechanism = new InvertedImuMechanism(imu);
+        MechanismScheduler scheduler = MechanismScheduler.create(context).register(mechanism);
+
+        scheduler.request(mechanism.setHeading);
+        scheduler.robotPeriodic(0.0, 0.02);
+
+        assertEquals(-90.0, handle.yawDegrees, 1.0e-9);
+        assertEquals(90.0,
+                RuntimeHardwareAccess.call(context, mechanism.heading::yawDegrees),
+                1.0e-9);
+    }
+
+    @Test
     void setYawActionAppliesImmediatelyWhenTriggeredByAHook() {
         ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 1);
         RecordingImuHandle handle = new RecordingImuHandle(imu);
@@ -151,6 +173,18 @@ class ImuActionTest {
             this.imu = imu;
             driverHeading = imu.relative();
             alignHeading = Events.autonomousInit().onStart(driverHeading.setYaw(() -> -180.0));
+        }
+    }
+
+    private static final class InvertedImuMechanism implements Mechanism {
+        private final ImuDevice imu;
+        private final ca.frc6390.athena.hardware.signal.ImuSource heading;
+        private final Action setHeading;
+
+        private InvertedImuMechanism(ImuDevice imu) {
+            this.imu = imu;
+            heading = imu.inverted();
+            setHeading = heading.setYaw(90.0);
         }
     }
 

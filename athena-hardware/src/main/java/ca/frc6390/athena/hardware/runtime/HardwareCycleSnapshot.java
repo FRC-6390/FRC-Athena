@@ -66,10 +66,14 @@ public record HardwareCycleSnapshot(
             double rollDegrees,
             double angleDegrees,
             double yawRateDegreesPerSecond,
+            double pitchRateDegreesPerSecond,
+            double rollRateDegreesPerSecond,
             double linearAccelerationXG,
             double linearAccelerationYG,
             double linearAccelerationZG,
             boolean connected,
+            boolean calibrating,
+            double lastUpdateSeconds,
             String failure) {
         public ImuInput { failure = failure == null ? "" : failure; }
     }

@@ -18,9 +18,12 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     private double pitchDegrees;
     private double rollDegrees;
     private double yawRateDegreesPerSecond;
+    private double pitchRateDegreesPerSecond;
+    private double rollRateDegreesPerSecond;
     private double linearAccelerationXG;
     private double linearAccelerationYG;
     private double linearAccelerationZG;
+    private volatile double lastUpdateSeconds = Double.NaN;
 
     /**
      * Creates a CTRE Pigeon2 handle using a real Phoenix 6 Pigeon2.
@@ -56,9 +59,12 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         pitchDegrees = controller.pitchDegrees();
         rollDegrees = controller.rollDegrees();
         yawRateDegreesPerSecond = controller.yawRateDegreesPerSecond();
+        pitchRateDegreesPerSecond = controller.pitchRateDegreesPerSecond();
+        rollRateDegreesPerSecond = controller.rollRateDegreesPerSecond();
         linearAccelerationXG = controller.linearAccelerationXG();
         linearAccelerationYG = controller.linearAccelerationYG();
         linearAccelerationZG = controller.linearAccelerationZG();
+        lastUpdateSeconds = System.nanoTime() * 1.0e-9;
         inputsFresh = true;
     }
 
@@ -91,6 +97,18 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     }
 
     @Override
+    public double pitchRateDegreesPerSecond() {
+        ensureInputsFresh();
+        return pitchRateDegreesPerSecond;
+    }
+
+    @Override
+    public double rollRateDegreesPerSecond() {
+        ensureInputsFresh();
+        return rollRateDegreesPerSecond;
+    }
+
+    @Override
     public double linearAccelerationXG() {
         ensureInputsFresh();
         return linearAccelerationXG;
@@ -107,6 +125,10 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         ensureInputsFresh();
         return linearAccelerationZG;
     }
+
+    @Override public boolean isConnected() { return controller.isConnected(); }
+    @Override public boolean isCalibrating() { return controller.isCalibrating(); }
+    @Override public double lastUpdateSeconds() { return lastUpdateSeconds; }
 
     @Override
     public void setYawDegrees(double yawDegrees) {
@@ -150,11 +172,17 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         double yawRateDegreesPerSecond();
 
+        default double pitchRateDegreesPerSecond() { return 0.0; }
+
+        default double rollRateDegreesPerSecond() { return 0.0; }
+
         double linearAccelerationXG();
 
         double linearAccelerationYG();
 
         double linearAccelerationZG();
+
+        default boolean isCalibrating() { return false; }
 
         boolean setYawDegrees(double yawDegrees);
 
@@ -190,7 +218,17 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         @Override
         public double yawRateDegreesPerSecond() {
-            return pigeon.getAngularVelocityZWorld().refresh().getValueAsDouble();
+            return pigeon.getAngularVelocityZDevice().refresh().getValueAsDouble();
+        }
+
+        @Override
+        public double pitchRateDegreesPerSecond() {
+            return pigeon.getAngularVelocityYDevice().refresh().getValueAsDouble();
+        }
+
+        @Override
+        public double rollRateDegreesPerSecond() {
+            return pigeon.getAngularVelocityXDevice().refresh().getValueAsDouble();
         }
 
         @Override

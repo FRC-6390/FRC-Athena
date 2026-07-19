@@ -10,6 +10,8 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Twist2d;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -116,6 +118,26 @@ class SwerveModulesTest {
         assertEquals(requested.xMetersPerSecond(), measured.xMetersPerSecond(), 1.0e-9);
         assertEquals(requested.yMetersPerSecond(), measured.yMetersPerSecond(), 1.0e-9);
         assertEquals(requested.angularRadiansPerSecond(), measured.angularRadiansPerSecond(), 1.0e-9);
+    }
+
+    @Test
+    void finiteCycleTargetsRemoveTranslationSkewWhileRotating() {
+        SwerveKinematics kinematics = SwerveKinematics.rectangular(
+                0.6, 0.5, 8.0, module(121, 122, 131), module(123, 124, 132),
+                module(125, 126, 133), module(127, 128, 134));
+        RobotVelocity requested = RobotVelocity.robot(2.0, 0.4, Math.PI);
+        double dtSeconds = 0.02;
+
+        RobotVelocity corrected = kinematics.velocity(kinematics.targets(requested, dtSeconds));
+        Pose2d realizedDelta = Pose2d.kZero.exp(new Twist2d(
+                corrected.xMetersPerSecond() * dtSeconds,
+                corrected.yMetersPerSecond() * dtSeconds,
+                corrected.angularRadiansPerSecond() * dtSeconds));
+
+        assertEquals(requested.xMetersPerSecond() * dtSeconds, realizedDelta.getX(), 1.0e-9);
+        assertEquals(requested.yMetersPerSecond() * dtSeconds, realizedDelta.getY(), 1.0e-9);
+        assertEquals(requested.angularRadiansPerSecond() * dtSeconds,
+                realizedDelta.getRotation().getRadians(), 1.0e-9);
     }
 
     @Test

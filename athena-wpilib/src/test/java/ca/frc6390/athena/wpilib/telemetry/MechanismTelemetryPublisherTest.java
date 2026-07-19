@@ -11,13 +11,44 @@ import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
+import ca.frc6390.athena.runtime.geometry.Point2d;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class MechanismTelemetryPublisherTest {
+    @Test
+    void publishesNativePointArraysForAdvantageScope() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        Point2d[][] source = {{
+                new Point2d(-1.0, -1.0), new Point2d(0.0, 1.0), new Point2d(1.0, -1.0)}};
+        mechanism.points = TelemetryValue.points(() -> source[0]);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        String path = "/Athena/Mechanisms/dashboardMechanism/Values/points";
+        try (var points = instance.getStructArrayTopic(path, Translation2d.struct)
+                        .subscribe(new Translation2d[0]);
+                MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.0);
+            Translation2d[] published = points.get();
+            assertEquals(3, published.length);
+            assertEquals(-1.0, published[0].getX(), 1.0e-9);
+            assertEquals(1.0, published[2].getX(), 1.0e-9);
+
+            source[0] = new Point2d[] {new Point2d(0.6, -0.25)};
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.02);
+            published = points.get();
+            assertEquals(1, published.length);
+            assertEquals(0.6, published[0].getX(), 1.0e-9);
+            assertEquals(-0.25, published[0].getY(), 1.0e-9);
+        } finally {
+            instance.close();
+        }
+    }
+
     @Test
     void publishesWritableCustomValuesUnderTheirOwningMechanism() {
         DashboardMechanism mechanism = new DashboardMechanism();
@@ -142,6 +173,29 @@ class MechanismTelemetryPublisherTest {
         }
     }
 
+    @Test
+    void publishesNumericArraysForTransferCurveGraphs() {
+        double[][] samples = {{-1.0, 0.0, 1.0}};
+        DashboardMechanism mechanism = new DashboardMechanism();
+        mechanism.curveSamples = TelemetryValue.numberArray(() -> samples[0]);
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        String path = "/Athena/Mechanisms/dashboardMechanism/Values/curveSamples";
+
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.0);
+            org.junit.jupiter.api.Assertions.assertArrayEquals(
+                    new double[] {-1.0, 0.0, 1.0}, instance.getEntry(path).getDoubleArray(new double[0]));
+
+            samples[0] = new double[] {-1.0, -0.25, 0.0, 0.25, 1.0};
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.1);
+            org.junit.jupiter.api.Assertions.assertArrayEquals(
+                    samples[0], instance.getEntry(path).getDoubleArray(new double[0]));
+        } finally {
+            instance.close();
+        }
+    }
+
     private static final class DashboardMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         public final Action run = motor.percent(0.2);
@@ -155,6 +209,10 @@ class MechanismTelemetryPublisherTest {
         private double temperature = 20.0;
         private double gain = 1.0;
         private final AtomicInteger gainWrites = new AtomicInteger();
+        @Telemetry
+        private TelemetryValue curveSamples = TelemetryValue.constant(new double[0]);
+        @Telemetry
+        private TelemetryValue points = TelemetryValue.points(() -> new Point2d[0]);
         @Telemetry("gain")
         private final TelemetryValue gainValue = TelemetryValue.writableNumber(
                 () -> gain,

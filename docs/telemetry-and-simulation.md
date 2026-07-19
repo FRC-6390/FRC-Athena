@@ -66,8 +66,9 @@ Device state and setup live with the field that owns the device:
   `Config`, along with support, status, and restore controls.
 - Encoders publish position, absolute position, and velocity under `State`; `Setup` provides a
   requested position plus Set, Zero, support, and status controls.
-- IMUs publish orientation, rate, and acceleration under `State`; `Setup` provides requested yaw,
-  Set, Zero, and status controls.
+- IMUs publish orientation, all three angular rates, and acceleration under `State`. `Health`
+  publishes connection, calibration, last-update, and 100 ms freshness state. `Setup` provides
+  requested yaw, Set, Zero, and status controls.
 - Digital inputs publish raw and active state and expose a latched-edge clear operation.
 - Controls publish mode and feedback under `State`, with disabled, slot, PID, and feedforward values
   under `Config`. `Config/Constraints` exposes temporary minimum/maximum position, maximum velocity,

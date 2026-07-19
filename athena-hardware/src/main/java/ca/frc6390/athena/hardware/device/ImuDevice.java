@@ -97,6 +97,16 @@ public record ImuDevice(
     }
 
     @Override
+    public double pitchRateDegreesPerSecond() {
+        return runtimeHandle().pitchRateDegreesPerSecond();
+    }
+
+    @Override
+    public double rollRateDegreesPerSecond() {
+        return runtimeHandle().rollRateDegreesPerSecond();
+    }
+
+    @Override
     public double linearAccelerationXG() {
         return runtimeHandle().linearAccelerationXG();
     }
@@ -109,6 +119,33 @@ public record ImuDevice(
     @Override
     public double linearAccelerationZG() {
         return runtimeHandle().linearAccelerationZG();
+    }
+
+    @Override
+    public boolean isConnected() {
+        try {
+            return runtimeHandle().isConnected();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean isCalibrating() {
+        try {
+            return runtimeHandle().isCalibrating();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    @Override
+    public double lastUpdateSeconds() {
+        try {
+            return runtimeHandle().lastUpdateSeconds();
+        } catch (RuntimeException exception) {
+            return Double.NaN;
+        }
     }
 
     @Override

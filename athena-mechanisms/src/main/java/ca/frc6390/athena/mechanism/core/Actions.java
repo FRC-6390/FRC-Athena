@@ -25,6 +25,7 @@ import java.util.function.Supplier;
  * Factories for common mechanism Actions.
  */
 public final class Actions {
+    private static final double TIME_EPSILON_SECONDS = 1.0e-9;
     private static final Action NEUTRAL = new Neutral();
 
     private Actions() {
@@ -512,7 +513,7 @@ public final class Actions {
 
     public record WaitSeconds(double seconds) implements Action {
         public boolean complete(MechanismContext ctx) {
-            return ctx.timeInStateSeconds() >= seconds;
+            return hasElapsed(ctx.timeInStateSeconds(), seconds);
         }
     }
 
@@ -532,7 +533,7 @@ public final class Actions {
         }
 
         public boolean expired(MechanismContext ctx) {
-            return ctx.timeInStateSeconds() >= seconds;
+            return hasElapsed(ctx.timeInStateSeconds(), seconds);
         }
     }
 
@@ -673,7 +674,7 @@ public final class Actions {
         public Sequence forTime(double seconds, Action action) {
             steps.add(new SequenceStep(
                     alongsideStarted(action),
-                    ctx -> ctx.timeInStateSeconds() >= seconds,
+                    ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds),
                     true));
             return this;
         }
@@ -705,7 +706,7 @@ public final class Actions {
         public Sequence waitSeconds(double seconds) {
             steps.add(new SequenceStep(
                     alongsideStarted(Actions.waitSeconds(seconds)),
-                    ctx -> ctx.timeInStateSeconds() >= seconds,
+                    ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds),
                     true));
             return this;
         }
@@ -812,7 +813,7 @@ public final class Actions {
         }
 
         public Cycle forTime(double seconds, Action action) {
-            steps.add(new CycleStep(action, ctx -> ctx.timeInStateSeconds() >= seconds));
+            steps.add(new CycleStep(action, ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds)));
             return this;
         }
 
@@ -850,6 +851,10 @@ public final class Actions {
 
     static void validate(Action action) {
         validate(action, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    static boolean hasElapsed(double elapsedSeconds, double durationSeconds) {
+        return elapsedSeconds + TIME_EPSILON_SECONDS >= durationSeconds;
     }
 
     private static void validate(Action action, Set<Action> visited) {

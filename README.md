@@ -229,6 +229,37 @@ ImuDevice navx = RIO.spi(SpiPort.MXP).imu(ImuKinds.NAVX);
 DigitalInputDevice home = RIO.dio(6).digitalInput("arm home");
 ```
 
+Normalize an IMU once where it is declared, then pass the resulting `ImuSource` to drivetrain,
+localization, and controls:
+
+```java
+ImuSource heading = pigeon
+        .transform(ImuTransform.identity().yawInverted())
+        .mounting(ImuMount.yawDegrees(90.0))
+        .relative();
+
+PositionSignal wrappedHeading = heading.heading();
+PositionSignal accumulatedHeading = heading.continuousHeading();
+VelocitySignal yawRate = heading.yawRate();
+ScalarSignal forwardAcceleration = heading.accelerationX();
+
+boolean usable = heading.isConnected()
+        && !heading.isCalibrating()
+        && heading.isFresh(0.1);
+```
+
+For a cardinal installation, describe which sensor directions point robot-forward and robot-up:
+
+```java
+ImuSource heading = pigeon.mounting(ImuMount
+        .forward(ImuDirection.NEGATIVE_Y)
+        .up(ImuDirection.POSITIVE_Z));
+```
+
+`ImuTransform` corrects a vendor or wiring convention. `ImuMount` corrects the sensor's physical
+orientation using a 3D rotation. Keeping those separate prevents mounting corrections from being
+repeated in odometry and control code.
+
 For REV SPARK controllers, Athena maps CTRE-style supply/stator declarations onto REV's
 motor-phase current limiter. If both are set, the lower value wins. A
 `RevMotorOptions.smartCurrentLimit(...)` value explicitly overrides that mapping. Initial REV

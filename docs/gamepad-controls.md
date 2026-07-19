@@ -3,6 +3,45 @@
 Athena controller inputs are composable `ControlSignal` values. A signal can bind actions directly,
 be combined with conditions, or be transformed into a toggle or gesture.
 
+## Controller types
+
+Create Xbox and PlayStation controllers through the same factory:
+
+```java
+Gamepad driver = Controllers.xbox(0);
+PlayStationGamepad operator = Controllers.playstation(1);
+
+operator.cross().onPress(arm.score);
+operator.r2Axis().above(0.55, 0.45).whileTrue(shooter.shoot);
+operator.touchpad().onPress(diagnostics.capture);
+```
+
+PlayStation controllers expose `cross`, `circle`, `square`, `triangle`, `l1`/`r1`, analog and
+digital `l2`/`r2`, `share`, `options`, `l3`/`r3`, `ps`, and `touchpad`. The inherited Xbox-style
+names remain available as position-based aliases, so shared bindings can accept either controller:
+cross maps to A, circle to B, square to X, and triangle to Y. `Controllers.ps4(port)` is an alias
+for `Controllers.playstation(port)`.
+
+Xbox gamepads also expose the PlayStation-style names for the equivalent controls. This lets code
+using `cross`, `circle`, `square`, `triangle`, `l1`/`r1`, `share`, `options`, `l3`/`r3`, and
+`l2Axis`/`r2Axis` move to Xbox without rewriting bindings. On Xbox, digital `l2()` and `r2()`
+activate when the corresponding analog trigger passes 50%. `ps()` and `touchpad()` remain
+PlayStation-only because Xbox controllers have no equivalent buttons.
+
+For custom HID hardware, use raw WPILib IDs through `GenericController`:
+
+```java
+GenericController custom = Controllers.generic(2);
+
+DoubleSupplier throttle = custom.axis(3).deadband(0.08).inverted().toSupplier();
+custom.button(7).onPress(arm.score);
+custom.pov(135).whileHeld(arm.nudge);
+```
+
+Axis IDs are zero-based and button IDs are one-based, matching WPILib. Repeated calls with the
+same ID return the same signal, and raw inputs retain the normal controller transforms, gestures,
+bindings, telemetry, and disconnect-safe toggle behavior.
+
 ## Button lifecycle
 
 ```java
@@ -129,6 +168,48 @@ available.
 
 Transforms execute from left to right, so debounce a physical input before applying click or hold
 recognition.
+
+## Axis curves and slew rates
+
+Axis pipelines support standard, FPV-style, and arbitrary mappings. Processing order is deadband,
+optional sign-preserving squaring, curve, inversion, then slew limiting. Output remains normalized
+to `[-1, 1]`.
+
+```java
+DoubleSupplier forward = driver.leftY()
+        .named("Forward")
+        .deadband(0.07)
+        .curve(AxisCurves.superRate()
+                .rcRate(1.0)
+                .expo(0.25)
+                .superRate(0.65))
+        .slew(3.0)
+        .inverted()
+        .toSupplier();
+
+DoubleSupplier turn = driver.rightX()
+        .named("Turn")
+        .curve(AxisCurves.custom(value -> Math.copySign(value * value, value)))
+        .slew(5.0, 7.0)
+        .toSupplier();
+```
+
+`AxisCurves.linear()`, `expo(value)`, `power(exponent)`, `superRate(...)`, and `custom(mapping)` are
+available. A custom reusable curve can implement `AxisCurve`; it may expose writable parameters by
+returning `TelemetryValue`s from `telemetry()`.
+
+Calling `toSupplier()` registers that final pipeline with its `Gamepad`. Athena then publishes the
+controller connection state and each named axis's raw, mapped, and slew-limited output under
+`/Athena/Mechanisms/<owner>/.../Axes`. Curve input/output sample arrays and writable deadband, curve,
+and slew settings are included, allowing the response trace and live controller values to be graphed
+and tuned in AdvantageScope without redeploying.
+
+Each axis also publishes native `Translation2d[]` data under `Visualization`. Open an AdvantageScope
+**Points** tab and add `Curve`, `Raw`, `Mapped`, and `Output` as sources. Set both display dimensions
+to about `2.2`, place the origin in the center, and assign distinct symbols or colors. X is raw stick
+input and Y is mapped output. `Raw` sits on the zero line, `Mapped` tracks the requested point on the
+curve, and `Output` shows the actual slew-limited value. This format is intended for the Points tab;
+the 2D Field tab uses full-size FRC field coordinates and will make a normalized curve difficult to see.
 
 ## Chords and ordered sequences
 

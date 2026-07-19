@@ -530,6 +530,8 @@ public final class MechanismScheduler {
 
     private CompiledAction compileAction(Action action) {
         Actions.validate(action);
+        validateConcurrentResourceConflicts(
+                action, Collections.newSetFromMap(new IdentityHashMap<>()));
         Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {
@@ -562,6 +564,63 @@ public final class MechanismScheduler {
             allResources.addAll(resources);
         }
         return new CompiledAction(compiledPartitions, allResources);
+    }
+
+    private void validateConcurrentResourceConflicts(Action action, Set<Action> visited) {
+        if (action == null || !visited.add(action)) return;
+        if (action instanceof Actions.Parallel parallel) {
+            validateConcurrentGroup("parallel", parallel.Actions());
+            parallel.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+        } else if (action instanceof Actions.Race race) {
+            validateConcurrentGroup("race", race.Actions());
+            race.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+        } else if (action instanceof Actions.Deadline deadline) {
+            validateConcurrentGroup("deadline", deadline.Actions());
+            deadline.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+        } else if (action instanceof Actions.Sequence sequence) {
+            sequence.steps().forEach(step -> validateConcurrentResourceConflicts(step.action(), visited));
+            validateConcurrentResourceConflicts(sequence.next(), visited);
+        } else if (action instanceof Actions.Cycle cycle) {
+            cycle.steps().forEach(step -> validateConcurrentResourceConflicts(step.action(), visited));
+        } else if (action instanceof Actions.Choice choice) {
+            validateConcurrentResourceConflicts(choice.active(), visited);
+            validateConcurrentResourceConflicts(choice.inactive(), visited);
+        } else if (action instanceof Actions.WhenBranch branch) {
+            validateConcurrentResourceConflicts(branch.active(), visited);
+        } else if (action instanceof Actions.Timeout timeout) {
+            validateConcurrentResourceConflicts(timeout.action(), visited);
+        } else if (action instanceof Actions.WithinTolerance within) {
+            validateConcurrentResourceConflicts(within.action(), visited);
+        } else if (action instanceof Actions.VelocityContribution contribution) {
+            validateConcurrentResourceConflicts(contribution.driveAction(), visited);
+        } else if (action instanceof Actions.Conditional conditional) {
+            validateConcurrentResourceConflicts(conditional.action(), visited);
+            validateConcurrentResourceConflicts(conditional.next(), visited);
+        } else if (action instanceof Action.Conditional conditional) {
+            validateConcurrentResourceConflicts(conditional.action(), visited);
+            validateConcurrentResourceConflicts(conditional.next(), visited);
+        } else if (action instanceof Actions.Then then) {
+            validateConcurrentResourceConflicts(then.action(), visited);
+            validateConcurrentResourceConflicts(then.next(), visited);
+        } else if (action instanceof Action.Then then) {
+            validateConcurrentResourceConflicts(then.action(), visited);
+            validateConcurrentResourceConflicts(then.next(), visited);
+        }
+    }
+
+    private void validateConcurrentGroup(String type, List<Action> children) {
+        Set<Object> claimed = new LinkedHashSet<>();
+        for (Action child : children) {
+            Set<Object> resources = actionResources(child);
+            Set<Object> conflicts = new LinkedHashSet<>(resources);
+            conflicts.retainAll(claimed);
+            if (!conflicts.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "A " + type + " action has children that concurrently control the same resource(s): "
+                                + conflicts + ". Put those actions in a sequence or remove the duplicate output.");
+            }
+            claimed.addAll(resources);
+        }
     }
 
     private boolean containsOpaqueRuntimeGraph(Action action) {

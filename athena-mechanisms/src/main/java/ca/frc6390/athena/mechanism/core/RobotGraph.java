@@ -424,9 +424,15 @@ final class RobotGraph {
         values.put(path + "/State/PitchDegrees", safeNumber(imu::pitchDegrees));
         values.put(path + "/State/RollDegrees", safeNumber(imu::rollDegrees));
         values.put(path + "/State/YawRateDegreesPerSecond", safeNumber(imu::yawRateDegreesPerSecond));
+        values.put(path + "/State/PitchRateDegreesPerSecond", safeNumber(imu::pitchRateDegreesPerSecond));
+        values.put(path + "/State/RollRateDegreesPerSecond", safeNumber(imu::rollRateDegreesPerSecond));
         values.put(path + "/State/LinearAccelerationXG", safeNumber(imu::linearAccelerationXG));
         values.put(path + "/State/LinearAccelerationYG", safeNumber(imu::linearAccelerationYG));
         values.put(path + "/State/LinearAccelerationZG", safeNumber(imu::linearAccelerationZG));
+        values.put(path + "/Health/Connected", TelemetryValue.bool(imu::isConnected));
+        values.put(path + "/Health/Calibrating", TelemetryValue.bool(imu::isCalibrating));
+        values.put(path + "/Health/LastUpdateSeconds", safeNumber(imu::lastUpdateSeconds));
+        values.put(path + "/Health/Fresh100ms", TelemetryValue.bool(() -> imu.isFresh(0.1)));
         values.put(path + "/Setup/RequestedYawDegrees", TelemetryValue.writableNumber(
                 () -> overrides.requestedImuYaw(imu), value -> overrides.requestedImuYaw(imu, value)));
         values.put(path + "/Setup/SetYaw", TelemetryValue.command(() ->

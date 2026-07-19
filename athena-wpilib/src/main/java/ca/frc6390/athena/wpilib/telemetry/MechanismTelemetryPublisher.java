@@ -11,6 +11,7 @@ import ca.frc6390.athena.runtime.geometry.Polygon2d;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
@@ -19,6 +20,7 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -71,7 +73,9 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         }
         for (int index = 0, size = values.size(); index < size; index++) {
             ValueChannel channel = values.get(index);
-            if (channel.value.writable() || publishReadOnly) {
+            if (channel.value.writable()
+                    || channel.value.type() == TelemetryValue.Type.POINTS
+                    || publishReadOnly) {
                 try {
                     channel.update(publishReadOnly);
                 } catch (RuntimeException exception) {
@@ -210,6 +214,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         private final TelemetryValue value;
         private final NetworkTableEntry entry;
         private final StructArrayPublisher<Pose2d> geometryPublisher;
+        private final StructArrayPublisher<Translation2d> pointsPublisher;
         private long lastEntryChange;
         private double lastNumber;
         private boolean lastBoolean;
@@ -223,9 +228,15 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             if (value.type() == TelemetryValue.Type.GEOMETRY) {
                 entry = null;
                 geometryPublisher = nt.getStructArrayTopic(topic, Pose2d.struct).publish();
+                pointsPublisher = null;
+            } else if (value.type() == TelemetryValue.Type.POINTS) {
+                entry = null;
+                geometryPublisher = null;
+                pointsPublisher = nt.getStructArrayTopic(topic, Translation2d.struct).publish();
             } else {
                 entry = nt.getEntry(topic);
                 geometryPublisher = null;
+                pointsPublisher = null;
                 initializeEntry();
             }
         }
@@ -246,6 +257,11 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                         lastObject = String.valueOf(value.value());
                         entry.setDefaultString((String) lastObject);
                     }
+                    case NUMBER_ARRAY -> {
+                        lastObject = ((double[]) value.value()).clone();
+                        entry.setDefaultDoubleArray((double[]) lastObject);
+                    }
+                    case POINTS -> throw new IllegalStateException("Points use a struct-array publisher.");
                     case GEOMETRY -> throw new IllegalStateException("Geometry uses a struct-array publisher.");
                 }
                 published = true;
@@ -262,6 +278,20 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 if (!published || !Objects.equals(lastObject, geometry)) {
                     geometryPublisher.set(outline(geometry));
                     lastObject = geometry;
+                    published = true;
+                }
+                return;
+            }
+            if (pointsPublisher != null) {
+                Point2d[] points = (Point2d[]) value.value();
+                if (!published || !(lastObject instanceof Point2d[] previous)
+                        || !Arrays.equals(previous, points)) {
+                    Translation2d[] translated = new Translation2d[points.length];
+                    for (int index = 0; index < points.length; index++) {
+                        translated[index] = new Translation2d(points[index].x(), points[index].y());
+                    }
+                    pointsPublisher.set(translated);
+                    lastObject = points.clone();
                     published = true;
                 }
                 return;
@@ -302,6 +332,16 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                         published = true;
                     }
                 }
+                case NUMBER_ARRAY -> {
+                    double[] current = (double[]) value.value();
+                    if (!published || !(lastObject instanceof double[] previous)
+                            || !Arrays.equals(previous, current)) {
+                        entry.setDoubleArray(current);
+                        lastObject = current.clone();
+                        published = true;
+                    }
+                }
+                case POINTS -> throw new IllegalStateException("Points use a struct-array publisher.");
                 case GEOMETRY -> throw new IllegalStateException("Geometry uses a struct-array publisher.");
             }
         }
@@ -328,6 +368,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                     String requested = entry.getString(current);
                     if (!current.equals(requested)) value.set(requested);
                 }
+                case NUMBER_ARRAY -> throw new IllegalArgumentException("Numeric-array telemetry is read-only.");
+                case POINTS -> throw new IllegalArgumentException("Point telemetry is read-only.");
                 case GEOMETRY -> throw new IllegalArgumentException("Geometry telemetry is read-only.");
             }
         }
@@ -358,6 +400,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                         lastObject = current;
                     }
                 }
+                case NUMBER_ARRAY -> throw new IllegalStateException("Numeric-array telemetry is read-only.");
+                case POINTS -> throw new IllegalStateException("Point telemetry is read-only.");
                 case GEOMETRY -> throw new IllegalStateException("Geometry telemetry is read-only.");
             }
         }
@@ -367,6 +411,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 case NUMBER -> lastNumber = value.number();
                 case BOOLEAN -> lastBoolean = value.bool();
                 case STRING -> lastObject = String.valueOf(value.value());
+                case NUMBER_ARRAY -> lastObject = ((double[]) value.value()).clone();
+                case POINTS -> lastObject = ((Point2d[]) value.value()).clone();
                 case GEOMETRY -> { }
             }
         }
@@ -374,6 +420,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         @Override
         public void close() {
             if (geometryPublisher != null) geometryPublisher.close();
+            if (pointsPublisher != null) pointsPublisher.close();
             if (entry != null) entry.close();
         }
     }

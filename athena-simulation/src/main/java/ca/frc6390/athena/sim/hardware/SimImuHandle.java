@@ -14,9 +14,12 @@ public final class SimImuHandle implements ImuHandle {
     private double pitchDegrees;
     private double rollDegrees;
     private double yawRateDegreesPerSecond;
+    private double pitchRateDegreesPerSecond;
+    private double rollRateDegreesPerSecond;
     private double linearAccelerationXG;
     private double linearAccelerationYG;
     private double linearAccelerationZG;
+    private double lastUpdateSeconds = System.nanoTime() * 1.0e-9;
 
     /**
      * Creates a simulation IMU handle.
@@ -57,6 +60,15 @@ public final class SimImuHandle implements ImuHandle {
         return yawRateDegreesPerSecond;
     }
 
+    @Override public double pitchRateDegreesPerSecond() { return pitchRateDegreesPerSecond; }
+    @Override public double rollRateDegreesPerSecond() { return rollRateDegreesPerSecond; }
+    @Override public double lastUpdateSeconds() { return lastUpdateSeconds; }
+
+    @Override
+    public void refreshInputs() {
+        lastUpdateSeconds = System.nanoTime() * 1.0e-9;
+    }
+
     @Override
     public double linearAccelerationXG() {
         return linearAccelerationXG;
@@ -75,11 +87,13 @@ public final class SimImuHandle implements ImuHandle {
     @Override
     public void setYawDegrees(double yawDegrees) {
         this.yawDegrees = finiteOrZero(yawDegrees);
+        touch();
     }
 
     @Override
     public void zeroYaw() {
         yawDegrees = 0.0;
+        touch();
     }
 
     @Override
@@ -88,9 +102,12 @@ public final class SimImuHandle implements ImuHandle {
         pitchDegrees = 0.0;
         rollDegrees = 0.0;
         yawRateDegreesPerSecond = 0.0;
+        pitchRateDegreesPerSecond = 0.0;
+        rollRateDegreesPerSecond = 0.0;
         linearAccelerationXG = 0.0;
         linearAccelerationYG = 0.0;
         linearAccelerationZG = 0.0;
+        touch();
     }
 
     /**
@@ -101,16 +118,19 @@ public final class SimImuHandle implements ImuHandle {
      */
     public SimImuHandle yawDegrees(double yawDegrees) {
         this.yawDegrees = finiteOrZero(yawDegrees);
+        touch();
         return this;
     }
 
     public SimImuHandle pitchDegrees(double pitchDegrees) {
         this.pitchDegrees = finiteOrZero(pitchDegrees);
+        touch();
         return this;
     }
 
     public SimImuHandle rollDegrees(double rollDegrees) {
         this.rollDegrees = finiteOrZero(rollDegrees);
+        touch();
         return this;
     }
 
@@ -122,6 +142,15 @@ public final class SimImuHandle implements ImuHandle {
      */
     public SimImuHandle yawRateDegreesPerSecond(double yawRateDegreesPerSecond) {
         this.yawRateDegreesPerSecond = finiteOrZero(yawRateDegreesPerSecond);
+        touch();
+        return this;
+    }
+
+    public SimImuHandle angularRateDegreesPerSecond(double roll, double pitch, double yaw) {
+        rollRateDegreesPerSecond = finiteOrZero(roll);
+        pitchRateDegreesPerSecond = finiteOrZero(pitch);
+        yawRateDegreesPerSecond = finiteOrZero(yaw);
+        touch();
         return this;
     }
 
@@ -129,6 +158,7 @@ public final class SimImuHandle implements ImuHandle {
         linearAccelerationXG = finiteOrZero(x);
         linearAccelerationYG = finiteOrZero(y);
         linearAccelerationZG = finiteOrZero(z);
+        touch();
         return this;
     }
 
@@ -140,7 +170,12 @@ public final class SimImuHandle implements ImuHandle {
     public void step(double seconds) {
         if (Double.isFinite(seconds) && seconds > 0.0) {
             yawDegrees += yawRateDegreesPerSecond * seconds;
+            touch();
         }
+    }
+
+    private void touch() {
+        lastUpdateSeconds = System.nanoTime() * 1.0e-9;
     }
 
     private static double finiteOrZero(double value) {

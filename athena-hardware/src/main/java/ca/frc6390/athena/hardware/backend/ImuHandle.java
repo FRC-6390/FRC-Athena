@@ -55,6 +55,14 @@ public interface ImuHandle {
         throw new UnsupportedOperationException("IMU yaw rate is not supported by this handle.");
     }
 
+    default double pitchRateDegreesPerSecond() {
+        throw new UnsupportedOperationException("IMU pitch rate is not supported by this handle.");
+    }
+
+    default double rollRateDegreesPerSecond() {
+        throw new UnsupportedOperationException("IMU roll rate is not supported by this handle.");
+    }
+
     default double linearAccelerationXG() {
         throw new UnsupportedOperationException("IMU X acceleration is not supported by this handle.");
     }
@@ -65,6 +73,21 @@ public interface ImuHandle {
 
     default double linearAccelerationZG() {
         throw new UnsupportedOperationException("IMU Z acceleration is not supported by this handle.");
+    }
+
+    /** Returns whether the vendor currently reports this device connected. */
+    default boolean isConnected() {
+        return true;
+    }
+
+    /** Returns whether this device is calibrating and its orientation should not be trusted. */
+    default boolean isCalibrating() {
+        return false;
+    }
+
+    /** Returns the monotonic timestamp of the latest successful input refresh, in seconds. */
+    default double lastUpdateSeconds() {
+        return Double.NaN;
     }
 
     default void setYawDegrees(double yawDegrees) {

@@ -333,6 +333,7 @@ final class MechanismRuntime {
             Set<Object> reservedResources) {
         resolvedScratch.clear();
         resolver.resolveInto(mechanism, active.action(), active.context(), resolvedScratch);
+        validateNoDuplicateOutputs(resolvedScratch);
         for (ResolvedOutput output : resolvedScratch) {
             validateReservedResources(output.request(), reservedResources);
             int order = candidates.size();
@@ -345,6 +346,27 @@ final class MechanismRuntime {
                 candidatePool.add(candidate);
             }
             candidates.add(candidate);
+        }
+    }
+
+    private static void validateNoDuplicateOutputs(List<ResolvedOutput> outputs) {
+        Set<Object> claimed = new LinkedHashSet<>();
+        for (ResolvedOutput output : outputs) {
+            OutputRequest request = output.request();
+            for (int index = 0; index < motorCount(request); index++) {
+                requireUnclaimedOutputResource(claimed, motorAt(request, index));
+            }
+            if (request.control() != null && request.control().sink() != null) {
+                requireUnclaimedOutputResource(claimed, request.control().sink());
+            }
+        }
+    }
+
+    private static void requireUnclaimedOutputResource(Set<Object> claimed, Object resource) {
+        if (!claimed.add(resource)) {
+            throw new IllegalStateException(
+                    "One action emitted multiple outputs for the same resource in one scheduler cycle: "
+                            + resource + ". Put those outputs in a sequence or remove the duplicate output.");
         }
     }
 
@@ -1010,7 +1032,7 @@ final class MechanismRuntime {
                         ? schedule.result(null, true, local)
                         : evaluate(schedule.named("next", sequence.next()), context);
             }
-            if (local.timeInStateSeconds() >= sequence.timeoutSeconds()) {
+            if (Actions.hasElapsed(local.timeInStateSeconds(), sequence.timeoutSeconds())) {
                 if (node.index < sequence.steps().size()) {
                     schedule.indexed(node.index, sequence.steps().get(node.index).action()).reset();
                 }

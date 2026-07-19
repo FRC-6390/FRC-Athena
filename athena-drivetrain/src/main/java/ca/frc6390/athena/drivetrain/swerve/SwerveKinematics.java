@@ -1,6 +1,8 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -19,6 +21,8 @@ import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicReference;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Twist2d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
 
 /**
  * Production swerve kinematics shared by drive actions, odometry, and optional simulation.
@@ -72,7 +76,13 @@ public final class SwerveKinematics implements SimModel.Source {
 
     /** Converts a requested robot-relative velocity into one composed module action. */
     public Action drive(RobotVelocity velocity) {
-        RobotVelocity safeVelocity = velocity == null ? RobotVelocity.zero() : velocity;
+        return drive(velocity, 0.02);
+    }
+
+    private Action drive(RobotVelocity velocity, double dtSeconds) {
+        RobotVelocity safeVelocity = discretize(
+                velocity == null ? RobotVelocity.zero() : velocity,
+                dtSeconds);
         requestedSimulationVelocity.set(safeVelocity);
         List<SwerveModuleTarget> targets = targets(safeVelocity);
         Action[] actions = new Action[modules.size()];
@@ -85,7 +95,7 @@ public final class SwerveKinematics implements SimModel.Source {
     /** Continuously recomputes module targets from a velocity supplier. */
     public Action drive(Supplier<RobotVelocity> velocity) {
         Supplier<RobotVelocity> safeVelocity = Objects.requireNonNull(velocity, "velocity");
-        return Actions.compute(() -> drive(safeVelocity.get()), modules.stream()
+        return Actions.compute(context -> drive(safeVelocity.get(), context.dtSeconds()), modules.stream()
                 .map(Module::module)
                 .toList());
     }
@@ -120,6 +130,11 @@ public final class SwerveKinematics implements SimModel.Source {
         return targets.stream()
                 .map(target -> new SwerveModuleTarget(target.speedMetersPerSecond() * scale, target.angleRotations()))
                 .toList();
+    }
+
+    /** Converts a finite-cycle request into module targets without translational skew. */
+    public List<SwerveModuleTarget> targets(RobotVelocity velocity, double dtSeconds) {
+        return targets(discretize(velocity == null ? RobotVelocity.zero() : velocity, dtSeconds));
     }
 
     /** Solves robot-relative velocity from ordered measured module states. */
@@ -191,13 +206,17 @@ public final class SwerveKinematics implements SimModel.Source {
                     .gearRatio(GearRatio.reduction(module.model().steerReduction(), 1.0)));
             model.motor(module.drive.get()).motor(module.steer.get()).encoder(module.angle.get());
         }
-        model.runtime(context -> seconds -> stepPose(context, seconds));
+        model.runtime(SwerveSimulationRuntime::new);
         return model.build();
     }
 
-    private void stepPose(SimModel.Context context, double seconds) {
+    private void stepPose(SimModel.Context context, double seconds, double[] drivePositions) {
         RobotVelocity robot = requestedSimulationVelocity.getAndSet(null);
-        if (robot == null) {
+        if (robot != null) {
+            List<SwerveModuleTarget> states = targets(robot);
+            synchronizeModuleSensors(context, states, drivePositions, seconds);
+            robot = velocity(states);
+        } else {
             List<SwerveModuleTarget> states = new ArrayList<>(modules.size());
             for (Module positioned : modules) {
                 SwerveModule module = positioned.module();
@@ -206,11 +225,88 @@ public final class SwerveKinematics implements SimModel.Source {
             robot = velocity(states);
         }
         PoseSnapshot pose = context.pose();
-        double cos = Math.cos(pose.headingRadians());
-        double sin = Math.sin(pose.headingRadians());
-        double fieldX = robot.xMetersPerSecond() * cos - robot.yMetersPerSecond() * sin;
-        double fieldY = robot.xMetersPerSecond() * sin + robot.yMetersPerSecond() * cos;
-        context.advancePose(fieldX, fieldY, robot.angularRadiansPerSecond(), seconds);
+        Pose2d current = new Pose2d(pose.xMeters(), pose.yMeters(),
+                edu.wpi.first.math.geometry.Rotation2d.fromRadians(pose.headingRadians()));
+        Pose2d next = current.exp(new Twist2d(
+                robot.xMetersPerSecond() * seconds,
+                robot.yMetersPerSecond() * seconds,
+                robot.angularRadiansPerSecond() * seconds));
+        context.advancePose(
+                (next.getX() - current.getX()) / seconds,
+                (next.getY() - current.getY()) / seconds,
+                robot.angularRadiansPerSecond(),
+                seconds);
+    }
+
+    private void synchronizeModuleSensors(
+            SimModel.Context context,
+            List<SwerveModuleTarget> states,
+            double[] drivePositions,
+            double seconds) {
+        for (int index = 0; index < modules.size(); index++) {
+            SwerveModule module = modules.get(index).module();
+            SwerveModuleTarget state = states.get(index);
+            EncoderDevice driveDistance = distanceEncoder(module);
+            double rawDriveVelocity = driveDistance.rotationsFromPosition(state.speedMetersPerSecond())
+                    - driveDistance.rotationsFromPosition(0.0);
+            drivePositions[index] += rawDriveVelocity * seconds;
+            context.motorState(module.drive.get(), drivePositions[index], rawDriveVelocity);
+            context.encoderState(
+                    driveDistance,
+                    drivePositions[index],
+                    drivePositions[index],
+                    rawDriveVelocity);
+
+            EncoderDevice angle = module.angle.get();
+            double rawAngle = angle.rotationsFromPosition(state.angleRotations());
+            double previousAngle = context.encoderPosition(angle);
+            context.encoderState(angle, rawAngle, rawAngle, (rawAngle - previousAngle) / seconds);
+            double steerPosition = rawAngle * module.model().steerReduction();
+            context.motorState(
+                    module.steer.get(),
+                    steerPosition,
+                    (rawAngle - previousAngle) * module.model().steerReduction() / seconds);
+        }
+    }
+
+    private static EncoderDevice distanceEncoder(SwerveModule module) {
+        return module.drive.get().encoder()
+                .gearRatio(GearRatio.reduction(module.model().driveReduction(), 1.0))
+                .wheelDiameterMeters(module.model().wheelDiameterMeters())
+                .units(EncoderUnit.METERS);
+    }
+
+    private final class SwerveSimulationRuntime implements SimModel.Runtime {
+        private final SimModel.Context context;
+        private final double[] drivePositions = new double[modules.size()];
+
+        private SwerveSimulationRuntime(SimModel.Context context) {
+            this.context = context;
+            for (int index = 0; index < modules.size(); index++) {
+                drivePositions[index] = context.encoderPosition(distanceEncoder(modules.get(index).module()));
+            }
+        }
+
+        @Override
+        public void step(double seconds) {
+            stepPose(context, seconds, drivePositions);
+        }
+    }
+
+    private static RobotVelocity discretize(RobotVelocity velocity, double dtSeconds) {
+        if (velocity.frame() != VelocityFrame.ROBOT) {
+            throw new IllegalArgumentException("Swerve discretization requires a robot-relative velocity.");
+        }
+        double dt = Double.isFinite(dtSeconds) && dtSeconds > 0.0 ? dtSeconds : 0.02;
+        ChassisSpeeds corrected = ChassisSpeeds.discretize(
+                velocity.xMetersPerSecond(),
+                velocity.yMetersPerSecond(),
+                velocity.angularRadiansPerSecond(),
+                dt);
+        return RobotVelocity.robot(
+                corrected.vxMetersPerSecond,
+                corrected.vyMetersPerSecond,
+                corrected.omegaRadiansPerSecond);
     }
 
     private double moduleSpeed(SwerveModule module, SimModel.Context context) {

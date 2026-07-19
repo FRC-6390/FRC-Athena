@@ -614,10 +614,18 @@ class HardwareGraphTest {
     @Test
     void refreshPublishesOneImmutableHardwareSnapshotPerCycle() {
         FakeMotorBackend backend = new FakeMotorBackend();
-        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
+        FakeImuBackend imuBackend = new FakeImuBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
+                List.of(backend), List.of(), List.of(imuBackend)));
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 19);
+        ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 20);
         FakeMotorHandle handle = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
+        FakeImuHandle imuHandle = assertInstanceOf(FakeImuHandle.class, graph.imu(imu));
         handle.position = 2.5;
+        imuHandle.yaw = 42.0;
+        imuHandle.pitchRate = 3.0;
+        imuHandle.rollRate = 4.0;
+        imuHandle.lastUpdate = 12.5;
 
         graph.refreshInputs(100L);
         HardwareCycleSnapshot first = graph.cycleSnapshot();
@@ -628,6 +636,12 @@ class HardwareGraphTest {
         assertEquals(2.5, first.motor(motor).orElseThrow().positionRotations(), 1.0e-9);
         assertEquals(1, handle.refreshCalls);
         assertEquals(1, handle.positionReadCalls);
+        assertEquals(42.0, first.imu(imu).orElseThrow().yawDegrees(), 1.0e-9);
+        assertEquals(3.0, first.imu(imu).orElseThrow().pitchRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(4.0, first.imu(imu).orElseThrow().rollRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(12.5, first.imu(imu).orElseThrow().lastUpdateSeconds(), 1.0e-9);
+        assertTrue(first.imu(imu).orElseThrow().connected());
+        assertFalse(first.imu(imu).orElseThrow().calibrating());
         assertSame(first, graph.cycleSnapshot());
 
         graph.refreshInputs(200L);
@@ -921,6 +935,9 @@ class HardwareGraphTest {
         private int activateCalls;
         private int closeCalls;
         private double yaw;
+        private double pitchRate;
+        private double rollRate;
+        private double lastUpdate = Double.NaN;
 
         private FakeImuHandle(ImuDevice device) {
             this.device = device;
@@ -940,6 +957,10 @@ class HardwareGraphTest {
         public double yawDegrees() {
             return yaw;
         }
+
+        @Override public double pitchRateDegreesPerSecond() { return pitchRate; }
+        @Override public double rollRateDegreesPerSecond() { return rollRate; }
+        @Override public double lastUpdateSeconds() { return lastUpdate; }
 
         @Override
         public void close() {

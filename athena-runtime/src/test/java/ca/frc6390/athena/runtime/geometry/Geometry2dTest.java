@@ -30,4 +30,5 @@ class Geometry2dTest {
         assertTrue(geometry.contains(new PoseSnapshot(0.5, 0.5, 0.0)));
         assertFalse(geometry.contains(new PoseSnapshot(1.1, 0.5, 0.0)));
     }
+
 }

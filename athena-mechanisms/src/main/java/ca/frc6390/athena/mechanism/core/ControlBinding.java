@@ -10,6 +10,8 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
+import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
 import ca.frc6390.athena.runtime.control.ControlSink;
 import ca.frc6390.athena.hardware.device.Range;
@@ -416,6 +418,12 @@ public record ControlBinding(
                 this,
                 Objects.requireNonNull(model, "model"),
                 Objects.requireNonNull(input, "input"));
+    }
+
+    /** Creates interpolation whose segments use the same mapping contract as controller axes. */
+    public InterpolatedControlAction interpolate(CurveMapping mapping, DoubleSupplier input) {
+        return interpolate(InterpolationKinds.curved(
+                Objects.requireNonNull(mapping, "mapping")), input);
     }
 
     public Action percent(double percent) {

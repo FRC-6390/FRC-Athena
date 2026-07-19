@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.runtime.geometry.Geometry2d;
+import ca.frc6390.athena.runtime.geometry.Point2d;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
@@ -9,7 +10,7 @@ import java.util.function.Supplier;
 
 /** A lightweight mechanism-owned value that may be published or tuned live. */
 public final class TelemetryValue {
-    public enum Type { NUMBER, BOOLEAN, STRING, GEOMETRY }
+    public enum Type { NUMBER, BOOLEAN, STRING, NUMBER_ARRAY, POINTS, GEOMETRY }
     private final Type type;
     private final boolean writable;
     private final Supplier<Object> reader;
@@ -83,6 +84,12 @@ public final class TelemetryValue {
         return new TelemetryValue(Type.STRING, false, () -> captured, null, false, true);
     }
 
+    /** Creates an immutable numeric array captured once when the schema is built. */
+    public static TelemetryValue constant(double[] value) {
+        double[] captured = Objects.requireNonNull(value, "value").clone();
+        return new TelemetryValue(Type.NUMBER_ARRAY, false, () -> captured.clone(), null, false, true);
+    }
+
     /** Creates immutable field geometry captured once when the schema is built. */
     public static TelemetryValue constant(Geometry2d value) {
         Geometry2d captured = Objects.requireNonNull(value, "value");
@@ -99,6 +106,22 @@ public final class TelemetryValue {
     }
     public static TelemetryValue string(Supplier<String> value) {
         return new TelemetryValue(Type.STRING, false, Objects.requireNonNull(value, "value")::get, null);
+    }
+    /** Creates read-only numeric-array telemetry evaluated when telemetry is sampled. */
+    public static TelemetryValue numberArray(Supplier<double[]> value) {
+        Objects.requireNonNull(value, "value");
+        return new TelemetryValue(Type.NUMBER_ARRAY, false, () -> {
+            double[] current = Objects.requireNonNull(value.get(), "number array telemetry value");
+            return current.clone();
+        }, null);
+    }
+    /** Creates read-only 2D point telemetry evaluated when telemetry is sampled. */
+    public static TelemetryValue points(Supplier<Point2d[]> value) {
+        Objects.requireNonNull(value, "value");
+        return new TelemetryValue(Type.POINTS, false, () -> {
+            Point2d[] current = Objects.requireNonNull(value.get(), "point telemetry value");
+            return current.clone();
+        }, null);
     }
     /** Creates read-only field geometry telemetry for WPILib field visualization. */
     public static TelemetryValue geometry(Geometry2d value) {

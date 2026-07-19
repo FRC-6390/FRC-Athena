@@ -63,7 +63,7 @@ public final class ControlSignals {
         /** Emits when all chord buttons become held within the duration. */
         public ControlSignal within(Duration duration) {
             double window = ControlSignal.seconds(duration, "duration");
-            Gamepad owner = buttons[0].owner();
+            ControlOwner owner = buttons[0].owner();
             final class State {
                 final double[] pressedAt = new double[buttons.length];
                 final boolean[] previous = new boolean[buttons.length];
@@ -167,7 +167,7 @@ public final class ControlSignals {
         return copy;
     }
 
-    private static Gamepad firstOwner(BooleanSupplier[] signals) {
+    private static ControlOwner firstOwner(BooleanSupplier[] signals) {
         for (BooleanSupplier supplier : signals) {
             if (supplier instanceof ControlSignal signal && signal.owner() != null) {
                 return signal.owner();

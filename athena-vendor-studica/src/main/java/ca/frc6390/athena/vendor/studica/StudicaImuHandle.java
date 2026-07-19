@@ -13,6 +13,7 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     private final ImuDevice device;
     private final NavxController controller;
     private volatile Snapshot snapshot = Snapshot.empty();
+    private volatile double lastUpdateSeconds = Double.NaN;
 
     /**
      * Creates a Studica/NavX IMU handle using a real Studica AHRS.
@@ -45,15 +46,17 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        double[] acceleration = controller.linearAccelerationG();
         snapshot = new Snapshot(
                 controller.yawDegrees(),
                 controller.angleDegrees(),
                 controller.pitchDegrees(),
                 controller.rollDegrees(),
                 controller.yawRateDegreesPerSecond(),
-                controller.linearAccelerationXG(),
-                controller.linearAccelerationYG(),
-                controller.linearAccelerationZG());
+                controller.pitchRateDegreesPerSecond(),
+                controller.rollRateDegreesPerSecond(),
+                acceleration[0], acceleration[1], acceleration[2]);
+        lastUpdateSeconds = System.nanoTime() * 1.0e-9;
     }
 
     @Override
@@ -77,6 +80,16 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     }
 
     @Override
+    public double pitchRateDegreesPerSecond() {
+        return snapshot.pitchRateDegreesPerSecond();
+    }
+
+    @Override
+    public double rollRateDegreesPerSecond() {
+        return snapshot.rollRateDegreesPerSecond();
+    }
+
+    @Override
     public double linearAccelerationXG() {
         return snapshot.linearAccelerationXG();
     }
@@ -90,6 +103,10 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     public double linearAccelerationZG() {
         return snapshot.linearAccelerationZG();
     }
+
+    @Override public boolean isConnected() { return controller.isConnected(); }
+    @Override public boolean isCalibrating() { return controller.isCalibrating(); }
+    @Override public double lastUpdateSeconds() { return lastUpdateSeconds; }
 
     @Override
     public void zeroYaw() {
@@ -116,12 +133,14 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
             double pitchDegrees,
             double rollDegrees,
             double yawRateDegreesPerSecond,
+            double pitchRateDegreesPerSecond,
+            double rollRateDegreesPerSecond,
             double linearAccelerationXG,
             double linearAccelerationYG,
             double linearAccelerationZG) {
         private static Snapshot empty() {
             return new Snapshot(Double.NaN, Double.NaN, Double.NaN, Double.NaN,
-                    Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
         }
     }
 
@@ -160,11 +179,27 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
         double yawRateDegreesPerSecond();
 
+        default double pitchRateDegreesPerSecond() { return 0.0; }
+
+        default double rollRateDegreesPerSecond() { return 0.0; }
+
         double linearAccelerationXG();
 
         double linearAccelerationYG();
 
         double linearAccelerationZG();
+
+        default double[] linearAccelerationG() {
+            return new double[] {
+                    linearAccelerationXG(),
+                    linearAccelerationYG(),
+                    linearAccelerationZG()
+            };
+        }
+
+        default boolean isConnected() { return true; }
+
+        default boolean isCalibrating() { return false; }
 
         void zeroYaw();
 
@@ -209,23 +244,41 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
         @Override
         public double yawRateDegreesPerSecond() {
-            return ahrs().getRate();
+            return ahrs().getRawGyroZ();
+        }
+
+        @Override
+        public double pitchRateDegreesPerSecond() {
+            return ahrs().getRawGyroY();
+        }
+
+        @Override
+        public double rollRateDegreesPerSecond() {
+            return ahrs().getRawGyroX();
         }
 
         @Override
         public double linearAccelerationXG() {
-            return ahrs().getWorldLinearAccelX();
+            return sensorLinearAcceleration()[0];
         }
 
         @Override
         public double linearAccelerationYG() {
-            return ahrs().getWorldLinearAccelY();
+            return sensorLinearAcceleration()[1];
         }
 
         @Override
         public double linearAccelerationZG() {
-            return ahrs().getWorldLinearAccelZ();
+            return sensorLinearAcceleration()[2];
         }
+
+        @Override
+        public double[] linearAccelerationG() {
+            return sensorLinearAcceleration();
+        }
+
+        @Override public boolean isConnected() { return ahrs().isConnected(); }
+        @Override public boolean isCalibrating() { return ahrs().isCalibrating(); }
 
         @Override
         public void zeroYaw() {
@@ -249,6 +302,29 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
                 ahrs = createAhrs(device);
             }
             return ahrs;
+        }
+
+        private double[] sensorLinearAcceleration() {
+            AHRS sensor = ahrs();
+            double x = sensor.getWorldLinearAccelX();
+            double y = sensor.getWorldLinearAccelY();
+            double z = sensor.getWorldLinearAccelZ();
+            double roll = Math.toRadians(sensor.getRoll());
+            double pitch = Math.toRadians(sensor.getPitch());
+            double yaw = Math.toRadians(sensor.getYaw());
+            double cr = Math.cos(roll), sr = Math.sin(roll);
+            double cp = Math.cos(pitch), sp = Math.sin(pitch);
+            double cy = Math.cos(yaw), sy = Math.sin(yaw);
+
+            // NavX reports gravity-corrected acceleration in its world frame. Rotate it back
+            // into sensor axes so ImuMount can consistently produce robot-frame acceleration.
+            return new double[] {
+                    cy * cp * x + sy * cp * y - sp * z,
+                    (cy * sp * sr - sy * cr) * x
+                            + (sy * sp * sr + cy * cr) * y + cp * sr * z,
+                    (cy * sp * cr + sy * sr) * x
+                            + (sy * sp * cr - cy * sr) * y + cp * cr * z
+            };
         }
     }
 }

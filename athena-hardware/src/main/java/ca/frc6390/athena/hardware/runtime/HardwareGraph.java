@@ -356,8 +356,10 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             imuInputs.put(source.identity(), new HardwareCycleSnapshot.ImuInput(
                     source.name(),
                     imuYaw(handle), imuPitch(handle), imuRoll(handle), imuAngle(handle), imuYawRate(handle),
+                    imuPitchRate(handle), imuRollRate(handle),
                     imuAccelerationX(handle), imuAccelerationY(handle), imuAccelerationZ(handle),
-                    failure == null, failureMessage(failure)));
+                    failure == null && imuConnected(handle), imuCalibrating(handle), imuLastUpdate(handle),
+                    failureMessage(failure)));
         }
         return new HardwareCycleSnapshot(
                 sequence, nowNanos, motorInputs, encoderInputs, imuInputs);
@@ -415,9 +417,14 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private static double imuRoll(ImuHandle value) { try { return value.rollDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
     private static double imuAngle(ImuHandle value) { try { return value.angleDegrees(); } catch (RuntimeException exception) { return Double.NaN; } }
     private static double imuYawRate(ImuHandle value) { try { return value.yawRateDegreesPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuPitchRate(ImuHandle value) { try { return value.pitchRateDegreesPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static double imuRollRate(ImuHandle value) { try { return value.rollRateDegreesPerSecond(); } catch (RuntimeException exception) { return Double.NaN; } }
     private static double imuAccelerationX(ImuHandle value) { try { return value.linearAccelerationXG(); } catch (RuntimeException exception) { return Double.NaN; } }
     private static double imuAccelerationY(ImuHandle value) { try { return value.linearAccelerationYG(); } catch (RuntimeException exception) { return Double.NaN; } }
     private static double imuAccelerationZ(ImuHandle value) { try { return value.linearAccelerationZG(); } catch (RuntimeException exception) { return Double.NaN; } }
+    private static boolean imuConnected(ImuHandle value) { try { return value.isConnected(); } catch (RuntimeException exception) { return false; } }
+    private static boolean imuCalibrating(ImuHandle value) { try { return value.isCalibrating(); } catch (RuntimeException exception) { return false; } }
+    private static double imuLastUpdate(ImuHandle value) { try { return value.lastUpdateSeconds(); } catch (RuntimeException exception) { return Double.NaN; } }
 
     private static String failureMessage(RuntimeException failure) {
         return failure == null || failure.getMessage() == null ? "" : failure.getMessage();

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.commands;
 
+import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -13,6 +14,8 @@ import java.util.Set;
 public final class CommandGraph {
     private final Map<String, ActiveCommand> activeCommands = new LinkedHashMap<>();
     private final Map<String, String> requirementOwners = new LinkedHashMap<>();
+    private final ArrayDeque<Runnable> deferredMutations = new ArrayDeque<>();
+    private boolean mutating;
 
     /**
      * Schedules a command Action.
@@ -22,7 +25,12 @@ public final class CommandGraph {
      */
     public CommandGraph schedule(CommandAction Action) {
         CommandAction safeState = Objects.requireNonNull(Action, "Action");
-        cancelConflicts(safeState.requirements());
+        mutate(() -> scheduleNow(safeState));
+        return this;
+    }
+
+    private void scheduleNow(CommandAction safeState) {
+        cancelConflictsNow(safeState.requirements());
         ActiveCommand existing = activeCommands.remove(safeState.name());
         if (existing != null) {
             existing.end(true);
@@ -33,7 +41,6 @@ public final class CommandGraph {
         for (String requirement : safeState.requirements()) {
             requirementOwners.put(requirement, safeState.name());
         }
-        return this;
     }
 
     /**
@@ -43,15 +50,17 @@ public final class CommandGraph {
      */
     public Collection<String> periodic() {
         Set<String> finished = new LinkedHashSet<>();
-        for (ActiveCommand active : ListSnapshot.copyOf(activeCommands.values())) {
-            if (active.execute()) {
-                finished.add(active.Action().name());
-                if (activeCommands.remove(active.Action().name(), active)) {
-                    active.end(false);
-                    releaseRequirements(active.Action());
+        mutate(() -> {
+            for (ActiveCommand active : ListSnapshot.copyOf(activeCommands.values())) {
+                if (active.execute()) {
+                    finished.add(active.Action().name());
+                    if (activeCommands.remove(active.Action().name(), active)) {
+                        active.end(false);
+                        releaseRequirements(active.Action());
+                    }
                 }
             }
-        }
+        });
         return finished;
     }
 
@@ -62,7 +71,14 @@ public final class CommandGraph {
      * @return true when a command was cancelled
      */
     public boolean cancel(String name) {
-        ActiveCommand active = activeCommands.remove(normalize(name));
+        String normalized = normalize(name);
+        boolean wasActive = activeCommands.containsKey(normalized);
+        mutate(() -> cancelNow(normalized));
+        return wasActive;
+    }
+
+    private boolean cancelNow(String name) {
+        ActiveCommand active = activeCommands.remove(name);
         if (active == null) {
             return false;
         }
@@ -77,12 +93,15 @@ public final class CommandGraph {
      * @return this graph
      */
     public CommandGraph cancelAll() {
-        for (ActiveCommand active : activeCommands.values()) {
-            active.end(true);
-        }
+        mutate(this::cancelAllNow);
+        return this;
+    }
+
+    private void cancelAllNow() {
+        Collection<ActiveCommand> cancelled = ListSnapshot.copyOf(activeCommands.values());
         activeCommands.clear();
         requirementOwners.clear();
-        return this;
+        cancelled.forEach(active -> active.end(true));
     }
 
     /**
@@ -94,7 +113,7 @@ public final class CommandGraph {
         return java.util.List.copyOf(activeCommands.keySet());
     }
 
-    private void cancelConflicts(Collection<String> requirements) {
+    private void cancelConflictsNow(Collection<String> requirements) {
         Set<String> conflicts = new LinkedHashSet<>();
         for (String requirement : requirements) {
             String owner = requirementOwners.get(requirement);
@@ -102,7 +121,31 @@ public final class CommandGraph {
                 conflicts.add(owner);
             }
         }
-        conflicts.forEach(this::cancel);
+        conflicts.forEach(this::cancelNow);
+    }
+
+    /**
+     * Serializes graph mutations initiated by lifecycle callbacks. A callback-triggered mutation
+     * takes effect immediately after the lifecycle transition that triggered it, preserving the
+     * single-owner requirement invariant without modifying a collection during iteration.
+     */
+    private void mutate(Runnable mutation) {
+        if (mutating) {
+            deferredMutations.addLast(mutation);
+            return;
+        }
+        mutating = true;
+        try {
+            mutation.run();
+            while (!deferredMutations.isEmpty()) {
+                deferredMutations.removeFirst().run();
+            }
+        } catch (RuntimeException | Error failure) {
+            deferredMutations.clear();
+            throw failure;
+        } finally {
+            mutating = false;
+        }
     }
 
     private void releaseRequirements(CommandAction Action) {

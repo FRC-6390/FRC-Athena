@@ -59,9 +59,14 @@ class StudicaImuBackendTest {
         assertEquals(3.0, genericHandle.pitchDegrees(), 1.0e-9);
         assertEquals(4.0, genericHandle.rollDegrees(), 1.0e-9);
         assertEquals(5.0, genericHandle.yawRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(6.0, genericHandle.pitchRateDegreesPerSecond(), 1.0e-9);
+        assertEquals(7.0, genericHandle.rollRateDegreesPerSecond(), 1.0e-9);
         assertEquals(0.1, genericHandle.linearAccelerationXG(), 1.0e-9);
         assertEquals(0.2, genericHandle.linearAccelerationYG(), 1.0e-9);
         assertEquals(0.3, genericHandle.linearAccelerationZG(), 1.0e-9);
+        assertTrue(genericHandle.isConnected());
+        assertFalse(genericHandle.isCalibrating());
+        assertTrue(Double.isFinite(genericHandle.lastUpdateSeconds()));
         genericHandle.zeroYaw();
         genericHandle.reset();
         handle.close();
@@ -114,6 +119,9 @@ class StudicaImuBackendTest {
         public double yawRateDegreesPerSecond() {
             return 5.0;
         }
+
+        @Override public double pitchRateDegreesPerSecond() { return 6.0; }
+        @Override public double rollRateDegreesPerSecond() { return 7.0; }
 
         @Override
         public double linearAccelerationXG() {

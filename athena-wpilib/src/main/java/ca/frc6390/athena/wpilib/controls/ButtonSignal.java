@@ -16,7 +16,7 @@ public class ButtonSignal extends ControlSignal {
         Objects.requireNonNull(source, "source");
     }
 
-    ButtonSignal(Gamepad owner, String name, Evaluator evaluator) {
+    ButtonSignal(ControlOwner owner, String name, Evaluator evaluator) {
         super(owner, name, evaluator);
     }
 

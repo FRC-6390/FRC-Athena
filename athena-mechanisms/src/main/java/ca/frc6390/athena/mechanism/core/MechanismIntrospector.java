@@ -90,10 +90,17 @@ final class MechanismIntrospector {
                 // Mechanism collections are structural children, not generic declarations.
             } else if (value instanceof Action action) {
                 actions.put(fieldName, action);
+                if (value instanceof TelemetrySource source) {
+                    putDeclaration(declarations, fieldName, source);
+                }
             } else if (value instanceof HookBinding hook) {
                 hooks.put(fieldName, hook);
             } else if (value instanceof HookGroup group) {
                 group.hooks().forEach((hookName, hook) -> hooks.put(fieldName + "." + hookName, hook));
+                Object declaration = declaration(value);
+                if (declaration != null) {
+                    putDeclaration(declarations, fieldName, declaration);
+                }
             } else {
                 Object declaration = declaration(value);
                 if (declaration != null) {
