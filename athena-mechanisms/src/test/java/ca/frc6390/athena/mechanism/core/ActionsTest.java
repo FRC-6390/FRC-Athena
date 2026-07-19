@@ -81,6 +81,14 @@ class ActionsTest {
     }
 
     @Test
+    void forTimeIsAFluentFiniteActionAlias() {
+        Actions.Timeout timed = (Actions.Timeout) MOTOR.percent(0.2).forTime(0.5);
+
+        assertEquals(0.5, timed.seconds());
+        assertEquals(MOTOR.percent(0.2).getClass(), timed.action().getClass());
+    }
+
+    @Test
     void untilWithinOnlyAcceptsClosedLoopTargetsAndValidTolerance() {
         ControlBinding position = Controls.position(MOTOR);
         Action openLoop = MOTOR.percent(0.2);

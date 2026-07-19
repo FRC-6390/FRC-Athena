@@ -53,6 +53,11 @@ public interface Action extends DeviceAction {
         return Actions.timeout(this, seconds);
     }
 
+    /** Runs this action for the supplied duration, then completes it. */
+    default Action forTime(double seconds) {
+        return Actions.timeout(this, seconds);
+    }
+
 
     record Conditional(Action action, ActionCondition condition, Action next) implements Action {
         public Conditional {

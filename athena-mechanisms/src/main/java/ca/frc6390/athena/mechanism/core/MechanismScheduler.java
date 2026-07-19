@@ -529,6 +529,7 @@ public final class MechanismScheduler {
     }
 
     private CompiledAction compileAction(Action action) {
+        Actions.validate(action);
         Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {

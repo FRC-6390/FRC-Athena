@@ -12,8 +12,10 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
@@ -656,6 +658,7 @@ public final class Actions {
     public static final class Sequence implements Action {
         private final List<SequenceStep> steps = new ArrayList<>();
         private final List<SequenceStep> stepView = Collections.unmodifiableList(steps);
+        private final List<Action> started = new ArrayList<>();
         private Action next;
         private double timeoutSeconds = Double.POSITIVE_INFINITY;
 
@@ -663,17 +666,20 @@ public final class Actions {
         }
 
         public Sequence run(Action action) {
-            steps.add(new SequenceStep(action, ctx -> false));
+            steps.add(new SequenceStep(withStartedUntilComplete(action), ctx -> false, false));
             return this;
         }
 
         public Sequence forTime(double seconds, Action action) {
-            steps.add(new SequenceStep(action, ctx -> ctx.timeInStateSeconds() >= seconds));
+            steps.add(new SequenceStep(
+                    alongsideStarted(action),
+                    ctx -> ctx.timeInStateSeconds() >= seconds,
+                    true));
             return this;
         }
 
         public Sequence until(ActionCondition condition, Action action) {
-            steps.add(new SequenceStep(action, condition));
+            steps.add(new SequenceStep(alongsideStarted(action), condition, true));
             return this;
         }
 
@@ -683,12 +689,12 @@ public final class Actions {
         }
 
         public Sequence doOnce(Runnable action) {
-            steps.add(new SequenceStep(Actions.doOnce(action), ctx -> true));
+            steps.add(new SequenceStep(withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
             return this;
         }
 
         public Sequence doOnce(ActionBinding action) {
-            steps.add(new SequenceStep(Actions.doOnce(action), ctx -> true));
+            steps.add(new SequenceStep(withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
             return this;
         }
 
@@ -697,12 +703,15 @@ public final class Actions {
         }
 
         public Sequence waitSeconds(double seconds) {
-            steps.add(new SequenceStep(Actions.waitSeconds(seconds), ctx -> ctx.timeInStateSeconds() >= seconds));
+            steps.add(new SequenceStep(
+                    alongsideStarted(Actions.waitSeconds(seconds)),
+                    ctx -> ctx.timeInStateSeconds() >= seconds,
+                    true));
             return this;
         }
 
         public Sequence waitUntil(ActionCondition condition) {
-            steps.add(new SequenceStep(Actions.waitUntil(condition), condition));
+            steps.add(new SequenceStep(alongsideStarted(Actions.waitUntil(condition)), condition, true));
             return this;
         }
 
@@ -716,9 +725,30 @@ public final class Actions {
             return this;
         }
 
+        /**
+         * Starts an action that remains active alongside every following sequence stage.
+         * Started actions are released with the containing sequence.
+         */
+        public Sequence start(Action action) {
+            Action safeAction = Objects.requireNonNull(action, "action");
+            for (Action existing : started) {
+                if (existing == safeAction) return this;
+            }
+            started.add(safeAction);
+            return this;
+        }
+
+        /** Stops carrying a previously started action into subsequent stages. */
+        public Sequence stop(Action action) {
+            Action safeAction = Objects.requireNonNull(action, "action");
+            started.removeIf(existing -> existing == safeAction);
+            return this;
+        }
+
         @Override
         public Sequence then(Action action) {
             Action safeAction = Objects.requireNonNull(action, "action");
+            safeAction = withStartedUntilComplete(safeAction);
             next = next == null ? safeAction : Actions.then(next, safeAction);
             return this;
         }
@@ -733,6 +763,23 @@ public final class Actions {
 
         public double timeoutSeconds() {
             return timeoutSeconds;
+        }
+
+        private Action alongsideStarted(Action action) {
+            Action safeAction = Objects.requireNonNull(action, "action");
+            if (started.isEmpty()) return safeAction;
+            Action[] actions = new Action[started.size() + 1];
+            actions[0] = safeAction;
+            for (int index = 0; index < started.size(); index++) {
+                actions[index + 1] = started.get(index);
+            }
+            return Actions.parallel(actions);
+        }
+
+        private Action withStartedUntilComplete(Action action) {
+            Action safeAction = Objects.requireNonNull(action, "action");
+            if (started.isEmpty()) return safeAction;
+            return Actions.deadline(safeAction, started.toArray(Action[]::new));
         }
     }
 
@@ -791,11 +838,155 @@ public final class Actions {
         }
     }
 
-    public record SequenceStep(Action action, ActionCondition complete) {
+    public record SequenceStep(
+            Action action,
+            ActionCondition complete,
+            boolean advancesIndependently) {
         public SequenceStep {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(complete, "complete");
         }
+    }
+
+    static void validate(Action action) {
+        validate(action, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    private static void validate(Action action, Set<Action> visited) {
+        if (action == null || !visited.add(action)) return;
+        if (action instanceof Sequence sequence) {
+            validateSequence(sequence);
+            for (SequenceStep step : sequence.steps()) validate(step.action(), visited);
+            validate(sequence.next(), visited);
+        } else if (action instanceof Parallel parallel) {
+            parallel.Actions().forEach(child -> validate(child, visited));
+        } else if (action instanceof Race race) {
+            race.Actions().forEach(child -> validate(child, visited));
+        } else if (action instanceof Deadline deadline) {
+            deadline.Actions().forEach(child -> validate(child, visited));
+        } else if (action instanceof Cycle cycle) {
+            cycle.steps().forEach(step -> validate(step.action(), visited));
+        } else if (action instanceof Timeout timeout) {
+            validate(timeout.action(), visited);
+        } else if (action instanceof WithinTolerance within) {
+            validate(within.action(), visited);
+        } else if (action instanceof Conditional conditional) {
+            validate(conditional.action(), visited);
+            validate(conditional.next(), visited);
+        } else if (action instanceof Action.Conditional conditional) {
+            validate(conditional.action(), visited);
+            validate(conditional.next(), visited);
+        } else if (action instanceof Then then) {
+            validateThenSource(then.action());
+            validate(then.action(), visited);
+            validate(then.next(), visited);
+        } else if (action instanceof Action.Then then) {
+            validateThenSource(then.action());
+            validate(then.action(), visited);
+            validate(then.next(), visited);
+        } else if (action instanceof Choice choice) {
+            validate(choice.active(), visited);
+            validate(choice.inactive(), visited);
+        } else if (action instanceof WhenBranch branch) {
+            validate(branch.active(), visited);
+        }
+    }
+
+    private static void validateSequence(Sequence sequence) {
+        if (Double.isFinite(sequence.timeoutSeconds())) return;
+        List<SequenceStep> steps = sequence.steps();
+        for (int index = 0; index < steps.size(); index++) {
+            SequenceStep step = steps.get(index);
+            boolean hasFollowingStage = index + 1 < steps.size() || sequence.next() != null;
+            if (hasFollowingStage
+                    && !step.advancesIndependently()
+                    && completion(step.action(), Collections.newSetFromMap(new IdentityHashMap<>()))
+                            == Completion.NEVER) {
+                throw new IllegalArgumentException(
+                        "Sequence cannot advance past run(...) because that action is continuous. "
+                                + "Use forTime(...), until(...), or start(...) for an action that should remain active.");
+            }
+        }
+    }
+
+    private static void validateThenSource(Action action) {
+        if (completion(action, Collections.newSetFromMap(new IdentityHashMap<>())) == Completion.NEVER) {
+            throw new IllegalArgumentException(
+                    "Action chain cannot advance past then(...) because the preceding action is continuous. "
+                            + "Complete it with forTime(...), timeout(...), until(...), or untilWithin(...).");
+        }
+    }
+
+    private static Completion completion(Action action, Set<Action> visited) {
+        if (action == null || !visited.add(action)) return Completion.UNKNOWN;
+        if (action instanceof Output) return Completion.NEVER;
+        if (action instanceof DoOnce || action instanceof RuntimeAction
+                || action instanceof EncoderSetPosition || action instanceof ImuYawMutation
+                || action instanceof WaitSeconds || action instanceof WaitUntil
+                || action instanceof Timeout || action instanceof WithinTolerance
+                || action instanceof Conditional || action instanceof Action.Conditional) {
+            return Completion.POSSIBLE;
+        }
+        if (action instanceof Sequence sequence) {
+            if (Double.isFinite(sequence.timeoutSeconds())) return Completion.POSSIBLE;
+            Completion result = Completion.POSSIBLE;
+            for (SequenceStep step : sequence.steps()) {
+                if (step.advancesIndependently()) continue;
+                Completion child = completion(step.action(), visited);
+                if (child == Completion.NEVER) return Completion.NEVER;
+                if (child == Completion.UNKNOWN) result = Completion.UNKNOWN;
+            }
+            if (sequence.next() != null) {
+                Completion next = completion(sequence.next(), visited);
+                if (next == Completion.NEVER) return Completion.NEVER;
+                if (next == Completion.UNKNOWN) result = Completion.UNKNOWN;
+            }
+            return result;
+        }
+        if (action instanceof Parallel parallel) {
+            if (parallel.Actions().isEmpty()) return Completion.NEVER;
+            Completion result = Completion.POSSIBLE;
+            for (Action child : parallel.Actions()) {
+                Completion completion = completion(child, visited);
+                if (completion == Completion.NEVER) return Completion.NEVER;
+                if (completion == Completion.UNKNOWN) result = Completion.UNKNOWN;
+            }
+            return result;
+        }
+        if (action instanceof Deadline deadline) {
+            return completion(deadline.primary(), visited);
+        }
+        if (action instanceof Race race) {
+            boolean unknown = false;
+            for (Action child : race.Actions()) {
+                Completion completion = completion(child, visited);
+                if (completion == Completion.POSSIBLE) return Completion.POSSIBLE;
+                unknown |= completion == Completion.UNKNOWN;
+            }
+            return unknown ? Completion.UNKNOWN : Completion.NEVER;
+        }
+        if (action instanceof Then then) {
+            return both(completion(then.action(), visited), completion(then.next(), visited));
+        }
+        if (action instanceof Action.Then then) {
+            return both(completion(then.action(), visited), completion(then.next(), visited));
+        }
+        if (action instanceof VelocityContribution contribution) {
+            return completion(contribution.driveAction(), visited);
+        }
+        return Completion.UNKNOWN;
+    }
+
+    private static Completion both(Completion first, Completion second) {
+        if (first == Completion.NEVER || second == Completion.NEVER) return Completion.NEVER;
+        if (first == Completion.UNKNOWN || second == Completion.UNKNOWN) return Completion.UNKNOWN;
+        return Completion.POSSIBLE;
+    }
+
+    private enum Completion {
+        POSSIBLE,
+        NEVER,
+        UNKNOWN
     }
 
     private static List<Action> copyStates(List<Action> Actions) {

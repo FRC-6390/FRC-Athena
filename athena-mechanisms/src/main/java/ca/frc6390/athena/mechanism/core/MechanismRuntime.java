@@ -1303,6 +1303,7 @@ final class MechanismRuntime {
 
             private SchedulerNode(Action action) {
                 this.action = Objects.requireNonNull(action, "action");
+                Actions.validate(action);
                 lowerKnownChildren();
             }
 

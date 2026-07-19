@@ -369,6 +369,64 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void sequenceStartCarriesActionThroughFollowingStagesAndReleasesWithSequence() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
+        Action routine = Actions.sequence()
+                .forTime(0.5, MOTOR.percent(0.2))
+                .start(CHILD_MOTOR.percent(0.6))
+                .waitSeconds(0.2)
+                .then(MOTOR.percent(0.8));
+        TestMechanism mechanism = new TestMechanism(routine);
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(routine);
+
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(0.2, actions.motor(MOTOR).percent, 1.0e-9);
+        assertTrue(Double.isNaN(actions.motor(CHILD_MOTOR).percent));
+
+        runtime.periodic(contextAt(0.5), EventContext.empty());
+        assertEquals(0.6, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+
+        runtime.periodic(contextAt(0.71), EventContext.empty());
+        assertEquals(0.8, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.6, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+
+        runtime.set(Actions.neutral());
+        runtime.periodic(contextAt(0.72), EventContext.empty());
+        assertEquals(0.0, actions.motor(MOTOR).percent, 1.0e-9);
+        assertEquals(0.0, actions.motor(CHILD_MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void sequenceRejectsUnreachableStageAfterContinuousRun() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
+        Action invalid = Actions.sequence()
+                .run(MOTOR.percent(0.2))
+                .then(CHILD_MOTOR.percent(0.8));
+        TestMechanism mechanism = new TestMechanism(invalid);
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> MechanismScheduler.create(actions).register(mechanism));
+
+        assertTrue(error.getMessage().contains("cannot advance past run"));
+        assertTrue(error.getMessage().contains("start(...)"));
+    }
+
+    @Test
+    void actionChainRejectsThenAfterContinuousAction() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
+        Action invalid = MOTOR.percent(0.2).then(CHILD_MOTOR.percent(0.8));
+        TestMechanism mechanism = new TestMechanism(invalid);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> MechanismScheduler.create(actions).register(mechanism));
+
+        assertTrue(error.getMessage().contains("cannot advance past then"));
+        assertTrue(error.getMessage().contains("forTime(...)"));
+    }
+
+    @Test
     void timeoutAndConditionMoveToNextState() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
