@@ -531,7 +531,7 @@ public final class MechanismScheduler {
     private CompiledAction compileAction(Action action) {
         Actions.validate(action);
         validateConcurrentResourceConflicts(
-                action, Collections.newSetFromMap(new IdentityHashMap<>()));
+                action, "root", Collections.newSetFromMap(new IdentityHashMap<>()));
         Map<Mechanism, List<Action>> partitions = new IdentityHashMap<>();
         RequestTarget direct = ambiguousActionTargets.contains(action) ? null : actionTargets.get(action);
         if (direct != null) {
@@ -566,61 +566,90 @@ public final class MechanismScheduler {
         return new CompiledAction(compiledPartitions, allResources);
     }
 
-    private void validateConcurrentResourceConflicts(Action action, Set<Action> visited) {
+    private void validateConcurrentResourceConflicts(Action action, String path, Set<Action> visited) {
         if (action == null || !visited.add(action)) return;
         if (action instanceof Actions.Parallel parallel) {
-            validateConcurrentGroup("parallel", parallel.Actions());
-            parallel.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+            validateConcurrentGroup(path + ".parallel", parallel.Actions());
+            validateConcurrentChildren(parallel.Actions(), path + ".parallel", visited);
         } else if (action instanceof Actions.Race race) {
-            validateConcurrentGroup("race", race.Actions());
-            race.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+            validateConcurrentGroup(path + ".race", race.Actions());
+            validateConcurrentChildren(race.Actions(), path + ".race", visited);
         } else if (action instanceof Actions.Deadline deadline) {
-            validateConcurrentGroup("deadline", deadline.Actions());
-            deadline.Actions().forEach(child -> validateConcurrentResourceConflicts(child, visited));
+            validateConcurrentGroup(path + ".deadline", deadline.Actions());
+            validateConcurrentChildren(deadline.Actions(), path + ".deadline", visited);
         } else if (action instanceof Actions.Sequence sequence) {
-            sequence.steps().forEach(step -> validateConcurrentResourceConflicts(step.action(), visited));
-            validateConcurrentResourceConflicts(sequence.next(), visited);
+            for (int index = 0; index < sequence.steps().size(); index++) {
+                validateConcurrentResourceConflicts(
+                        sequence.steps().get(index).action(), path + ".sequence.step[" + index + "]", visited);
+            }
+            validateConcurrentResourceConflicts(sequence.next(), path + ".sequence.next", visited);
         } else if (action instanceof Actions.Cycle cycle) {
-            cycle.steps().forEach(step -> validateConcurrentResourceConflicts(step.action(), visited));
+            for (int index = 0; index < cycle.steps().size(); index++) {
+                validateConcurrentResourceConflicts(
+                        cycle.steps().get(index).action(), path + ".cycle.step[" + index + "]", visited);
+            }
         } else if (action instanceof Actions.Choice choice) {
-            validateConcurrentResourceConflicts(choice.active(), visited);
-            validateConcurrentResourceConflicts(choice.inactive(), visited);
+            validateConcurrentResourceConflicts(choice.active(), path + ".choice.active", visited);
+            validateConcurrentResourceConflicts(choice.inactive(), path + ".choice.inactive", visited);
         } else if (action instanceof Actions.WhenBranch branch) {
-            validateConcurrentResourceConflicts(branch.active(), visited);
+            validateConcurrentResourceConflicts(branch.active(), path + ".when.active", visited);
         } else if (action instanceof Actions.Timeout timeout) {
-            validateConcurrentResourceConflicts(timeout.action(), visited);
+            validateConcurrentResourceConflicts(timeout.action(), path + ".timeout", visited);
         } else if (action instanceof Actions.WithinTolerance within) {
-            validateConcurrentResourceConflicts(within.action(), visited);
+            validateConcurrentResourceConflicts(within.action(), path + ".withinTolerance", visited);
         } else if (action instanceof Actions.VelocityContribution contribution) {
-            validateConcurrentResourceConflicts(contribution.driveAction(), visited);
+            validateConcurrentResourceConflicts(contribution.driveAction(), path + ".velocityDrive", visited);
         } else if (action instanceof Actions.Conditional conditional) {
-            validateConcurrentResourceConflicts(conditional.action(), visited);
-            validateConcurrentResourceConflicts(conditional.next(), visited);
+            validateConcurrentResourceConflicts(conditional.action(), path + ".conditional.action", visited);
+            validateConcurrentResourceConflicts(conditional.next(), path + ".conditional.next", visited);
         } else if (action instanceof Action.Conditional conditional) {
-            validateConcurrentResourceConflicts(conditional.action(), visited);
-            validateConcurrentResourceConflicts(conditional.next(), visited);
+            validateConcurrentResourceConflicts(conditional.action(), path + ".conditional.action", visited);
+            validateConcurrentResourceConflicts(conditional.next(), path + ".conditional.next", visited);
         } else if (action instanceof Actions.Then then) {
-            validateConcurrentResourceConflicts(then.action(), visited);
-            validateConcurrentResourceConflicts(then.next(), visited);
+            validateConcurrentResourceConflicts(then.action(), path + ".then.action", visited);
+            validateConcurrentResourceConflicts(then.next(), path + ".then.next", visited);
         } else if (action instanceof Action.Then then) {
-            validateConcurrentResourceConflicts(then.action(), visited);
-            validateConcurrentResourceConflicts(then.next(), visited);
+            validateConcurrentResourceConflicts(then.action(), path + ".then.action", visited);
+            validateConcurrentResourceConflicts(then.next(), path + ".then.next", visited);
         }
     }
 
-    private void validateConcurrentGroup(String type, List<Action> children) {
-        Set<Object> claimed = new LinkedHashSet<>();
-        for (Action child : children) {
-            Set<Object> resources = actionResources(child);
-            Set<Object> conflicts = new LinkedHashSet<>(resources);
-            conflicts.retainAll(claimed);
-            if (!conflicts.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "A " + type + " action has children that concurrently control the same resource(s): "
-                                + conflicts + ". Put those actions in a sequence or remove the duplicate output.");
-            }
-            claimed.addAll(resources);
+    private void validateConcurrentChildren(List<Action> children, String path, Set<Action> visited) {
+        for (int index = 0; index < children.size(); index++) {
+            validateConcurrentResourceConflicts(children.get(index), path + ".child[" + index + "]", visited);
         }
+    }
+
+    private void validateConcurrentGroup(String path, List<Action> children) {
+        Map<Object, ConcurrentClaim> claimed = new LinkedHashMap<>();
+        for (int index = 0; index < children.size(); index++) {
+            Action child = children.get(index);
+            Set<Object> resources = actionResources(child);
+            for (Object resource : resources) {
+                ConcurrentClaim existing = claimed.get(resource);
+                if (existing != null) {
+                    throw new IllegalArgumentException(
+                            "Concurrent action conflict at " + path + ": child[" + existing.index() + "] "
+                                    + actionDescription(existing.action()) + " and child[" + index + "] "
+                                    + actionDescription(child) + " both claim " + resourceDescription(resource)
+                                    + ". Put them in a sequence or remove one of the duplicate outputs.");
+                }
+                claimed.put(resource, new ConcurrentClaim(index, child));
+            }
+        }
+    }
+
+    private static String actionDescription(Action action) {
+        String type = action.getClass().getSimpleName();
+        return type.isBlank() ? action.getClass().getName() : type;
+    }
+
+    private static String resourceDescription(Object resource) {
+        if (resource instanceof MotorDevice motor) return "motor '" + motor.defaultName() + "'";
+        return "resource '" + resource + "'";
+    }
+
+    private record ConcurrentClaim(int index, Action action) {
     }
 
     private boolean containsOpaqueRuntimeGraph(Action action) {

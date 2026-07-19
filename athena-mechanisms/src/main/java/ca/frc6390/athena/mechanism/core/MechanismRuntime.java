@@ -333,7 +333,7 @@ final class MechanismRuntime {
             Set<Object> reservedResources) {
         resolvedScratch.clear();
         resolver.resolveInto(mechanism, active.action(), active.context(), resolvedScratch);
-        validateNoDuplicateOutputs(resolvedScratch);
+        validateNoDuplicateOutputs(resolvedScratch, source, active.action());
         for (ResolvedOutput output : resolvedScratch) {
             validateReservedResources(output.request(), reservedResources);
             int order = candidates.size();
@@ -349,25 +349,57 @@ final class MechanismRuntime {
         }
     }
 
-    private static void validateNoDuplicateOutputs(List<ResolvedOutput> outputs) {
-        Set<Object> claimed = new LinkedHashSet<>();
-        for (ResolvedOutput output : outputs) {
+    private static void validateNoDuplicateOutputs(
+            List<ResolvedOutput> outputs,
+            String source,
+            Action scheduledOutput) {
+        Map<Object, Integer> claimed = new LinkedHashMap<>();
+        for (int outputIndex = 0; outputIndex < outputs.size(); outputIndex++) {
+            ResolvedOutput output = outputs.get(outputIndex);
             OutputRequest request = output.request();
             for (int index = 0; index < motorCount(request); index++) {
-                requireUnclaimedOutputResource(claimed, motorAt(request, index));
+                requireUnclaimedOutputResource(
+                        claimed, motorAt(request, index), outputs, outputIndex, source, scheduledOutput);
             }
             if (request.control() != null && request.control().sink() != null) {
-                requireUnclaimedOutputResource(claimed, request.control().sink());
+                requireUnclaimedOutputResource(
+                        claimed, request.control().sink(), outputs, outputIndex, source, scheduledOutput);
             }
         }
     }
 
-    private static void requireUnclaimedOutputResource(Set<Object> claimed, Object resource) {
-        if (!claimed.add(resource)) {
+    private static void requireUnclaimedOutputResource(
+            Map<Object, Integer> claimed,
+            Object resource,
+            List<ResolvedOutput> outputs,
+            int outputIndex,
+            String source,
+            Action scheduledOutput) {
+        Integer existingIndex = claimed.putIfAbsent(resource, outputIndex);
+        if (existingIndex != null) {
             throw new IllegalStateException(
-                    "One action emitted multiple outputs for the same resource in one scheduler cycle: "
-                            + resource + ". Put those outputs in a sequence or remove the duplicate output.");
+                    "Runtime output conflict in " + source + " action " + actionType(scheduledOutput)
+                            + ": output[" + existingIndex + "] " + outputDescription(outputs.get(existingIndex))
+                            + " and output[" + outputIndex + "] " + outputDescription(outputs.get(outputIndex))
+                            + " both claim " + outputResourceDescription(resource)
+                            + ". Put them in a sequence or remove one of the duplicate outputs.");
         }
+    }
+
+    private static String actionType(Action action) {
+        String type = action.getClass().getSimpleName();
+        return type.isBlank() ? action.getClass().getName() : type;
+    }
+
+    private static String outputDescription(ResolvedOutput resolved) {
+        Output output = resolved.output();
+        String type = output.getClass().getSimpleName();
+        return type.isBlank() ? output.getClass().getName() : type;
+    }
+
+    private static String outputResourceDescription(Object resource) {
+        if (resource instanceof MotorDevice motor) return "motor '" + motor.defaultName() + "'";
+        return "resource '" + resource + "'";
     }
 
     private static void validateReservedResources(OutputRequest request, Set<Object> reservedResources) {

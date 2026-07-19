@@ -30,7 +30,12 @@ class ActionArbitrationTest {
                 Actions.deadline(Actions.waitSeconds(1.0).then(ARM.percent(0.25)), ARM.voltage(4.0)))) {
             IllegalArgumentException error = assertThrows(
                     IllegalArgumentException.class, () -> scheduler.request(conflicting));
-            assertTrue(error.getMessage().contains("concurrently control the same resource"));
+            String message = error.getMessage();
+            assertTrue(message.contains("Concurrent action conflict at root."
+                    + conflicting.getClass().getSimpleName().toLowerCase()));
+            assertTrue(message.contains("child[0]"));
+            assertTrue(message.contains("child[1]"));
+            assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
         }
     }
 
@@ -45,7 +50,11 @@ class ActionArbitrationTest {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class, () -> scheduler.request(conflicting));
 
-        assertTrue(error.getMessage().contains("concurrently control the same resource"));
+        String message = error.getMessage();
+        assertTrue(message.contains("root.sequence.step[0].parallel"));
+        assertTrue(message.contains("child[0] MotorPercent"));
+        assertTrue(message.contains("child[1] MotorPercent"));
+        assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
     }
 
     @Test
@@ -59,7 +68,11 @@ class ActionArbitrationTest {
         IllegalStateException error = assertThrows(
                 IllegalStateException.class, () -> scheduler.teleopPeriodic(0.0, 0.02));
 
-        assertTrue(error.getMessage().contains("multiple outputs for the same resource"));
+        String message = error.getMessage();
+        assertTrue(message.contains("Runtime output conflict in lease action ScheduledOutputs"));
+        assertTrue(message.contains("output[0] MotorPercent"));
+        assertTrue(message.contains("output[1] MotorVoltage"));
+        assertTrue(message.contains("motor '" + ARM.defaultName() + "'"));
     }
 
     @Test
