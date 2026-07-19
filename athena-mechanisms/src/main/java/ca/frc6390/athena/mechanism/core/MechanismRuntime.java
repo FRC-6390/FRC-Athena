@@ -1023,8 +1023,9 @@ final class MechanismRuntime {
             while (node.index < steps.size()) {
                 Actions.SequenceStep step = steps.get(node.index);
                 SchedulerNode stepNode = schedule.indexed(node.index, step.action());
+                MechanismContext stepContext = stepNode.localContext(context);
                 Evaluation child = evaluate(stepNode, context);
-                if (child.complete() || step.complete().test(child.context())) {
+                if (child.complete() || step.complete().test(stepContext)) {
                     stepNode.reset();
                     node.index++;
                     continue;
@@ -1052,8 +1053,9 @@ final class MechanismRuntime {
             for (int attempts = 0; attempts < steps.size(); attempts++) {
                 Actions.CycleStep step = steps.get(node.index);
                 SchedulerNode stepNode = schedule.indexed(node.index, step.action());
+                MechanismContext stepContext = stepNode.localContext(context);
                 Evaluation child = evaluate(stepNode, context);
-                if (child.complete() || step.advance().test(child.context())) {
+                if (child.complete() || step.advance().test(stepContext)) {
                     stepNode.reset();
                     node.index = (node.index + 1) % steps.size();
                     continue;
@@ -1317,6 +1319,11 @@ final class MechanismRuntime {
                     runtime = new Node(context.nowSeconds());
                 }
                 return runtime;
+            }
+
+            private MechanismContext localContext(MechanismContext context) {
+                Node node = runtime(context);
+                return withTimeInState(context, context.nowSeconds() - node.startSeconds);
             }
 
             private SchedulerNode indexed(int index, Action childState) {
