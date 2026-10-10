@@ -4,10 +4,12 @@
   import Header from './Header.svelte';
   import DashboardsScreen from '../screens/DashboardsScreen.svelte';
   import MechanismsScreen from '../screens/MechanismsScreen.svelte';
-  import PitView from '../components/mechanisms/PitView.svelte';
+  import HealthScreen from '../screens/HealthScreen.svelte';
+  import SignalsScreen from '../screens/SignalsScreen.svelte';
+  import SettingsScreen from '../screens/SettingsScreen.svelte';
   import PitFiles from '../components/pit/PitFiles.svelte';
   import AnalysisView from '../components/analysis/AnalysisView.svelte';
-  import ConnectionBar from '../components/live/ConnectionBar.svelte';
+  import ConnectionPanel from './ConnectionPanel.svelte';
   import { useLiveStore } from '../lib/data/live.svelte';
   import { createMockSource } from '../lib/data/mock';
   import { createSession } from '../lib/data/session';
@@ -55,16 +57,6 @@
     return faults ? { health: 'fault' as const } : warns ? { health: 'warn' as const } : {};
   });
 
-  const signalRows = $derived.by(() => {
-    void live.current;
-    if (section !== 'signals') return [];
-    return session.store
-      .allSignals()
-      .slice()
-      .sort((a, b) => a.path.localeCompare(b.path))
-      .map((s) => ({ s, value: session.store.latestSample(s.signalId)?.value }));
-  });
-  let signalFilter = $state('');
 
   function openMechanism(path: string) {
     mechanism = path;
@@ -84,41 +76,26 @@
     />
     {#if connectionOpen}
       <div class="connection-popover ui-panel">
-        {#if liveSource}
-          <ConnectionBar live={liveSource} />
-        {:else}
-          <p class="note">
-            Showing demo data. Open the desktop app (or run the ARCP bridge) to connect to a robot or the simulator.
-          </p>
-        {/if}
+        <ConnectionPanel connector={liveSource} />
       </div>
     {/if}
-    <main class="content" class:flush={section === 'mechanisms' || section === 'dashboards'}>
+    <main class="content" class:flush={section === 'mechanisms' || section === 'dashboards' || section === 'signals'}>
       {#if section === 'dashboards'}
         <DashboardsScreen {session} {live} {driver} onmechanism={openMechanism} />
       {:else if section === 'mechanisms'}
         <MechanismsScreen {session} {live} selected={mechanism} onselect={(p) => (mechanism = p)} />
       {:else if section === 'health'}
-        <div class="stack">
-          <section class="ui-panel"><header class="ui-panel-head"><h3 class="ui-panel-title">Robot health</h3></header><div class="ui-panel-body"><PitView {session} {live} /></div></section>
-          <section class="ui-panel"><header class="ui-panel-head"><h3 class="ui-panel-title">Robot files</h3></header><div class="ui-panel-body"><PitFiles live={liveSource} onopenanalysis={() => (section = 'replays')} /></div></section>
-        </div>
+        <HealthScreen {session} {live} {driver} onmechanism={openMechanism}>
+          {#snippet files()}
+            <PitFiles live={liveSource} onopenanalysis={() => (section = 'replays')} />
+          {/snippet}
+        </HealthScreen>
       {:else if section === 'replays'}
         <section class="ui-panel"><div class="ui-panel-body"><AnalysisView /></div></section>
       {:else if section === 'signals'}
-        <section class="ui-panel signals">
-          <div class="search"><input class="ui-input" placeholder="Filter signals" bind:value={signalFilter} aria-label="Filter signals" /></div>
-          <div class="table">
-            {#each signalRows.filter((r) => r.s.path.includes(signalFilter)) as row (row.s.signalId)}
-              <div class="ui-kv">
-                <span class="ui-kv-key ui-mono">{row.s.path}</span>
-                <span class="ui-kv-value">{row.value === undefined ? '—' : String(row.value)}</span>
-              </div>
-            {/each}
-          </div>
-        </section>
+        <SignalsScreen {session} {live} />
       {:else}
-        <section class="ui-panel"><div class="ui-panel-body">Settings</div></section>
+        <SettingsScreen {session} sourceName={useMock ? 'Mock robot' : 'Live robot'} />
       {/if}
     </main>
   </div>
@@ -146,10 +123,6 @@
   .content.flush {
     overflow: hidden;
   }
-  .stack {
-    display: grid;
-    gap: var(--sp-3);
-  }
   .connection-popover {
     position: absolute;
     top: calc(var(--topbar-height) + 6px);
@@ -158,26 +131,5 @@
     width: min(560px, calc(100% - 32px));
     padding: var(--sp-3);
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-  }
-  .note {
-    margin: 0;
-    font-size: var(--fs-sm);
-    color: var(--text-soft);
-  }
-  .signals {
-    display: flex;
-    flex-direction: column;
-    max-height: 100%;
-  }
-  .signals .search {
-    padding: var(--sp-2);
-    border-bottom: 1px solid var(--border);
-  }
-  .signals .search input {
-    width: 100%;
-    font-family: var(--font-body);
-  }
-  .table {
-    overflow: auto;
   }
 </style>

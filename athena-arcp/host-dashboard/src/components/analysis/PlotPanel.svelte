@@ -98,7 +98,7 @@
     padding: 8px 10px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     min-width: 0;
   }
   header {

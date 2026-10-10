@@ -16,6 +16,23 @@ export function formatValue(value: SignalValue | undefined): string {
   return `struct #${value.schemaId} (${value.bytes.length} B)`;
 }
 
+/**
+ * Like {@link formatValue}, but uses the signal's declared type to decode known WPILib structs
+ * (Pose2d: x, y in metres and rotation in radians, 24 bytes little-endian) into readable text.
+ */
+export function formatSignalValue(type: string, value: SignalValue | undefined): string {
+  if (value !== undefined && typeof value === 'object' && !Array.isArray(value) && 'schemaId' in value) {
+    if (type === 'struct:Pose2d' && value.bytes.length >= 24) {
+      const view = new DataView(value.bytes.buffer, value.bytes.byteOffset, 24);
+      const x = view.getFloat64(0, true);
+      const y = view.getFloat64(8, true);
+      const degrees = (view.getFloat64(16, true) * 180) / Math.PI;
+      return `${x.toFixed(2)}, ${y.toFixed(2)} m · ${degrees.toFixed(1)}°`;
+    }
+  }
+  return formatValue(value);
+}
+
 export function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return String(value);
   if (Number.isInteger(value)) return value.toString();

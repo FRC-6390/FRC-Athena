@@ -63,7 +63,7 @@
   svg {
     width: 100%;
     height: auto;
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     border: 1px solid var(--border);
     background: #0b0d12;
   }
@@ -74,7 +74,7 @@
   }
   .robot {
     fill: rgba(56, 189, 248, 0.35);
-    stroke: #38bdf8;
+    stroke: var(--info);
     stroke-width: 0.05;
   }
   .heading {

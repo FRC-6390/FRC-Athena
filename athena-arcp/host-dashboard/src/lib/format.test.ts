@@ -32,3 +32,15 @@ describe('formatValue', () => {
     expect(formatValue('')).toBe('""');
   });
 });
+
+import { formatSignalValue } from './format';
+import { encodePose2d } from './data/mock-robot';
+
+test('formatSignalValue decodes Pose2d structs', () => {
+  const text = formatSignalValue('struct:Pose2d', { schemaId: 1, bytes: encodePose2d(1.5, 2.25, Math.PI / 2) });
+  expect(text).toBe('1.50, 2.25 m · 90.0°');
+});
+
+test('formatSignalValue falls back for unknown structs', () => {
+  expect(formatSignalValue('struct:Other', { schemaId: 3, bytes: new Uint8Array(8) })).toBe('struct #3 (8 B)');
+});

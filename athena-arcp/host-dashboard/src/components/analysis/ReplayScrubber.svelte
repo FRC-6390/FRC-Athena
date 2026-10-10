@@ -86,7 +86,7 @@
     padding: 0;
     border: 0;
     border-radius: 2px;
-    background: #fbbf24;
+    background: var(--warn);
     cursor: pointer;
     z-index: 1;
   }

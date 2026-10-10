@@ -3,7 +3,7 @@
   import { faLock, faFloppyDisk, faCheck, faXmark } from '@fortawesome/free-solid-svg-icons';
   import type { Session } from '../lib/data/session';
   import type { SignalDescriptor } from '../lib/data/types';
-  import { formatValue, parseInput } from '../lib/format';
+  import { formatSignalValue, parseInput } from '../lib/format';
 
   type Props = {
     signal: SignalDescriptor;
@@ -91,7 +91,7 @@
       onclick={begin}
       title={signal.writable ? (isBool ? 'Click to toggle' : 'Click to edit') : undefined}
     >
-      {formatValue(latest)}{#if signal.unit}<span class="unit">{signal.unit}</span>{/if}
+      {formatSignalValue(signal.type, latest)}{#if signal.unit}<span class="unit">{signal.unit}</span>{/if}
     </button>
   {/if}
   {#if error}

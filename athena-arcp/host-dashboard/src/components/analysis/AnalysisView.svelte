@@ -113,26 +113,28 @@
 </script>
 
 <section class="analysis">
-  <div class="toolbar">
-    <label class="file">
-      <span>Open replay</span>
-      <input type="file" accept=".athrp" onchange={onFile} />
+  <div class="ui-panel toolbar">
+    <label class="ui-btn" data-variant={model ? undefined : 'primary'}>
+      Open replay
+      <input type="file" accept=".athrp" onchange={onFile} hidden />
     </label>
     {#if model}
-      <span class="meta">{fileName} | {model.frameCount} frames | {model.markers.length} markers
-        {#if model.sequenceGaps > 0}| <span class="warn">{model.sequenceGaps} gaps</span>{/if}
+      <span class="meta">
+        <b>{fileName}</b>
+        <span class="ui-mono">{model.frameCount} frames · {model.markers.length} markers</span>
+        {#if model.sequenceGaps > 0}<span class="ui-badge" data-tone="warn">{model.sequenceGaps} gaps</span>{/if}
       </span>
-      <div class="zoom" role="group" aria-label="visible window">
+      <span class="ui-spacer"></span>
+      <div class="segmented" role="group" aria-label="visible window">
         {#each ZOOM_OPTIONS as option (option.label)}
           <button type="button" class:active={zoomMicros === option.micros} onclick={() => (zoomMicros = option.micros)}>
             {option.label}
           </button>
         {/each}
       </div>
-      <button type="button" class="export" onclick={exportCsv} disabled={selected.length === 0}>Export CSV</button>
+      <button type="button" class="ui-btn" onclick={exportCsv} disabled={selected.length === 0}>Export CSV</button>
     {/if}
   </div>
-
   {#if loading}
     <p class="note">Reading replay...</p>
   {:else if loadError}
@@ -142,12 +144,13 @@
   {#if exportNote}<p class="note">{exportNote}</p>{/if}
 
   {#if !model}
-    <div class="empty">
-      <p>Open a <code>.athrp</code> replay to scrub the timeline, plot signals in sync, and export CSV.</p>
-      <p class="muted">Everything is read in this window; no data leaves the browser.</p>
+    <div class="ui-panel empty">
+      <h3>No replay open</h3>
+      <p>Open a <code>.athrp</code> file to scrub the timeline, plot signals in sync and export CSV.</p>
+      <p class="muted">Replays recorded on the robot can be downloaded from Health → Robot files.</p>
     </div>
   {:else}
-    <div class="scrub">
+    <div class="ui-panel scrub">
       <ReplayScrubber {model} {cursor} onscrub={jumpTo} />
       {#if model.markers.length > 0}
         <ol class="markers" aria-label="markers">
@@ -165,7 +168,7 @@
     </div>
 
     <div class="body">
-      <aside>
+      <aside class="ui-panel picker">
         <SignalPicker {signals} {selected} max={MAX_PLOTS} ontoggle={toggle} />
       </aside>
       <div class="plots">
@@ -194,74 +197,91 @@
 <style>
   .analysis {
     display: grid;
-    gap: 12px;
+    gap: var(--sp-3);
   }
   .toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
     align-items: center;
-  }
-  .file {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    font-size: 13px;
-  }
-  .file span,
-  .export,
-  .zoom button {
-    background: var(--surface-3);
-    color: var(--text-strong);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 6px 10px;
-    font: inherit;
-    cursor: pointer;
-  }
-  .zoom {
-    display: inline-flex;
-    gap: 4px;
-  }
-  .zoom button.active {
-    border-color: #38bdf8;
-  }
-  .export:disabled {
-    opacity: 0.5;
-    cursor: default;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
   }
   .meta {
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
     color: var(--text-soft);
+    min-width: 0;
   }
-  .warn {
-    color: #fbbf24;
+  .meta b {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+  .meta .ui-mono {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+  .segmented {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    background: var(--bg-1);
+  }
+  .segmented button {
+    height: 24px;
+    padding: 0 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .segmented button.active {
+    background: var(--surface-3);
+    color: var(--text-strong);
   }
   .note {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-soft);
   }
   .error {
     margin: 0;
-    color: var(--danger);
+    font-size: var(--fs-sm);
+    color: var(--fault);
   }
   .empty {
-    padding: 32px;
-    border: 1px dashed var(--border);
-    border-radius: 12px;
+    display: grid;
+    justify-items: center;
+    gap: var(--sp-2);
+    padding: 64px var(--sp-4);
+    text-align: center;
+  }
+  .empty h3 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    color: var(--text-strong);
+  }
+  .empty p {
+    margin: 0;
+    font-size: var(--fs-sm);
     color: var(--text);
   }
+  .empty code {
+    font-family: var(--font-mono);
+  }
   .muted {
-    color: var(--text-soft);
+    color: var(--text-faint);
   }
   .scrub {
     display: grid;
-    gap: 8px;
-    padding: 10px 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
   }
   .markers {
     list-style: none;
@@ -275,28 +295,35 @@
     display: inline-flex;
     gap: 6px;
     align-items: baseline;
-    background: transparent;
+    height: 24px;
+    padding: 0 8px;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
     color: var(--text);
     font: inherit;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     cursor: pointer;
+  }
+  .markers button:hover {
+    border-color: var(--border-emphasis);
   }
   .when {
     font-family: var(--font-mono);
-    color: #fbbf24;
+    color: var(--warn);
   }
   .body {
     display: grid;
     grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
-    gap: 12px;
+    gap: var(--sp-3);
     align-items: start;
+  }
+  .picker {
+    padding: var(--sp-2);
   }
   .plots {
     display: grid;
-    gap: 10px;
+    gap: var(--sp-3);
     min-width: 0;
   }
   @media (max-width: 860px) {
