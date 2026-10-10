@@ -15,6 +15,11 @@ public sealed interface ConstraintResult<T>
         return !(this instanceof Rejected<?>);
     }
 
+    /** Name of the constraint that rejected the request, or an empty string when nothing rejected it. */
+    default String rejectedBy() {
+        return this instanceof Rejected<?> rejected ? rejected.constraint() : "";
+    }
+
     default T value() {
         if (this instanceof Allowed<T> allowed) {
             return allowed.value();
@@ -43,9 +48,20 @@ public sealed interface ConstraintResult<T>
         }
     }
 
-    record Rejected<T>(T requested) implements ConstraintResult<T> {
+    /**
+     * A rejected request.
+     *
+     * @param requested the request that was refused
+     * @param constraint kind of the constraint that refused it (for example {@code require})
+     */
+    record Rejected<T>(T requested, String constraint) implements ConstraintResult<T> {
         public Rejected {
             Objects.requireNonNull(requested, "requested");
+            Objects.requireNonNull(constraint, "constraint");
+        }
+
+        public Rejected(T requested) {
+            this(requested, Constraint.DEFAULT_KIND);
         }
     }
 }

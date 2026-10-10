@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.mechanism.staging.StageCaps;
 import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.api.FailurePolicy;
@@ -58,7 +59,9 @@ final class MechanismRuntime {
     private int reasonKind = -1;
     private Object reasonSubject;
     private Object reasonDetail;
+    private int reasonNumber;
     private String reasonText = "Idle";
+    private PowerRuntime electrical;
     private MechanismContext evaluatedTimedContext = MechanismContext.empty();
     private String lastFault = "";
     private boolean faultedThisCycle;
@@ -364,8 +367,15 @@ final class MechanismRuntime {
 
     /** Arbitrates the candidates from {@link #evaluateCandidates} and applies the winners. */
     /** Installs the staging caps for the coming output cycle. */
-    void stageCaps(Map<ca.frc6390.athena.mechanism.core.ControlBinding<?>, ca.frc6390.athena.mechanism.staging.StageCaps> caps) {
-        applier.stageCaps(caps);
+    void stageCaps(
+            Map<ControlBinding<?>, StageCaps> caps,
+            Map<ControlBinding<?>, Enum<?>> stages) {
+        applier.stageCaps(caps, stages);
+    }
+
+    /** Installs the power pass whose per-motor thermal and budget caps explain this mechanism's outputs. */
+    void electrical(PowerRuntime power) {
+        electrical = power;
     }
 
     Set<MotorDevice> applyCandidates(List<ResolvedOutput> outputs, Map<Object, Long> reservations) {
@@ -373,7 +383,7 @@ final class MechanismRuntime {
         Objects.requireNonNull(reservations, "reservations");
         MechanismContext safeMechanismContext = evaluatedContext;
         if (!safeMechanismContext.enabled()) {
-            setReason(REASON_DISABLED, null, null);
+            setReason(REASON_DISABLED, null, null, 0);
             applier.stopAll();
             previouslyDrivenMotors.clear();
             simulationStep.run();
@@ -402,7 +412,6 @@ final class MechanismRuntime {
         MechanismContext timedContext = evaluatedTimedContext;
         List<CandidateOutput> candidates = candidateScratch;
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
-        updateReason(candidates, selected, reservations);
         Set<MotorDevice> drivenNow = drivenScratch;
         drivenNow.clear();
         applier.beginCycle();
@@ -419,6 +428,8 @@ final class MechanismRuntime {
                 outputs.add(candidate.output());
                 addMotors(drivenNow, candidate.output().request());
             }
+            // After the apply loop, so the explanation sees the constraints and caps that acted on this cycle.
+            updateReason(candidates, selected, reservations);
         } finally {
             applier.endCycle();
         }
@@ -614,15 +625,24 @@ final class MechanismRuntime {
     }
 
     /**
-     * Summarises why outputs are or are not applied. Text is rebuilt only when the decision's subjects
-     * change, so an unchanged state allocates nothing.
+     * Summarises why outputs are or are not applied. The first matching line wins, highest priority first:
+     * Fault, Disabled, Blocked (a constraint rejected the target), Starved (a newer lease reserves a motor),
+     * Superseded (a candidate lost arbitration), Guard (output clipped at a range edge), Stage (a staging
+     * stage caps an applied output), Thermal derate, Power cap, Running, Idle.
+     *
+     * <p>Text is rebuilt only when the decision's subjects change, so an unchanged state allocates nothing.
      */
     private void updateReason(
             List<CandidateOutput> candidates,
             List<CandidateOutput> selected,
             Map<Object, Long> reservations) {
         if (faultedThisCycle) {
-            setReason(REASON_FAULT, null, lastFault);
+            setReason(REASON_FAULT, null, lastFault, 0);
+            return;
+        }
+        String blocked = applier.blockedBy();
+        if (!blocked.isEmpty()) {
+            setReason(REASON_BLOCKED, blocked, null, 0);
             return;
         }
         for (int candidateIndex = 0; candidateIndex < candidates.size(); candidateIndex++) {
@@ -633,18 +653,50 @@ final class MechanismRuntime {
                 MotorDevice motor = motorAt(request, motorIndex);
                 long reserved = reservations.getOrDefault(motor, Long.MIN_VALUE);
                 if (candidate.recency() < reserved && !drivenBy(motor, selected)) {
-                    setReason(REASON_STARVED, leaseWithRecency(reserved), motor);
+                    setReason(REASON_STARVED, leaseWithRecency(reserved), motor, 0);
                     return;
                 }
             }
         }
-        if (!selected.isEmpty()) {
-            CandidateOutput winner = selected.get(0);
-            Object subject = "base".equals(winner.source()) ? action : leaseActionWithRecency(winner.recency());
-            setReason(REASON_RUNNING, subject, null);
+        if (selected.isEmpty()) {
+            setReason(candidates.isEmpty() ? REASON_IDLE : REASON_SUPERSEDED, null, null, 0);
             return;
         }
-        setReason(candidates.isEmpty() ? REASON_IDLE : REASON_SUPERSEDED, null, null);
+        String guard = applier.guardEdge();
+        if (!guard.isEmpty()) {
+            setReason(REASON_GUARD, guard, null, 0);
+            return;
+        }
+        Enum<?> stage = applier.activeStage();
+        if (stage != null) {
+            setReason(REASON_STAGE, stage, null, 0);
+            return;
+        }
+        int thermal = -1;
+        int power = -1;
+        if (electrical != null) {
+            for (int candidateIndex = 0; candidateIndex < selected.size(); candidateIndex++) {
+                OutputRequest request = selected.get(candidateIndex).output().request();
+                for (int motorIndex = 0; motorIndex < motorCount(request); motorIndex++) {
+                    MotorDevice motor = motorAt(request, motorIndex);
+                    int derate = electrical.thermalDeratePercent(motor);
+                    if (derate >= 0 && (thermal < 0 || derate < thermal)) thermal = derate;
+                    int cap = electrical.powerCapAmps(motor);
+                    if (cap >= 0 && (power < 0 || cap < power)) power = cap;
+                }
+            }
+        }
+        if (thermal >= 0) {
+            setReason(REASON_THERMAL, null, null, thermal);
+            return;
+        }
+        if (power >= 0) {
+            setReason(REASON_POWER, null, null, power);
+            return;
+        }
+        CandidateOutput winner = selected.get(0);
+        Object subject = "base".equals(winner.source()) ? action : leaseActionWithRecency(winner.recency());
+        setReason(REASON_RUNNING, subject, null, 0);
     }
 
     private static boolean drivenBy(MotorDevice motor, List<CandidateOutput> selected) {
@@ -670,23 +722,37 @@ final class MechanismRuntime {
         return lease == null ? action : lease.action();
     }
 
-    private void setReason(int kind, Object subject, Object detail) {
-        if (kind == reasonKind && subject == reasonSubject && detail == reasonDetail) return;
+    private void setReason(int kind, Object subject, Object detail, int number) {
+        if (kind == reasonKind && sameReasonValue(subject, reasonSubject) && number == reasonNumber
+                && sameReasonValue(detail, reasonDetail)) {
+            return;
+        }
         reasonKind = kind;
         reasonSubject = subject;
         reasonDetail = detail;
-        reasonText = describeReason(kind, subject, detail);
+        reasonNumber = number;
+        reasonText = describeReason(kind, subject, detail, number);
     }
 
-    private String describeReason(int kind, Object subject, Object detail) {
+    private static boolean sameReasonValue(Object value, Object previous) {
+        if (value == previous) return true;
+        return value instanceof String text && text.equals(previous);
+    }
+
+    private String describeReason(int kind, Object subject, Object detail, int number) {
         return switch (kind) {
             case REASON_DISABLED -> "Disabled";
             case REASON_FAULT -> "Fault: " + detail;
+            case REASON_BLOCKED -> "Blocked: " + subject + " constraint rejected target";
             case REASON_STARVED -> "Starved: newer lease "
                     + (subject instanceof ActiveLease lease ? actionName(lease.action()) : "unknown")
                     + " reserves " + outputResourceDescription(detail);
-            case REASON_RUNNING -> "Running: " + (subject instanceof Action running ? actionName(running) : "unknown");
             case REASON_SUPERSEDED -> "Superseded by newer action on shared resource";
+            case REASON_GUARD -> "Guard: at " + subject + " edge";
+            case REASON_STAGE -> "Stage " + ((Enum<?>) subject).name();
+            case REASON_THERMAL -> "Thermal derate " + number + "%";
+            case REASON_POWER -> "Power cap " + number + " A";
+            case REASON_RUNNING -> "Running: " + (subject instanceof Action running ? actionName(running) : "unknown");
             default -> "Idle";
         };
     }
@@ -697,6 +763,11 @@ final class MechanismRuntime {
     private static final int REASON_STARVED = 3;
     private static final int REASON_RUNNING = 4;
     private static final int REASON_SUPERSEDED = 5;
+    private static final int REASON_BLOCKED = 6;
+    private static final int REASON_GUARD = 7;
+    private static final int REASON_STAGE = 8;
+    private static final int REASON_THERMAL = 9;
+    private static final int REASON_POWER = 10;
 
     private MechanismTraceSnapshot buildTrace(
             MechanismContext context,

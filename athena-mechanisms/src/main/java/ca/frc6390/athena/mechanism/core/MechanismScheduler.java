@@ -1320,8 +1320,10 @@ public final class MechanismScheduler {
             // motor command below.
             power.cycle(powerMotors, actionContext, resolver.overrides(), safeMechanismContext.nowSeconds());
             Map<ControlBinding<?>, StageCaps> caps = stageCapsByControl();
+            Map<ControlBinding<?>, Enum<?>> stageNames = stageNamesByControl(caps);
             for (MechanismRuntime runtime : runtimes.values()) {
-                runtime.stageCaps(caps);
+                runtime.stageCaps(caps, stageNames);
+                runtime.electrical(power);
             }
             for (MechanismRuntime runtime : runtimes.values()) {
                 Set<MotorDevice> driven;
@@ -1422,6 +1424,18 @@ public final class MechanismScheduler {
                 recordFault("staging " + staging.currentStage(), exception);
             }
         }
+    }
+
+    /** Maps each capped binding to the stage constant that set its caps, for the State/Reason explanation. */
+    private Map<ControlBinding<?>, Enum<?>> stageNamesByControl(Map<ControlBinding<?>, StageCaps> caps) {
+        if (caps.isEmpty()) return Map.of();
+        Map<ControlBinding<?>, Enum<?>> names = new IdentityHashMap<>();
+        for (Staging<?> staging : stagings) {
+            for (StageModifier modifier : staging.activeModifiers()) {
+                names.put(modifier.binding(), staging.currentStage());
+            }
+        }
+        return names;
     }
 
     private Map<ControlBinding<?>, StageCaps> stageCapsByControl() {

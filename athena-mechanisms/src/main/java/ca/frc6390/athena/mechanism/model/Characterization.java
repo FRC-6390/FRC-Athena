@@ -642,23 +642,34 @@ public final class Characterization implements TelemetrySource {
         }
     }
 
-    /** Receives the SysId routine's samples and converts them, with acceleration, into run data. */
+    /**
+     * Receives the SysId routine's samples and converts them into run data. A sample's state is measured after
+     * the previous cycle's command has acted, so the acceleration between two samples is produced by the earlier
+     * command. Each run row therefore pairs that command with the acceleration of its interval, and with the
+     * interval's mean position and velocity. The first sample of a run has no interval and is not stored.
+     */
     private final class RunLog implements SysIdLog {
         @Override
         public synchronized void record(SysIdSample sample) {
             double now = state.clock.getAsDouble();
-            double acceleration = 0.0;
+            CharacterizationSample raw = new CharacterizationSample(sample.state(), now,
+                    sample.appliedVoltage(), sample.position(), sample.velocity(), 0.0, sample.currentAmps());
             CharacterizationSample previous = state.previousRun;
-            if (previous != null && previous.state() == sample.state()) {
-                double dt = now - previous.timeSeconds();
-                if (dt > 1.0e-6) {
-                    acceleration = (sample.velocity() - previous.velocity()) / dt;
-                }
+            state.previousRun = raw;
+            if (previous == null || previous.state() != sample.state()) {
+                return;
             }
+            double dt = now - previous.timeSeconds();
+            if (dt <= 1.0e-6) {
+                return;
+            }
+            double acceleration = (raw.velocity() - previous.velocity()) / dt;
             CharacterizationSample converted = new CharacterizationSample(sample.state(), now,
-                    sample.appliedVoltage(), sample.position(), sample.velocity(), acceleration,
-                    sample.currentAmps());
-            state.previousRun = converted;
+                    previous.voltage(),
+                    0.5 * (previous.position() + raw.position()),
+                    0.5 * (previous.velocity() + raw.velocity()),
+                    acceleration,
+                    previous.currentAmps());
             addBounded(state.runs, converted, RUN_CAPACITY);
         }
 

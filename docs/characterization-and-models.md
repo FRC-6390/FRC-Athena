@@ -44,6 +44,11 @@ dropped first).
 Positions are in rotations (rotary) or meters (linear). A typed binding converts its own unit to
 these base units first. Raw bindings use their values as they are.
 
+Run data pairs each interval's acceleration with the voltage that produced it. The mechanism's state is
+measured after the previous cycle's command has acted, so a row takes the previous command, the interval's
+mean position and velocity, and the acceleration from the two samples (I5). The first sample of each run has
+no interval and is not used.
+
 Feedforward is fitted by ordinary least squares on samples whose speed exceeds 0.02 units per second:
 
 ```
@@ -121,8 +126,16 @@ error. Until then the payload counts as external load.
 - `MechanismModel.feedforwardVolts(position, velocity, acceleration, directionHint)` predicts the volts.
   Static friction is used at rest, with the sign of `directionHint`. Kinetic friction is used while
   moving.
-- `SimModel.arm(motor).model(model)` takes the identified inertia. Other simulation parameters are not
-  yet used by the WPILib physics engine.
+- `SimModel.arm(motor).model(model)` applies the identified plant (I5). The WPILib physics engine then
+  simulates the mechanism the model describes: static friction holds the mechanism at rest until the drive
+  exceeds it, kinetic friction and kV act while it moves, kA sets the inertia, and gravity is
+  `kG cos(2 pi p + offset)` for rotary and constant `kG` for linear mechanisms (including any payload delta).
+  Volts become mechanism torque (rotary) or force (linear) through the model's motor constants, so the
+  inertia is `kA * n * G * Kt / (2 pi R)`, the relation the fit uses. The simulation runs in fixed substeps of
+  at most 1 ms. Limits:
+  - the friction-versus-position table and backlash are not simulated;
+  - the declared `momentOfInertia` and `gravity(...)` are not used once a plant is applied;
+  - linear plants convert force with a 0.025 m drum radius (the elevator default).
 
 ## Checks (B3)
 
@@ -188,4 +201,4 @@ encoder measures a distance, keeps 1. `gearRatio(...)` overrides either way.
 ## Not yet implemented
 
 - Thermal characterization and thermal parameters.
-- WPILib physics use of friction and gravity from the model (only inertia is applied). Tracked as I5.
+- Friction-versus-position and backlash in the simulated plant.

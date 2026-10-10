@@ -306,15 +306,24 @@ show no match identity.
 ### Why is this mechanism not moving?
 
 Each mechanism publishes `State/Reason`, a one-line summary of its output decision for the last cycle.
-It is updated only when its subject changes:
+It is updated only when its subject changes. When several causes apply, the first one in this list wins:
 
-- `Running: <action>`: the named action owns the outputs.
-- `Starved: newer lease <action> reserves <motor>`: an older request is blocked by a newer lease on a
-  shared motor.
-- `Superseded by newer action on shared resource`: an older candidate lost arbitration without a
-  lease conflict.
-- `Fault: ...`: the mechanism faulted this cycle and its outputs were neutralized.
-- `Disabled`, `Idle`: no action is running, or the robot is disabled.
+1. `Fault: ...`: the mechanism faulted this cycle and its outputs were neutralized (`State/Fault` carries the detail).
+2. `Disabled`: the robot is disabled.
+3. `Blocked: <constraint> constraint rejected target`: a `require`, `upper`, `lower` or other constraint refused the
+   target or output. The constraint kind is named.
+4. `Starved: newer lease <action> reserves <motor>`: an older request is blocked by a newer lease on a
+   shared motor.
+5. `Superseded by newer action on shared resource`: an older candidate lost arbitration without a
+   lease conflict.
+6. `Guard: at max edge` (or `min`): the output was clipped at a range edge.
+7. `Stage <CONSTANT>`: an active staging stage caps the applied output (`limitEffort`, `limitSpeed`, `limitAccel`).
+8. `Thermal derate NN%`: a motor the output drives is thermally derated; NN is the percent of its limit that remains.
+9. `Power cap NN A`: a power budget or profile cap limits a motor the output drives.
+10. `Running: <action>`: the named action owns the outputs.
+11. `Idle`: no action is running.
+
+The text is rebuilt only when the cause or its value changes, so an unchanged state allocates nothing.
 
 ## Autonomous preview
 
