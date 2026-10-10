@@ -8,7 +8,7 @@ import { createMockSource } from './mock';
 import { MockRobot, derate } from './mock-robot';
 import { encodeFrame, encodeDictionary, encodeMarker } from './encoder';
 import { decodeRecords } from './decoder';
-import { TYPE_TAG, type DecodedRecord, type SignalDescriptor } from './types';
+import { TYPE_TAG, type DecodedRecord, type SignalDescriptor, type SignalValue } from './types';
 
 function descriptor(signalId: number, path: string, extra: Partial<SignalDescriptor> = {}): SignalDescriptor {
   return {
@@ -21,9 +21,24 @@ function descriptor(signalId: number, path: string, extra: Partial<SignalDescrip
     writable: false,
     persisted: false,
     lockGroup: '',
-    lockState: 'unknown',
     structSchemaId: 0,
     ...extra
+  };
+}
+
+function frameOf(sequence: number, ts: number, entries: { signalId: number; typeTag: 1 | 2 | 3; value: SignalValue }[]): DecodedRecord {
+  return {
+    kind: 'frame',
+    frame: {
+      version: 2,
+      keyframe: false,
+      fragmented: false,
+      cycleTimestampMicros: ts,
+      sequence,
+      fragmentIndex: 0,
+      fragmentCount: 1,
+      entries
+    }
   };
 }
 
@@ -117,12 +132,65 @@ describe('ValueStore', () => {
     expect(store.metadata()).toEqual({ event: 'A', robot: 'R' });
   });
 
-  test('lock state survives a dictionary refresh for the same path', () => {
+  test('lock state is derived from the role-7 signal at athena/locks/<group>', () => {
+    const group = 'ca.frc6390.athena.Demo.InMatch';
     const store = new ValueStore();
-    store.apply({ kind: 'dictionary', entries: [descriptor(1, 'robot/a/Values/x', { writable: true })] });
-    store.setLockState(1, 'locked');
-    store.apply({ kind: 'dictionary', entries: [descriptor(1, 'robot/a/Values/x', { writable: true })] });
-    expect(store.descriptor(1)?.lockState).toBe('locked');
+    store.apply({
+      kind: 'dictionary',
+      entries: [
+        descriptor(1, 'robot/a/Values/x', { writable: true, lockGroup: group }),
+        descriptor(2, `athena/locks/${group}`, { typeTag: TYPE_TAG.bool, type: 'bool', role: 'lock' })
+      ]
+    });
+    expect(store.lockStateOf(1)).toBe('unknown');
+    store.apply(frameOf(1, 10, [{ signalId: 2, typeTag: TYPE_TAG.bool, value: true }]));
+    expect(store.lockStateOf(1)).toBe('locked');
+    store.apply(frameOf(2, 20, [{ signalId: 2, typeTag: TYPE_TAG.bool, value: false }]));
+    expect(store.lockStateOf(1)).toBe('open');
+    // Read-only and ungrouped signals have no lock state.
+    expect(store.lockStateOf(2)).toBe('unknown');
+  });
+
+  test('fragmented frames are reassembled by sequence before they reach the history', () => {
+    const store = new ValueStore();
+    store.apply({ kind: 'dictionary', entries: [descriptor(1, 'robot/a/Values/x'), descriptor(2, 'robot/a/Values/y')] });
+    const fragment = (index: number, entries: { signalId: number; typeTag: 3; value: number }[]): DecodedRecord => ({
+      kind: 'frame',
+      frame: {
+        version: 2,
+        keyframe: false,
+        fragmented: true,
+        cycleTimestampMicros: 100,
+        sequence: 7,
+        fragmentIndex: index,
+        fragmentCount: 2,
+        entries
+      }
+    });
+    store.apply(fragment(1, [{ signalId: 2, typeTag: 3, value: 2 }]));
+    expect(store.latestSample(2)).toBeUndefined();
+    store.apply(fragment(0, [{ signalId: 1, typeTag: 3, value: 1 }]));
+    expect(store.latestSample(1)?.value).toBe(1);
+    expect(store.latestSample(2)?.value).toBe(2);
+    expect(store.sequenceGaps).toBe(0);
+  });
+
+  test('i64 values beyond 2^53 stay exact as bigints', async () => {
+    const big = 9007199254740993n; // 2^53 + 1
+    const bytes = new Uint8Array([
+      ...encodeDictionary([{ signalId: 1, path: 'robot/a/Values/n', typeTag: TYPE_TAG.i64 }]),
+      ...encodeFrame({
+        keyframe: true,
+        cycleTimestampMicros: 1,
+        sequence: 0,
+        entries: [
+          { signalId: 1, typeTag: TYPE_TAG.i64, value: big },
+        ]
+      })
+    ]);
+    const store = new ValueStore();
+    store.applyAll(await decodeRecords(bytes));
+    expect(store.latestSample(1)?.value).toBe(big);
   });
 
   test('subscribers are notified and the version advances', () => {
@@ -165,7 +233,8 @@ describe('mock robot', () => {
       accepted: false,
       reason: 'rejected: locked (InMatch)'
     });
-    expect(robot.lockStateOf('robot/turret/Values/target')).toBe('locked');
+    robot.step(0);
+    expect(robot.value('athena/locks/ca.frc6390.athena.mock.InMatch')).toBe(true);
     // Constraints use the Never group and stay writable during a match.
     expect(robot.write('robot/turret/Controls/position/Constraints/maxVelocity', 90)).toEqual({
       accepted: true,
@@ -206,6 +275,7 @@ describe('mock source session', () => {
     expect(store.latestSample(target!.signalId)).toBeDefined();
     const reply = await session.commands.write(target!.signalId, 15);
     expect(reply.accepted).toBe(true);
+    expect(reply.actualValue).toBe(15);
     expect(store.reply(target!.signalId)?.accepted).toBe(true);
     session.stop();
   });

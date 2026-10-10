@@ -24,7 +24,19 @@
     void live.current;
     return session.store.reply(signal.signalId);
   });
+  const lockState = $derived.by(() => {
+    void live.current;
+    return session.store.lockStateOf(signal.signalId);
+  });
   const editable = $derived(signal.writable);
+
+  // A rejected write restores the displayed value to what the robot reports (E1-W write replies).
+  $effect(() => {
+    if (reply && reply.op === 'write' && !reply.accepted) {
+      const actual = reply.actualValue ?? latest;
+      draft = actual === undefined || actual === null ? '' : String(actual);
+    }
+  });
   const isBool = $derived(signal.type === 'bool');
 
   /** Writes are always sent. Lock state is shown, never used to block the send (E5). */
@@ -45,12 +57,12 @@
   }
 </script>
 
-<div class="field" class:field-locked={signal.lockState === 'locked'} data-path={signal.path}>
+<div class="field" class:field-locked={lockState === 'locked'} data-path={signal.path}>
   <div class="field-head">
     <span class="field-name" title={signal.path}>{label ?? signal.localPath}</span>
     {#if signal.writable}
-      <span class="badge lock lock-{signal.lockState}" title={signal.lockGroup ? `lock group ${signal.lockGroup}` : 'no lock group'}>
-        {signal.lockState === 'locked' ? 'locked' : signal.lockState === 'open' ? 'open' : 'writable'}
+      <span class="badge lock lock-{lockState}" title={signal.lockGroup ? `lock group ${signal.lockGroup}` : 'no lock group'}>
+        {lockState === 'locked' ? 'locked' : lockState === 'open' ? 'open' : 'writable'}
       </span>
     {/if}
     {#if signal.persisted}

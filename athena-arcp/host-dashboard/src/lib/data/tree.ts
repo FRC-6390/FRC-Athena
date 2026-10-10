@@ -40,7 +40,8 @@ export function buildMechanismTree(signals: readonly SignalDescriptor[]): Mechan
   };
 
   for (const signal of signals) {
-    if (signal.mechanismPath === '') continue;
+    // Lock-state and system signals describe the robot, not a mechanism; they stay in the dictionary.
+    if (signal.mechanismPath === '' || signal.role === 'lock' || signal.role === 'system') continue;
     ensure(signal.mechanismPath).signals.push(signal);
   }
   for (const node of nodes.values()) {

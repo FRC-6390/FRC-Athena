@@ -3,21 +3,35 @@
  * flywheel. Produces plausible State/Values/Actions/Devices/Controls/Hooks signals and applies writes
  * with the same lock rules the robot enforces (A2, E5).
  */
-import { TYPE_TAG, type LockState, type SignalType, type SignalValue, type TypeTag } from './types';
+import {
+  LOCK_PATH_PREFIX,
+  TYPE_TAG,
+  type SignalRole,
+  type SignalType,
+  type SignalValue,
+  type TypeTag
+} from './types';
 
 export type MockSpec = {
   path: string;
   type: SignalType;
   typeTag: TypeTag;
   unit: string;
-  role: 'state' | 'value' | 'control' | 'device' | 'action' | 'marker';
+  role: SignalRole;
   writable: boolean;
   persisted: boolean;
   lockGroup: string;
 };
 
-const IN_MATCH = 'InMatch';
-const NEVER = 'Never';
+/** Lock groups are identified by fully qualified class names on the wire (E1-W). */
+const IN_MATCH = 'ca.frc6390.athena.mock.InMatch';
+const NEVER = 'ca.frc6390.athena.mock.Never';
+
+/** Simple name of a lock group, as shown to people (`InMatch`). */
+export function lockGroupSimpleName(group: string): string {
+  const dot = group.lastIndexOf('.');
+  return dot < 0 ? group : group.slice(dot + 1);
+}
 
 function num(path: string, unit: string, role: MockSpec['role'], extra: Partial<MockSpec> = {}): MockSpec {
   return { path, type: 'f64', typeTag: TYPE_TAG.f64, unit, role, writable: false, persisted: false, lockGroup: '', ...extra };
@@ -80,8 +94,37 @@ export const MOCK_SPECS: MockSpec[] = [
   gain('robot/shooter/Controls/velocity/kP'),
   gain('robot/shooter/Controls/velocity/kV'),
   limit('robot/shooter/Controls/velocity/Constraints/maxAcceleration', 'rpm/s'),
-  flag('robot/shooter/Hooks/readyToShoot', 'state')
+  flag('robot/shooter/Hooks/readyToShoot', 'hook'),
+  struct('robot/drive/Values/pose', 'struct:Pose2d', 'value'),
+  text('athena/mode/operator', 'system'),
+  num('athena/power/battery/voltage', 'V', 'system'),
+  num('athena/power/turret/current', 'A', 'system'),
+  num('athena/power/shooter/current', 'A', 'system'),
+  num('athena/power/drive/current', 'A', 'system')
 ];
+
+/** Pose2d struct type name and WPILib layout: x, y (metres), rotation (radians), 24 bytes. */
+export const POSE2D_SCHEMA_ID = 1;
+export const POSE2D_SCHEMA_TEXT = 'double x;double y;double rot';
+
+/** Struct-typed mock signal (E1-W typeTag 9). */
+function struct(path: string, type: `struct:${string}`, role: SignalRole): MockSpec {
+  return { path, type, typeTag: TYPE_TAG.struct, unit: '', role, writable: false, persisted: false, lockGroup: '' };
+}
+
+/** Encodes a Pose2d in WPILib struct layout. */
+export function encodePose2d(x: number, y: number, rotation: number): Uint8Array {
+  const view = new DataView(new ArrayBuffer(24));
+  view.setFloat64(0, x, true);
+  view.setFloat64(8, y, true);
+  view.setFloat64(16, rotation, true);
+  return new Uint8Array(view.buffer);
+}
+
+/** Lock-state signal for a group: boolean, role `lock`, read-only (E1-W). */
+export function lockSpecFor(group: string): MockSpec {
+  return flag(LOCK_PATH_PREFIX + group, 'lock');
+}
 
 export const MATCH_PERIOD_SECONDS = 25;
 const TURRET_SPEED_LIMIT = 120;
@@ -95,6 +138,8 @@ export class MockRobot {
   matchActive = false;
   private readonly values = new Map<string, SignalValue>();
   private readonly specs = new Map<string, MockSpec>();
+  /** Lock-state signal path to the group it reports. */
+  private readonly lockPaths = new Map<string, string>();
   private homingUntil = -1;
   private turretPosition = 0;
   private turretReference = 0;
@@ -106,11 +151,23 @@ export class MockRobot {
   private shooterTemp = TEMP_AMBIENT;
   private nextMatchToggle = MATCH_PERIOD_SECONDS;
   private seed = 7;
+  private pose = { x: 1.5, y: 2.0, rotation: 0 };
 
-  constructor(readonly specList: readonly MockSpec[] = MOCK_SPECS) {
-    for (const spec of specList) {
+  readonly specList: readonly MockSpec[];
+
+  constructor(specs: readonly MockSpec[] = MOCK_SPECS) {
+    // Every lock group used by a writable signal gets its own role-7 signal, as the robot publishes it.
+    const groups = [...new Set(specs.filter((s) => s.writable && s.lockGroup).map((s) => s.lockGroup))];
+    const lockSpecs = groups.map(lockSpecFor).filter((spec) => !specs.some((s) => s.path === spec.path));
+    this.specList = [...specs, ...lockSpecs];
+    for (const spec of this.specList) {
       this.specs.set(spec.path, spec);
       this.values.set(spec.path, defaultValue(spec));
+    }
+    for (const group of groups) {
+      const path = LOCK_PATH_PREFIX + group;
+      this.lockPaths.set(path, group);
+      this.values.set(path, this.isLocked(group));
     }
     this.values.set('robot/turret/Values/target', 20);
     this.values.set('robot/turret/Controls/position/kP', 4.0);
@@ -137,13 +194,6 @@ export class MockRobot {
     return this.values.get(path) ?? '';
   }
 
-  /** Lock state of a signal at the current time; `unknown` for signals without a lock group. */
-  lockStateOf(path: string): LockState {
-    const spec = this.specs.get(path);
-    if (!spec || !spec.writable) return 'unknown';
-    return this.isLocked(spec.lockGroup) ? 'locked' : 'open';
-  }
-
   private isLocked(group: string): boolean {
     return group === IN_MATCH && this.matchActive;
   }
@@ -159,7 +209,35 @@ export class MockRobot {
     }
     this.stepTurret(dt);
     this.stepShooter(dt);
+    for (const [path, group] of this.lockPaths) this.values.set(path, this.isLocked(group));
+    this.stepPower();
+    this.stepDrive();
+    this.values.set('athena/mode/operator', this.matchActive ? 'Teleop' : 'Disabled');
     return events;
+  }
+
+  /** Battery sags with total current; per-consumer currents come from the mechanism models. */
+  private stepPower(): void {
+    const turret = this.values.get('robot/turret/Devices/motor/current') as number;
+    const shooter = this.values.get('robot/shooter/Devices/motor/current') as number;
+    const drive = this.matchActive ? 22 + Math.sin(this.time * 2) * 6 : 1.5;
+    const total = turret + shooter + drive;
+    this.values.set('athena/power/turret/current', turret);
+    this.values.set('athena/power/shooter/current', shooter);
+    this.values.set('athena/power/drive/current', drive);
+    this.values.set('athena/power/battery/voltage', 12.8 - total * 0.012 + this.noise() * 0.2);
+  }
+
+  /** Drive pose circles the field centre during a match and holds still otherwise. */
+  private stepDrive(): void {
+    if (this.matchActive) {
+      const angle = this.time * 0.35;
+      this.pose = { x: 8.775 + Math.cos(angle) * 3.2, y: 4.03 + Math.sin(angle) * 1.8, rotation: angle + Math.PI / 2 };
+    }
+    this.values.set('robot/drive/Values/pose', {
+      schemaId: POSE2D_SCHEMA_ID,
+      bytes: encodePose2d(this.pose.x, this.pose.y, this.pose.rotation)
+    });
   }
 
   private noise(): number {
@@ -280,7 +358,7 @@ export class MockRobot {
     if (!spec) return { accepted: false, reason: 'rejected: unknown signal' };
     if (!spec.writable) return { accepted: false, reason: 'rejected: not writable' };
     if (spec.lockGroup && this.isLocked(spec.lockGroup)) {
-      return { accepted: false, reason: `rejected: locked (${spec.lockGroup})` };
+      return { accepted: false, reason: `rejected: locked (${lockGroupSimpleName(spec.lockGroup)})` };
     }
     const expected = spec.type === 'f64' ? 'number' : spec.type === 'bool' ? 'boolean' : 'string';
     if (typeof value !== expected) {
@@ -300,6 +378,7 @@ function defaultValue(spec: MockSpec): SignalValue {
     case 'f64':
       return 0;
     default:
+      if (spec.type.startsWith('struct:')) return { schemaId: POSE2D_SCHEMA_ID, bytes: encodePose2d(0, 0, 0) };
       return 0;
   }
 }

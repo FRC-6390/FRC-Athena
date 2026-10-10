@@ -11,6 +11,7 @@ import {
   type DecodedRecord,
   type Frame,
   type FrameEntry,
+  type I64Value,
   type Marker,
   type SignalDescriptor,
   type SignalType,
@@ -121,13 +122,21 @@ function readTypeTag(r: WireReader): TypeTag {
   return tag as TypeTag;
 }
 
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
+
+/** Exact i64s become numbers; anything outside the safe range stays a bigint (no silent rounding). */
+export function normalizeI64(value: bigint): I64Value {
+  return value >= MIN_SAFE && value <= MAX_SAFE ? Number(value) : value;
+}
+
 /** Reads one typed value (the part after `varint signalId, u8 typeTag`). */
 export function readValue(r: WireReader, tag: TypeTag): SignalValue {
   switch (tag) {
     case TYPE_TAG.bool:
       return r.u8() !== 0;
     case TYPE_TAG.i64:
-      return r.zigzag();
+      return normalizeI64(r.zigzagBig());
     case TYPE_TAG.f64:
       return r.f64();
     case TYPE_TAG.string:
@@ -140,8 +149,8 @@ export function readValue(r: WireReader, tag: TypeTag): SignalValue {
     }
     case TYPE_TAG['i64[]']: {
       const n = r.count();
-      const out: number[] = [];
-      for (let i = 0; i < n; i++) out.push(r.zigzag());
+      const out: I64Value[] = [];
+      for (let i = 0; i < n; i++) out.push(normalizeI64(r.zigzagBig()));
       return out;
     }
     case TYPE_TAG['f64[]']: {
@@ -224,11 +233,10 @@ export function decodeDictionary(
       type,
       typeTag,
       unit,
-      role: ROLE_BY_CODE[roleCode] ?? 'unknown',
+      role: ROLE_BY_CODE[roleCode] ?? 'unspecified',
       writable: (flags & DICTIONARY_FLAG_WRITABLE) !== 0,
       persisted: (flags & DICTIONARY_FLAG_PERSISTED) !== 0,
       lockGroup,
-      lockState: 'unknown',
       structSchemaId
     });
   }

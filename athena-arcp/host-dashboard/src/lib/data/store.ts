@@ -1,6 +1,8 @@
 import type { CommandReply } from './commands';
+import { FrameAssembler } from './frames';
 import { RingBuffer } from './ring';
 import {
+  LOCK_PATH_PREFIX,
   type DecodedRecord,
   type Frame,
   type LockState,
@@ -23,7 +25,7 @@ export type StoreListener = () => void;
 /**
  * Client value store. Holds the dictionary, the latest value and a bounded history per signal,
  * the marker list and last command replies. Listeners are notified once per applied record; UI code
- * should coalesce notifications (see `svelte.svelte.ts`).
+ * should coalesce notifications (see `live.svelte.ts`).
  */
 export class ValueStore {
   private readonly historyCapacity: number;
@@ -34,6 +36,7 @@ export class ValueStore {
   private readonly history = new Map<number, RingBuffer<Sample>>();
   private readonly replies = new Map<number, CommandReply>();
   private readonly listeners = new Set<StoreListener>();
+  private readonly assembler = new FrameAssembler();
   private markerList: Marker[] = [];
   private metadataPairs: Record<string, string> = {};
   private lastSequence: number | null = null;
@@ -85,24 +88,23 @@ export class ValueStore {
     for (const record of records) this.apply(record);
   }
 
-  /** Replaces the dictionary. Lock state of unchanged ids is kept. */
+  /** Replaces the dictionary. History of unchanged ids is kept. */
   private applyDictionary(entries: SignalDescriptor[]): void {
-    const previous = new Map(this.signals);
     this.signals.clear();
     this.byPath.clear();
     for (const entry of entries) {
-      const prior = previous.get(entry.signalId);
-      const descriptor = prior && prior.path === entry.path ? { ...entry, lockState: prior.lockState } : entry;
-      this.signals.set(descriptor.signalId, descriptor);
-      this.byPath.set(descriptor.path, descriptor);
-      if (!this.history.has(descriptor.signalId)) {
-        this.history.set(descriptor.signalId, new RingBuffer<Sample>(this.historyCapacity));
+      this.signals.set(entry.signalId, entry);
+      this.byPath.set(entry.path, entry);
+      if (!this.history.has(entry.signalId)) {
+        this.history.set(entry.signalId, new RingBuffer<Sample>(this.historyCapacity));
       }
     }
   }
 
-  private applyFrame(frame: Frame): void {
-    if (this.lastSequence !== null && frame.sequence > this.lastSequence + 1 && !frame.fragmented) {
+  private applyFrame(incoming: Frame): void {
+    const frame = this.assembler.push(incoming);
+    if (!frame) return;
+    if (this.lastSequence !== null && frame.sequence > this.lastSequence + 1) {
       this.sequenceGaps += frame.sequence - this.lastSequence - 1;
     }
     this.lastSequence = frame.sequence;
@@ -124,16 +126,7 @@ export class ValueStore {
     }
   }
 
-  /** Sets the lock state of a writable signal (A2). Sources call this; UI only displays it. */
-  setLockState(signalId: number, state: LockState): void {
-    const descriptor = this.signals.get(signalId);
-    if (!descriptor || descriptor.lockState === state) return;
-    const updated = { ...descriptor, lockState: state };
-    this.signals.set(signalId, updated);
-    this.byPath.set(updated.path, updated);
-    this.notify();
-  }
-
+  /** Stores the robot's reply for the signal (latest reply wins). */
   recordReply(reply: CommandReply): void {
     this.replies.set(reply.signalId, reply);
     this.notify();
@@ -160,6 +153,21 @@ export class ValueStore {
 
   latestSample(signalId: number): Sample | undefined {
     return this.latest.get(signalId);
+  }
+
+  /**
+   * Lock state of a writable signal (A2, E1-W "Lock state on the wire"): the role-7 boolean at
+   * `athena/locks/<lockGroup>` (true = locked). `unknown` when the signal has no lock group or the lock
+   * signal has not been seen. The result is informational; it never blocks a write (E5).
+   */
+  lockStateOf(signalId: number): LockState {
+    const descriptor = this.signals.get(signalId);
+    if (!descriptor || !descriptor.writable || descriptor.lockGroup === '') return 'unknown';
+    const lock = this.byPath.get(LOCK_PATH_PREFIX + descriptor.lockGroup);
+    if (!lock) return 'unknown';
+    const sample = this.latest.get(lock.signalId);
+    if (!sample || typeof sample.value !== 'boolean') return 'unknown';
+    return sample.value ? 'locked' : 'open';
   }
 
   /** Samples oldest to newest. */

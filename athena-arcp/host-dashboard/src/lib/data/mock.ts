@@ -2,10 +2,18 @@
  * Mock data source: a simulated turret and shooter that runs without a robot. Frames are encoded with
  * the E1-W encoder and decoded again, so the mock exercises the same byte path as a real stream.
  */
-import { encodeDictionary, encodeFrame, encodeMarker, encodeMetadata, concat, type FrameInput } from './encoder';
+import {
+  concat,
+  encodeDictionary,
+  encodeFrame,
+  encodeMarker,
+  encodeMetadata,
+  encodeStructSchema,
+  type FrameInput
+} from './encoder';
 import { decodeRecords } from './decoder';
-import { MARKER_KIND, type LockState, type SignalValue } from './types';
-import { MOCK_SPECS, MockRobot, type MockSpec } from './mock-robot';
+import { MARKER_KIND, TYPE_TAG, type SignalValue } from './types';
+import { MOCK_SPECS, MockRobot, POSE2D_SCHEMA_ID, POSE2D_SCHEMA_TEXT, type MockSpec } from './mock-robot';
 import type { CommandReply, RobotCommands } from './commands';
 import type { DataSource, SourceSink } from './source';
 import { MECHANISM_GROUPS } from './path';
@@ -27,37 +35,45 @@ export function createMockSource(options: MockSourceOptions = {}): DataSource {
   specs.forEach((spec, index) => idByPath.set(spec.path, index + 1));
   const pathById = new Map([...idByPath].map(([path, id]) => [id, path]));
   const lastSent = new Map<number, SignalValue>();
-  const lastLock = new Map<number, LockState>();
 
   let timer: ReturnType<typeof setInterval> | null = null;
   let sink: SourceSink | null = null;
   let cycle = 0;
   let pending: Promise<void> = Promise.resolve();
 
+  /** Builds the reply the robot would send. `actualValue` is what the robot holds after the command. */
   const toReply = (
+    requestId: number,
     op: CommandReply['op'],
     signalId: number,
-    result: { accepted: boolean; reason: string | null }
+    result: { accepted: boolean; reason: string | null },
+    actualValue: SignalValue | null
   ): CommandReply => ({
+    requestId,
     op,
     signalId,
     accepted: result.accepted,
-    reason: result.reason,
+    reason: result.reason ?? '',
+    actualValue,
     receivedAtMs: Date.now()
   });
 
+  const unknown = { accepted: false, reason: 'rejected: unknown signal' };
+
   const commands: RobotCommands = {
-    async run(signalId) {
+    async run(requestId, signalId) {
       const path = pathById.get(signalId);
-      return toReply('run', signalId, path ? robot.run(path) : { accepted: false, reason: 'rejected: unknown signal' });
+      return toReply(requestId, 'run', signalId, path ? robot.run(path) : unknown, null);
     },
-    async cancel(signalId) {
+    async cancel(requestId, signalId) {
       const path = pathById.get(signalId);
-      return toReply('cancel', signalId, path ? robot.cancel(path) : { accepted: false, reason: 'rejected: unknown signal' });
+      return toReply(requestId, 'cancel', signalId, path ? robot.cancel(path) : unknown, null);
     },
-    async write(signalId, value) {
+    async write(requestId, signalId, value) {
       const path = pathById.get(signalId);
-      return toReply('write', signalId, path ? robot.write(path, value) : { accepted: false, reason: 'rejected: unknown signal' });
+      if (!path) return toReply(requestId, 'write', signalId, unknown, null);
+      const result = robot.write(path, value);
+      return toReply(requestId, 'write', signalId, result, robot.value(path));
     }
   };
 
@@ -71,11 +87,13 @@ export function createMockSource(options: MockSourceOptions = {}): DataSource {
       role: spec.role,
       writable: spec.writable,
       persisted: spec.persisted,
-      lockGroup: spec.lockGroup
+      lockGroup: spec.lockGroup,
+      structSchemaId: spec.typeTag === TYPE_TAG.struct ? POSE2D_SCHEMA_ID : 0
     }));
     return concat([
       encodeMetadata({ robot: 'Mock robot', event: 'Simulation', athenaVersion: 'mock', groups: MECHANISM_GROUPS.join(',') }),
       encodeDictionary(entries),
+      encodeStructSchema(POSE2D_SCHEMA_ID, 'Pose2d', POSE2D_SCHEMA_TEXT),
       encodeMarker(0, MARKER_KIND.BOOT, 'mock robot started')
     ]);
   }
@@ -108,32 +126,18 @@ export function createMockSource(options: MockSourceOptions = {}): DataSource {
     return concat(parts);
   }
 
-  function emitLockStates(): void {
-    if (!sink) return;
-    for (const spec of specs) {
-      if (!spec.writable) continue;
-      const id = idByPath.get(spec.path) as number;
-      const state = robot.lockStateOf(spec.path);
-      if (lastLock.get(id) !== state) {
-        lastLock.set(id, state);
-        sink.lockState(id, state);
-      }
-    }
-  }
-
   /** Decodes bytes in order and forwards the records. Chained so frames never overtake each other. */
-  function deliver(bytes: Uint8Array, after: () => void = () => undefined): void {
+  function deliver(bytes: Uint8Array): void {
     pending = pending.then(() =>
       decodeRecords(bytes).then((records) => {
         sink?.records(records);
-        after();
       })
     );
   }
 
   function tick(): void {
     const events = robot.step(tickMs / 1000);
-    deliver(cycleBytes(events), emitLockStates);
+    deliver(cycleBytes(events));
   }
 
   return {
@@ -143,8 +147,7 @@ export function createMockSource(options: MockSourceOptions = {}): DataSource {
       sink = nextSink;
       cycle = 0;
       lastSent.clear();
-      lastLock.clear();
-      deliver(bootstrapBytes(), emitLockStates);
+      deliver(bootstrapBytes());
       timer = setInterval(tick, tickMs);
     },
     stop() {

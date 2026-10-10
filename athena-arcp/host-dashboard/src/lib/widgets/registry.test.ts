@@ -19,7 +19,6 @@ function signal(
     writable: options.writable ?? false,
     persisted: false,
     lockGroup: '',
-    lockState: 'unknown',
     structSchemaId: 0
   };
 }
