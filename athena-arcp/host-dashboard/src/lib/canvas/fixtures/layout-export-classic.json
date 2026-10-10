@@ -1,0 +1,536 @@
+{
+  "format": "arcp.host.layout.export",
+  "version": 1,
+  "exported_at": "2026-10-10T07:20:35.823Z",
+  "layout": {
+    "activeTabId": "tab-1791616835822-piwmzm",
+    "tabs": [
+      {
+        "id": "tab-1791616835822-piwmzm",
+        "name": "Main",
+        "widgets": [
+          {
+            "id": "widget-1791616835821-ihxe70",
+            "signalId": 0,
+            "kind": "layout_list",
+            "title": "Readouts",
+            "layout": {
+              "x": 1,
+              "y": 1,
+              "w": 3,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-mh9o4e",
+            "signalId": 0,
+            "kind": "layout_grid",
+            "title": "Drive grid",
+            "layout": {
+              "x": 8,
+              "y": 1,
+              "w": 4,
+              "h": 2
+            },
+            "config": {
+              "columns": 3,
+              "rows": 2,
+              "autoSize": false
+            }
+          },
+          {
+            "id": "widget-1791616835822-x6nooh",
+            "signalId": 0,
+            "kind": "layout_accordion",
+            "title": "Advanced",
+            "layout": {
+              "x": 1,
+              "y": 8,
+              "w": 4,
+              "h": 3
+            },
+            "config": {
+              "collapsed": true
+            }
+          },
+          {
+            "id": "widget-1791616835822-8tr6gp",
+            "signalId": 0,
+            "kind": "layout_title",
+            "title": "Turret",
+            "layout": {
+              "x": 14,
+              "y": 1,
+              "w": 6,
+              "h": 2
+            },
+            "config": {
+              "text": "Turret",
+              "color": "#f5f7fb"
+            }
+          },
+          {
+            "id": "widget-1791616835822-92dkrq",
+            "signalId": 0,
+            "kind": "layout_divider",
+            "title": "Divider",
+            "layout": {
+              "x": 14,
+              "y": 4,
+              "w": 4,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-12ce9v",
+            "signalId": 0,
+            "kind": "layout_spacer",
+            "title": "Spacer",
+            "layout": {
+              "x": 14,
+              "y": 5,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-884xq6",
+            "signalId": 0,
+            "kind": "layout_section",
+            "title": "Section Header",
+            "layout": {
+              "x": 14,
+              "y": 6,
+              "w": 4,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-2ql5iy",
+            "signalId": 1,
+            "kind": "metric",
+            "title": "metric 0",
+            "layout": {
+              "x": 1,
+              "y": 20,
+              "w": 2,
+              "h": 1
+            },
+            "parentLayoutId": "widget-1791616835821-ihxe70"
+          },
+          {
+            "id": "widget-1791616835822-4i4l5b",
+            "signalId": 2,
+            "kind": "state",
+            "title": "state 1",
+            "layout": {
+              "x": 2,
+              "y": 21,
+              "w": 2,
+              "h": 1
+            },
+            "parentLayoutId": "widget-1791616835821-ihxe70"
+          },
+          {
+            "id": "widget-1791616835822-y6xdv5",
+            "signalId": 3,
+            "kind": "text",
+            "title": "text 2",
+            "layout": {
+              "x": 3,
+              "y": 22,
+              "w": 2,
+              "h": 1
+            },
+            "parentLayoutId": "widget-1791616835821-ihxe70"
+          },
+          {
+            "id": "widget-1791616835822-53msvu",
+            "signalId": 4,
+            "kind": "trend",
+            "title": "trend 3",
+            "layout": {
+              "x": 4,
+              "y": 23,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-1isbyg",
+            "signalId": 5,
+            "kind": "action",
+            "title": "action 4",
+            "layout": {
+              "x": 5,
+              "y": 24,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-l9f9ed",
+            "signalId": 6,
+            "kind": "tunable",
+            "title": "tunable 5",
+            "layout": {
+              "x": 6,
+              "y": 25,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-x86t4y",
+            "signalId": 7,
+            "kind": "toggle",
+            "title": "toggle 6",
+            "layout": {
+              "x": 7,
+              "y": 26,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-ew0c54",
+            "signalId": 8,
+            "kind": "button_group",
+            "title": "button_group 7",
+            "layout": {
+              "x": 8,
+              "y": 27,
+              "w": 3,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-7kqvh5",
+            "signalId": 9,
+            "kind": "radio",
+            "title": "radio 8",
+            "layout": {
+              "x": 11,
+              "y": 28,
+              "w": 3,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-yxzc0a",
+            "signalId": 10,
+            "kind": "input",
+            "title": "input 9",
+            "layout": {
+              "x": 14,
+              "y": 29,
+              "w": 3,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-pu7i0y",
+            "signalId": 1,
+            "kind": "textarea",
+            "title": "textarea 10",
+            "layout": {
+              "x": 11,
+              "y": 30,
+              "w": 4,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-wcdutz",
+            "signalId": 2,
+            "kind": "graph",
+            "title": "graph 11",
+            "layout": {
+              "x": 15,
+              "y": 31,
+              "w": 6,
+              "h": 3
+            },
+            "config": {
+              "showLegend": true,
+              "yMin": -1,
+              "yMax": 1,
+              "series": [
+                {
+                  "signalId": 1,
+                  "style": "line",
+                  "color": "#ff0000"
+                }
+              ]
+            }
+          },
+          {
+            "id": "widget-1791616835822-m33wse",
+            "signalId": 3,
+            "kind": "controller",
+            "title": "controller 12",
+            "layout": {
+              "x": 1,
+              "y": 32,
+              "w": 2,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-1791616835822-vb4co8",
+            "signalId": 4,
+            "kind": "bar",
+            "title": "bar 13",
+            "layout": {
+              "x": 3,
+              "y": 33,
+              "w": 2,
+              "h": 1
+            },
+            "config": {
+              "min": 0,
+              "max": 10
+            }
+          },
+          {
+            "id": "widget-1791616835822-83ltma",
+            "signalId": 5,
+            "kind": "dial",
+            "title": "dial 14",
+            "layout": {
+              "x": 3,
+              "y": 34,
+              "w": 2,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-yyd5z9",
+            "signalId": 6,
+            "kind": "compass",
+            "title": "compass 15",
+            "layout": {
+              "x": 5,
+              "y": 35,
+              "w": 2,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-lf9alg",
+            "signalId": 7,
+            "kind": "timer",
+            "title": "timer 16",
+            "layout": {
+              "x": 7,
+              "y": 36,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-v9eq1y",
+            "signalId": 8,
+            "kind": "dropdown",
+            "title": "dropdown 17",
+            "layout": {
+              "x": 6,
+              "y": 37,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-1791616835822-nq6lmr",
+            "signalId": 9,
+            "kind": "field",
+            "title": "field 18",
+            "layout": {
+              "x": 7,
+              "y": 38,
+              "w": 6,
+              "h": 4
+            }
+          },
+          {
+            "id": "widget-1791616835822-hh2mhb",
+            "signalId": 10,
+            "kind": "imu_3d",
+            "title": "imu_3d 19",
+            "layout": {
+              "x": 13,
+              "y": 39,
+              "w": 4,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-1791616835822-kufni1",
+            "signalId": 1,
+            "kind": "mech2d",
+            "title": "mech2d 20",
+            "layout": {
+              "x": 17,
+              "y": 40,
+              "w": 4,
+              "h": 4
+            }
+          },
+          {
+            "id": "widget-1791616835822-u2ua3z",
+            "signalId": 2,
+            "kind": "swerve_module",
+            "title": "swerve_module 21",
+            "layout": {
+              "x": 21,
+              "y": 41,
+              "w": 3,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-1791616835822-40k50d",
+            "signalId": 3,
+            "kind": "swerve_drive",
+            "title": "swerve_drive 22",
+            "layout": {
+              "x": 11,
+              "y": 42,
+              "w": 6,
+              "h": 4
+            }
+          },
+          {
+            "id": "widget-1791616835822-q8ykif",
+            "signalId": 4,
+            "kind": "differential_drive",
+            "title": "differential_drive 23",
+            "layout": {
+              "x": 1,
+              "y": 44,
+              "w": 5,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-1791616835822-1d0496",
+            "signalId": 5,
+            "kind": "status_matrix",
+            "title": "status_matrix 24",
+            "layout": {
+              "x": 6,
+              "y": 44,
+              "w": 4,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-1791616835822-0u689f",
+            "signalId": 6,
+            "kind": "camera_overlay",
+            "title": "camera_overlay 25",
+            "layout": {
+              "x": 17,
+              "y": 45,
+              "w": 6,
+              "h": 4
+            }
+          },
+          {
+            "id": "widget-1791616835822-v7dwjd",
+            "signalId": 7,
+            "kind": "state_machine",
+            "title": "state_machine 26",
+            "layout": {
+              "x": 10,
+              "y": 46,
+              "w": 3,
+              "h": 4
+            }
+          },
+          {
+            "id": "widget-1791616835822-mhym5o",
+            "signalId": 8,
+            "kind": "dio",
+            "title": "dio 27",
+            "layout": {
+              "x": 4,
+              "y": 47,
+              "w": 4,
+              "h": 2
+            }
+          },
+          {
+            "id": "widget-1791616835822-hxz00i",
+            "signalId": 9,
+            "kind": "motor",
+            "title": "motor 28",
+            "layout": {
+              "x": 13,
+              "y": 48,
+              "w": 3,
+              "h": 5
+            }
+          },
+          {
+            "id": "widget-1791616835822-sjbkhy",
+            "signalId": 10,
+            "kind": "encoder",
+            "title": "encoder 29",
+            "layout": {
+              "x": 6,
+              "y": 49,
+              "w": 3,
+              "h": 7
+            }
+          },
+          {
+            "id": "widget-1791616835822-azjwl2",
+            "signalId": 1,
+            "kind": "imu",
+            "title": "imu 30",
+            "layout": {
+              "x": 16,
+              "y": 50,
+              "w": 5,
+              "h": 3
+            }
+          },
+          {
+            "id": "widget-orphan",
+            "signalId": 999,
+            "kind": "metric",
+            "title": "Orphan",
+            "layout": {
+              "x": 2,
+              "y": 60,
+              "w": 2,
+              "h": 1
+            }
+          },
+          {
+            "id": "widget-in-acc",
+            "signalId": 2,
+            "kind": "tunable",
+            "title": "In accordion",
+            "layout": {
+              "x": 1,
+              "y": 9,
+              "w": 4,
+              "h": 1
+            },
+            "parentLayoutId": "widget-1791616835822-x6nooh",
+            "config": {
+              "topicPath": "robot/turret/Values"
+            }
+          }
+        ]
+      },
+      {
+        "id": "tab-1791616835822-hrkdw9",
+        "name": "Pit",
+        "widgets": []
+      }
+    ]
+  }
+}
