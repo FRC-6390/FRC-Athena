@@ -23,6 +23,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, IsIconic, IsWindowVisible,
 };
 
+mod live;
 mod nt4_client;
 
 use nt4_client::spawn_nt4_client_worker;
@@ -2316,6 +2317,7 @@ fn read_total_jiffies() -> Option<u64> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppRuntime::default())
+        .manage(live::LiveRuntime::default())
         .invoke_handler(tauri::generate_handler![
             connect_arcp,
             disconnect_arcp,
@@ -2336,6 +2338,22 @@ pub fn run() {
             window_mode_snapshot,
             set_presentation_mode,
             set_driverstation_dock_mode,
+            live::live_connect,
+            live::live_disconnect,
+            live::live_status,
+            live::live_subscribe,
+            live::live_unsubscribe,
+            live::live_write,
+            live::live_action,
+            live::live_time_sync,
+            live::live_schema_request,
+            live::live_file_list,
+            live::live_file_download,
+            live::live_file_delete,
+            live::live_pull_tuning,
+            live::live_tuning_diff,
+            live::live_record_start,
+            live::live_record_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

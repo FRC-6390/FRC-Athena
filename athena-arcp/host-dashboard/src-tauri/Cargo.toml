@@ -19,6 +19,8 @@ tauri-build = { version = "2.5.5", features = [] }
 [dependencies]
 arcp-dashboard = { path = "../../rust/crates/arcp-dashboard" }
 arcp-core = { path = "../../rust/crates/arcp-core" }
+arcp-client = { path = "../../rust/crates/arcp-client" }
+base64 = "0.22"
 nt_client = { path = "../../rust/vendor/nt_client" }
 rmpv = "1.3.0"
 serde = { version = "1.0.228", features = ["derive"] }

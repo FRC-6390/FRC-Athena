@@ -54,8 +54,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "arcp-client"
+version = "0.1.0"
+dependencies = [
+ "arcp-core",
+]
+
+[[package]]
 name = "arcp-core"
 version = "0.1.0"
+dependencies = [
+ "flate2",
+]
 
 [[package]]
 name = "arcp-dashboard"
@@ -70,8 +80,10 @@ dependencies = [
 name = "arcp-host-dashboard"
 version = "0.1.0"
 dependencies = [
+ "arcp-client",
  "arcp-core",
  "arcp-dashboard",
+ "base64 0.22.1",
  "nt_client",
  "rmpv",
  "serde",
