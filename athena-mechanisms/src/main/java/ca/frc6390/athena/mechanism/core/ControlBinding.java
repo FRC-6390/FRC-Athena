@@ -25,6 +25,8 @@ import ca.frc6390.athena.mechanism.model.MonotonicClock;
 import ca.frc6390.athena.mechanism.model.SlipCheck;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.mechanism.staging.StageModifier;
+import ca.frc6390.athena.mechanism.effort.Effort;
+import ca.frc6390.athena.mechanism.effort.EffortLimit;
 import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
@@ -35,6 +37,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 /**
  * Declarative control binding for one actuator group.
@@ -389,6 +392,32 @@ public record ControlBinding<U extends Unit>(
 
     public List<MotorDevice> motors() {
         return motors;
+    }
+
+    /**
+     * Declares this binding's effort ceiling (B5): the largest torque, force or current it may drive.
+     * Declare it before creating the Actions that use the binding, because torque and force need its
+     * gearing. The ceiling is enforced as a voltage clamp on the software output path (B6), so it works
+     * with any controller. Load responses ({@link Effort#onLoad}) need a model on this binding
+     * ({@link #model(Characterization)} or {@link #model(MechanismModel)}) declared before this call. Without
+     * one, the responses are ignored and only the ceiling applies.
+     *
+     * @param effort ceiling and optional load responses
+     * @return binding with the ceiling
+     * @throws IllegalArgumentException when the units, gearing or motor constants do not suit this binding
+     */
+    public ControlBinding<U> effort(Effort effort) {
+        Objects.requireNonNull(effort, "effort");
+        Supplier<MechanismModel> model = null;
+        if (!effort.responses().isEmpty()) {
+            for (ControlLoop loop : loops) {
+                if (loop instanceof ModelFeedforward feedforward) {
+                    model = feedforward::currentModel;
+                }
+            }
+        }
+        double factor = Identification.baseFactor(unit);
+        return replaceLoop(EffortLimit.class, EffortLimit.declare(effort, motionKind(), motors(), model, factor));
     }
 
     /**

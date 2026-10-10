@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.mechanism.effort.EffortActions;
 import ca.frc6390.athena.mechanism.staging.Staging;
 import edu.wpi.first.units.Measure;
 import java.util.Objects;
@@ -46,6 +47,20 @@ public interface Action extends DeviceAction {
     default Action until(BooleanSupplier condition) {
         Objects.requireNonNull(condition, "condition");
         return until(ctx -> condition.getAsBoolean());
+    }
+
+    /**
+     * Limits the current this control Action may draw while it runs (B5). The value is a torque, force or
+     * current measure of the control's unit kind: rotary controls accept Torque or Current, linear controls
+     * Force or Current, and untyped controls Current only. Torque and force convert through the binding's
+     * declared gearing and the motors' constants. The limit is applied as a voltage clamp (B6), so it works
+     * with any controller. Composite Actions pass the limit to their control Actions.
+     *
+     * @param limit maximum effort
+     * @return Action with the limit
+     */
+    default Action effort(Measure<?> limit) {
+        return EffortActions.limit(this, limit);
     }
 
     /**

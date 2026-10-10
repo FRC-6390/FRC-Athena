@@ -5,6 +5,8 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.mechanism.effort.EffortCarrier;
+import ca.frc6390.athena.mechanism.effort.EffortRequest;
 import edu.wpi.first.units.Measure;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
@@ -399,19 +401,19 @@ public final class Actions {
         Objects.requireNonNull(action, "action");
         if (action instanceof ControlPosition position) {
             return new ControlPosition(position.control(), position.position(),
-                    merge(position.policy(), update));
+                    merge(position.policy(), update), position.effort());
         }
         if (action instanceof DynamicControlPosition position) {
             return new DynamicControlPosition(position.control(), position.positionSupplier(),
-                    merge(position.policy(), update));
+                    merge(position.policy(), update), position.effort());
         }
         if (action instanceof ControlVelocity velocity) {
             return new ControlVelocity(velocity.control(), velocity.velocity(),
-                    merge(velocity.policy(), update));
+                    merge(velocity.policy(), update), velocity.effort());
         }
         if (action instanceof DynamicControlVelocity velocity) {
             return new DynamicControlVelocity(velocity.control(), velocity.velocitySupplier(),
-                    merge(velocity.policy(), update));
+                    merge(velocity.policy(), update), velocity.effort());
         }
         throw new IllegalArgumentException("Retarget and release policies apply to one position or velocity control"
                 + " action. Set the binding default with ControlBinding.retarget(...) or ControlBinding.release(...).");
@@ -558,16 +560,28 @@ public final class Actions {
         }
     }
 
-    public record ControlPercent(ControlBinding<?> control, double percent) implements Action, Output.Percent {
+    public record ControlPercent(ControlBinding<?> control, double percent, EffortRequest effort) implements Action, Output.Percent, EffortCarrier {
+        /** Source-compatible constructor: the Action sets no effort limit. */
+        public ControlPercent(ControlBinding<?> control, double percent) {
+            this(control, percent, EffortRequest.NONE);
+        }
+
         public ControlPercent {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             requireControlOutput(control);
             requireFinite(percent, "Control percent");
         }
     }
 
-    public record DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier) implements Action, Output.Percent {
+    public record DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier, EffortRequest effort) implements Action, Output.Percent, EffortCarrier {
+        /** Source-compatible constructor: the Action sets no effort limit. */
+        public DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier) {
+            this(control, percentSupplier, EffortRequest.NONE);
+        }
+
         public DynamicControlPercent {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(percentSupplier, "percentSupplier");
             requireControlOutput(control);
@@ -579,16 +593,28 @@ public final class Actions {
         }
     }
 
-    public record ControlVoltage(ControlBinding<?> control, double volts) implements Action, Output.Voltage {
+    public record ControlVoltage(ControlBinding<?> control, double volts, EffortRequest effort) implements Action, Output.Voltage, EffortCarrier {
+        /** Source-compatible constructor: the Action sets no effort limit. */
+        public ControlVoltage(ControlBinding<?> control, double volts) {
+            this(control, volts, EffortRequest.NONE);
+        }
+
         public ControlVoltage {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             requireControlOutput(control);
             requireFinite(volts, "Control voltage");
         }
     }
 
-    public record DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier) implements Action, Output.Voltage {
+    public record DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier, EffortRequest effort) implements Action, Output.Voltage, EffortCarrier {
+        /** Source-compatible constructor: the Action sets no effort limit. */
+        public DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier) {
+            this(control, voltsSupplier, EffortRequest.NONE);
+        }
+
         public DynamicControlVoltage {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(voltsSupplier, "voltsSupplier");
             requireControlOutput(control);
@@ -625,13 +651,23 @@ public final class Actions {
         }
     }
 
-    public record ControlPosition(ControlBinding<?> control, double position, MotionPolicy policy)
-            implements Action, Output.Position {
+    public record ControlPosition(ControlBinding<?> control, double position, MotionPolicy policy, EffortRequest effort)
+            implements Action, Output.Position, EffortCarrier {
+        /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public ControlPosition(ControlBinding<?> control, double position) {
-            this(control, position, MotionPolicy.INHERIT);
+            this(control, position, MotionPolicy.INHERIT, EffortRequest.NONE);
+        }
+
+        public ControlPosition(ControlBinding<?> control, double position, MotionPolicy policy) {
+            this(control, position, policy, EffortRequest.NONE);
+        }
+
+        public ControlPosition(ControlBinding<?> control, double position, EffortRequest effort) {
+            this(control, position, MotionPolicy.INHERIT, effort);
         }
 
         public ControlPosition {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.POSITION);
             requireFinite(position, "Control position");
@@ -639,13 +675,23 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, MotionPolicy policy)
-            implements Action, Output.Position {
+    public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, MotionPolicy policy, EffortRequest effort)
+            implements Action, Output.Position, EffortCarrier {
+        /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier) {
-            this(control, positionSupplier, MotionPolicy.INHERIT);
+            this(control, positionSupplier, MotionPolicy.INHERIT, EffortRequest.NONE);
+        }
+
+        public DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, MotionPolicy policy) {
+            this(control, positionSupplier, policy, EffortRequest.NONE);
+        }
+
+        public DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, EffortRequest effort) {
+            this(control, positionSupplier, MotionPolicy.INHERIT, effort);
         }
 
         public DynamicControlPosition {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(positionSupplier, "positionSupplier");
             requireControlMode(control, ControlMode.POSITION);
@@ -658,13 +704,23 @@ public final class Actions {
         }
     }
 
-    public record ControlVelocity(ControlBinding<?> control, double velocity, MotionPolicy policy)
-            implements Action, Output.Velocity {
+    public record ControlVelocity(ControlBinding<?> control, double velocity, MotionPolicy policy, EffortRequest effort)
+            implements Action, Output.Velocity, EffortCarrier {
+        /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public ControlVelocity(ControlBinding<?> control, double velocity) {
-            this(control, velocity, MotionPolicy.INHERIT);
+            this(control, velocity, MotionPolicy.INHERIT, EffortRequest.NONE);
+        }
+
+        public ControlVelocity(ControlBinding<?> control, double velocity, MotionPolicy policy) {
+            this(control, velocity, policy, EffortRequest.NONE);
+        }
+
+        public ControlVelocity(ControlBinding<?> control, double velocity, EffortRequest effort) {
+            this(control, velocity, MotionPolicy.INHERIT, effort);
         }
 
         public ControlVelocity {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.VELOCITY);
             requireFinite(velocity, "Control velocity");
@@ -672,13 +728,23 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, MotionPolicy policy)
-            implements Action, Output.Velocity {
+    public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, MotionPolicy policy, EffortRequest effort)
+            implements Action, Output.Velocity, EffortCarrier {
+        /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier) {
-            this(control, velocitySupplier, MotionPolicy.INHERIT);
+            this(control, velocitySupplier, MotionPolicy.INHERIT, EffortRequest.NONE);
+        }
+
+        public DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, MotionPolicy policy) {
+            this(control, velocitySupplier, policy, EffortRequest.NONE);
+        }
+
+        public DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, EffortRequest effort) {
+            this(control, velocitySupplier, MotionPolicy.INHERIT, effort);
         }
 
         public DynamicControlVelocity {
+            effort = effort == null ? EffortRequest.NONE : effort;
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(velocitySupplier, "velocitySupplier");
             requireControlMode(control, ControlMode.VELOCITY);

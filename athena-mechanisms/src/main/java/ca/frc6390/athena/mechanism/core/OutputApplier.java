@@ -24,6 +24,9 @@ import ca.frc6390.athena.mechanism.motion.MotionProfileRuntime;
 import ca.frc6390.athena.mechanism.motion.MotionReference;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.staging.StageCaps;
+import ca.frc6390.athena.mechanism.effort.EffortCarrier;
+import ca.frc6390.athena.mechanism.effort.EffortRuntime;
+import ca.frc6390.athena.mechanism.effort.EffortUnits;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -574,6 +577,8 @@ final class OutputApplier {
         Output constrainedOutput = applyStageEffort(
                 control, applyOutputConstraints(control, resolved, mechanismContext));
         Output saturated = saturate(control, constrainedOutput);
+        // EFFORT HOOK (B5/B6): current-limit voltage clamp and load responses. See the effort package.
+        saturated = limitEffort(state, output.output(), saturated, mechanismContext.dtSeconds(), position, velocity);
         notifyApplied(state, loopContext, resolved, saturated);
         Output guarded = guardFinalOutput(
                 control,
@@ -961,19 +966,47 @@ final class OutputApplier {
     private MotionProfile effectiveProfile(ControlBinding<?> control) {
         if (!overrides.hasProfile(control)) return null;
         MotionProfile profile = overrides.profile(control);
-        if (stageCaps.isEmpty()) return profile;
+        double effortSpeed = effortSpeedScale(control);
+        if (stageCaps.isEmpty() && effortSpeed == 1.0) return profile;
         StageCaps caps = stageCapsFor(control);
-        if (caps.speed() == 1.0 && caps.acceleration() == 1.0) return profile;
+        if (caps.speed() == 1.0 && caps.acceleration() == 1.0 && effortSpeed == 1.0) return profile;
         return new MotionProfile(
-                Math.max(Double.MIN_VALUE, profile.maxVelocity() * caps.speed()),
+                Math.max(Double.MIN_VALUE, profile.maxVelocity() * caps.speed() * effortSpeed),
                 Math.max(Double.MIN_VALUE, profile.maxAcceleration() * caps.acceleration()));
     }
 
     /** Scales a velocity target by the staging speed cap. Position targets are limited by the profile instead. */
     private Output applyStageSpeed(ControlBinding<?> control, Output output) {
-        if (stageCaps.isEmpty() || !(output instanceof Output.Velocity velocity)) return output;
-        double speed = stageCapsFor(control).speed();
+        if (!(output instanceof Output.Velocity velocity)) return output;
+        double speed = (stageCaps.isEmpty() ? 1.0 : stageCapsFor(control).speed())
+                * effortSpeedScale(control);
         return speed == 1.0 ? output : Outputs.velocity(velocity.velocity() * speed);
+    }
+
+    /**
+     * EFFORT HOOK (B5/B6). Advances the binding's effort state once per applied cycle and clamps a
+     * voltage (or percent, at nominal bus voltage) to the current the motors may draw.
+     */
+    private Output limitEffort(ControlRuntimeState state, Output requested, Output candidate, double dtSeconds,
+            double position, double velocity) {
+        double actionLimit = requested instanceof EffortCarrier carrier
+                ? carrier.effort().currentLimitAmps()
+                : Double.POSITIVE_INFINITY;
+        double volts = candidate instanceof Output.Voltage voltage ? voltage.volts()
+                : candidate instanceof Output.Percent percent ? percent.percent() * EffortUnits.NOMINAL_VOLTS
+                : Double.NaN;
+        state.effort.advance(actionLimit, dtSeconds, volts, position, velocity);
+        if (Double.isNaN(volts)) {
+            return candidate;
+        }
+        double limited = state.effort.clampVolts(context, volts);
+        return limited == volts ? candidate : Outputs.voltage(limited);
+    }
+
+    /** Speed multiplier from the binding's {@code slow(...)} load response, 1 when none applies. */
+    private double effortSpeedScale(ControlBinding<?> control) {
+        ControlRuntimeState state = controlRuntimes.get(control);
+        return state == null ? 1.0 : state.effort.speedScale();
     }
 
     /** Scales voltage and percent output by the staging effort cap. */
@@ -1362,6 +1395,8 @@ final class OutputApplier {
         private final ControlBinding<?> binding;
         private final List<ControlLoopRuntime> runtimes;
         private final ControlLoopRole[] roles;
+        /** Effort state of this binding (B5/B6); a limit-free runtime when the binding has no ceiling. */
+        private final EffortRuntime effort;
         private MotionProfileRuntime profileRuntime;
         private MotionProfile activeProfile;
         private double velocityReference;
@@ -1398,6 +1433,13 @@ final class OutputApplier {
                 runtimeArray[i] = loop.bind(loopBinding);
             }
             runtimes = List.of(runtimeArray);
+            EffortRuntime found = null;
+            for (ControlLoopRuntime runtime : runtimeArray) {
+                if (runtime instanceof EffortRuntime effortRuntime) {
+                    found = effortRuntime;
+                }
+            }
+            effort = found == null ? EffortRuntime.unlimited(binding.motors()) : found;
             activeProfile = binding.profile();
             profileRuntime = activeProfile == null ? null : new MotionProfileRuntime(activeProfile);
         }
