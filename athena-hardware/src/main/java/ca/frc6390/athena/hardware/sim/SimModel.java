@@ -12,6 +12,7 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
 
@@ -35,6 +36,7 @@ public final class SimModel {
     private final List<DigitalInputDevice> directDigitalInputs;
     private final List<SimModel> children;
     private final RuntimeFactory runtimeFactory;
+    private final SimPlant plant;
 
     private SimModel(
             BuiltIn kind,
@@ -48,7 +50,8 @@ public final class SimModel {
             List<SimLimit> limits,
             List<DigitalInputDevice> digitalInputs,
             List<SimModel> children,
-            RuntimeFactory runtimeFactory) {
+            RuntimeFactory runtimeFactory,
+            SimPlant plant) {
         this.kind = kind;
         this.momentOfInertia = momentOfInertia == null ? OptionalDouble.empty() : momentOfInertia;
         this.lengthMeters = lengthMeters == null ? OptionalDouble.empty() : lengthMeters;
@@ -61,6 +64,7 @@ public final class SimModel {
         directDigitalInputs = digitalInputs == null ? List.of() : List.copyOf(digitalInputs);
         this.children = children == null ? List.of() : List.copyOf(children);
         this.runtimeFactory = runtimeFactory;
+        this.plant = plant;
     }
 
     /** Creates a provider-backed motor axis. */
@@ -131,6 +135,7 @@ public final class SimModel {
                 List.of(),
                 List.of(),
                 List.of(),
+                null,
                 null);
     }
 
@@ -146,7 +151,27 @@ public final class SimModel {
     public SimModel model(SimDynamicsSource source) {
         Objects.requireNonNull(source, "source");
         OptionalDouble inertia = source.momentOfInertia();
-        return inertia.isPresent() ? momentOfInertia(inertia.getAsDouble()) : this;
+        SimModel updated = inertia.isPresent() ? momentOfInertia(inertia.getAsDouble()) : this;
+        Optional<SimPlant> identified = source.plant();
+        return identified.isPresent() ? updated.withPlant(identified.get()) : updated;
+    }
+
+    private SimModel withPlant(SimPlant value) {
+        if (kind == null) {
+            throw new IllegalStateException("Provider-backed physics options can only be applied to a leaf model.");
+        }
+        return new SimModel(kind, momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+                directMotors, directEncoders, range, directLimits, directDigitalInputs, children, runtimeFactory,
+                Objects.requireNonNull(value, "plant"));
+    }
+
+    /**
+     * Returns the identified plant applied by {@link #model(SimDynamicsSource)}. When present, the physics
+     * engine simulates this plant (friction, gravity, viscous and inertia from the model) instead of the
+     * motor's own dynamics; the declared inertia and gravity flag are then not used.
+     */
+    public Optional<SimPlant> plant() {
+        return Optional.ofNullable(plant);
     }
 
     public SimModel lengthMeters(double value) {
@@ -218,7 +243,7 @@ public final class SimModel {
             throw new IllegalStateException("Provider-backed physics options can only be applied to a leaf model.");
         }
         return new SimModel(kind, momentOfInertia, lengthMeters, gearRatio, gravity,
-                motors, encoders, range, limits, digitalInputs, children, runtimeFactory);
+                motors, encoders, range, limits, digitalInputs, children, runtimeFactory, plant);
     }
 
     /** Returns all motors claimed by this model and its children. */
@@ -423,7 +448,8 @@ public final class SimModel {
                     List.of(),
                     List.copyOf(digitalInputs),
                     List.copyOf(children),
-                    runtimeFactory);
+                    runtimeFactory,
+                    null);
         }
     }
 }

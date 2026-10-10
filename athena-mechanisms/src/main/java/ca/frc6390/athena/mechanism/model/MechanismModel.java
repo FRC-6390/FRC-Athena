@@ -1,12 +1,14 @@
 package ca.frc6390.athena.mechanism.model;
 
 import ca.frc6390.athena.hardware.sim.SimDynamicsSource;
+import ca.frc6390.athena.hardware.sim.SimPlant;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalDouble;
 
 /**
@@ -132,6 +134,30 @@ public record MechanismModel(
     public OptionalDouble momentOfInertia() {
         double inertia = inertia();
         return Double.isFinite(inertia) ? OptionalDouble.of(inertia) : OptionalDouble.empty();
+    }
+
+    /**
+     * Returns the identified plant for simulation: static and kinetic friction, kV, kA, gravity (including any
+     * payload delta) and the motor constants that convert volts to mechanism torque or force. Empty until kA
+     * and the motor constants are known.
+     */
+    @Override
+    public Optional<SimPlant> plant() {
+        if (!(kA > 0.0) || !(motorTorqueConstant > 0.0) || !(motorResistance > 0.0) || motorCount <= 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new SimPlant(
+                motionKind == MotionKind.ROTARY,
+                staticFrictionVolts,
+                kineticFrictionVolts,
+                kV,
+                kA,
+                kG + payloadDelta,
+                gravityOffsetRadians,
+                motorTorqueConstant,
+                motorResistance,
+                motorCount,
+                gearRatio));
     }
 
     /** Returns the scalar parameters as a name-to-value map, for telemetry and storage. */

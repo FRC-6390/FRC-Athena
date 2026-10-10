@@ -7,6 +7,7 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
+import ca.frc6390.athena.hardware.sim.SimPlant;
 import ca.frc6390.athena.sim.hardware.SimDigitalInputHandle;
 import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
@@ -86,6 +87,9 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     }
 
     private ModelAdapter createAdapter(SimModel model) {
+        if (model.plant().isPresent()) {
+            return new PlantAdapter(model, model.plant().get());
+        }
         return switch (model.kind()) {
             case ARM -> new ArmAdapter(model);
             case ELEVATOR -> new ElevatorAdapter(model);
@@ -348,6 +352,102 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             sim.update(seconds);
             publish(model, session, sim.getPositionMeters(), sim.getVelocityMetersPerSecond());
             return sim.getCurrentDrawAmps();
+        }
+    }
+
+    /**
+     * Simulates an identified plant. Static friction holds the mechanism at rest until the drive exceeds it,
+     * then kinetic friction, kV, gravity and kA act on the motion. Volts become mechanism torque (rotary) or
+     * force (linear) through the motor constants, so the inertia equals the one the characterization derives
+     * from kA. Steps are split into fixed substeps so the stick-slip transitions stay stable.
+     */
+    private static final class PlantAdapter implements ModelAdapter {
+        private static final double MAX_SUBSTEP_SECONDS = 0.001;
+        private static final double MAX_VOLTAGE = 12.0;
+
+        private final SimPlant plant;
+        private final Range range;
+        private final double outputPerVolt;
+        private final double inertia;
+        private final double staticVolts;
+        private final double kineticVolts;
+        private final double resistanceTotalOhms;
+        private double position;
+        private double velocity;
+
+        private PlantAdapter(SimModel model, SimPlant plant) {
+            this.plant = plant;
+            double torquePerVolt = plant.outputPerVolt();
+            if (plant.rotary()) {
+                range = range(model, Range.rotations(-0.5, 0.5));
+                outputPerVolt = torquePerVolt;
+                // J = kA * torque per volt / (2 pi), from kA = 2 pi J / (torque per volt).
+                inertia = plant.kAVoltsPerUnitPerSecondSquared() * torquePerVolt / (2.0 * Math.PI);
+            } else {
+                range = range(model, Range.of(0.0, 1.0));
+                outputPerVolt = torquePerVolt / DEFAULT_ELEVATOR_DRUM_RADIUS_METERS;
+                inertia = plant.kAVoltsPerUnitPerSecondSquared() * outputPerVolt;
+            }
+            // Static friction can never be below the kinetic value it breaks into.
+            staticVolts = Math.max(plant.staticFrictionVolts(), plant.kineticFrictionVolts());
+            kineticVolts = plant.kineticFrictionVolts();
+            resistanceTotalOhms = plant.resistanceOhms() / plant.motorCount();
+            position = range.clamp(0.0);
+        }
+
+        @Override
+        public double step(SimModel model, SimulationSession session, double seconds) {
+            double volts = clamp(commandVoltage(model, session, position), -MAX_VOLTAGE, MAX_VOLTAGE);
+            double remaining = seconds;
+            while (remaining > 0.0) {
+                double substep = Math.min(MAX_SUBSTEP_SECONDS, remaining);
+                remaining -= substep;
+                advance(volts, substep);
+            }
+            double currentDraw = Math.abs(volts - plant.kVVoltsPerUnitPerSecond() * velocity) / resistanceTotalOhms;
+            publish(model, session, position, velocity);
+            return currentDraw;
+        }
+
+        private void advance(double volts, double seconds) {
+            double drive = volts - gravityVolts();
+            double previous = velocity;
+            if (previous == 0.0) {
+                if (Math.abs(drive) <= staticVolts) {
+                    return;
+                }
+                // Breakaway: kinetic friction opposes the motion this substep starts.
+                velocity = accelerationFor(drive - Math.signum(drive) * kineticVolts) * seconds;
+            } else {
+                double friction = Math.signum(previous) * kineticVolts;
+                velocity = previous + accelerationFor(drive - friction - plant.kVVoltsPerUnitPerSecond() * previous)
+                        * seconds;
+                if (velocity * previous <= 0.0) {
+                    // Crossed zero: the mechanism may stick here; the next substep decides.
+                    velocity = 0.0;
+                }
+            }
+            position += velocity * seconds;
+            if (position <= range.minimum() && velocity <= 0.0) {
+                position = range.minimum();
+                velocity = 0.0;
+            } else if (position >= range.maximum() && velocity >= 0.0) {
+                position = range.maximum();
+                velocity = 0.0;
+            }
+        }
+
+        /** Acceleration (rotations or meters per second squared) produced by a net voltage. */
+        private double accelerationFor(double netVolts) {
+            double output = outputPerVolt * netVolts;
+            return plant.rotary() ? output / inertia / (2.0 * Math.PI) : output / inertia;
+        }
+
+        /** Gravity voltage at the current position: kG cos(2 pi p + offset) for rotary, constant for linear. */
+        private double gravityVolts() {
+            return plant.rotary()
+                    ? plant.gravityVolts() * Math.cos(2.0 * Math.PI * position + plant.gravityOffsetRadians())
+                    : plant.gravityVolts();
         }
     }
 
