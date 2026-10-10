@@ -81,11 +81,11 @@
   .grid-surface {
     position: relative;
     width: 100%;
-    border: 1px solid var(--border-subtle);
-    border-radius: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     height: 100%;
     min-height: 0;
-    background: var(--surface-2);
+    background: var(--bg-1);
     overflow-y: auto;
     overflow-x: auto;
     scrollbar-gutter: stable both-edges;
@@ -93,24 +93,19 @@
   }
 
   .grid-surface.drag-over {
-    border-color: rgba(180, 35, 45, 0.55);
-    box-shadow: inset 0 0 0 1px rgba(180, 35, 45, 0.24);
+    border-color: color-mix(in srgb, var(--brand) 55%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 24%, transparent);
   }
 
   .grid-spacer {
     min-width: 100%;
     min-height: 100%;
-    background-image:
-      linear-gradient(
-        to right,
-        rgba(153, 164, 180, 0.18) 1px,
-        transparent 1px
-      ),
-      linear-gradient(
-        to bottom,
-        rgba(153, 164, 180, 0.14) 1px,
-        transparent 1px
-      );
+    /* Subtle dot grid: the border token at low opacity. */
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--border-emphasis) 70%, transparent) 1px,
+      transparent 1.4px
+    );
     background-size: calc(var(--cell) + var(--gap)) calc(var(--cell) + var(--gap));
     background-position: 0 0;
     pointer-events: none;
@@ -123,16 +118,16 @@
     z-index: 3;
     display: flex;
     gap: 0.34rem;
-    background: rgba(20, 25, 36, 0.76);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 0.3rem;
     backdrop-filter: blur(4px);
   }
 
   .canvas-actions .btn[data-active='true'] {
-    border-color: rgba(180, 35, 45, 0.52);
-    background: rgba(180, 35, 45, 0.24);
-    color: #ffe7ea;
+    border-color: color-mix(in srgb, var(--brand) 52%, transparent);
+    background: var(--brand-soft);
+    color: var(--text-strong);
   }
 </style>

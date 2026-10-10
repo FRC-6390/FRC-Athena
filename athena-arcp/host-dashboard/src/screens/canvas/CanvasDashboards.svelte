@@ -1543,7 +1543,7 @@
     box-shadow: 0 10px 22px rgba(0, 0, 0, 0.34);
   }
 
-  .explorer-fab-icon {
+  :global(.explorer-fab-icon) {
     width: 1.4rem;
     height: 1.4rem;
     fill: currentColor;
