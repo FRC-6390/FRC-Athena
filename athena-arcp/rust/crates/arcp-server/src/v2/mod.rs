@@ -1,0 +1,207 @@
+//! ARCP v2 server (E1-E6).
+//!
+//! * Realtime: one batched frame per robot cycle over UDP. Each subscriber receives only the
+//!   signals its subscriptions match, at the requested rate, with per-subscriber sequence numbers
+//!   and keyframes at least once per [`ServerConfig::keyframe_interval`].
+//! * Control: reliable TCP with typed binary requests, request ids and structured replies.
+//! * Writes and actions are forwarded to the robot through [`RobotHandler`]; the robot validates
+//!   and the reply carries its accept or reject reason.
+//!
+//! The server runs on its own threads. Calls on [`ArcpServerV2`] are cheap and thread safe; the
+//! robot loop should call [`ArcpServerV2::publish_cycle`] once per cycle.
+
+mod conn;
+mod files;
+mod state;
+
+use std::io;
+use std::net::{SocketAddr, TcpListener, UdpSocket};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use arcp_core::v2::control::Rate;
+use arcp_core::v2::record::{Dictionary, Marker, StructSchema};
+use arcp_core::v2::{Entry, Value};
+
+use state::State;
+
+pub use arcp_core::v2::control::{WriteReply, MAX_FILE_CHUNK};
+
+/// Robot-side hook. Called on control connection threads, so implementations should hand the
+/// request to the robot loop and wait for its decision (or return quickly).
+pub trait RobotHandler: Send + Sync + 'static {
+    /// Validates and applies a write. The returned [`WriteReply`] (accepted or rejected with a
+    /// reason, plus the value the robot now holds) is sent to the client unchanged.
+    fn write(&self, signal_id: u64, value: Value) -> WriteReply;
+    /// Runs (`run == true`) or cancels (`run == false`) the Action behind `signal_id`.
+    fn action(&self, signal_id: u64, run: bool) -> Result<(), String>;
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    /// TCP control listener address. Port 0 picks a free port; see [`ArcpServerV2::control_addr`].
+    pub control_bind: SocketAddr,
+    /// Directory exposed by the file service. `None` disables file requests.
+    pub file_root: Option<PathBuf>,
+    /// Realtime bandwidth budget in bytes per second. `0` disables budgeting.
+    pub bandwidth_budget_bytes_per_sec: u64,
+    /// Maximum datagram size for frames (fragments split at this size).
+    pub mtu: usize,
+    /// Keyframe cadence per subscriber.
+    pub keyframe_interval: Duration,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            control_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
+            file_root: None,
+            bandwidth_budget_bytes_per_sec: 0,
+            mtu: 1200,
+            keyframe_interval: Duration::from_secs(1),
+        }
+    }
+}
+
+/// A subscription whose effective rate was lowered by the bandwidth budget.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThrottledSubscription {
+    pub session_id: u32,
+    pub subscription_id: u32,
+    pub pattern: String,
+    pub requested: Rate,
+    pub divisor: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerStatus {
+    pub sessions: usize,
+    pub subscriptions: usize,
+    pub throttled: Vec<ThrottledSubscription>,
+    /// Realtime bytes sent in the last completed budget window.
+    pub bytes_last_window: u64,
+}
+
+pub(crate) struct Inner {
+    state: Mutex<State>,
+    pub(crate) udp: UdpSocket,
+    pub(crate) handler: Arc<dyn RobotHandler>,
+    pub(crate) file_root: Option<PathBuf>,
+    started: Instant,
+    shutdown: AtomicBool,
+}
+
+impl Inner {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn elapsed_micros(&self) -> u64 {
+        self.started.elapsed().as_micros() as u64
+    }
+}
+
+/// Handle to a running v2 server. Cloning shares the same server.
+#[derive(Clone)]
+pub struct ArcpServerV2 {
+    inner: Arc<Inner>,
+    control_addr: SocketAddr,
+}
+
+impl ArcpServerV2 {
+    /// Binds the control listener and starts the accept thread.
+    pub fn start(config: ServerConfig, handler: Arc<dyn RobotHandler>) -> io::Result<Self> {
+        let listener = TcpListener::bind(config.control_bind)?;
+        listener.set_nonblocking(true)?;
+        let control_addr = listener.local_addr()?;
+        let udp = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?;
+        let keyframe_micros = config.keyframe_interval.as_micros().min(u128::from(u64::MAX)) as u64;
+        let inner = Arc::new(Inner {
+            state: Mutex::new(State::new(config.bandwidth_budget_bytes_per_sec, config.mtu, keyframe_micros)),
+            udp,
+            handler,
+            file_root: config.file_root,
+            started: Instant::now(),
+            shutdown: AtomicBool::new(false),
+        });
+        let accept_inner = Arc::clone(&inner);
+        thread::Builder::new()
+            .name("arcp-v2-accept".into())
+            .spawn(move || accept_loop(accept_inner, listener))?;
+        Ok(Self { inner, control_addr })
+    }
+
+    /// Address of the TCP control listener (useful when the configured port was 0).
+    pub fn control_addr(&self) -> SocketAddr {
+        self.control_addr
+    }
+
+    /// Replaces the dictionary and struct schemas, pushes them to every connected client, and
+    /// re-matches existing subscriptions.
+    pub fn publish_dictionary(&self, dictionary: Dictionary, schemas: Vec<StructSchema>) {
+        self.inner.lock().set_dictionary(dictionary, schemas);
+    }
+
+    /// Publishes one robot cycle. `values` holds the cycle's current signal values; unchanged
+    /// values are ignored, and each subscriber receives one batched frame with what is due.
+    pub fn publish_cycle(&self, cycle_timestamp_micros: u64, values: &[Entry]) {
+        self.inner.lock().publish_cycle(cycle_timestamp_micros, values, &self.inner.udp);
+    }
+
+    /// Sends a marker to every subscriber (markers are not filtered by subscriptions).
+    pub fn marker(&self, marker: Marker) {
+        self.inner.lock().send_marker(marker, &self.inner.udp);
+    }
+
+    pub fn status(&self) -> ServerStatus {
+        let state = self.inner.lock();
+        let mut throttled = Vec::new();
+        let mut subscriptions = 0;
+        for session in &state.sessions {
+            for sub in &session.subs {
+                subscriptions += 1;
+                if sub.divisor > 1 {
+                    throttled.push(ThrottledSubscription {
+                        session_id: session.id,
+                        subscription_id: sub.id,
+                        pattern: sub.pattern.clone(),
+                        requested: sub.rate,
+                        divisor: sub.divisor,
+                    });
+                }
+            }
+        }
+        ServerStatus {
+            sessions: state.sessions.len(),
+            subscriptions,
+            throttled,
+            bytes_last_window: state.last_window_bytes,
+        }
+    }
+
+    /// Stops accepting new connections. Existing connections end when their clients close them.
+    pub fn shutdown(&self) {
+        self.inner.shutdown.store(true, Ordering::SeqCst);
+    }
+}
+
+fn accept_loop(inner: Arc<Inner>, listener: TcpListener) {
+    while !inner.shutdown.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
+                let conn_inner = Arc::clone(&inner);
+                let _ = thread::Builder::new()
+                    .name("arcp-v2-conn".into())
+                    .spawn(move || conn::serve(conn_inner, stream));
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(5)),
+            Err(_) => thread::sleep(Duration::from_millis(50)),
+        }
+    }
+}
