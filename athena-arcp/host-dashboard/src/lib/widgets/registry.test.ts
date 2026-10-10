@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { describePath } from '../data/path';
 import type { SignalDescriptor, SignalRole, SignalType } from '../data/types';
 import { TYPE_TAG } from '../data/types';
-import { compatibleModules, widgetModule } from './registry';
+import { classicKindsFor, compatibleModules, WIDGET_MODULES, widgetModule } from './registry';
+import { SIGNAL_WIDGET_KINDS } from './kinds';
 
 function signal(
   path: string,
@@ -67,5 +68,18 @@ describe('widget registry compatibility', () => {
       yMin: null,
       yMax: null
     });
+  });
+});
+
+describe('classic kinds are registered once', () => {
+  test('every saved classic kind has exactly one legacy module', () => {
+    const legacyIds = WIDGET_MODULES.filter((m) => m.legacy).map((m) => m.id);
+    expect([...legacyIds].sort()).toEqual([...SIGNAL_WIDGET_KINDS].sort());
+    expect(new Set(legacyIds).size).toBe(legacyIds.length);
+  });
+
+  test('new-contract modules never appear in the classic palette', () => {
+    expect(classicKindsFor(null)).not.toContain('plot' as never);
+    expect(classicKindsFor(null).length).toBeGreaterThan(0);
   });
 });

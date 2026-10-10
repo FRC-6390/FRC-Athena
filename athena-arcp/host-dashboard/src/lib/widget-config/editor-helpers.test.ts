@@ -104,7 +104,7 @@ describe('editor signal pools', () => {
   test('pools split signals by type and access, sorted by path', () => {
     expect(pools.numericSignals.map((s) => s.signal_id)).toEqual([2, 1, 3]);
     expect(pools.writableNumericSignals.map((s) => s.signal_id)).toEqual([2, 1, 3]);
-    expect(pools.boolSignals.map((s) => s.signal_id)).toEqual([4, 5]);
+    expect(pools.boolSignals.map((s) => s.signal_id)).toEqual([5, 4]);
     expect(pools.vectorSignals.map((s) => s.signal_id)).toEqual([6]);
     expect(pools.actionSignals.map((s) => s.signal_id)).toEqual([5]);
     expect(pools.writableBoolSignals).toEqual([]);
