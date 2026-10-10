@@ -89,11 +89,11 @@ class ConstructorDeclaredPositionActionTest {
 
     private static final class ConstructorActionMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 86);
-        private final ControlBinding position;
+        private final ControlBinding<?> position;
         private final Action trackTarget;
 
         private ConstructorActionMechanism(AtomicReference<Double> target, boolean planned) {
-            ControlBinding configured = Controls.position(motor)
+            ControlBinding<?> configured = Controls.position(motor)
                     .feedback(motor.encoder())
                     .pid(1.0, 0.0, 0.0);
             position = planned
@@ -111,7 +111,7 @@ class ConstructorDeclaredPositionActionTest {
                 .inverted()
                 .gearRatio(1.0 / 7.0)
                 .conversion(360.0);
-        private final ControlBinding position = Controls.position(motor)
+        private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.015, 0.0, 0.0)
                 .constraint(Constraints.range(Range.degrees(-136.0, 204.0)))

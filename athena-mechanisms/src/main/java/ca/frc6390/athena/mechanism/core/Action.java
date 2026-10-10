@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import edu.wpi.first.units.Measure;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
@@ -42,6 +43,17 @@ public interface Action extends DeviceAction {
      * @return feedback-completing action
      */
     default Action untilWithin(double tolerance) {
+        return Actions.untilWithin(this, tolerance);
+    }
+
+    /**
+     * Typed form of {@link #untilWithin(double)}: the tolerance is a WPILib measure of the control's
+     * unit (a rate of that unit for velocity controls). Requires a unit-typed control binding.
+     *
+     * @param tolerance maximum absolute target error as a measure
+     * @return feedback-completing action
+     */
+    default Action untilWithin(Measure<?> tolerance) {
         return Actions.untilWithin(this, tolerance);
     }
 

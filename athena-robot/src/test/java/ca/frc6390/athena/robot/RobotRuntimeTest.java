@@ -1006,7 +1006,7 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 44);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 44);
         @SuppressWarnings("unused")
-        private final ControlBinding velocity = Controls.velocity(motor).feedback(encoder);
+        private final ControlBinding<?> velocity = Controls.velocity(motor).feedback(encoder);
         private final Action initial = velocity.velocity(5.0);
     }
 

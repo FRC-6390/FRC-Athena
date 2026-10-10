@@ -238,7 +238,7 @@ final class MechanismIntrospector {
                 || value instanceof GearRatio
                 || value instanceof PidGains
                 || value instanceof FeedforwardGains
-                || value instanceof ControlBinding
+                || value instanceof ControlBinding<?>
                 || value instanceof PathAction
                 || value instanceof SimModel
                 || value instanceof SimModel.Source

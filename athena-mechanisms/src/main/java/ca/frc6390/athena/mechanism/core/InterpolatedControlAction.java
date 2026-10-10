@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationData;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
 import ca.frc6390.athena.runtime.geometry.Point2d;
@@ -10,33 +11,58 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
+import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.Unit;
 
 /** A position or velocity action whose target is interpolated from runtime data. */
 public final class InterpolatedControlAction implements Action, TelemetrySource {
     private static final int CURVE_SAMPLES_PER_SEGMENT = 16;
-    private final ControlBinding control;
+    private final ControlBinding<?> control;
     private final InterpolationModel model;
     private final DoubleSupplier input;
+    private final Unit inputUnit;
     private final List<Entry> entries;
     private final RuntimeData runtimeData;
     private double lastInput;
     private double lastTarget;
     private boolean sampled;
 
-    InterpolatedControlAction(ControlBinding control, InterpolationModel model, DoubleSupplier input) {
-        this(control, model, input, List.of());
+    InterpolatedControlAction(ControlBinding<?> control, InterpolationModel model, DoubleSupplier input) {
+        this(control, model, input, null, List.of());
+    }
+
+    InterpolatedControlAction(
+            ControlBinding<?> control,
+            InterpolationModel model,
+            DoubleSupplier input,
+            Unit inputUnit) {
+        this(control, model, input, inputUnit, List.of());
     }
 
     private InterpolatedControlAction(
-            ControlBinding control,
+            ControlBinding<?> control,
             InterpolationModel model,
             DoubleSupplier input,
+            Unit inputUnit,
             List<Entry> entries) {
         this.control = Objects.requireNonNull(control, "control");
         this.model = Objects.requireNonNull(model, "model");
         this.input = Objects.requireNonNull(input, "input");
+        this.inputUnit = inputUnit;
         this.entries = List.copyOf(entries);
         this.runtimeData = new RuntimeData(this.entries);
+    }
+
+    /**
+     * Adds an interpolation point and target given as measures. The point must measure the input
+     * unit passed to {@code ControlBinding.interpolate(model, input, inputUnit)}; the target must
+     * measure the binding's unit (or its per-second rate for velocity bindings).
+     */
+    public InterpolatedControlAction at(Measure<?> point, Measure<?> value) {
+        if (inputUnit == null) {
+            throw new IllegalStateException("Typed interpolation points require interpolate(model, input, inputUnit).");
+        }
+        return at(UnitConversions.value(point, inputUnit), control.modeValue(value));
     }
 
     /** Adds a fixed interpolation point and target value. */
@@ -72,11 +98,11 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     private InterpolatedControlAction append(Entry entry) {
         List<Entry> updated = new ArrayList<>(entries);
         updated.add(entry);
-        return new InterpolatedControlAction(control, model, input, updated);
+        return new InterpolatedControlAction(control, model, input, inputUnit, updated);
     }
 
     /** Returns the control binding targeted by this action. */
-    public ControlBinding control() {
+    public ControlBinding<?> control() {
         return control;
     }
 

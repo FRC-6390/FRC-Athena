@@ -34,8 +34,8 @@ import java.util.ArrayList;
 final class OutputApplier {
     private final ActionContext context;
     private final RuntimeOverrides overrides;
-    private final Map<ControlBinding, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
-    private final Set<ControlBinding> controlsAppliedThisCycle =
+    private final Map<ControlBinding<?>, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
+    private final Set<ControlBinding<?>> controlsAppliedThisCycle =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<MotorHandle> drivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final AppliedOutput appliedOutput = new AppliedOutput();
@@ -99,7 +99,7 @@ final class OutputApplier {
                 ? resolveControlOutput(output, safeContext)
                 : RuntimeHardwareAccess.call(context, () -> resolveControlOutput(output, safeContext));
         if (output.request().control() != null) {
-            ControlBinding control = output.request().control();
+            ControlBinding<?> control = output.request().control();
             if (captureTrace) {
                 controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
             }
@@ -108,7 +108,7 @@ final class OutputApplier {
             }
         }
         appliedHandles.clear();
-        ControlBinding control = output.request().control();
+        ControlBinding<?> control = output.request().control();
         if (control != null) {
             for (MotorDevice motor : control.motors()) {
                 applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
@@ -173,8 +173,8 @@ final class OutputApplier {
     }
 
     void resetControls() {
-        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding control = entry.getKey();
+        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding<?> control = entry.getKey();
             ControlRuntimeState state = entry.getValue();
             if (!state.active) {
                 continue;
@@ -190,7 +190,7 @@ final class OutputApplier {
      * keeps its previous command, and lets its control state reset at the end of the cycle.
      */
     void abandon(OutputRequest request) {
-        ControlBinding control = request.control();
+        ControlBinding<?> control = request.control();
         if (control != null) {
             controlsAppliedThisCycle.remove(control);
             if (control.sink() != null) {
@@ -217,8 +217,8 @@ final class OutputApplier {
      * position is used directly because cached hardware inputs may not reflect the new value yet.
      */
     void encoderPositionSet(EncoderDevice encoder, double position) {
-        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding control = entry.getKey();
+        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding<?> control = entry.getKey();
             FeedbackBinding feedback = control.feedback();
             boolean direct = feedback != null && encoder.equals(feedback.position());
             boolean fedBy = direct
@@ -243,11 +243,11 @@ final class OutputApplier {
             return;
         }
         activeSinks.clear();
-        for (ControlBinding control : controlsAppliedThisCycle) {
+        for (ControlBinding<?> control : controlsAppliedThisCycle) {
             if (control.sink() != null) activeSinks.add(control.sink());
         }
-        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding control = entry.getKey();
+        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding<?> control = entry.getKey();
             ControlRuntimeState state = entry.getValue();
             boolean applied = controlsAppliedThisCycle.contains(control);
             if (!applied && state.active) {
@@ -261,7 +261,7 @@ final class OutputApplier {
         controlsAppliedThisCycle.clear();
     }
 
-    private void resetFromCurrentFeedback(ControlBinding control, ControlRuntimeState state) {
+    private void resetFromCurrentFeedback(ControlBinding<?> control, ControlRuntimeState state) {
         RuntimeHardwareAccess.call(context, () -> {
             double position = firstFeedbackPosition(control);
             double velocity = firstFeedbackVelocity(control);
@@ -287,7 +287,7 @@ final class OutputApplier {
 
     private AppliedOutput resolveControlOutput(ResolvedOutput output, MechanismContext mechanismContext) {
         OutputRequest request = output.request();
-        ControlBinding control = request.control();
+        ControlBinding<?> control = request.control();
         if (control == null) {
             return appliedOutput.set(output.output(), ControlRoute.OPEN_LOOP, null).withoutTrace();
         }
@@ -380,7 +380,7 @@ final class OutputApplier {
     }
 
     private Output applyTargetTransforms(
-            ControlBinding control,
+            ControlBinding<?> control,
             Output request,
             MechanismContext mechanismContext,
             ControlRuntimeState state,
@@ -422,7 +422,7 @@ final class OutputApplier {
     }
 
     private StagedRequest stageRequest(
-            ControlBinding control,
+            ControlBinding<?> control,
             Output request,
             MechanismContext mechanismContext,
             ControlRuntimeState state,
@@ -541,7 +541,7 @@ final class OutputApplier {
         return new StagedRequest(request, MotionReference.stationary(finiteOrZero(position)), 0.0, false);
     }
 
-    private ControlRuntimeState controlRuntimes(ControlBinding control) {
+    private ControlRuntimeState controlRuntimes(ControlBinding<?> control) {
         return controlRuntimes.computeIfAbsent(control, ControlRuntimeState::new);
     }
 
@@ -564,7 +564,7 @@ final class OutputApplier {
     }
 
     private boolean allowsDirection(
-            ControlBinding control,
+            ControlBinding<?> control,
             double current,
             double direction,
             MechanismContext context) {
@@ -597,7 +597,7 @@ final class OutputApplier {
     }
 
     private Output guardFinalOutput(
-            ControlBinding control,
+            ControlBinding<?> control,
             Output output,
             MechanismContext context,
             double position,
@@ -626,7 +626,7 @@ final class OutputApplier {
         return 0.0;
     }
 
-    private Output saturate(ControlBinding control, Output output) {
+    private Output saturate(ControlBinding<?> control, Output output) {
         if (output instanceof Output.Percent percent) {
             return Outputs.percent(Math.max(-1.0, Math.min(1.0, percent.percent())));
         }
@@ -636,16 +636,16 @@ final class OutputApplier {
         return output;
     }
 
-    private static double constraintFeedback(ControlBinding control, double position, double velocity) {
+    private static double constraintFeedback(ControlBinding<?> control, double position, double velocity) {
         return control.mode() == ControlMode.VELOCITY ? velocity : position;
     }
 
-    private static boolean hasTargetConstraints(ControlBinding control) {
+    private static boolean hasTargetConstraints(ControlBinding<?> control) {
         return Constraints.hasStage(control.constraints(), ConstraintStage.TARGET);
     }
 
     private static Output applyOutputConstraints(
-            ControlBinding control,
+            ControlBinding<?> control,
             Output output,
             MechanismContext context) {
         Double requested = scalarValue(output);
@@ -679,7 +679,7 @@ final class OutputApplier {
         }
     }
 
-    private MotionProfile effectiveProfile(ControlBinding control) {
+    private MotionProfile effectiveProfile(ControlBinding<?> control) {
         return overrides.hasProfile(control) ? overrides.profile(control) : null;
     }
 
@@ -763,7 +763,7 @@ final class OutputApplier {
     }
 
     private AppliedOutput resolveDeviceControl(
-            ControlBinding control,
+            ControlBinding<?> control,
             Output request,
             ControlLoopContext loopContext,
             ControlRuntimeState state) {
@@ -876,7 +876,7 @@ final class OutputApplier {
         motor.recordCommand(MotorCommandSnapshot.neutral());
     }
 
-    private static boolean usesDeviceNativeFeedback(ControlBinding control) {
+    private static boolean usesDeviceNativeFeedback(ControlBinding<?> control) {
         FeedbackBinding feedback = control.feedback();
         if (feedback == null) {
             return true;
@@ -936,7 +936,7 @@ final class OutputApplier {
         return 0.0;
     }
 
-    private static MotorClosedLoopConfig closedLoopConfig(ControlBinding control) {
+    private static MotorClosedLoopConfig closedLoopConfig(ControlBinding<?> control) {
         PidGains pid = null;
         FeedforwardGains feedforward = null;
         for (ControlLoop loop : control.loops()) {
@@ -974,13 +974,13 @@ final class OutputApplier {
     }
 
     private final class AppliedControlLoopContext implements ControlLoopContext {
-        private final ControlBinding control;
+        private final ControlBinding<?> control;
         private final Output request;
         private final MechanismContext mechanismContext;
         private final MotionReference reference;
 
         private AppliedControlLoopContext(
-                ControlBinding control,
+                ControlBinding<?> control,
                 Output request,
                 MechanismContext mechanismContext,
                 MotionReference reference) {
@@ -1017,7 +1017,7 @@ final class OutputApplier {
 
     }
 
-    private double firstFeedbackPosition(ControlBinding control) {
+    private double firstFeedbackPosition(ControlBinding<?> control) {
         if (control.feedback() != null) {
             return readOrNaN(control.feedback().position()::position);
         }
@@ -1028,7 +1028,7 @@ final class OutputApplier {
         return 0.0;
     }
 
-    private double firstFeedbackVelocity(ControlBinding control) {
+    private double firstFeedbackVelocity(ControlBinding<?> control) {
         if (control.feedback() != null) {
             return readOrNaN(control.feedback().velocity()::velocity);
         }
@@ -1052,7 +1052,7 @@ final class OutputApplier {
     }
 
     private final class ControlRuntimeState {
-        private final ControlBinding binding;
+        private final ControlBinding<?> binding;
         private final List<ControlLoopRuntime> runtimes;
         private final ControlLoopRole[] roles;
         private MotionProfileRuntime profileRuntime;
@@ -1072,7 +1072,7 @@ final class OutputApplier {
         private boolean reseedPending;
         private double reseedPosition = Double.NaN;
 
-        private ControlRuntimeState(ControlBinding binding) {
+        private ControlRuntimeState(ControlBinding<?> binding) {
             this.binding = binding;
             List<ControlLoop> loops = binding.loops();
             roles = new ControlLoopRole[loops.size()];
@@ -1168,7 +1168,7 @@ final class OutputApplier {
             return this;
         }
 
-        private MechanismTraceSnapshot.Control trace(ControlBinding control, ControlRuntimeState state) {
+        private MechanismTraceSnapshot.Control trace(ControlBinding<?> control, ControlRuntimeState state) {
             MotionReference reference = staged == null
                     ? MotionReference.stationary(Double.isFinite(measuredPosition) ? measuredPosition : 0.0)
                     : staged.reference();

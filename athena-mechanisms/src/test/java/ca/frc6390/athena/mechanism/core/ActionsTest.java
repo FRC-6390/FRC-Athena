@@ -19,7 +19,7 @@ class ActionsTest {
 
     @Test
     void controlNeutralRetainsItsTargetControl() {
-        ControlBinding speed = Controls.velocity(MOTOR);
+        ControlBinding<?> speed = Controls.velocity(MOTOR);
 
         Actions.ControlNeutral neutral = (Actions.ControlNeutral) speed.neutral();
 
@@ -90,7 +90,7 @@ class ActionsTest {
 
     @Test
     void untilWithinOnlyAcceptsClosedLoopTargetsAndValidTolerance() {
-        ControlBinding position = Controls.position(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR);
         Action openLoop = MOTOR.percent(0.2);
 
         assertThrows(IllegalArgumentException.class, () -> openLoop.untilWithin(0.1));

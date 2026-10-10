@@ -37,7 +37,7 @@ class ControlRobustnessTest {
     void untilWithinComparesAgainstTheRangeConstrainedTarget() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 5.0;
-        ControlBinding arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 5.0)));
+        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 5.0)));
         Action raise = arm.position(10.0).untilWithin(0.1);
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm));
 
@@ -53,7 +53,7 @@ class ControlRobustnessTest {
         double[] speed = {100.0};
         boolean[] fed = {false};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding shooter = Controls.velocity(SHOOTER).feedback(() -> 0.0, () -> speed[0]);
+        ControlBinding<?> shooter = Controls.velocity(SHOOTER).feedback(() -> 0.0, () -> speed[0]);
         Action shoot = Actions.parallel(
                 shooter.velocity(100.0).untilWithin(5.0),
                 Actions.waitUntil(() -> fed[0]));
@@ -77,7 +77,7 @@ class ControlRobustnessTest {
         double[] distance = {1.0};
         double[] movingPoint = {2.0};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding hood = Controls.position(HOOD);
+        ControlBinding<?> hood = Controls.position(HOOD);
         InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> distance[0])
                 .at(0.0, 10.0)
                 .at(() -> movingPoint[0], 30.0);
@@ -103,7 +103,7 @@ class ControlRobustnessTest {
     @Test
     void interpolatedTargetWithoutAnyValidSampleIsNeutral() {
         RecordingContext hardware = new RecordingContext();
-        ControlBinding hood = Controls.position(HOOD);
+        ControlBinding<?> hood = Controls.position(HOOD);
         InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> Double.NaN)
                 .at(0.0, 10.0)
                 .at(1.0, 30.0);
@@ -120,7 +120,7 @@ class ControlRobustnessTest {
     void dynamicControlTargetHoldsLastFiniteSample() {
         double[] target = {3.0};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding hood = Controls.position(HOOD);
+        ControlBinding<?> hood = Controls.position(HOOD);
         Action track = hood.position(() -> target[0]);
         MechanismScheduler scheduler = scheduler(hardware, new Holder(hood));
 
@@ -135,7 +135,7 @@ class ControlRobustnessTest {
     @Test
     void encoderSetPositionReseedsARunningProfiledControl() {
         RecordingContext hardware = new RecordingContext();
-        ControlBinding arm = Controls.position(ARM)
+        ControlBinding<?> arm = Controls.position(ARM)
                 .feedback(ARM_ENCODER)
                 .pid(1.0, 0.0, 0.0)
                 .profile(new MotionProfile(1.0, 100.0));
@@ -158,7 +158,7 @@ class ControlRobustnessTest {
     void finalGuardProbeIsIndependentOfControlUnits() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 0.5;
-        ControlBinding arm = Controls.position(ARM)
+        ControlBinding<?> arm = Controls.position(ARM)
                 .constraint(Constraints.require(context -> context.requested() < 0.9));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm));
 
@@ -175,7 +175,7 @@ class ControlRobustnessTest {
     void dashboardTunedLimitsAlsoBoundThePlannerResult() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 350.0;
-        ControlBinding turret = Controls.position(ARM)
+        ControlBinding<?> turret = Controls.position(ARM)
                 .constraint(Constraints.range(Range.of(0.0, 400.0)))
                 .planner(MotionPlanners.boundedAngular(360.0));
         RuntimeOverrides overrides = new RuntimeOverrides();
@@ -193,7 +193,7 @@ class ControlRobustnessTest {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).capabilities = MotorControlCapabilities.voltageClosedLoop(1);
         hardware.motor(ARM).position = 350.0;
-        ControlBinding wrapped = Controls.position(ARM).pid(0.01, 0.0, 0.0).continuous(0.0, 360.0);
+        ControlBinding<?> wrapped = Controls.position(ARM).pid(0.01, 0.0, 0.0).continuous(0.0, 360.0);
         Output target = Outputs.position(10.0);
 
         OutputApplier.using(hardware).apply(new ResolvedOutput(OutputRequest.of(wrapped, target), target));
@@ -207,7 +207,7 @@ class ControlRobustnessTest {
         assertThrows(IllegalArgumentException.class, () -> Controls.position(ARM)
                 .constraint(Constraints.range(Range.of(0.0, 1.0)))
                 .constraint(Constraints.range(Range.of(2.0, 3.0))));
-        ControlBinding arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 1.0)));
+        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 1.0)));
         RuntimeOverrides overrides = new RuntimeOverrides();
         assertSame(overrides.tuning(arm), overrides.tuning(arm));
     }

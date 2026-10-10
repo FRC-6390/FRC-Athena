@@ -15,9 +15,20 @@ import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.runtime.RuntimeScope;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
+import ca.frc6390.athena.hardware.units.UnitConversions;
+import edu.wpi.first.units.AngleUnit;
+import edu.wpi.first.units.DistanceUnit;
+import edu.wpi.first.units.Unit;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Distance;
 
 /**
  * Reusable encoder declaration for robot constants.
+ *
+ * <p>{@link #measuresUnit()} is the WPILib unit the encoder's {@link #position()} and
+ * {@link #velocity()} are expressed in, set by {@link #measures(AngleUnit)} or
+ * {@link #measures(DistanceUnit)}. It is null for legacy declarations, which keep the
+ * {@link EncoderUnit} / conversion contract. Typed bindings check it at declaration time.</p>
  */
 public record EncoderDevice(
         EncoderSource source,
@@ -27,8 +38,21 @@ public record EncoderDevice(
         double offset,
         EncoderUnit units,
         FailurePolicy failurePolicy,
-        boolean baselineConfigApplied) implements PositionSignal, VelocitySignal {
+        boolean baselineConfigApplied,
+        Unit measuresUnit) implements PositionSignal, VelocitySignal {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
+
+    public EncoderDevice(
+            EncoderSource source,
+            boolean isInverted,
+            double gearRatio,
+            double conversion,
+            double offset,
+            EncoderUnit units,
+            FailurePolicy failurePolicy,
+            boolean baselineConfigApplied) {
+        this(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, baselineConfigApplied, null);
+    }
 
     public EncoderDevice(
             EncoderSource source,
@@ -101,6 +125,9 @@ public record EncoderDevice(
         }
         units = units == null ? EncoderUnit.RAW : units;
         failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
+        if (measuresUnit != null && !(measuresUnit instanceof AngleUnit) && !(measuresUnit instanceof DistanceUnit)) {
+            throw new IllegalArgumentException("Encoder measures must be an angle or distance unit.");
+        }
     }
 
     public EncoderKind kind() {
@@ -151,7 +178,8 @@ public record EncoderDevice(
                     offset,
                     units,
                     failurePolicy,
-                    baselineConfigApplied);
+                    baselineConfigApplied,
+                    measuresUnit);
         }
         return this;
     }
@@ -162,12 +190,12 @@ public record EncoderDevice(
 
     public EncoderDevice inverted(boolean inverted) {
         return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied);
+                baselineConfigApplied, measuresUnit);
     }
 
     public EncoderDevice gearRatio(double gearRatio) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied);
+                baselineConfigApplied, measuresUnit);
     }
 
     public EncoderDevice gearRatio(GearRatio gearRatio) {
@@ -175,9 +203,88 @@ public record EncoderDevice(
         return gearRatio(gearRatio.ratio());
     }
 
+    /**
+     * Typed alternative to {@link #gearRatio(double)} that reads like the reduction on the robot: a
+     * value of 10 means ten sensor rotations per mechanism rotation (a 10:1 reduction). Equivalent to
+     * {@code gearRatio(1.0 / reduction)}, the same as {@code GearRatio.reduction(10.0, 1.0)}.
+     *
+     * @param reduction sensor rotations per mechanism rotation, finite and non-zero
+     * @return updated declaration
+     */
+    public EncoderDevice reduction(double reduction) {
+        if (!Double.isFinite(reduction) || reduction == 0.0) {
+            throw new IllegalArgumentException("Encoder reduction must be finite and non-zero.");
+        }
+        return gearRatio(1.0 / reduction);
+    }
+
+    /**
+     * Typed alternative to {@link #gearRatio(GearRatio)}.
+     *
+     * @param gearing sensor-to-mechanism gearing
+     * @return updated declaration
+     */
+    public EncoderDevice gearing(GearRatio gearing) {
+        return gearRatio(gearing);
+    }
+
+    /**
+     * Declares that {@link #position()} and {@link #velocity()} are expressed in {@code unit} and
+     * sets the conversion to one full revolution of the encoder in that unit (360 for
+     * {@link Units#Degrees}, 1 for {@link Units#Rotations}). Call {@link #conversion(double)} after
+     * this to override it.
+     *
+     * @param unit angle unit reported by this encoder
+     * @return updated declaration
+     */
+    public EncoderDevice measures(AngleUnit unit) {
+        Objects.requireNonNull(unit, "unit");
+        EncoderUnit encoderUnit = units;
+        if (unit.equals(Units.Degrees)) {
+            encoderUnit = EncoderUnit.DEGREES;
+        } else if (unit.equals(Units.Radians)) {
+            encoderUnit = EncoderUnit.RADIANS;
+        } else if (unit.equals(Units.Rotations)) {
+            encoderUnit = EncoderUnit.ROTATIONS;
+        }
+        double oneRevolution = unit.fromBaseUnits(2.0 * Math.PI);
+        return new EncoderDevice(source, isInverted, gearRatio, oneRevolution, offset, encoderUnit,
+                failurePolicy, baselineConfigApplied, unit);
+    }
+
+    /**
+     * Declares that {@link #position()} and {@link #velocity()} are expressed in {@code unit}, with
+     * one encoder revolution equal to one {@code unit} until {@link #travelPerRevolution(Distance)}
+     * sets the real travel (for example a wheel circumference).
+     *
+     * @param unit distance unit reported by this encoder
+     * @return updated declaration
+     */
+    public EncoderDevice measures(DistanceUnit unit) {
+        Objects.requireNonNull(unit, "unit");
+        EncoderUnit encoderUnit = unit.equals(Units.Meters) ? EncoderUnit.METERS : units;
+        return new EncoderDevice(source, isInverted, gearRatio, 1.0, offset, encoderUnit,
+                failurePolicy, baselineConfigApplied, unit);
+    }
+
+    /**
+     * Sets the linear travel of one encoder revolution after the reduction, for example a wheel
+     * circumference. Requires {@link #measures(DistanceUnit)} first.
+     *
+     * @param travel travel per revolution
+     * @return updated declaration
+     */
+    public EncoderDevice travelPerRevolution(Distance travel) {
+        Objects.requireNonNull(travel, "travel");
+        if (!(measuresUnit instanceof DistanceUnit distance)) {
+            throw new IllegalStateException("travelPerRevolution requires measures(DistanceUnit) first.");
+        }
+        return conversion(UnitConversions.value(travel, distance));
+    }
+
     public EncoderDevice conversion(double conversion) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied);
+                baselineConfigApplied, measuresUnit);
     }
 
     public EncoderDevice wheelDiameterMeters(double diameterMeters) {
@@ -193,18 +300,18 @@ public record EncoderDevice(
 
     public EncoderDevice units(EncoderUnit units) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied);
+                baselineConfigApplied, measuresUnit);
     }
 
     public EncoderDevice offset(double offset) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied);
+                baselineConfigApplied, measuresUnit);
     }
 
     /** Selects how Athena responds if this encoder cannot be created or stops responding. */
     public EncoderDevice failurePolicy(FailurePolicy policy) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units,
-                Objects.requireNonNull(policy, "policy"), baselineConfigApplied);
+                Objects.requireNonNull(policy, "policy"), baselineConfigApplied, measuresUnit);
     }
 
     /**

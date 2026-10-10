@@ -8,7 +8,7 @@ import java.util.Objects;
  * Output request emitted by a Action before it is applied to hardware.
  */
 public interface OutputRequest {
-    ControlBinding control();
+    ControlBinding<?> control();
 
     MotorDevice motor();
 
@@ -50,16 +50,16 @@ public interface OutputRequest {
         return new Basic(null, motor, output);
     }
 
-    static OutputRequest of(ControlBinding control, Output output) {
+    static OutputRequest of(ControlBinding<?> control, Output output) {
         return new Basic(control, null, output);
     }
 
-    record Basic(ControlBinding control, MotorDevice motor, Output output) implements OutputRequest {
+    record Basic(ControlBinding<?> control, MotorDevice motor, Output output) implements OutputRequest {
         public Basic {
             Objects.requireNonNull(output, "output");
         }
 
-        static Basic of(ControlBinding control, MotorDevice motor, Output output) {
+        static Basic of(ControlBinding<?> control, MotorDevice motor, Output output) {
             return new Basic(control, motor, output);
         }
     }

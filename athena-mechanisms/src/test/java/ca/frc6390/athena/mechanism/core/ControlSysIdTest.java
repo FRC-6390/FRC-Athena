@@ -59,7 +59,7 @@ class ControlSysIdTest {
     void dynamicReverseUsesStepVoltageAndStopsAtTimeout() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         ControlSysId sysId = control.sysId()
                 .stepVoltage(6.0)
                 .timeout(0.5)
@@ -81,7 +81,7 @@ class ControlSysIdTest {
     void characterizationDoesNotLogWhenANewerActionWinsTheMotor() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         ControlSysId sysId = control.sysId().logger(log);
         TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
@@ -107,7 +107,7 @@ class ControlSysIdTest {
         boolean[] held = {true};
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         ControlSysId sysId = control.sysId().stepVoltage(4.0).timeout(0.1).logger(log);
         Action action = sysId.dynamicForward();
         HeldMechanism mechanism = new HeldMechanism(control, held, action);
@@ -137,7 +137,7 @@ class ControlSysIdTest {
     void sysIdCommandsEveryMotorInAControlGroup() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.velocity(MOTOR, FOLLOWER).feedback(ENCODER);
+        ControlBinding<?> control = Controls.velocity(MOTOR, FOLLOWER).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.sysId().stepVoltage(6.0).logger(log).dynamicForward());
@@ -156,7 +156,7 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(MOTOR).telemetryUnavailable = true;
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.sysId().stepVoltage(4.25).logger(log).dynamicForward());
@@ -186,7 +186,7 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         hardware.encoder.positionRotations = Double.NaN;
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.sysId().logger(log).dynamicForward());
@@ -202,7 +202,7 @@ class ControlSysIdTest {
     void oneRoutineLoggerRemainsValidAcrossSequentialDirections() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         ControlSysId sysId = control.sysId().logger(log);
         MultiTestMechanism mechanism = new MultiTestMechanism(control, sysId);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
@@ -223,7 +223,7 @@ class ControlSysIdTest {
     private static void assertTestOutput(SysIdState state, double expectedVoltage, double elapsedSeconds) {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         ControlSysId sysId = control.sysId()
                 .rampRate(0.5)
                 .stepVoltage(5.5)
@@ -249,7 +249,7 @@ class ControlSysIdTest {
     }
 
     private static final class SysIdMechanism implements Mechanism {
-        private final ControlBinding control = Controls.position(MOTOR).feedback(ENCODER);
+        private final ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         private final ControlSysId sysId;
         private final Action quasistaticForward;
         private final HookBinding binding;
@@ -262,31 +262,31 @@ class ControlSysIdTest {
     }
 
     private static final class TestMechanism implements Mechanism {
-        private final ControlBinding control;
+        private final ControlBinding<?> control;
         private final Action test;
 
-        private TestMechanism(ControlBinding control, Action test) {
+        private TestMechanism(ControlBinding<?> control, Action test) {
             this.control = control;
             this.test = test;
         }
     }
 
     private static final class HeldMechanism implements Mechanism {
-        private final ControlBinding control;
+        private final ControlBinding<?> control;
         private final HookBinding binding;
 
-        private HeldMechanism(ControlBinding control, boolean[] held, Action action) {
+        private HeldMechanism(ControlBinding<?> control, boolean[] held, Action action) {
             this.control = control;
             binding = Events.when(() -> held[0]).active().whileActive(action);
         }
     }
 
     private static final class MultiTestMechanism implements Mechanism {
-        private final ControlBinding control;
+        private final ControlBinding<?> control;
         private final Action forward;
         private final Action reverse;
 
-        private MultiTestMechanism(ControlBinding control, ControlSysId sysId) {
+        private MultiTestMechanism(ControlBinding<?> control, ControlSysId sysId) {
             this.control = control;
             forward = sysId.dynamicForward();
             reverse = sysId.dynamicReverse();

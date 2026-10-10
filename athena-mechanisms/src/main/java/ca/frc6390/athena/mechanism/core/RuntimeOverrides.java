@@ -18,13 +18,13 @@ import java.util.Set;
 final class RuntimeOverrides {
     private final Map<MotorDevice, Boolean> motors = new IdentityHashMap<>();
     private final Set<MotorDevice> faultedMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
-    private final Map<ControlBinding, Boolean> controls = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, Boolean> controls = new IdentityHashMap<>();
     private final Map<MotorDevice, TelemetryValue> motorTelemetry = new IdentityHashMap<>();
-    private final Map<ControlBinding, TelemetryValue> controlTelemetry = new IdentityHashMap<>();
-    private final Map<ControlBinding, Double> controlTestPercent = new IdentityHashMap<>();
-    private final Map<ControlBinding, ControlTuning> controlTunings = new IdentityHashMap<>();
-    private final Map<ControlBinding, ControlTuning> declaredTunings = new IdentityHashMap<>();
-    private final Set<ControlBinding> controlProfileOverrides = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<ControlBinding<?>, TelemetryValue> controlTelemetry = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, Double> controlTestPercent = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, ControlTuning> controlTunings = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, ControlTuning> declaredTunings = new IdentityHashMap<>();
+    private final Set<ControlBinding<?>> controlProfileOverrides = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<MotorDevice, MotorRuntimeConfig> motorConfigs = new IdentityHashMap<>();
     private final Map<MotorDevice, String> motorStatus = new IdentityHashMap<>();
     private final Map<Object, String> setupStatus = new IdentityHashMap<>();
@@ -37,13 +37,13 @@ final class RuntimeOverrides {
     boolean disabled(MotorDevice motor) {
         return faultedMotors.contains(motor) || motors.getOrDefault(motor, motor.isDisabled());
     }
-    boolean disabled(ControlBinding control) { return controls.getOrDefault(control, control.isDisabled()); }
+    boolean disabled(ControlBinding<?> control) { return controls.getOrDefault(control, control.isDisabled()); }
     void disabled(MotorDevice motor, boolean value) { motors.put(motor, value); }
     void faulted(MotorDevice motor, boolean value) {
         if (value) faultedMotors.add(motor);
         else faultedMotors.remove(motor);
     }
-    void disabled(ControlBinding control, boolean value) { controls.put(control, value); }
+    void disabled(ControlBinding<?> control, boolean value) { controls.put(control, value); }
     void restore(MotorDevice motor) {
         motors.remove(motor);
         motorConfigs.remove(motor);
@@ -162,18 +162,18 @@ final class RuntimeOverrides {
                 () -> disabled(declaration), value -> disabled(declaration, value)));
     }
 
-    TelemetryValue controlDisabled(ControlBinding control) {
+    TelemetryValue controlDisabled(ControlBinding<?> control) {
         return controlTelemetry.computeIfAbsent(control, declaration -> TelemetryValue.writableBoolean(
                 () -> disabled(declaration), value -> disabled(declaration, value)));
     }
 
-    double testPercent(ControlBinding control) { return controlTestPercent.getOrDefault(control, 0.0); }
-    void testPercent(ControlBinding control, double value) {
+    double testPercent(ControlBinding<?> control) { return controlTestPercent.getOrDefault(control, 0.0); }
+    void testPercent(ControlBinding<?> control, double value) {
         if (!Double.isFinite(value)) throw new IllegalArgumentException("Test percent must be finite.");
         controlTestPercent.put(control, Math.max(-1.0, Math.min(1.0, value)));
     }
 
-    ControlTuning tuning(ControlBinding control) {
+    ControlTuning tuning(ControlBinding<?> control) {
         ControlTuning tuned = controlTunings.get(control);
         if (tuned != null) return tuned;
         // Declared tuning only depends on the immutable binding. Cache it so the several lookups
@@ -181,51 +181,51 @@ final class RuntimeOverrides {
         return declaredTunings.computeIfAbsent(control, ControlTuning::declared);
     }
 
-    boolean hasTuning(ControlBinding control) {
+    boolean hasTuning(ControlBinding<?> control) {
         return controlTunings.containsKey(control);
     }
 
-    boolean hasProfile(ControlBinding control) {
+    boolean hasProfile(ControlBinding<?> control) {
         return control.profile() != null
                 || control.mode() == ControlMode.POSITION
                         && Constraints.motionProfile(control.constraints()) != null
                 || controlProfileOverrides.contains(control);
     }
 
-    MotionProfile profile(ControlBinding control) {
+    MotionProfile profile(ControlBinding<?> control) {
         ControlTuning tuning = tuning(control);
         return new MotionProfile(tuning.maxVelocity(), tuning.maxAcceleration());
     }
 
-    void minimumPosition(ControlBinding control, double value) {
+    void minimumPosition(ControlBinding<?> control, double value) {
         requireFinite(value, "Minimum position");
         ControlTuning current = tuning(control);
         if (value >= current.maximumPosition()) throw new IllegalArgumentException("Minimum position must be below maximum position.");
         controlTunings.put(control, current.withPositions(value, current.maximumPosition()));
     }
 
-    void maximumPosition(ControlBinding control, double value) {
+    void maximumPosition(ControlBinding<?> control, double value) {
         requireFinite(value, "Maximum position");
         ControlTuning current = tuning(control);
         if (value <= current.minimumPosition()) throw new IllegalArgumentException("Maximum position must be above minimum position.");
         controlTunings.put(control, current.withPositions(current.minimumPosition(), value));
     }
 
-    void maximumVelocity(ControlBinding control, double value) {
+    void maximumVelocity(ControlBinding<?> control, double value) {
         requirePositive(value, "Maximum velocity");
         ControlTuning current = tuning(control);
         controlTunings.put(control, current.withMotion(value, current.maxAcceleration()));
         controlProfileOverrides.add(control);
     }
 
-    void maximumAcceleration(ControlBinding control, double value) {
+    void maximumAcceleration(ControlBinding<?> control, double value) {
         requirePositive(value, "Maximum acceleration");
         ControlTuning current = tuning(control);
         controlTunings.put(control, current.withMotion(current.maxVelocity(), value));
         controlProfileOverrides.add(control);
     }
 
-    void restore(ControlBinding control) {
+    void restore(ControlBinding<?> control) {
         controlTunings.remove(control);
         controlProfileOverrides.remove(control);
         controlTestPercent.remove(control);
@@ -245,7 +245,7 @@ final class RuntimeOverrides {
             double maximumPosition,
             double maxVelocity,
             double maxAcceleration) {
-        static ControlTuning declared(ControlBinding control) {
+        static ControlTuning declared(ControlBinding<?> control) {
             Range range = Constraints.positionRange(control.constraints());
             MotionProfile profile = control.profile() == null
                     ? Constraints.motionProfile(control.constraints())

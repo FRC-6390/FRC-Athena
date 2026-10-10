@@ -187,7 +187,7 @@ class LimitHookIntegrationTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 58);
         private final EncoderDevice encoder = motor.encoder().gearRatio(1.0 / 9.0);
         private final DigitalInputDevice home = DigitalInputDevice.rio(8).inverted();
-        private final ControlBinding position = Controls.position(motor)
+        private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.5, 0.0, 0.0)
                 .constraint(Constraints.range(Range.of(0.0, 0.35)));
@@ -197,7 +197,7 @@ class LimitHookIntegrationTest {
         private final Action manualIn = position.percent(-0.2);
         private final Action manualOut = position.percent(0.2);
         private final Action outsideRange = position.position(1.0);
-        private final ControlBinding derivativePosition = Controls.position(motor)
+        private final ControlBinding<?> derivativePosition = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.0, 0.0, 1.0)
                 .constraint(Constraints.range(Range.of(0.0, 0.35)));
