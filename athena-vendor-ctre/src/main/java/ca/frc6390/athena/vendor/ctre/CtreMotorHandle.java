@@ -35,6 +35,7 @@ import com.ctre.phoenix6.signals.MotorArrangementValue;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Temperature;
 import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj.DriverStation;
 import java.util.Objects;
@@ -279,6 +280,10 @@ public final class CtreMotorHandle implements MotorHandle {
     @Override
     public double statorCurrentAmps() { ensureInputsFresh(); return statorCurrentAmps; }
 
+    /** Device temperature from the TalonFX/TalonFXS DeviceTemp signal, refreshed with the batch. */
+    @Override
+    public java.util.OptionalDouble temperatureCelsius() { ensureInputsFresh(); return controller.temperatureCelsius(); }
+
     @Override
     public void setIntegratedPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
@@ -386,6 +391,9 @@ public final class CtreMotorHandle implements MotorHandle {
         default double supplyCurrentAmps() { return 0.0; }
 
         default double statorCurrentAmps() { return 0.0; }
+
+        /** Device temperature in Celsius from the last batched refresh, or empty when the controller has none. */
+        default java.util.OptionalDouble temperatureCelsius() { return java.util.OptionalDouble.empty(); }
     }
 
     private static final class PhoenixTalonController implements TalonController {
@@ -408,7 +416,8 @@ public final class CtreMotorHandle implements MotorHandle {
                     talon.getVelocity(),
                     talon.getMotorVoltage(),
                     talon.getSupplyCurrent(),
-                    talon.getStatorCurrent());
+                    talon.getStatorCurrent(),
+                    talon.getDeviceTemp());
         }
 
         @Override public boolean isConnected() { return talon.isConnected(); }
@@ -522,6 +531,7 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override public double appliedVoltage() { return signals.voltage.getValueAsDouble(); }
         @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
         @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
+        @Override public java.util.OptionalDouble temperatureCelsius() { return signals.temperatureCelsius(); }
     }
 
     private static final class PhoenixTalonFxsController implements TalonController {
@@ -546,7 +556,8 @@ public final class CtreMotorHandle implements MotorHandle {
                     talon.getVelocity(),
                     talon.getMotorVoltage(),
                     talon.getSupplyCurrent(),
-                    talon.getStatorCurrent());
+                    talon.getStatorCurrent(),
+                    talon.getDeviceTemp());
         }
 
         @Override public boolean isConnected() { return talon.isConnected(); }
@@ -678,6 +689,7 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override public double appliedVoltage() { return signals.voltage.getValueAsDouble(); }
         @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
         @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
+        @Override public java.util.OptionalDouble temperatureCelsius() { return signals.temperatureCelsius(); }
     }
 
     private static boolean configureCurrentLimits(
@@ -716,6 +728,7 @@ public final class CtreMotorHandle implements MotorHandle {
         private final StatusSignal<Voltage> voltage;
         private final StatusSignal<Current> supplyCurrent;
         private final StatusSignal<Current> statorCurrent;
+        private final StatusSignal<Temperature> deviceTemp;
         private final BaseStatusSignal[] all;
 
         private TalonSignals(
@@ -723,13 +736,24 @@ public final class CtreMotorHandle implements MotorHandle {
                 StatusSignal<AngularVelocity> velocity,
                 StatusSignal<Voltage> voltage,
                 StatusSignal<Current> supplyCurrent,
-                StatusSignal<Current> statorCurrent) {
+                StatusSignal<Current> statorCurrent,
+                StatusSignal<Temperature> deviceTemp) {
             this.position = position;
             this.velocity = velocity;
             this.voltage = voltage;
             this.supplyCurrent = supplyCurrent;
             this.statorCurrent = statorCurrent;
-            all = new BaseStatusSignal[] {position, velocity, voltage, supplyCurrent, statorCurrent};
+            this.deviceTemp = deviceTemp;
+            all = new BaseStatusSignal[] {position, velocity, voltage, supplyCurrent, statorCurrent, deviceTemp};
+        }
+
+        private java.util.OptionalDouble temperatureCelsius() {
+            // Phoenix reports DeviceTemp in degrees Celsius; a missing or invalid reading is empty, not zero.
+            if (deviceTemp == null || !deviceTemp.getStatus().isOK()) {
+                return java.util.OptionalDouble.empty();
+            }
+            double value = deviceTemp.getValueAsDouble();
+            return Double.isFinite(value) ? java.util.OptionalDouble.of(value) : java.util.OptionalDouble.empty();
         }
 
         private void refresh() {
