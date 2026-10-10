@@ -46,6 +46,9 @@ pub struct ClientConfig {
     pub replay: bool,
     /// Request buffered records for every frame sequence gap.
     pub auto_backfill: bool,
+    /// Subscription made right after connecting (pattern, rate). The default is every signal at
+    /// the robot loop rate, so a dashboard gets values without asking; `None` subscribes to nothing.
+    pub initial_subscription: Option<(String, Rate)>,
 }
 
 impl ClientConfig {
@@ -59,6 +62,7 @@ impl ClientConfig {
             udp_advertise: None,
             replay: false,
             auto_backfill: true,
+            initial_subscription: Some(("**".into(), Rate::Hz(50.0))),
         }
     }
 }
@@ -186,8 +190,8 @@ pub struct Client {
 }
 
 impl Client {
-    /// Opens the control and realtime sockets, runs the Hello exchange and (optionally) subscribes
-    /// to replay records. Events arrive on the returned receiver.
+    /// Opens the control and realtime sockets, runs the Hello exchange and subscribes (see
+    /// [`ClientConfig::initial_subscription`]) and optionally to replay records. Events arrive on the returned receiver.
     pub fn connect(config: ClientConfig) -> Result<(Client, Receiver<Event>), ClientError> {
         let addr = (config.host.as_str(), config.control_port)
             .to_socket_addrs()
@@ -264,6 +268,12 @@ impl Client {
         }
         if config.replay {
             if let Err(e) = client.replay_subscribe() {
+                client.close();
+                return Err(e);
+            }
+        }
+        if let Some((pattern, rate)) = &config.initial_subscription {
+            if let Err(e) = client.subscribe(pattern, *rate) {
                 client.close();
                 return Err(e);
             }

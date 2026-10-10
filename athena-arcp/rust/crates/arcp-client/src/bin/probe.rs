@@ -103,7 +103,10 @@ fn parse_value(entry: &DictEntry, text: &str) -> Result<Value, String> {
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let target = format!("{}:{}", args.host, args.port);
-    let (client, rx) = Client::connect(ClientConfig::new(args.host.clone(), args.port))
+    let mut config = ClientConfig::new(args.host.clone(), args.port);
+    // The probe makes its own 20 Hz subscription below.
+    config.initial_subscription = None;
+    let (client, rx) = Client::connect(config)
         .map_err(|e| format!("connect {target}: {e}"))?;
     let link = client.status();
     println!(

@@ -109,6 +109,7 @@ fn publish_angle(server: &ArcpServerV2, cycle: u64, value: f64) {
 
 fn connect(server: &ArcpServerV2, replay: bool) -> (Client, Receiver<Event>) {
     let mut config = ClientConfig::new("127.0.0.1", server.control_addr().port());
+    config.initial_subscription = None;
     config.replay = replay;
     config.request_timeout = Duration::from_secs(3);
     Client::connect(config).expect("client connects")
@@ -264,6 +265,7 @@ fn lost_frame_is_detected_and_backfilled() {
     let (server, _robot) = start_server(None);
     let relay = LossyRelay::spawn();
     let mut config = ClientConfig::new("127.0.0.1", server.control_addr().port());
+    config.initial_subscription = None;
     config.udp_advertise = Some(relay.port);
     config.request_timeout = Duration::from_secs(3);
     let (client, rx) = Client::connect(config).expect("client connects");

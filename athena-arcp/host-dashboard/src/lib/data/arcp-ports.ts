@@ -6,7 +6,3 @@
 export const ARCP_CONTROL_PORT = 5808;
 export const ARCP_UDP_PORT = 5807;
 export const ARCP_ROBOT_REALTIME_PORT = 5809;
-
-/** Subscription made on connect: every signal at the robot loop rate. The server's bandwidth budget lowers the rate if it must. */
-export const DEFAULT_SUBSCRIPTION = '**';
-export const DEFAULT_SUBSCRIPTION_HZ = 50;
