@@ -152,6 +152,63 @@ Only persisted, writable numbers, booleans and strings take part. Persisted numb
 - Number-array values allocate when they change. Numbers, booleans and integers do not.
 - The Rust side owns the sockets and frame encoding. Java never encodes ARCP frames.
 
+## Connecting to a simulated robot
+
+The simulator runs the robot code on this machine and serves ARCP on its control port. Three pieces connect the
+dashboard to it: the simulator, the browser bridge (`arcp-ws-bridge`, for a browser dashboard), and the dashboard
+itself (`bun run dev` in a browser, or the desktop app).
+
+**Port.** WPILib's NetworkTables server listens on TCP 5810 (NT4) in simulation and on the roboRIO. The
+`mechanism-examples` robot also asks ARCP for 5810, so ARCP fails with `Address already in use` and is disabled
+(`Athena ARCP is disabled` in the sim log). Until the default moves, give the simulated robot another control
+port: change `controlPort(5810)` to `controlPort(5812)` in that example's `Robot.java` for the sim, and connect to
+5812 everywhere below. Quick-connect targets still use 5810.
+
+1. Publish the Athena artifacts to an isolated Maven repository (never `~/.m2` or `~/wpilib` for this):
+
+   ```bash
+   REPO=/path/to/m2-athena
+   JAVA_HOME=~/wpilib/2026/jdk ./gradlew publishToMavenLocal -ParcpRoborioNative=false -Dmaven.repo.local=$REPO
+   ```
+
+2. Start the simulator headless (no GUI extension) from the example:
+
+   ```bash
+   cd example-projects/mechanism-examples
+   JAVA_HOME=~/wpilib/2026/jdk sh ./gradlew simulateJava -PathenaHeadless -Dmaven.repo.local=$REPO
+   ```
+
+   Drop `-PathenaHeadless` to start with the WPILib simulator GUI. The log line `Athena ARCP` with no warning
+   means the control port is listening. Check it with the probe below.
+
+3. Check the robot with the probe (prints the dictionary size, server status, live values and one write):
+
+   ```bash
+   cd athena-arcp/rust
+   cargo run -p arcp-client --bin arcp-probe -- 127.0.0.1 5812 --seconds 3
+   ```
+
+4. Start the browser bridge. It listens on `ws://127.0.0.1:5811` and accepts only loopback origins (plus any
+   `--allow-origin`). The dashboard connects to a robot with a `connect` command, so the bridge needs no config:
+
+   ```bash
+   cd athena-arcp/rust
+   cargo run -p arcp-client --bin arcp-ws-bridge -- --listen 127.0.0.1:5811
+   ```
+
+5. Start the dashboard and pick the source:
+
+   - Browser: `cd athena-arcp/host-dashboard && bun install && bun run dev`, then open
+     `http://localhost:1420/?bridge=ws://127.0.0.1:5811`. Without the parameter, source selection probes the default
+     bridge on 5811 and falls back to the mock robot when it does not answer. `?source=mock` always selects the mock.
+   - Desktop app: `bun run tauri:dev` in `athena-arcp/host-dashboard`. Quick connect to **Simulator** (127.0.0.1).
+
+   The data layer for the browser bridge is `src/lib/data/ws-bridge-source.ts`. Source choice is
+   `src/lib/data/source-select.ts`, and quick-connect targets are `src/lib/data/connection-targets.ts`.
+
+The bridge protocol is documented at the top of `athena-arcp/rust/crates/arcp-client/src/ws_bridge.rs`. JSON
+commands carry an `id`; realtime records are binary messages batched about every 16 ms.
+
 ## Build
 
 The native library is built by the normal Gradle build (`:athena-arcp:buildArcpNativeHost`, which runs cargo).
@@ -167,3 +224,8 @@ is cross-built with `:athena-arcp:buildArcpNativeRoboRio`. See `athena-arcp/READ
 - `athena-mechanisms`: `PersistentStoreLayerTest` covers the layer precedence and the tuning file format.
 - Rust: `arcp-core` codec, `arcp-server` `tests/v2_server.rs` (replay opt-in and backfill, file categories), and
   `arcp-jni` unit tests.
+- Rust `arcp-client`: `tests/e2e.rs` (client against an in-process server) and `tests/ws_bridge.rs` (a WebSocket
+  client drives the browser bridge, which drives an in-process server: commands, rejected writes, records,
+  origin checks). The `arcp-probe` and `arcp-ws-bridge` binaries build with the same crate.
+- Dashboard data layer: `bun test src` covers `ws-bridge-source.test.ts` (commands, records, reconnect with a fake
+  socket) and `source-select.test.ts` (source choice, bridge probe, quick-connect targets).

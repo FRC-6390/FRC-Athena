@@ -60,7 +60,8 @@ dependencies {
     simulationRelease wpi.sim.enableRelease()
 }
 
-wpi.sim.addGui().defaultEnabled = true
+// Headless sim: ./gradlew simulateJava -PathenaHeadless (no GUI extension is loaded).
+wpi.sim.addGui().defaultEnabled = !project.hasProperty('athenaHeadless')
 wpi.sim.addDriverstation()
 
 jar {
