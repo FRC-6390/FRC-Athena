@@ -37,6 +37,15 @@
   const batteryTone = $derived(
     driver.battery.volts === null ? 'stale' : driver.battery.volts < 11 ? 'fault' : driver.battery.volts < 12 ? 'warn' : 'ok'
   );
+
+  /** The biggest draws (at least 0.5 A), largest first; the rest are counted, not listed. */
+  const ranked = $derived(
+    driver.power.consumers
+      .map((c, index) => ({ ...c, index }))
+      .sort((a, b) => Math.abs(b.amps) - Math.abs(a.amps))
+  );
+  const topConsumers = $derived(ranked.filter((c) => Math.abs(c.amps) >= 0.5).slice(0, 6));
+  const idleCount = $derived(ranked.length - topConsumers.length);
 </script>
 
 <div class="overview">
@@ -64,9 +73,12 @@
           {/each}
         </div>
         <ul class="consumers">
-          {#each driver.power.consumers as c, i (c.name)}
-            <li><i class="seg s{i % 5}"></i><span>{c.name}</span><b class="ui-mono">{c.amps.toFixed(1)} A</b></li>
+          {#each topConsumers as c (c.name)}
+            <li><i class="seg s{c.index % 5}"></i><span>{c.name}</span><b class="ui-mono">{c.amps.toFixed(1)} A</b></li>
+          {:else}
+            <li class="idle">All motors idle</li>
           {/each}
+          {#if idleCount > 0 && topConsumers.length > 0}<li class="idle">{idleCount} more under 0.5 A</li>{/if}
         </ul>
       </div>
     </section>
@@ -276,5 +288,9 @@
     .tile {
       grid-column: span 12;
     }
+  }
+  .consumers .idle {
+    color: var(--text-faint);
+    font-size: var(--fs-xs);
   }
 </style>

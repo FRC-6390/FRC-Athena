@@ -132,7 +132,10 @@
         <ConnectionPanel {connector} />
       </div>
     {/if}
-    <main class="content" class:flush={section === 'mechanisms' || section === 'dashboards' || section === 'signals'}>
+    {#if link === 'reconnecting'}
+      <div class="stale-banner" role="status">Robot link lost. Values below are the last ones received; reconnecting…</div>
+    {/if}
+    <main class="content" class:stale={link === 'reconnecting'} class:flush={section === 'mechanisms' || section === 'dashboards' || section === 'signals'}>
       {#if section === 'dashboards'}
         <DashboardsScreen {session} {live} {driver} onmechanism={openMechanism} />
       {:else if section === 'mechanisms'}
@@ -175,6 +178,23 @@
   }
   .content.flush {
     overflow: hidden;
+  }
+  .content.stale {
+    opacity: 0.45;
+    filter: grayscale(0.8);
+    transition: opacity 0.2s;
+  }
+  .stale-banner {
+    position: absolute;
+    top: var(--topbar-height);
+    left: 0;
+    right: 0;
+    z-index: 15;
+    padding: 6px var(--sp-4);
+    background: var(--warn-soft);
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    border-bottom: 1px solid var(--border);
   }
   .connection-popover {
     position: absolute;
