@@ -113,3 +113,14 @@ export function classicCommands(
     }
   };
 }
+
+/** Signals on the robot's NT4 compatibility tree (shown in the explorer's NT list, not in the main list). */
+export function isNtCompatPath(path: string): boolean {
+  return path.startsWith('Athena/NT4/') || path.startsWith('NT4/');
+}
+
+/** Publish-only plumbing signals hidden from every list. */
+export function isIgnoredPublishSignal(signal: SignalRow): boolean {
+  const token = signal.path.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return token.includes('publish');
+}
