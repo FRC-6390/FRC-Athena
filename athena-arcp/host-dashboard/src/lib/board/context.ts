@@ -48,9 +48,20 @@ export function createContext(options: {
 export function widgetTitle(instance: WidgetInstance, def: WidgetDef, bindings: Record<string, SignalDescriptor[]>): string {
   if (instance.title && instance.title.trim() !== '') return instance.title;
   const first = def.slots.map((s) => bindings[s.key]?.[0]).find((d) => d !== undefined);
-  if (first) {
-    const mechanism = first.mechanismPath.split('/').pop();
-    return mechanism && mechanism !== first.name ? `${mechanism} · ${first.name}` : first.name;
+  if (!first || def.titleFrom === 'fixed') return def.name;
+  const mechanism = first.mechanismPath.split('/').pop() ?? '';
+  const group = (name: string) => {
+    const parts = first.localPath.split('/');
+    return parts[0] === name && parts[1] ? parts[1] : null;
+  };
+  switch (def.titleFrom) {
+    case 'mechanism':
+      return mechanism || first.name;
+    case 'device':
+      return [mechanism, group('Devices')].filter(Boolean).join(' · ') || first.name;
+    case 'control':
+      return [mechanism, group('Controls')].filter(Boolean).join(' · ') || first.name;
+    default:
+      return mechanism && mechanism !== first.name ? `${mechanism} · ${first.name}` : first.name;
   }
-  return def.name;
 }

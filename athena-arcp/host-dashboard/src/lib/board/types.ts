@@ -92,6 +92,11 @@ export type WidgetDef = {
   settings: SettingField[];
   defaultSize: { w: number; h: number };
   minSize?: { w: number; h: number };
+  /**
+   * Where the automatic title comes from: the bound signal's name (default), or the mechanism, device or
+   * control it belongs to (for cards that show a whole group).
+   */
+  titleFrom?: 'signal' | 'mechanism' | 'device' | 'control' | 'fixed';
   /** Suggestion priority when a signal is dropped (higher first). */
   score?: (signal: SignalDescriptor) => number;
   component: Component<{ ctx: WidgetContext }>;

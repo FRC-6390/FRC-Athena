@@ -109,7 +109,7 @@ export function registerControlWidgets(): void {
   });
 
   registerWidget({
-    type: 'button-group',
+    type: 'button-group', titleFrom: 'mechanism',
     name: 'Button group',
     category: 'Controls',
     description: 'Several robot Actions as one grid of run buttons. Each shows its own running state; press a running one to stop it.',
@@ -228,7 +228,7 @@ export function registerControlWidgets(): void {
   });
 
   registerWidget({
-    type: 'boolean-matrix',
+    type: 'boolean-matrix', titleFrom: 'mechanism',
     name: 'Boolean matrix',
     category: 'Values',
     description: 'Many true/false signals as a grid of labelled lights. Good for sensor and limit-switch panels.',
@@ -245,7 +245,7 @@ export function registerControlWidgets(): void {
   });
 
   registerWidget({
-    type: 'status-list',
+    type: 'status-list', titleFrom: 'mechanism',
     name: 'Status list',
     category: 'Values',
     description: 'Several signals in one compact list. Each row gets a tone from the thresholds (numbers) or true/false colours (booleans).',
@@ -265,7 +265,7 @@ export function registerControlWidgets(): void {
   });
 
   registerWidget({
-    type: 'pid-tuner',
+    type: 'pid-tuner', titleFrom: 'control',
     name: 'PID tuner',
     category: 'Controls',
     description: 'Table of writable gains (kP, kI, kD, ...). Edit each one inline. Restore uses the sibling Restore action when there is one.',

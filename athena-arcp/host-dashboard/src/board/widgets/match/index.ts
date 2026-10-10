@@ -22,7 +22,7 @@ const POSE = ['struct:Pose2d'];
 /** Registers the match and layout widget pack. Called once from `registerAllWidgets()`. */
 export function registerMatchWidgets(): void {
   registerWidget({
-    type: 'match-field',
+    type: 'match-field', titleFrom: 'fixed',
     name: 'Field 2D',
     category: 'Match',
     description: 'Robot pose on the field with heading, trail and alliance-coloured bumpers. Extra Pose2d signals (targets, vision) are drawn as outlines.',
@@ -53,7 +53,7 @@ export function registerMatchWidgets(): void {
   });
 
   registerWidget({
-    type: 'match-timer',
+    type: 'match-timer', titleFrom: 'fixed',
     name: 'Match timer',
     category: 'Match',
     description: 'Big match clock with auto, teleop, endgame and final colours. Uses a match-time signal, or the match markers when none is bound.',
@@ -79,7 +79,7 @@ export function registerMatchWidgets(): void {
   });
 
   registerWidget({
-    type: 'match-alliance',
+    type: 'match-alliance', titleFrom: 'fixed',
     name: 'Alliance and station',
     category: 'Match',
     description: 'Alliance colour block with the driver station number. Bind an alliance (string or boolean) and a station (1 to 3).',
@@ -95,7 +95,7 @@ export function registerMatchWidgets(): void {
   });
 
   registerWidget({
-    type: 'match-battery',
+    type: 'match-battery', titleFrom: 'fixed',
     name: 'Battery',
     category: 'Match',
     description: 'Battery voltage with a sag chart. Colours change below the warning and fault voltages.',
@@ -112,7 +112,7 @@ export function registerMatchWidgets(): void {
   });
 
   registerWidget({
-    type: 'match-alerts',
+    type: 'match-alerts', titleFrom: 'fixed',
     name: 'Alerts',
     category: 'Match',
     description: 'Newest faults, stage changes and checks from the robot, plus any boolean fault signals bound here. Dismiss on this screen only.',

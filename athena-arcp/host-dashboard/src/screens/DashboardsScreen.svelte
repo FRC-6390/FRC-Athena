@@ -17,6 +17,7 @@
   import { createWidget, newId, suggestWidgets, widgetDef } from '../lib/board/registry';
   import { exportBoards, importBoards, loadBoards, saveBoards } from '../lib/board/storage';
   import { History } from '../lib/board/history';
+  import { driverBoard, tunableMechanisms, tuningBoard } from '../lib/board/templates';
   import { downloadJsonFile, pickJsonFileText, shouldIgnoreGlobalHotkeys } from '../lib/browser-io';
   import { registerAllWidgets } from '../board/widgets';
   import Board, { type DragPayload } from '../board/Board.svelte';
@@ -42,6 +43,7 @@
   let editing = $state(false);
   let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
+  let newOpen = $state(false);
   let renaming = $state(false);
   let nameDraft = $state('');
   let notice = $state<string | null>(null);
@@ -88,16 +90,26 @@
   const undo = () => restore(history.undo($state.snapshot(boards) as BoardDoc[]));
   const redo = () => restore(history.redo($state.snapshot(boards) as BoardDoc[]));
 
-  function newBoard() {
-    const board: BoardDoc = { id: newId('b'), name: `Board ${boards.length + 1}`, columns: 24, widgets: [] };
+  function addBoard(board: BoardDoc, edit: boolean) {
     change((all) => {
       all.push(board);
     });
     activeId = board.id;
-    editing = true;
-    renaming = true;
-    nameDraft = board.name;
+    selectedId = null;
+    editing = edit;
+    newOpen = false;
   }
+
+  function newBoard() {
+    addBoard({ id: newId('b'), name: `Board ${boards.length + 1}`, columns: 24, widgets: [] }, true);
+    renaming = true;
+    nameDraft = `Board ${boards.length}`;
+  }
+
+  const tunable = $derived.by(() => {
+    void live.current;
+    return newOpen ? tunableMechanisms(session.store.allSignals()) : [];
+  });
 
   function nextFreeRow(board: BoardDoc): number {
     return board.widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0);
@@ -326,7 +338,38 @@
           {/if}
         </button>
       {/each}
-      <button type="button" class="new" title="New board" onclick={newBoard}><FontAwesomeIcon icon={faPlus} /></button>
+    </div>
+    <div class="new-wrap">
+      <button type="button" class="new" title="New board" onclick={() => (newOpen = !newOpen)}><FontAwesomeIcon icon={faPlus} /></button>
+      {#if newOpen}
+        <div class="scrim" role="presentation" onpointerdown={() => (newOpen = false)}></div>
+        <div class="menu new-menu ui-panel" role="menu">
+          <button type="button" role="menuitem" onclick={newBoard}>
+            <span class="mi-title">Blank board</span><span class="mi-desc">Start empty and drag signals in</span>
+          </button>
+          <button type="button" role="menuitem" onclick={() => addBoard(driverBoard(session.store.allSignals()), false)}>
+            <span class="mi-title">Driver</span><span class="mi-desc">Match clock, battery, alerts, field, camera, mechanism status</span>
+          </button>
+          {#if tunable.length > 0}
+            <hr />
+            <div class="mi-head">Tune a mechanism</div>
+            {#each tunable as mechanism (mechanism.path)}
+              <button
+                type="button"
+                role="menuitem"
+                onclick={() => {
+                  const board = tuningBoard(session.store.allSignals(), mechanism.path);
+                  if (board) addBoard(board, false);
+                }}
+              >
+                <span class="mi-title">{mechanism.name}</span>
+              </button>
+            {/each}
+          {:else}
+            <p class="mi-note">Connect to a robot for driver and tuning templates.</p>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <span class="ui-spacer"></span>
@@ -505,6 +548,43 @@
     color: var(--text-strong);
     font: inherit;
     padding: 0 6px;
+  }
+  .new-wrap {
+    position: relative;
+  }
+  .new-menu {
+    left: 0;
+    right: auto;
+    width: 300px;
+    max-height: 60vh;
+    overflow: auto;
+  }
+  .new-menu button {
+    display: grid;
+    gap: 1px;
+  }
+  .mi-title {
+    font-weight: 600;
+    color: var(--text-strong);
+    text-transform: capitalize;
+  }
+  .mi-desc {
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+  }
+  .mi-head {
+    padding: 4px 10px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+  .mi-note {
+    margin: 0;
+    padding: 6px 10px;
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
   }
   .new {
     display: grid;

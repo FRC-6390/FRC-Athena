@@ -173,7 +173,7 @@ export function registerRobotWidgets(): void {
       component: SwerveWidget
     },
     {
-      type: 'motorCard',
+      type: 'motorCard', titleFrom: 'device',
       name: 'Motor card',
       category: 'Robot',
       description: 'A motor or device group from one of its signals: current, voltage, temperature, derate and link state. Siblings are found by path.',
@@ -188,7 +188,7 @@ export function registerRobotWidgets(): void {
       component: MotorCardWidget
     },
     {
-      type: 'mechanismCard',
+      type: 'mechanismCard', titleFrom: 'mechanism',
       name: 'Mechanism card',
       category: 'Robot',
       description: 'A mechanism summary from any of its signals: State and Reason (coloured by tone), stage, active actions and faults.',
@@ -200,7 +200,7 @@ export function registerRobotWidgets(): void {
       component: MechanismCardWidget
     },
     {
-      type: 'controlTuner',
+      type: 'controlTuner', titleFrom: 'control',
       name: 'Control tuner',
       category: 'Robot',
       description: 'A control loop from any of its signals: target, reference and measured traces with the gains editable inline.',
@@ -212,7 +212,7 @@ export function registerRobotWidgets(): void {
       component: ControlTunerWidget
     },
     {
-      type: 'powerSplit',
+      type: 'powerSplit', titleFrom: 'fixed',
       name: 'Power split',
       category: 'Robot',
       description: 'Several current signals as one stacked bar and a list, with the total amps. Drop more channels onto the Currents slot.',
