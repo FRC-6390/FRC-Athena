@@ -54,13 +54,14 @@
     min-height: 0;
   }
   .volts {
-    font-size: min(80cqh, 40cqw);
+    /* The number row gets about half the card; the sag line and chart take the rest. */
+    font-size: min(40cqh, 28cqw);
     font-weight: 700;
     line-height: 1;
     letter-spacing: -0.02em;
   }
   .unit {
-    font-size: min(30cqh, 14cqw);
+    font-size: min(16cqh, 10cqw);
     font-weight: 600;
     color: var(--text-soft);
   }

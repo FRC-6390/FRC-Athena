@@ -290,6 +290,8 @@
     }
   }
   .consumers .idle {
+    grid-column: 1 / -1;
+    display: block;
     color: var(--text-faint);
     font-size: var(--fs-xs);
   }

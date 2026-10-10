@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { clockFromElapsed, clockFromPhase, clockFromRemaining, formatMatchClock, MATCH_SECONDS } from './match-timer';
+import { clockFromElapsed, clockFromPeriod, clockFromPhase, clockFromRemaining, formatMatchClock, MATCH_SECONDS } from './match-timer';
 import { parseAlliance, parseStation } from './match-alliance';
 import { batteryReading, batteryTone, sparklinePoints } from './match-battery';
 
@@ -95,5 +95,19 @@ describe('battery', () => {
     );
     expect(line.split(' ')).toHaveLength(2);
     expect(line.startsWith('2.0,')).toBe(true);
+  });
+});
+
+describe('clockFromPeriod (WPILib match time)', () => {
+  const t = { endgameSeconds: 30, finalSeconds: 10 };
+  test('the DriverStation mode picks the period, match time is what is left in it', () => {
+    expect(clockFromPeriod('Autonomous', 12, t)).toMatchObject({ phase: 'auto', remaining: 12 });
+    expect(clockFromPeriod('Teleop', 100, t)).toMatchObject({ phase: 'teleop', remaining: 100 });
+    expect(clockFromPeriod('Teleop', 25, t)).toMatchObject({ phase: 'endgame', tone: 'warn' });
+    expect(clockFromPeriod('Teleop', 5, t)).toMatchObject({ phase: 'final', tone: 'fault' });
+  });
+  test('outside a timed match there is no time, only the mode', () => {
+    expect(clockFromPeriod('Teleop', -1, t)).toMatchObject({ phase: 'teleop', remaining: null });
+    expect(clockFromPeriod('Disabled', -1, t)).toMatchObject({ phase: 'idle', label: 'Disabled', remaining: null });
   });
 });

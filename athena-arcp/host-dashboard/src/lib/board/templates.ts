@@ -39,8 +39,17 @@ class Packer {
     this.rowHeight = Math.max(this.rowHeight, h);
   }
 
+  /** Starts a new row. Columns left over are shared out across the row's widgets, so rows end flush. */
   newRow(): void {
     if (this.x === 0) return;
+    const row = this.widgets.filter((w) => w.y === this.y);
+    let spare = COLUMNS - this.x;
+    for (let i = 0; spare > 0 && row.length > 0; i = (i + 1) % row.length, spare--) row[i].w += 1;
+    let x = 0;
+    for (const w of row) {
+      w.x = x;
+      x += w.w;
+    }
     this.y += this.rowHeight;
     this.x = 0;
     this.rowHeight = 0;
@@ -65,14 +74,13 @@ export function driverBoard(signals: readonly SignalDescriptor[], name = 'Driver
   const chooser = signals.find((s) => s.type === 'string' && s.writable && /auto/i.test(s.path));
   if (chooser) pack.add('match-chooser', { selected: [chooser.path] }, { w: 8, h: 3 });
   pack.newRow();
+  const count = mechanisms(signals).length;
   if (poses.length > 0) pack.add('match-field', { pose: [poses[0]] }, { w: 12, h: 7 });
   pack.add('match-camera', {}, { w: 12, h: 7 });
+  // Without a field the mechanism tiles sit beside the camera; otherwise they get their own row.
+  if (poses.length > 0) pack.newRow();
+  if (count > 0) pack.add('mechanismStatus', { mechanisms: [] }, { w: poses.length > 0 ? 24 : 12, h: poses.length > 0 ? Math.min(6, 1 + Math.ceil(count / 6)) : 7 }, {}, 'Mechanisms');
   pack.newRow();
-  for (const node of mechanisms(signals)) {
-    const s = summarize(node);
-    const anchor = s.reason ?? s.state ?? node.signals[0];
-    if (anchor) pack.add('mechanismCard', { signal: [anchor.path] }, { w: 6, h: 3 });
-  }
   return { id: newId('b'), name, columns: COLUMNS, widgets: pack.widgets };
 }
 
@@ -108,6 +116,7 @@ export function tuningBoard(signals: readonly SignalDescriptor[], mechanismPath:
   if (values.length > 0) pack.add('status-list', { rows: values.slice(0, 12).map((v) => v.path) }, { w: 8, h: Math.min(8, 2 + values.length) }, {}, 'Values');
   const numeric = values.filter((v) => v.type !== 'bool').slice(0, 4);
   if (numeric.length > 0) pack.add('graph', { series: numeric.map((v) => v.path) }, { w: 16, h: 6 }, {}, 'Trends');
+  pack.newRow();
   return { id: newId('b'), name: `Tune ${node.name}`, columns: COLUMNS, widgets: pack.widgets };
 }
 

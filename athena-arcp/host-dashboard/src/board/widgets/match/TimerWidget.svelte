@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { WidgetContext } from '../../../lib/board/types';
   import { matchPhase, robotNowMicros } from '../../../lib/driver/driver-state';
+  import { ROBOT_PATHS } from '../../../lib/data/types';
   import {
+    clockFromPeriod,
     clockFromPhase,
     clockFromRemaining,
     clockFromElapsed,
@@ -22,11 +24,13 @@
   const clock = $derived.by(() => {
     void ctx.live.current;
     const value = signal ? ctx.latest(signal) : undefined;
-    if (signal && typeof value === 'number') {
-      return source === 'remaining' ? clockFromRemaining(value, thresholds) : clockFromElapsed(value, thresholds);
-    }
-    if (signal && typeof value === 'bigint') {
-      const n = Number(value);
+    const n = typeof value === 'number' ? value : typeof value === 'bigint' ? Number(value) : null;
+    if (signal && n !== null) {
+      if (source === 'period') {
+        const modeSignal = ctx.session.store.descriptorByPath(ROBOT_PATHS.mode);
+        const mode = modeSignal ? ctx.latest(modeSignal) : undefined;
+        return clockFromPeriod(typeof mode === 'string' ? mode : null, n, thresholds);
+      }
       return source === 'remaining' ? clockFromRemaining(n, thresholds) : clockFromElapsed(n, thresholds);
     }
     const store = ctx.session.store;
@@ -37,13 +41,11 @@
   });
 
   const text = $derived(formatMatchClock(clock.remaining));
-  const showSource = $derived(signal ? 'signal' : 'markers');
 </script>
 
 <div class="timer" data-tone={clock.tone}>
   <span class="phase">{clock.label}</span>
   <span class="clock ui-mono">{text}</span>
-  <span class="source">{showSource}</span>
 </div>
 
 <style>
@@ -51,7 +53,7 @@
     width: 100%;
     height: 100%;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr;
     align-items: center;
     justify-items: center;
     padding: 4px 8px;
@@ -72,12 +74,6 @@
     line-height: 1;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
-  }
-  .source {
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
   .timer[data-tone='info'] .phase,
   .timer[data-tone='info'] .clock {

@@ -4,6 +4,7 @@ import { clearRegistry, createWidget, matches, registerWidget, suggestWidgets } 
 import { exportBoards, importBoards, loadBoards, saveBoards, type KeyValueStorage } from './storage';
 import { History } from './history';
 import type { BoardDoc, WidgetDef } from './types';
+import { driverBoard } from './templates';
 
 function signal(partial: Partial<SignalDescriptor>): SignalDescriptor {
   return {
@@ -97,5 +98,23 @@ describe('history', () => {
     state = history.redo(state)!;
     expect(state).toEqual([1, 2]);
     expect(history.redo(state)).toBeNull();
+  });
+});
+
+describe('templates', () => {
+  beforeEach(() => {
+    clearRegistry();
+    for (const type of ['match-timer', 'match-battery', 'match-alerts', 'match-camera', 'match-field', 'mechanismStatus']) registerWidget(def({ type }));
+  });
+
+  test('driver board rows end flush with the grid', () => {
+    const signals = ['arm', 'turret', 'intake'].map((m, i) =>
+      signal({ signalId: i + 1, path: `robot/${m}/State/Reason`, type: 'string', mechanismPath: `robot/${m}`, localPath: 'State/Reason', name: 'Reason' })
+    );
+    const board = driverBoard(signals);
+    const rows = new Map<number, number>();
+    for (const w of board.widgets) rows.set(w.y, (rows.get(w.y) ?? 0) + w.w);
+    expect([...rows.values()].every((total) => total === board.columns)).toBe(true);
+    expect(board.widgets.map((w) => w.type)).toContain('mechanismStatus');
   });
 });

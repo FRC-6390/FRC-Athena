@@ -1,6 +1,7 @@
 import type { Session } from '../data/session';
 import type { SignalDescriptor } from '../data/types';
 import type { WidgetContext, WidgetDef, WidgetInstance } from './types';
+import { humanLabel } from './widgets/controls-values';
 
 /** Resolves a widget's bindings (stored as paths) against the live dictionary. */
 export function resolveBindings(session: Session, instance: WidgetInstance): Record<string, SignalDescriptor[]> {
@@ -49,19 +50,21 @@ export function widgetTitle(instance: WidgetInstance, def: WidgetDef, bindings: 
   if (instance.title && instance.title.trim() !== '') return instance.title;
   const first = def.slots.map((s) => bindings[s.key]?.[0]).find((d) => d !== undefined);
   if (!first || def.titleFrom === 'fixed') return def.name;
-  const mechanism = first.mechanismPath.split('/').pop() ?? '';
+  // Derived names are code identifiers (`followerElevator`, `chassisImu`); titles read as words.
+  const mechanism = humanLabel(first.mechanismPath.split('/').pop() ?? '');
   const group = (name: string) => {
     const parts = first.localPath.split('/');
-    return parts[0] === name && parts[1] ? parts[1] : null;
+    return parts[0] === name && parts[1] ? humanLabel(parts[1]) : null;
   };
+  const signalName = humanLabel(first.name);
   switch (def.titleFrom) {
     case 'mechanism':
-      return mechanism || first.name;
+      return mechanism || signalName;
     case 'device':
-      return [mechanism, group('Devices')].filter(Boolean).join(' · ') || first.name;
+      return [mechanism, group('Devices')].filter(Boolean).join(' · ') || signalName;
     case 'control':
-      return [mechanism, group('Controls')].filter(Boolean).join(' · ') || first.name;
+      return [mechanism, group('Controls')].filter(Boolean).join(' · ') || signalName;
     default:
-      return mechanism && mechanism !== first.name ? `${mechanism} · ${first.name}` : first.name;
+      return mechanism && mechanism !== signalName ? `${mechanism} · ${signalName}` : signalName;
   }
 }

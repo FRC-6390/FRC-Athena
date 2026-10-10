@@ -63,10 +63,11 @@ export function registerMatchWidgets(): void {
         key: 'source',
         label: 'Bound signal counts',
         kind: 'enum',
-        default: 'elapsed',
+        default: 'period',
         options: [
-          { value: 'elapsed', label: 'Seconds elapsed' },
-          { value: 'remaining', label: 'Seconds remaining' }
+          { value: 'period', label: 'Seconds left in period (WPILib match time)' },
+          { value: 'elapsed', label: 'Seconds elapsed in match' },
+          { value: 'remaining', label: 'Seconds left in match' }
         ]
       },
       { key: 'endgame', label: 'Endgame colour at', kind: 'number', default: 30, min: 1, max: 60, step: 1, unit: 's left' },

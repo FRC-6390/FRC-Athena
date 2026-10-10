@@ -76,6 +76,22 @@ export function clockFromPhase(phase: MatchPhase, sinceSeconds: number | null, t
   return clockFromElapsed(AUTO_SECONDS + sinceSeconds, thresholds);
 }
 
+/**
+ * Clock from WPILib's match time (`athena/robot/matchTime`): seconds left in the current period, -1 outside a
+ * timed match. The period comes from the DriverStation mode (`Autonomous`, `Teleop`, `Disabled`, `Test`).
+ */
+export function clockFromPeriod(mode: string | null, remaining: number, thresholds: ClockThresholds): MatchClock {
+  const timed = Number.isFinite(remaining) && remaining >= 0;
+  const left = timed ? remaining : null;
+  if (mode === 'Autonomous') return { phase: 'auto', remaining: left, tone: 'info', label: PHASE_LABEL.auto };
+  if (mode === 'Teleop') {
+    if (left !== null && left <= thresholds.finalSeconds) return { phase: 'final', remaining: left, tone: 'fault', label: PHASE_LABEL.final };
+    if (left !== null && left <= thresholds.endgameSeconds) return { phase: 'endgame', remaining: left, tone: 'warn', label: PHASE_LABEL.endgame };
+    return { phase: 'teleop', remaining: left, tone: null, label: PHASE_LABEL.teleop };
+  }
+  return { ...IDLE, remaining: left, label: mode === 'Test' ? 'Test' : mode === 'Disabled' ? 'Disabled' : PHASE_LABEL.idle };
+}
+
 /** m:ss, rounding up so the display never reads 0:00 while time is left. */
 export function formatMatchClock(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds)) return '--:--';

@@ -13,6 +13,7 @@ import ElevatorWidget from './ElevatorWidget.svelte';
 import SwerveWidget from './SwerveWidget.svelte';
 import MotorCardWidget from './MotorCardWidget.svelte';
 import MechanismCardWidget from './MechanismCardWidget.svelte';
+import MechanismStatusWidget from './MechanismStatusWidget.svelte';
 import ControlTunerWidget from './ControlTunerWidget.svelte';
 import PowerSplitWidget from './PowerSplitWidget.svelte';
 
@@ -198,6 +199,18 @@ export function registerRobotWidgets(): void {
       minSize: { w: 3, h: 2 },
       score: (s) => (s.mechanismPath === '' ? 0 : s.localPath.startsWith('State/') ? 40 : 20),
       component: MechanismCardWidget
+    },
+    {
+      type: 'mechanismStatus', titleFrom: 'fixed',
+      name: 'Mechanism status',
+      category: 'Robot',
+      description: 'Every mechanism (or the ones bound) as a compact tile: running action, reason, and faults in red. Made for driver boards.',
+      slots: [{ key: 'mechanisms', label: 'Mechanisms (optional, any signal of each)', matcher: { test: (s) => s.mechanismPath !== '' }, multiple: true }],
+      settings: [{ key: 'hideIdle', label: 'Only show running or faulted', kind: 'bool', default: false }],
+      defaultSize: { w: 12, h: 4 },
+      minSize: { w: 3, h: 2 },
+      score: () => 5,
+      component: MechanismStatusWidget
     },
     {
       type: 'controlTuner', titleFrom: 'control',
