@@ -335,9 +335,14 @@ List/download/delete for replays, persisted values, models/history, health recor
 "pull tuning" (robot values vs deployed `deploy/athena/tuning` file vs code defaults).
 
 ### E7. Packaging
-ARCP becomes an optional transport behind the runtime's sink extension point and is re-added to the
-build and vendordep. Rust core via JNI where available; pure-Java implementation of the same wire
-format as fallback (required for sim/tests). Optional NT4 bridge mirroring selected subtrees.
+ARCP is implemented **only in Rust** (`arcp-core`, `arcp-server`). Java never runs a server or
+encodes the ARCP protocol itself: the Java side is a thin JNI binding (`arcp-jni`) exposing the
+robot-facing API (sink for dictionary/frames/markers, write/action handler callbacks, file-service
+root, status). The native library is built by the Gradle build for the host platform (Linux/Windows/
+macOS, used by simulation and tests) and cross-compiled for the roboRIO (linuxathena / armv7), and
+packaged in the athena-arcp artifact. The ARCP transport is optional behind the runtime's sink
+extension point and is re-added to the build and vendordep. Optional NT4 bridge mirroring selected
+subtrees.
 
 ---
 
