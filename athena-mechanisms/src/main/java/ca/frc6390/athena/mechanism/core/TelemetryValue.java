@@ -19,6 +19,33 @@ public final class TelemetryValue {
     private final java.util.function.Consumer<Object> writer;
     private final boolean momentary;
     private final boolean constant;
+    private Meta meta = Meta.DEFAULT;
+
+    /** Metadata that does not change how the value is read: persistence, publication, and lock state. */
+    private record Meta(boolean persisted, boolean published, Class<?> lockGroup, java.util.function.BooleanSupplier lockCondition) {
+        static final Meta DEFAULT = new Meta(false, true, null, null);
+    }
+
+    /** Outcome of a dashboard or runtime write attempted through {@link #tryWrite(Object)}. */
+    public record WriteResult(boolean accepted, String reason) {
+        static final WriteResult ACCEPTED = new WriteResult(true, "ok");
+
+        static WriteResult rejected(String reason) {
+            return new WriteResult(false, reason);
+        }
+    }
+
+    private TelemetryValue(TelemetryValue source, Meta meta) {
+        this.type = source.type;
+        this.writable = source.writable;
+        this.reader = source.reader;
+        this.numberReader = source.numberReader;
+        this.booleanReader = source.booleanReader;
+        this.writer = source.writer;
+        this.momentary = source.momentary;
+        this.constant = source.constant;
+        this.meta = meta;
+    }
 
     private TelemetryValue(Type type, boolean writable, Supplier<Object> reader,
             java.util.function.Consumer<Object> writer) {
@@ -181,6 +208,76 @@ public final class TelemetryValue {
     public boolean momentary() { return momentary; }
     /** True when the value never changes after schema construction. */
     public boolean constant() { return constant; }
+    /**
+     * Returns a copy that is restored from the persistent store at registration and saved when it
+     * changes. Only writable numeric, boolean, and string values persist; other values are ignored.
+     */
+    public TelemetryValue persisted() {
+        return withMeta(new Meta(true, meta.published(), meta.lockGroup(), meta.lockCondition()));
+    }
+
+    /** Returns a copy that is kept local: it is not sent to NetworkTables. */
+    public TelemetryValue unpublished() {
+        return withMeta(new Meta(meta.persisted(), false, meta.lockGroup(), meta.lockCondition()));
+    }
+
+    /**
+     * Returns a copy gated by a lock group. Dashboard writes are rejected while the group is locked.
+     *
+     * @param group lock group class, such as {@code Locks.InMatch.class}
+     * @return copy with the lock group
+     */
+    public TelemetryValue lock(Class<?> group) {
+        java.util.Objects.requireNonNull(group, "group");
+        return withMeta(new Meta(meta.persisted(), meta.published(), group, meta.lockCondition()));
+    }
+
+    /** Returns true when the value is persisted. */
+    public boolean isPersisted() { return meta.persisted(); }
+
+    /** Returns true when the value is sent to NetworkTables. */
+    public boolean isPublished() { return meta.published(); }
+
+    /** Returns the lock group, or null when writes are never locked. */
+    public Class<?> lockGroup() { return meta.lockGroup(); }
+
+    /** Returns true while the value's lock group is locked. */
+    public boolean locked() {
+        java.util.function.BooleanSupplier condition = meta.lockCondition();
+        return condition != null && condition.getAsBoolean();
+    }
+
+    /** Returns a copy whose lock state comes from the supplied condition. Set by the schema builder. */
+    TelemetryValue withLockCondition(java.util.function.BooleanSupplier condition) {
+        return withMeta(new Meta(meta.persisted(), meta.published(), meta.lockGroup(), condition));
+    }
+
+    private TelemetryValue withMeta(Meta updated) {
+        return new TelemetryValue(this, updated);
+    }
+
+    /**
+     * Attempts a write from the dashboard or another runtime writer. Read-only values and values whose
+     * lock group is locked are rejected and left unchanged. Writer failures are reported as rejections.
+     *
+     * @param value requested value
+     * @return whether the write was applied, with the reason when it was not
+     */
+    public WriteResult tryWrite(Object value) {
+        if (!writable || writer == null) {
+            return WriteResult.rejected("rejected: read-only");
+        }
+        if (locked()) {
+            return WriteResult.rejected("rejected: locked (" + meta.lockGroup().getSimpleName() + ")");
+        }
+        try {
+            writer.accept(value);
+        } catch (RuntimeException exception) {
+            return WriteResult.rejected("rejected: " + exception.getMessage());
+        }
+        return WriteResult.ACCEPTED;
+    }
+
     public Object value() {
         if (numberReader != null) return numberReader.getAsDouble();
         if (booleanReader != null) return booleanReader.getAsBoolean();

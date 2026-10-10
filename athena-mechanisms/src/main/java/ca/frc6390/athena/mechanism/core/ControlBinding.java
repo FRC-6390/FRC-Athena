@@ -55,7 +55,8 @@ public record ControlBinding<U extends Unit>(
         boolean isDisabled,
         ControlSink sink,
         Range continuousRange,
-        U unit) {
+        U unit,
+        Class<?> persistGroup) {
     public ControlBinding {
         Objects.requireNonNull(mode, "mode");
         slot = Math.max(0, slot);
@@ -73,6 +74,30 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("A control binding cannot target both a motor and a scalar sink.");
         }
         motors = motorList(output, followers);
+    }
+
+    /**
+     * Source-compatible form of the canonical constructor from before tuning persistence existed.
+     * The binding is not persisted.
+     */
+    public ControlBinding(
+            ControlMode mode,
+            MotorDevice output,
+            int slot,
+            List<MotorDevice> followers,
+            FeedbackBinding feedback,
+            List<Object> dependencies,
+            List<ControlLoop> loops,
+            List<Constraint<Double>> constraints,
+            MotionProfile profile,
+            MotionPlanner planner,
+            List<MotorDevice> motors,
+            boolean isDisabled,
+            ControlSink sink,
+            Range continuousRange,
+            U unit) {
+        this(mode, output, slot, followers, feedback, dependencies, loops, constraints, profile, planner,
+                motors, isDisabled, sink, continuousRange, unit, null);
     }
 
     public ControlBinding(
@@ -134,20 +159,34 @@ public record ControlBinding<U extends Unit>(
                 motors, isDisabled, sink, continuousRange, null);
     }
 
+    /**
+     * Persists this binding's tuning (PID and feedforward gains, and temporary constraint overrides)
+     * under the telemetry store. Dashboard edits are saved and reloaded at the next registration. Writes
+     * are gated by {@code lockGroup}; see {@code AthenaRobot.tuningLock}.
+     *
+     * @param lockGroup lock group class, such as {@code Locks.InMatch.class}
+     * @return binding with tuning persistence enabled
+     */
+    public ControlBinding<U> persistTuning(Class<?> lockGroup) {
+        Objects.requireNonNull(lockGroup, "lockGroup");
+        return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled, sink, continuousRange, unit, lockGroup);
+    }
+
     public ControlBinding<U> output(MotorDevice output) {
         MotorDevice safeOutput = Objects.requireNonNull(output, "output");
         if (followers.contains(safeOutput)) {
             throw new IllegalArgumentException("Control output cannot also be a follower.");
         }
         return new ControlBinding<>(mode, safeOutput, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, isDisabled, null, continuousRange, unit);
+                constraints, profile, planner, null, isDisabled, null, continuousRange, unit, persistGroup);
     }
 
     /** Routes the calculated scalar result to a non-motor destination. */
     public ControlBinding<U> output(ControlSink sink) {
         return new ControlBinding<>(mode, null, slot, List.of(), feedback, dependencies, loops,
                 constraints, profile, planner, null, isDisabled,
-                Objects.requireNonNull(sink, "sink"), continuousRange, unit);
+                Objects.requireNonNull(sink, "sink"), continuousRange, unit, persistGroup);
     }
 
     /** Configures wrapped error calculation for a continuous position input. */
@@ -157,7 +196,7 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("Continuous input bounds must be finite and ordered.");
         }
         return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum), unit);
+                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum), unit, persistGroup);
     }
 
     /** Typed form of {@link #continuous(double, double)}; both bounds must measure this binding's unit. */
@@ -341,7 +380,7 @@ public record ControlBinding<U extends Unit>(
 
     public ControlBinding<U> disabled(boolean disabled) {
         return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, disabled, sink, continuousRange, unit);
+                constraints, profile, planner, null, disabled, sink, continuousRange, unit, persistGroup);
     }
 
     /** Returns the latest configured position feedback. */
@@ -515,7 +554,8 @@ public record ControlBinding<U extends Unit>(
                 isDisabled,
                 sink,
                 continuousRange,
-                unit);
+                unit,
+                persistGroup);
     }
 
     public Action set(double target) {

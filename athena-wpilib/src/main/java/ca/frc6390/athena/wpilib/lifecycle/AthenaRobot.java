@@ -14,6 +14,11 @@ import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
+import ca.frc6390.athena.mechanism.persist.Locks;
+import ca.frc6390.athena.mechanism.persist.PersistentStore;
+import ca.frc6390.athena.mechanism.persist.TuningLocks;
+import java.nio.file.Path;
+import java.util.function.BooleanSupplier;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
@@ -58,6 +63,9 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private boolean reportedJvmConfiguration;
     private ReplayBridge replay;
     private boolean closed;
+    private final TuningLocks tuningLocks = new TuningLocks()
+            .define(Locks.InMatch.class, DriverStation::isFMSAttached);
+    private Path persistenceDirectory;
 
     /**
      * Returns the owned Athena mechanism runtime.
@@ -81,6 +89,30 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         if (tracePublisher != null) {
             tracePublisher.profile(traceProfile);
         }
+    }
+
+    /**
+     * Defines when a lock group is locked. Writes from the dashboard to values in the group are rejected
+     * while {@code locked} returns true. A group without a definition behaves as {@code Locks.InMatch},
+     * which is locked while FMS is attached. Safe to call from the robot constructor.
+     *
+     * @param group lock group class, such as {@code Locks.InMatch.class} or a robot-defined class
+     * @param locked condition that is true while writes are rejected
+     */
+    public final void tuningLock(Class<?> group, BooleanSupplier locked) {
+        tuningLocks.define(group, locked);
+    }
+
+    /**
+     * Selects the directory of the persistent telemetry store. The default is
+     * {@code /home/lvuser/athena/store} on the roboRIO and a temporary directory in simulation. Safe to
+     * call from the robot constructor.
+     */
+    public final void persistenceDirectory(Path directory) {
+        if (runtime != null) {
+            throw new IllegalStateException("The persistence directory must be selected before robotInit.");
+        }
+        persistenceDirectory = java.util.Objects.requireNonNull(directory, "directory");
     }
 
     /** Selects roboRIO memory monitoring and tuning. Safe to call from the robot constructor. */
@@ -118,6 +150,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
             }
         });
         ActionRequests.bind(runtime::request);
+        runtime.tuningLocks(tuningLocks);
+        runtime.persistentStore(openPersistentStore(), DriverStation::getMatchTime);
         runtime.register(this);
         replay = ReplayBridge.attach(runtime, ReplayBridge.discoverPolicy(this), RobotBase.isSimulation());
         mechanismTelemetrySchema = runtime.mechanismTelemetrySchema();
@@ -337,6 +371,18 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     static RobotRuntime createRuntime(boolean simulation) {
         return createRuntime(simulation, new ConcurrentHashMap<>());
+    }
+
+    private PersistentStore openPersistentStore() {
+        Path directory = persistenceDirectory != null ? persistenceDirectory
+                : RobotBase.isReal() ? Path.of("/home/lvuser/athena/store")
+                : Path.of(System.getProperty("java.io.tmpdir"), "athena-sim-store");
+        try {
+            return PersistentStore.open(directory);
+        } catch (RuntimeException exception) {
+            DriverStation.reportWarning("Athena persistent telemetry is disabled: " + exception.getMessage(), false);
+            return null;
+        }
     }
 
     private static RobotRuntime createRuntime(boolean simulation, Map<Integer, DigitalInput> inputs) {

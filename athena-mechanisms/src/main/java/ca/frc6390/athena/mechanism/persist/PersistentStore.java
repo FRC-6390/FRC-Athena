@@ -1,0 +1,398 @@
+package ca.frc6390.athena.mechanism.persist;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.Set;
+import java.util.TreeMap;
+
+/**
+ * A small robot-side key/value store for persisted tuning and telemetry values.
+ *
+ * <p>Keys are telemetry paths (mechanism tree path plus field path). Values are typed: {@code double},
+ * {@code long}, {@code boolean}, {@code String}, and {@code double[]}. The store lives in memory and is
+ * written to one text file in its directory. Writes are batched: {@link #flushIfDue(double)} writes at
+ * most once per second, and {@link #flush()} writes immediately. A flush writes a temporary file and
+ * atomically renames it over the store file, so a power loss leaves either the old or the new contents.</p>
+ *
+ * <p>The store has no dependency on WPILib or the hardware HAL, so it can be used in tests with a
+ * temporary directory.</p>
+ */
+public final class PersistentStore {
+    /** Name of the store file inside the store directory. */
+    public static final String FILE_NAME = "athena-store.txt";
+    /** Minimum interval between batched flushes, in seconds. */
+    public static final double FLUSH_PERIOD_SECONDS = 1.0;
+
+    private static final String HEADER = "# athena persistent store v1";
+    private static final String TEMP_NAME = FILE_NAME + ".tmp";
+
+    private final Path directory;
+    private final Path file;
+    private final TreeMap<String, Object> entries = new TreeMap<>();
+    private boolean dirty;
+    private double lastFlushSeconds = Double.NaN;
+    private String lastError = "";
+    private int skippedLines;
+
+    private PersistentStore(Path directory) {
+        this.directory = directory;
+        this.file = directory.resolve(FILE_NAME);
+    }
+
+    /**
+     * Opens the store in a directory, creating the directory when needed and loading existing entries.
+     * Malformed lines are skipped and counted in {@link #skippedLines()}.
+     *
+     * @param directory store directory
+     * @return opened store
+     * @throws UncheckedIOException when the directory cannot be created or the file cannot be read
+     */
+    public static PersistentStore open(Path directory) {
+        Path safeDirectory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(safeDirectory);
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to create persistent store directory " + safeDirectory, exception);
+        }
+        PersistentStore store = new PersistentStore(safeDirectory);
+        store.load();
+        return store;
+    }
+
+    /** Returns the store directory. */
+    public Path directory() {
+        return directory;
+    }
+
+    /** Returns the store file path. */
+    public Path file() {
+        return file;
+    }
+
+    /** Returns the number of lines ignored while loading because they were malformed. */
+    public synchronized int skippedLines() {
+        return skippedLines;
+    }
+
+    /** Returns the message of the last failed flush, or an empty string when the last flush succeeded. */
+    public synchronized String lastError() {
+        return lastError;
+    }
+
+    /** Returns true when in-memory entries differ from the file. */
+    public synchronized boolean dirty() {
+        return dirty;
+    }
+
+    /** Returns the number of stored entries. */
+    public synchronized int size() {
+        return entries.size();
+    }
+
+    /** Returns the stored keys in sorted order. */
+    public synchronized Set<String> keys() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(entries.keySet()));
+    }
+
+    /**
+     * Returns the stored value. Values are {@link Double}, {@link Long}, {@link Boolean}, {@link String},
+     * or a copy of a {@code double[]}.
+     *
+     * @param key entry key
+     * @return stored value, or empty when absent
+     */
+    public synchronized Optional<Object> get(String key) {
+        Object value = entries.get(requireKey(key));
+        if (value instanceof double[] array) {
+            return Optional.of(array.clone());
+        }
+        return Optional.ofNullable(value);
+    }
+
+    /** Returns the stored {@code double} value, or empty when absent or of another type. */
+    public synchronized OptionalDouble getDouble(String key) {
+        Object value = entries.get(requireKey(key));
+        return value instanceof Double number ? OptionalDouble.of(number) : OptionalDouble.empty();
+    }
+
+    /** Stores a finite {@code double}. Returns true when the stored value changed. */
+    public synchronized boolean put(String key, double value) {
+        requireFinite(value);
+        return set(requireKey(key), value);
+    }
+
+    /** Stores a {@code long}. Returns true when the stored value changed. */
+    public synchronized boolean put(String key, long value) {
+        return set(requireKey(key), value);
+    }
+
+    /** Stores a {@code boolean}. Returns true when the stored value changed. */
+    public synchronized boolean put(String key, boolean value) {
+        return set(requireKey(key), value);
+    }
+
+    /** Stores a {@code String}. Returns true when the stored value changed. */
+    public synchronized boolean put(String key, String value) {
+        return set(requireKey(key), Objects.requireNonNull(value, "value"));
+    }
+
+    /** Stores a copy of a finite {@code double} array. Returns true when the stored value changed. */
+    public synchronized boolean put(String key, double[] values) {
+        Objects.requireNonNull(values, "values");
+        for (double value : values) {
+            requireFinite(value);
+        }
+        return set(requireKey(key), values.clone());
+    }
+
+    /** Removes an entry. Returns true when it existed. */
+    public synchronized boolean remove(String key) {
+        if (entries.remove(requireKey(key)) == null) {
+            return false;
+        }
+        dirty = true;
+        return true;
+    }
+
+    /**
+     * Removes every entry whose key is not in {@code keep}. Used at boot so values for fields that were
+     * renamed or removed do not linger.
+     *
+     * @param keep keys to keep
+     * @return number of removed entries
+     */
+    public synchronized int retainOnly(Set<String> keep) {
+        Objects.requireNonNull(keep, "keep");
+        int removed = 0;
+        for (String key : List.copyOf(entries.keySet())) {
+            if (!keep.contains(key)) {
+                entries.remove(key);
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            dirty = true;
+        }
+        return removed;
+    }
+
+    /**
+     * Writes pending changes when at least {@link #FLUSH_PERIOD_SECONDS} passed since the last batched
+     * flush. The first pending change is written immediately.
+     *
+     * @param nowSeconds current robot timestamp
+     * @return true when a flush was written
+     */
+    public synchronized boolean flushIfDue(double nowSeconds) {
+        if (!dirty) {
+            return false;
+        }
+        if (!Double.isNaN(lastFlushSeconds) && nowSeconds - lastFlushSeconds < FLUSH_PERIOD_SECONDS) {
+            return false;
+        }
+        boolean written = flush();
+        lastFlushSeconds = nowSeconds;
+        return written;
+    }
+
+    /**
+     * Writes all pending changes now, using a temporary file and an atomic rename.
+     *
+     * @return true when nothing is pending or the write succeeded
+     */
+    public synchronized boolean flush() {
+        if (!dirty) {
+            return true;
+        }
+        Path temp = directory.resolve(TEMP_NAME);
+        try {
+            byte[] bytes = render().getBytes(StandardCharsets.UTF_8);
+            try (FileChannel channel = FileChannel.open(temp,
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                channel.write(ByteBuffer.wrap(bytes));
+                channel.force(true);
+            }
+            try {
+                Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException unsupported) {
+                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+            dirty = false;
+            lastError = "";
+            return true;
+        } catch (IOException | RuntimeException exception) {
+            lastError = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+            return false;
+        }
+    }
+
+    private boolean set(String key, Object value) {
+        Object previous = entries.get(key);
+        if (previous != null && sameValue(previous, value)) {
+            return false;
+        }
+        entries.put(key, value);
+        dirty = true;
+        return true;
+    }
+
+    private void load() {
+        if (!Files.isRegularFile(file)) {
+            return;
+        }
+        List<String> lines;
+        try {
+            lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to read persistent store " + file, exception);
+        }
+        for (String line : lines) {
+            if (line.isBlank() || line.startsWith("#")) {
+                continue;
+            }
+            try {
+                parseLine(line);
+            } catch (RuntimeException exception) {
+                skippedLines++;
+            }
+        }
+    }
+
+    private void parseLine(String line) {
+        String[] parts = line.split("\t", -1);
+        if (parts.length != 3) {
+            throw new IllegalArgumentException("expected three fields");
+        }
+        String key = unescape(parts[0]);
+        Object value = switch (parts[1]) {
+            case "D" -> finite(Double.parseDouble(parts[2]));
+            case "L" -> Long.parseLong(parts[2]);
+            case "B" -> switch (parts[2]) {
+                case "true" -> Boolean.TRUE;
+                case "false" -> Boolean.FALSE;
+                default -> throw new IllegalArgumentException("invalid boolean");
+            };
+            case "S" -> unescape(parts[2]);
+            case "A" -> parseArray(parts[2]);
+            default -> throw new IllegalArgumentException("unknown type tag");
+        };
+        requireKey(key);
+        entries.put(key, value);
+    }
+
+    private static double[] parseArray(String text) {
+        if (text.isEmpty()) {
+            return new double[0];
+        }
+        String[] tokens = text.split(",", -1);
+        double[] values = new double[tokens.length];
+        for (int index = 0; index < tokens.length; index++) {
+            values[index] = finite(Double.parseDouble(tokens[index]));
+        }
+        return values;
+    }
+
+    private String render() {
+        StringBuilder builder = new StringBuilder(HEADER).append('\n');
+        for (var entry : entries.entrySet()) {
+            builder.append(escape(entry.getKey())).append('\t');
+            Object value = entry.getValue();
+            if (value instanceof Double number) {
+                builder.append("D\t").append(Double.toString(number));
+            } else if (value instanceof Long number) {
+                builder.append("L\t").append(number);
+            } else if (value instanceof Boolean flag) {
+                builder.append("B\t").append(flag);
+            } else if (value instanceof String text) {
+                builder.append("S\t").append(escape(text));
+            } else if (value instanceof double[] array) {
+                builder.append("A\t");
+                for (int index = 0; index < array.length; index++) {
+                    if (index > 0) {
+                        builder.append(',');
+                    }
+                    builder.append(Double.toString(array[index]));
+                }
+            }
+            builder.append('\n');
+        }
+        return builder.toString();
+    }
+
+    private static boolean sameValue(Object left, Object right) {
+        if (left instanceof double[] leftArray && right instanceof double[] rightArray) {
+            return Arrays.equals(leftArray, rightArray);
+        }
+        return left.equals(right);
+    }
+
+    private static String requireKey(String key) {
+        Objects.requireNonNull(key, "key");
+        if (key.isBlank()) {
+            throw new IllegalArgumentException("Persistent store key must not be blank.");
+        }
+        return key;
+    }
+
+    private static void requireFinite(double value) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException("Persistent store numbers must be finite.");
+        }
+    }
+
+    private static double finite(double value) {
+        requireFinite(value);
+        return value;
+    }
+
+    static String escape(String text) {
+        StringBuilder builder = new StringBuilder(text.length());
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            switch (character) {
+                case '\\' -> builder.append("\\\\");
+                case '\t' -> builder.append("\\t");
+                case '\n' -> builder.append("\\n");
+                case '\r' -> builder.append("\\r");
+                default -> builder.append(character);
+            }
+        }
+        return builder.toString();
+    }
+
+    static String unescape(String text) {
+        StringBuilder builder = new StringBuilder(text.length());
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character != '\\' || index + 1 >= text.length()) {
+                builder.append(character);
+                continue;
+            }
+            char next = text.charAt(++index);
+            builder.append(switch (next) {
+                case 't' -> '\t';
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case '\\' -> '\\';
+                default -> throw new IllegalArgumentException("invalid escape");
+            });
+        }
+        return builder.toString();
+    }
+}

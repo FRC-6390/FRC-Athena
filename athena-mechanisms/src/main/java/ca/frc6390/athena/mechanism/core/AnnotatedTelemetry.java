@@ -15,6 +15,10 @@ final class AnnotatedTelemetry {
     }
 
     static TelemetryValue field(Field field, Object instance, Telemetry annotation) {
+        return applyAnnotation(fieldValue(field, instance, annotation), annotation, field);
+    }
+
+    private static TelemetryValue fieldValue(Field field, Object instance, Telemetry annotation) {
         makeAccessible(field, instance);
         Class<?> type = field.getType();
         if (TelemetryValue.class.isAssignableFrom(type)) {
@@ -73,6 +77,31 @@ final class AnnotatedTelemetry {
     }
 
     static TelemetryValue method(Method method, Object instance, Telemetry annotation) {
+        if (annotation.persist()) {
+            throw invalid(method, "methods are read-only and cannot persist");
+        }
+        return applyAnnotation(methodValue(method, instance, annotation), annotation, method);
+    }
+
+    /** Applies persistence, publication, and lock metadata declared on the member. */
+    private static TelemetryValue applyAnnotation(TelemetryValue value, Telemetry annotation, java.lang.reflect.Member member) {
+        TelemetryValue result = value;
+        if (annotation.persist()) {
+            if (!result.writable()) {
+                throw invalid(member, "persist requires a writable value");
+            }
+            result = result.persisted();
+        }
+        if (!annotation.publish()) {
+            result = result.unpublished();
+        }
+        if (result.writable()) {
+            result = result.lock(annotation.lock());
+        }
+        return result;
+    }
+
+    private static TelemetryValue methodValue(Method method, Object instance, Telemetry annotation) {
         if (method.getParameterCount() != 0) {
             throw invalid(method, "telemetry method must have no parameters");
         }
