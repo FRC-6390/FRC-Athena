@@ -56,6 +56,18 @@ export const GAIN_NAMES: Readonly<Record<string, string>> = {
   'Feedforward/gravity': 'kG'
 };
 
+const SHORT_GAIN_NAMES = new Set(['p', 'i', 'd', 'izone', 'kp', 'ki', 'kd', 'kizone', 'ks', 'kv', 'ka', 'kg']);
+
+/**
+ * True for a gain: either a path inside a control (`Config/PID/p`, `PID/p`, `Config/Feedforward/gravity`)
+ * or a bare name (`p`, `kP`, `kG`, `iZone`).
+ */
+export function isGainName(name: string): boolean {
+  const relative = name.startsWith('Config/') ? name.slice('Config/'.length) : name;
+  if (relative in GAIN_NAMES) return true;
+  return SHORT_GAIN_NAMES.has((relative.split('/').pop() ?? '').toLowerCase());
+}
+
 /** Motor current names, in preference order. Supply current is the battery-side draw used for the power split. */
 export const CURRENT_NAMES = ['SupplyCurrentAmps', 'StatorCurrentAmps'] as const;
 /** Device temperature (degrees C) and thermal derate (1 = full output). Not published over ARCP yet. */
