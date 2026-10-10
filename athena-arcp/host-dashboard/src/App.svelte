@@ -51,7 +51,6 @@
     parseNumericSignal,
     saveLayout,
     serializeLayoutExport,
-    sparklinePath,
     widgetKindLabel,
     type DashboardLayoutState,
     type DashboardWidget,
@@ -3409,13 +3408,10 @@
               {widgets}
               signals={signalRows}
               {signalById}
-              baseGridColumns={defaultGridColumns}
-              gridDensity={defaultGridDensity}
               {selectedWidgetId}
               {widgetInputs}
               {historyBySignal}
               {historyTimeBySignal}
-              {sparklinePath}
               {editMode}
               onSelectWidget={(widgetId, signalId) => {
                 selectedWidgetId = widgetId;

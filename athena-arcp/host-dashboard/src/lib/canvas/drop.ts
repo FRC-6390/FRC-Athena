@@ -151,7 +151,7 @@ export function planDrop(
 
 /** Drop from outside the canvas (signal, topic or layout tool) at a grid position. */
 export function planSurfaceDrop(ctx: CanvasContext, point: { x: number; y: number }): SurfaceDropPlan {
-  const fallbackPosition = { x: point.x, y: point.y };
+  const fallbackPosition = { x: Math.max(1, point.x), y: Math.max(1, point.y) };
   const canvasSnappedPosition = {
     x: Math.max(1, Math.round(point.x)),
     y: Math.max(1, Math.round(point.y))
