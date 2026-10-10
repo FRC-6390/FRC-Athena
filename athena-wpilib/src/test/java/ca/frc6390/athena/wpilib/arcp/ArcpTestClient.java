@@ -339,6 +339,39 @@ final class ArcpTestClient implements AutoCloseable {
             case 2 -> r.zigzag();
             case 3 -> r.f64();
             case 4 -> r.string();
+            case 5 -> {
+                boolean[] values = new boolean[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.u8() != 0;
+                }
+                yield values;
+            }
+            case 6 -> {
+                long[] values = new long[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.zigzag();
+                }
+                yield values;
+            }
+            case 7 -> {
+                double[] values = new double[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.f64();
+                }
+                yield values;
+            }
+            case 8 -> {
+                String[] values = new String[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.string();
+                }
+                yield values;
+            }
+            case 9 -> {
+                long schemaId = r.varint();
+                byte[] bytes = r.bytes((int) r.varint());
+                yield new Object[] {schemaId, bytes};
+            }
             default -> throw new IllegalStateException("value tag " + tag + " not supported by the test client");
         };
     }

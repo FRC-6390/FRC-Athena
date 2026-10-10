@@ -14,7 +14,7 @@ class ArcpPolicyTest {
     void defaultsEnableArcpWithEphemeralPortAndNoBudget() {
         ArcpPolicy policy = ArcpPolicy.of();
         assertTrue(policy.enabled());
-        assertEquals(0, policy.controlPort());
+        assertEquals(ArcpPolicy.DEFAULT_CONTROL_PORT, policy.controlPort());
         assertEquals(0L, policy.bandwidthBudgetBytesPerSecond());
         assertEquals(ArcpPolicy.DEFAULT_MTU, policy.mtu());
         assertEquals(Duration.ofSeconds(1), policy.keyframeInterval());
@@ -24,10 +24,10 @@ class ArcpPolicyTest {
     @Test
     void settersReturnNewImmutablePoliciesWithValidation() {
         ArcpPolicy base = ArcpPolicy.of();
-        ArcpPolicy tuned = base.controlPort(5810).bandwidthBudgetBytesPerSecond(400_000).mtu(1400)
+        ArcpPolicy tuned = base.controlPort(5805).bandwidthBudgetBytesPerSecond(400_000).mtu(1400)
                 .storeDirectory(Path.of("/tmp/store")).modelDirectory(Path.of("/tmp/models"));
-        assertEquals(0, base.controlPort());
-        assertEquals(5810, tuned.controlPort());
+        assertEquals(ArcpPolicy.DEFAULT_CONTROL_PORT, base.controlPort());
+        assertEquals(5805, tuned.controlPort());
         assertEquals(400_000L, tuned.bandwidthBudgetBytesPerSecond());
         assertEquals(1400, tuned.mtu());
         assertEquals(Path.of("/tmp/store"), tuned.storeDirectory().orElseThrow());

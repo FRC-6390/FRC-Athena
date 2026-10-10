@@ -202,7 +202,7 @@ final class ArcpWireClient implements AutoCloseable {
         return new Frame(timestamp, sequence, values);
     }
 
-    /** Decodes a typed value (tag byte then body). Covers the scalar and string types used here. */
+    /** Decodes a typed value (tag byte then body) for every appendix E1-W type tag. */
     static Object readValue(WireReader r) {
         int tag = r.u8();
         switch (tag) {
@@ -214,6 +214,39 @@ final class ArcpWireClient implements AutoCloseable {
                 return r.f64();
             case 4:
                 return r.string();
+            case 5: {
+                boolean[] values = new boolean[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.u8() != 0;
+                }
+                return values;
+            }
+            case 6: {
+                long[] values = new long[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.zigzag();
+                }
+                return values;
+            }
+            case 7: {
+                double[] values = new double[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.f64();
+                }
+                return values;
+            }
+            case 8: {
+                String[] values = new String[(int) r.varint()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = r.string();
+                }
+                return values;
+            }
+            case 9: {
+                long schemaId = r.varint();
+                byte[] bytes = r.bytes((int) r.varint());
+                return new Object[] {schemaId, bytes};
+            }
             default:
                 throw new IllegalStateException("value tag " + tag + " not supported by the test client");
         }

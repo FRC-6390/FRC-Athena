@@ -32,8 +32,9 @@ const MAX_DOWNLOAD_BYTES: usize = 64 * 1024 * 1024;
 /// Robot file that holds the tuning values pulled from the robot.
 const TUNING_PULL_FILE: &str = "tuning/pull.txt";
 /// Where a pulled tuning file lives inside a robot project.
-const PROJECT_TUNING_DIR: &[&str] = &["src", "main", "deploy", "athena", "tuning"];
-const PULL_FILE_NAME: &str = "pull.txt";
+const PROJECT_TUNING_DIR: &[&str] = &["src", "main", "deploy", "athena"];
+/// The deployed tuning file the robot reads (`deploy/athena/tuning`, see docs/arcp.md).
+const PULL_FILE_NAME: &str = "tuning";
 
 #[derive(Default)]
 pub struct LiveRuntime {
@@ -318,7 +319,7 @@ fn project_tuning_path(project_dir: &str) -> Result<PathBuf, String> {
     Ok(path.join(PULL_FILE_NAME))
 }
 
-/// Saves the robot's `tuning/pull.txt` into the project at `src/main/deploy/athena/tuning/pull.txt`.
+/// Saves the robot's `tuning/pull.txt` into the project's deployed tuning file `src/main/deploy/athena/tuning`.
 #[tauri::command]
 pub async fn live_pull_tuning(runtime: State<'_, LiveRuntime>, project_dir: String) -> Result<String, String> {
     let dest = project_tuning_path(&project_dir)?;
@@ -334,7 +335,7 @@ pub async fn live_pull_tuning(runtime: State<'_, LiveRuntime>, project_dir: Stri
 pub struct TuningDiffSource {
     /// Robot's current `tuning/pull.txt`, or `null` when the robot has none.
     pub robot: Option<String>,
-    /// The project's last pulled copy, or `null` when none was pulled yet.
+    /// The project's deployed tuning file (`src/main/deploy/athena/tuning`), or `null` when none was pulled yet.
     pub project: Option<String>,
 }
 

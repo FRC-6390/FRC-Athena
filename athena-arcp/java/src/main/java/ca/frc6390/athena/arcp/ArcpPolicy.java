@@ -8,7 +8,7 @@ import java.util.Optional;
 /**
  * Typed robot-wide ARCP policy. Declare one field of this type on the robot class; the robot runtime
  * discovers it. Without a field the defaults apply: ARCP is enabled on the real robot and in simulation,
- * with an ephemeral TCP control port, no bandwidth budget, 1200-byte datagrams and 1 second keyframes.
+ * with TCP control port {@value #DEFAULT_CONTROL_PORT} (FRC team-use range), no bandwidth budget, 1200-byte datagrams and 1 second keyframes.
  *
  * <pre>{@code
  * public final ArcpPolicy arcp = ArcpPolicy.of()
@@ -26,6 +26,9 @@ public final class ArcpPolicy {
     public static final Duration DEFAULT_KEYFRAME_INTERVAL = Duration.ofSeconds(1);
 
     private final boolean enabled;
+    /** Default TCP control port; inside the FRC team-use range 5800-5810 and the dashboard's default. */
+    public static final int DEFAULT_CONTROL_PORT = 5810;
+
     private final int controlPort;
     private final long budgetBytesPerSecond;
     private final int mtu;
@@ -48,7 +51,7 @@ public final class ArcpPolicy {
 
     /** The default policy: ARCP enabled with the defaults described on the class. */
     public static ArcpPolicy of() {
-        return new ArcpPolicy(true, 0, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL, null, null, null);
+        return new ArcpPolicy(true, DEFAULT_CONTROL_PORT, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL, null, null, null);
     }
 
     /** A policy that turns ARCP off. The robot then publishes nothing and serves no files. */
@@ -57,7 +60,8 @@ public final class ArcpPolicy {
     }
 
     /**
-     * Sets the TCP control port. 0 (the default) picks a free port; the UDP realtime socket is always ephemeral.
+     * Sets the TCP control port ({@value #DEFAULT_CONTROL_PORT} by default, which the dashboard connects to; 0 picks a
+     * free port, useful in tests); the UDP realtime socket is always ephemeral.
      *
      * @param port control port, 0 to 65535
      * @return new policy

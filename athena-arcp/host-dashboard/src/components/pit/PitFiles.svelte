@@ -145,7 +145,7 @@
     <section class="tuning">
       <h3>Tuning</h3>
       <p class="note">
-        Pull saves the robot's <code>tuning/pull.txt</code> to <code>src/main/deploy/athena/tuning/pull.txt</code>
+        Pull saves the robot's <code>tuning/pull.txt</code> to <code>src/main/deploy/athena/tuning</code>
         inside the project folder you choose.
       </p>
       <div class="row">

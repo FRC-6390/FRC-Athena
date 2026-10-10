@@ -79,7 +79,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void dictionaryAndCycleValuesReachSubscribers() throws Exception {
-        start(ArcpPolicy.of(), null, null);
+        start(ArcpPolicy.of().controlPort(0), null, null);
         assertTrue(client.dictionary().containsKey(GAIN));
         ArcpTestClient.Dict gain = client.signal(GAIN);
         assertTrue((gain.flags() & ArcpDictEntry.FLAG_WRITABLE) != 0);
@@ -101,7 +101,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void writesGoThroughTelemetryAndFmsLocksRejectThem() throws Exception {
-        start(ArcpPolicy.of(), null, null);
+        start(ArcpPolicy.of().controlPort(0), null, null);
         long gain = client.signal(GAIN).id();
 
         ArcpTestClient.WriteAnswer accepted = write(gain, 3.5);
@@ -133,7 +133,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void actionRunAndCancelUseTheMechanismAction() throws Exception {
-        start(ArcpPolicy.of(), null, null);
+        start(ArcpPolicy.of().controlPort(0), null, null);
         long run = client.signal(RUN).id();
         TelemetryAction action = schemaAction("run");
         assertFalse(action.running());
@@ -158,7 +158,7 @@ class ArcpRobotRuntimeTest {
         runtime.replay(ReplayPolicy.of().directory(replays), replays);
         PersistentStore store = PersistentStore.open(temp.resolve("store"));
         store.put(GAIN, 3.5);
-        start(runtime, ArcpPolicy.of(), store);
+        start(runtime, ArcpPolicy.of().controlPort(0), store);
         cycles(3);
 
         ArcpTestClient.Reply list = client.fileList();
@@ -201,7 +201,7 @@ class ArcpRobotRuntimeTest {
         assertEquals(2.75, schemaGain(), 1e-9, "deployed file overrides the code default");
         assertEquals(2.0, runtime.telemetryPersistence().codeDefaults().get(GAIN));
 
-        bridge = ArcpBridge.attach(ArcpPolicy.of().deployedTuningFile(deployed), runtime, null, locks::isLocked,
+        bridge = ArcpBridge.attach(ArcpPolicy.of().controlPort(0).deployedTuningFile(deployed), runtime, null, locks::isLocked,
                 store, true);
         client = new ArcpTestClient(bridge.controlPort());
         assertEquals(ArcpTestClient.STATUS_OK, client.hello(0).status());
@@ -218,7 +218,7 @@ class ArcpRobotRuntimeTest {
         Path replays = temp.resolve("replays");
         runtime = RobotRuntime.simulated(SimulationSession.create());
         runtime.replay(ReplayPolicy.of().stream(true).directory(replays), replays);
-        start(runtime, ArcpPolicy.of(), null);
+        start(runtime, ArcpPolicy.of().controlPort(0), null);
         ReplayRecorder recorder = runtime.replayRecorder().orElseThrow();
         assertTrue(recorder.streaming());
 
