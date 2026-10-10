@@ -436,3 +436,26 @@ The Java implementation of this format lives in `athena-runtime`
 (`ca.frc6390.athena.runtime.wire`) and is the reference; the Rust implementation in
 `athena-arcp/rust/crates/arcp-core` must round-trip byte-identically (shared golden test vectors in
 `docs/wire-vectors/`).
+
+### Dictionary role values (normative)
+| role | Meaning |
+| --- | --- |
+| 0 | unspecified |
+| 1 | state |
+| 2 | value (telemetry field) |
+| 3 | control |
+| 4 | device |
+| 5 | action |
+| 6 | hook |
+| 7 | lock (boolean lock-state signal for a lock group) |
+| 8 | system (runtime/power/replay status) |
+
+### Lock state on the wire
+Each lock group in use is published as its own boolean signal with role 7 at path
+`athena/locks/<fully.qualified.GroupClassName>` (true = locked). Dictionary entries of writable
+signals carry the group name in `lockGroup`; clients join the two to show current lock state. Clients
+display it but never block writes (E5).
+
+### Write replies
+A write reply carries `{requestId, accepted (bool), reason (string, empty when accepted),
+actualValue}` so the client can restore the displayed value on rejection.
