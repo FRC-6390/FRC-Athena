@@ -56,6 +56,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private int reportedSystemFailures;
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
     private boolean reportedJvmConfiguration;
+    private ReplayBridge replay;
     private boolean closed;
 
     /**
@@ -118,6 +119,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         });
         ActionRequests.bind(runtime::request);
         runtime.register(this);
+        replay = ReplayBridge.attach(runtime, ReplayBridge.discoverPolicy(this), RobotBase.isSimulation());
         mechanismTelemetrySchema = runtime.mechanismTelemetrySchema();
         configureAutoChoosers();
         tracePublisher = new MechanismTracePublisher().profile(
@@ -132,17 +134,20 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         publishSystemTelemetry();
         publishMechanismTelemetry();
         run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, simulationActive());
+        replay.boot();
         publishAutoPreview();
     }
 
     @Override
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
+        replay.periodic();
     }
 
     @Override
     public final void disabledInit() {
         run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, simulationActive());
+        replay.initialized(LifecycleMode.DISABLED);
     }
 
     @Override
@@ -159,6 +164,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void autonomousInit() {
         run(LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, simulationActive());
+        replay.initialized(LifecycleMode.AUTONOMOUS);
     }
 
     @Override
@@ -170,12 +176,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void autonomousExit() {
         run(LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, simulationActive());
+        replay.exited(LifecycleMode.AUTONOMOUS);
     }
 
     @Override
     public final void teleopInit() {
         CommandScheduler.getInstance().cancelAll();
         run(LifecycleMode.TELEOP, LifecyclePhase.INIT, true, simulationActive());
+        replay.initialized(LifecycleMode.TELEOP);
     }
 
     @Override
@@ -187,12 +195,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void teleopExit() {
         run(LifecycleMode.TELEOP, LifecyclePhase.EXIT, true, simulationActive());
+        replay.exited(LifecycleMode.TELEOP);
     }
 
     @Override
     public final void testInit() {
         CommandScheduler.getInstance().cancelAll();
         run(LifecycleMode.TEST, LifecyclePhase.INIT, true, simulationActive());
+        replay.initialized(LifecycleMode.TEST);
     }
 
     @Override

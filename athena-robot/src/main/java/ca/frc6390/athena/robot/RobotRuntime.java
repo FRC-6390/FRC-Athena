@@ -28,6 +28,9 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
+import ca.frc6390.athena.robot.replay.ReplayMarkers;
+import ca.frc6390.athena.robot.replay.ReplayPolicy;
+import ca.frc6390.athena.robot.replay.ReplayRecorder;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
@@ -46,8 +49,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ScheduledExecutorService;
+import java.nio.file.Path;
 import java.util.function.Function;
 import java.util.function.BooleanSupplier;
 
@@ -84,6 +89,7 @@ public final class RobotRuntime implements AutoCloseable {
     private final Map<Object, Integer> recoverySamples = new IdentityHashMap<>();
     private long cycleSequence;
     private volatile RuntimeCycleSnapshot cycleSnapshot;
+    private ReplayRecorder replayRecorder;
     private volatile boolean closed;
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
@@ -752,7 +758,9 @@ public final class RobotRuntime implements AutoCloseable {
         updateCycleSnapshot(
                 new MechanismContext(nowSeconds, 0.0, dtSeconds, true, false, true),
                 new EventContext(nowSeconds, dtSeconds, LifecycleMode.SIMULATION,
-                        LifecyclePhase.PERIODIC, true, true));
+                        LifecyclePhase.PERIODIC, true, true),
+                null,
+                null);
         return List.of();
     }
 
@@ -771,6 +779,7 @@ public final class RobotRuntime implements AutoCloseable {
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         workers.runDue(safeMechanismContext.nowSeconds());
         hardwareGraph.refreshInputs();
+        HardwareCycleSnapshot mechanismInputs = replayRecorder == null ? null : hardwareGraph.cycleSnapshot();
         refreshFailures(safeMechanismContext.nowSeconds());
         refreshLocalizations(safeMechanismContext);
         boolean autonomous = safeEventContext.mode() == LifecycleMode.AUTONOMOUS && safeEventContext.enabled();
@@ -796,7 +805,7 @@ public final class RobotRuntime implements AutoCloseable {
                     safeMechanismContext.enabled(),
                     safeMechanismContext.autonomous());
         }
-        updateCycleSnapshot(safeMechanismContext, safeEventContext);
+        updateCycleSnapshot(safeMechanismContext, safeEventContext, outputs, mechanismInputs);
         return outputs;
     }
 
@@ -811,6 +820,7 @@ public final class RobotRuntime implements AutoCloseable {
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
         workers.runDue(nowSeconds);
         hardwareGraph.refreshInputs();
+        HardwareCycleSnapshot mechanismInputs = replayRecorder == null ? null : hardwareGraph.cycleSnapshot();
         refreshFailures(nowSeconds);
         refreshLocalizations(mechanismContext);
         commands.periodic();
@@ -822,7 +832,7 @@ public final class RobotRuntime implements AutoCloseable {
                 enabled,
                 simulation);
         List<ResolvedOutput> outputs = runMechanisms(mechanismContext, eventContext);
-        updateCycleSnapshot(mechanismContext, eventContext);
+        updateCycleSnapshot(mechanismContext, eventContext, outputs, mechanismInputs);
         return outputs;
     }
 
@@ -862,7 +872,11 @@ public final class RobotRuntime implements AutoCloseable {
         }
     }
 
-    private void updateCycleSnapshot(MechanismContext context, EventContext eventContext) {
+    private void updateCycleSnapshot(
+            MechanismContext context,
+            EventContext eventContext,
+            List<ResolvedOutput> outputs,
+            HardwareCycleSnapshot mechanismInputs) {
         List<RuntimeCycleSnapshot.DigitalInput> digitalInputs = mechanisms.digitalInputDevices().stream()
                 .map(input -> new RuntimeCycleSnapshot.DigitalInput(
                         input.defaultName(), input.channel(), safeDigitalRead(input, true), safeDigitalRead(input, false)))
@@ -888,6 +902,9 @@ public final class RobotRuntime implements AutoCloseable {
                 digitalInputs,
                 mechanisms.traceSnapshots(),
                 localizationInputs);
+        if (replayRecorder != null) {
+            replayRecorder.record(cycleSnapshot, mechanismInputs, outputs);
+        }
     }
 
     private static boolean safeDigitalRead(DigitalInputDevice input, boolean raw) {
@@ -1050,7 +1067,59 @@ public final class RobotRuntime implements AutoCloseable {
         } catch (RuntimeException exception) {
             failure = appendFailure(failure, exception);
         }
+        if (replayRecorder != null) {
+            replayRecorder.close();
+            ReplayMarkers.activate(null);
+        }
         if (failure != null) throw failure;
+    }
+
+    /**
+     * Enables replay recording with the policy's directory, or {@code /home/lvuser/athena/replays} when the
+     * policy does not set one. Replaces any previously attached recorder.
+     *
+     * @param policy replay policy
+     * @return this runtime
+     */
+    public RobotRuntime replay(ReplayPolicy policy) {
+        return replay(policy, policy.directory().orElse(Path.of("/home/lvuser/athena/replays")));
+    }
+
+    /**
+     * Enables replay recording into a directory. Cycles are recorded from the next periodic call.
+     *
+     * @param policy replay policy
+     * @param directory directory for replay files
+     * @return this runtime
+     */
+    public synchronized RobotRuntime replay(ReplayPolicy policy, Path directory) {
+        ensureOpen();
+        if (replayRecorder != null) {
+            replayRecorder.close();
+        }
+        replayRecorder = new ReplayRecorder(
+                Objects.requireNonNull(policy, "policy"),
+                Objects.requireNonNull(directory, "directory"),
+                new RuntimeFailureReporter() {
+                    @Override public void error(String message, Throwable cause) {
+                        failureReporter.error(message, cause);
+                    }
+
+                    @Override public void warning(String message, Throwable cause) {
+                        failureReporter.warning(message, cause);
+                    }
+                });
+        ReplayMarkers.activate(replayRecorder);
+        return this;
+    }
+
+    /**
+     * Returns the replay recorder, if replay is enabled.
+     *
+     * @return recorder
+     */
+    public Optional<ReplayRecorder> replayRecorder() {
+        return Optional.ofNullable(replayRecorder);
     }
 
     private void ensureOpen() {

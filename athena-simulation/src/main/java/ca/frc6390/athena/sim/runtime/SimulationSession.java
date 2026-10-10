@@ -217,6 +217,15 @@ public final class SimulationSession {
     }
 
     /**
+     * Returns an injector that writes hardware inputs by name, for replay.
+     *
+     * @return injector
+     */
+    public SimulationInjector injector() {
+        return new SimulationInjector(coordinator);
+    }
+
+    /**
      * Returns the simulated IMU handle for a real IMU declaration.
      *
      * @param device IMU declaration
