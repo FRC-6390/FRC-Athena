@@ -79,7 +79,7 @@ public final class Controls {
     private static <U extends edu.wpi.first.units.Unit> ControlBinding<U> typed(ControlMode mode, U unit) {
         java.util.Objects.requireNonNull(unit, "unit");
         return new ControlBinding<>(mode, null, 0, null, null, null, null, null, null, null, null,
-                false, null, null, unit);
+                false, null, null, unit, null, null);
     }
 
     private static ControlBinding<?> outputs(

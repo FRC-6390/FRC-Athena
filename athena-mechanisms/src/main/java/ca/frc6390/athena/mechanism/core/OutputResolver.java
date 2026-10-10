@@ -133,13 +133,18 @@ final class OutputResolver {
             ResolvedOutput resolved = staticOutputs.get(action);
             if (resolved == null) {
                 if (staticOutputs.size() >= STATIC_CACHE_LIMIT) staticOutputs.clear();
-                resolved = resolve(OutputRequest.Basic.of(control, motor, output));
+                resolved = resolve(OutputRequest.Basic.of(control, motor, output, Actions.policyOf(action)));
                 staticOutputs.put(action, resolved);
             }
             outputs.add(resolved);
             return;
         }
-        resolveRequest(request(control, motor, output), outputs);
+        OutputRequest request = request(control, motor, output);
+        MotionPolicy policy = Actions.policyOf(action);
+        if (request != null && policy != MotionPolicy.INHERIT) {
+            request = OutputRequest.Basic.of(request.control(), request.motor(), request.output(), policy);
+        }
+        resolveRequest(request, outputs);
     }
 
     private void resolveStates(List<Action> actions, MechanismContext context, List<ResolvedOutput> outputs) {

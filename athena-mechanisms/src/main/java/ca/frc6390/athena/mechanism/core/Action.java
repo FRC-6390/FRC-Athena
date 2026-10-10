@@ -70,6 +70,46 @@ public interface Action extends DeviceAction {
         return Actions.timeout(this, seconds);
     }
 
+    /**
+     * Bounds this action to the supplied duration, then completes it. Required to make a continuous
+     * action eligible for {@link #interruptible(Interrupt) AFTER_COMPLETE} policies.
+     */
+    default Action atMost(java.time.Duration duration) {
+        Objects.requireNonNull(duration, "duration");
+        return Actions.timeout(this, duration.toNanos() / 1.0e9);
+    }
+
+    /**
+     * Overrides how a new target re-plans a running profile for this position or velocity control
+     * action. Binding default: {@link ControlBinding#retarget(Retarget)}.
+     *
+     * @throws IllegalArgumentException when this action is not a single position or velocity control
+     */
+    default Action retarget(Retarget retarget) {
+        return Actions.withMotionPolicy(this, new MotionPolicy(Objects.requireNonNull(retarget, "retarget"), null));
+    }
+
+    /**
+     * Overrides what happens to the binding when this action is the last one driving it. Binding
+     * default: {@link ControlBinding#release(Release)}.
+     *
+     * @throws IllegalArgumentException when this action is not a single position or velocity control
+     */
+    default Action release(Release release) {
+        return Actions.withMotionPolicy(this, new MotionPolicy(null, Objects.requireNonNull(release, "release")));
+    }
+
+    /**
+     * Sets how a newer request for overlapping resources may replace this running action. Only valid
+     * on a root action (the one passed to {@link #request()}). Restrictive policies require a bounded
+     * action; see {@link Actions#isBounded(Action)}.
+     *
+     * @throws IllegalArgumentException when the action is unbounded for a restrictive policy
+     */
+    default Action interruptible(Interrupt interrupt) {
+        return Actions.interruptible(this, Objects.requireNonNull(interrupt, "interrupt"));
+    }
+
 
     record Conditional(Action action, ActionCondition condition, Action next) implements Action {
         public Conditional {

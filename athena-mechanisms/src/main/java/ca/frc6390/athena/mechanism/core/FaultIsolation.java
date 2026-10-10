@@ -36,6 +36,24 @@ final class FaultIsolation {
         pendingWarnings.add(message);
     }
 
+    private static final java.util.List<String> pendingReports = new java.util.ArrayList<>();
+
+    /**
+     * Queues a deliberate fault reported by {@code Actions.fault(...)}. Reports are delivered through the
+     * runtime fault channel (the failure reporter) by the scheduler, and are never rate limited away.
+     */
+    static synchronized void report(String message) {
+        if (pendingReports.size() >= WARNING_LIMIT) pendingReports.remove(0);
+        pendingReports.add(message);
+    }
+
+    static synchronized java.util.List<String> drainReports() {
+        if (pendingReports.isEmpty()) return java.util.List.of();
+        java.util.List<String> drained = java.util.List.copyOf(pendingReports);
+        pendingReports.clear();
+        return drained;
+    }
+
     static synchronized java.util.List<String> drainWarnings() {
         if (pendingWarnings.isEmpty()) return java.util.List.of();
         java.util.List<String> drained = java.util.List.copyOf(pendingWarnings);

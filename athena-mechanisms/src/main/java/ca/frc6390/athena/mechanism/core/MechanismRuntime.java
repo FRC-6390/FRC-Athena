@@ -411,6 +411,8 @@ final class MechanismRuntime {
         } finally {
             applier.endCycle();
         }
+        // Controls held after release (HOLD / DECELERATE) keep their motors driven without a lease.
+        drivenNow.addAll(applier.heldMotors());
         simulationStep.run();
         if (traceDue(timedContext.nowSeconds())) {
             traceSnapshot = buildTrace(timedContext, candidates, selected, reservations);

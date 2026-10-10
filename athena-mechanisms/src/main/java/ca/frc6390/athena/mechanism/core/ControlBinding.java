@@ -55,7 +55,9 @@ public record ControlBinding<U extends Unit>(
         boolean isDisabled,
         ControlSink sink,
         Range continuousRange,
-        U unit) {
+        U unit,
+        Retarget retarget,
+        Release release) {
     public ControlBinding {
         Objects.requireNonNull(mode, "mode");
         slot = Math.max(0, slot);
@@ -73,6 +75,8 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("A control binding cannot target both a motor and a scalar sink.");
         }
         motors = motorList(output, followers);
+        retarget = retarget == null ? Retarget.SMOOTH : retarget;
+        release = release == null ? Release.NEUTRAL : release;
     }
 
     public ControlBinding(
@@ -83,7 +87,7 @@ public record ControlBinding<U extends Unit>(
             List<Object> dependencies,
             List<ControlLoop> loops) {
         this(mode, output, 0, followers, feedback, dependencies, loops,
-                null, null, null, null, false, null, null, null);
+                null, null, null, null, false, null, null, null, null, null);
     }
 
     public ControlBinding(
@@ -95,7 +99,7 @@ public record ControlBinding<U extends Unit>(
             List<Object> dependencies,
             List<ControlLoop> loops) {
         this(mode, output, slot, followers, feedback, dependencies, loops,
-                null, null, null, null, false, null, null, null);
+                null, null, null, null, false, null, null, null, null, null);
     }
 
     public ControlBinding(
@@ -111,7 +115,7 @@ public record ControlBinding<U extends Unit>(
             MotionPlanner planner,
             List<MotorDevice> motors) {
         this(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, motors, false, null, null, null);
+                constraints, profile, planner, motors, false, null, null, null, null, null);
     }
 
     /** Source-compatible untyped form of the canonical constructor. */
@@ -131,7 +135,7 @@ public record ControlBinding<U extends Unit>(
             ControlSink sink,
             Range continuousRange) {
         this(mode, output, slot, followers, feedback, dependencies, loops, constraints, profile, planner,
-                motors, isDisabled, sink, continuousRange, null);
+                motors, isDisabled, sink, continuousRange, null, null, null);
     }
 
     public ControlBinding<U> output(MotorDevice output) {
@@ -140,14 +144,14 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("Control output cannot also be a follower.");
         }
         return new ControlBinding<>(mode, safeOutput, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, isDisabled, null, continuousRange, unit);
+                constraints, profile, planner, null, isDisabled, null, continuousRange, unit, retarget, release);
     }
 
     /** Routes the calculated scalar result to a non-motor destination. */
     public ControlBinding<U> output(ControlSink sink) {
         return new ControlBinding<>(mode, null, slot, List.of(), feedback, dependencies, loops,
                 constraints, profile, planner, null, isDisabled,
-                Objects.requireNonNull(sink, "sink"), continuousRange, unit);
+                Objects.requireNonNull(sink, "sink"), continuousRange, unit, retarget, release);
     }
 
     /** Configures wrapped error calculation for a continuous position input. */
@@ -157,7 +161,7 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("Continuous input bounds must be finite and ordered.");
         }
         return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum), unit);
+                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum), unit, retarget, release);
     }
 
     /** Typed form of {@link #continuous(double, double)}; both bounds must measure this binding's unit. */
@@ -335,13 +339,34 @@ public record ControlBinding<U extends Unit>(
         return motors;
     }
 
+    /**
+     * Binding default for how a new target re-plans a running motion profile. Per-Action overrides
+     * use {@code action.retarget(...)}. Defaults to {@link Retarget#SMOOTH}.
+     */
+    public ControlBinding<U> retarget(Retarget retarget) {
+        return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled, sink, continuousRange, unit,
+                Objects.requireNonNull(retarget, "retarget"), release);
+    }
+
+    /**
+     * Binding default for what happens when the last Action driving this binding ends and nothing
+     * replaces it. Per-Action overrides use {@code action.release(...)}. Defaults to
+     * {@link Release#NEUTRAL}, the behaviour before the release policy existed.
+     */
+    public ControlBinding<U> release(Release release) {
+        return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
+                constraints, profile, planner, null, isDisabled, sink, continuousRange, unit,
+                retarget, Objects.requireNonNull(release, "release"));
+    }
+
     public ControlBinding<U> disabled() {
         return disabled(true);
     }
 
     public ControlBinding<U> disabled(boolean disabled) {
         return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, disabled, sink, continuousRange, unit);
+                constraints, profile, planner, null, disabled, sink, continuousRange, unit, retarget, release);
     }
 
     /** Returns the latest configured position feedback. */
@@ -515,7 +540,9 @@ public record ControlBinding<U extends Unit>(
                 isDisabled,
                 sink,
                 continuousRange,
-                unit);
+                unit,
+                retarget,
+                release);
     }
 
     public Action set(double target) {

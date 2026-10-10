@@ -119,8 +119,13 @@ public final class Actions {
         return new DynamicControlVelocity(control, velocity);
     }
 
+    /**
+     * Reports a deliberate fault through the runtime failure reporter and completes immediately. Use it
+     * as a terminal step of an {@link #attempt(Action) attempt} chain, or to flag an unrecoverable state.
+     */
     public static Action fault(String reason) {
-        return new Fault(reason);
+        String message = reason == null || reason.isBlank() ? "Action fault" : reason;
+        return new DoOnce(() -> FaultIsolation.report(message));
     }
 
     public static Action dynamic(Supplier<Output> output) {
@@ -295,6 +300,213 @@ public final class Actions {
         return new Then(action, next);
     }
 
+    /**
+     * Root-level interrupt policy. Request it instead of the inner Action; the scheduler holds newer
+     * requests for overlapping resources while the inner Action does not allow interruption.
+     * Nested use is rejected when the Action tree is compiled.
+     */
+    public record Interruptible(Action action, Interrupt interrupt) implements Action {
+        public Interruptible {
+            Objects.requireNonNull(action, "action");
+            Objects.requireNonNull(interrupt, "interrupt");
+            if (action instanceof Interruptible || action instanceof Abort) {
+                throw new IllegalArgumentException("Interrupt policies and abort are root-level requests and cannot be nested.");
+            }
+            if (interrupt.restrictive() && !isBounded(action)) {
+                throw new IllegalArgumentException("Interrupt policy " + interrupt
+                        + " requires a bounded Action: put every continuous step inside timeout(...)/forTime(...),"
+                        + " or give the Action .atMost(Duration).");
+            }
+        }
+    }
+
+    /** Request-only Action that cancels every committed lease touching a mechanism, ignoring policies. */
+    public record Abort(Mechanism mechanism) implements Action {
+        public Abort {
+            Objects.requireNonNull(mechanism, "mechanism");
+        }
+    }
+
+    /**
+     * Returns an Action that cancels every committed Action on {@code mechanism}, overriding interrupt
+     * policies. Request it like any other Action; it does not occupy a lease itself.
+     */
+    public static Action abort(Mechanism mechanism) {
+        return new Abort(mechanism);
+    }
+
+    /** Wraps an Action with a root interrupt policy, validating bounded commitment at declaration. */
+    static Action interruptible(Action action, Interrupt interrupt) {
+        return new Interruptible(action, interrupt);
+    }
+
+    /**
+     * Static analysis for the bounded commitment rule. An Action is bounded when it is guaranteed to
+     * finish on its own: every continuous leaf (position, velocity, percent, voltage, wait-until,
+     * computed output, unknown Action) must sit inside a timeout, a timed sequence step, or be
+     * bounded by {@code .atMost(Duration)}. Instantaneous Actions (neutral, fault, run, waitSeconds)
+     * are bounded.
+     */
+    public static boolean isBounded(Action action) {
+        return bounded(Objects.requireNonNull(action, "action"));
+    }
+
+    private static boolean bounded(Action action) {
+        if (action == null) return true;
+        if (action instanceof Timeout || action instanceof WaitSeconds || action instanceof DoOnce
+                || action instanceof RuntimeAction || action instanceof EncoderSetPosition
+                || action instanceof ImuYawMutation || action instanceof Neutral
+                || action instanceof ControlNeutral || action instanceof MotorNeutral
+                || action instanceof Fault || action instanceof Abort) {
+            return true;
+        }
+        if (action instanceof Interruptible interruptible) return bounded(interruptible.action());
+        if (action instanceof WithinTolerance within) return bounded(within.action());
+        if (action instanceof Conditional conditional) {
+            return bounded(conditional.action()) && bounded(conditional.next());
+        }
+        if (action instanceof Action.Conditional conditional) {
+            return bounded(conditional.action()) && bounded(conditional.next());
+        }
+        if (action instanceof Then then) return bounded(then.action()) && bounded(then.next());
+        if (action instanceof Action.Then then) return bounded(then.action()) && bounded(then.next());
+        if (action instanceof Sequence sequence) {
+            if (Double.isFinite(sequence.timeoutSeconds())) return true;
+            for (SequenceStep step : sequence.steps()) {
+                if (!sequence.boundedStep(step) && !bounded(step.action())) return false;
+            }
+            return bounded(sequence.next());
+        }
+        if (action instanceof Parallel parallel) {
+            return parallel.Actions().stream().allMatch(Actions::bounded);
+        }
+        if (action instanceof Race race) {
+            return race.Actions().isEmpty() || race.Actions().stream().anyMatch(Actions::bounded);
+        }
+        if (action instanceof Deadline deadline) return bounded(deadline.primary());
+        if (action instanceof Choice choice) return bounded(choice.active()) && bounded(choice.inactive());
+        return false;
+    }
+
+    private static void rejectNestedRootOnly(Action action) {
+        if (action instanceof Interruptible || action instanceof Abort) {
+            throw new IllegalArgumentException("Interrupt policies and abort are root-level requests; request them directly instead of nesting them in another Action.");
+        }
+    }
+
+    /** Returns {@code action} with the policy override merged in (non-null components win). */
+    static Action withMotionPolicy(Action action, MotionPolicy update) {
+        Objects.requireNonNull(action, "action");
+        if (action instanceof ControlPosition position) {
+            return new ControlPosition(position.control(), position.position(),
+                    merge(position.policy(), update));
+        }
+        if (action instanceof DynamicControlPosition position) {
+            return new DynamicControlPosition(position.control(), position.positionSupplier(),
+                    merge(position.policy(), update));
+        }
+        if (action instanceof ControlVelocity velocity) {
+            return new ControlVelocity(velocity.control(), velocity.velocity(),
+                    merge(velocity.policy(), update));
+        }
+        if (action instanceof DynamicControlVelocity velocity) {
+            return new DynamicControlVelocity(velocity.control(), velocity.velocitySupplier(),
+                    merge(velocity.policy(), update));
+        }
+        throw new IllegalArgumentException("Retarget and release policies apply to one position or velocity control"
+                + " action. Set the binding default with ControlBinding.retarget(...) or ControlBinding.release(...).");
+    }
+
+    static MotionPolicy policyOf(Action action) {
+        if (action instanceof ControlPosition position) return position.policy();
+        if (action instanceof DynamicControlPosition position) return position.policy();
+        if (action instanceof ControlVelocity velocity) return velocity.policy();
+        if (action instanceof DynamicControlVelocity velocity) return velocity.policy();
+        return MotionPolicy.INHERIT;
+    }
+
+    private static MotionPolicy merge(MotionPolicy current, MotionPolicy update) {
+        MotionPolicy base = current == null ? MotionPolicy.INHERIT : current;
+        return new MotionPolicy(
+                update.retarget() != null ? update.retarget() : base.retarget(),
+                update.release() != null ? update.release() : base.release());
+    }
+
+    /**
+     * Starts a fallback chain: each attempt must complete before its time limit to count as a success;
+     * a timed-out or missing attempt moves to the next. Finish with {@link Attempt#orElse(Action)} or
+     * {@link Attempt#toAction()}.
+     */
+    public static Attempt attempt(Action first) {
+        return new Attempt(List.of(new Attempt.Step(Objects.requireNonNull(first, "first"), Double.POSITIVE_INFINITY)), null);
+    }
+
+    /** Fallback chain builder. Each step's time limit applies to the step immediately before it. */
+    public static final class Attempt {
+        private final List<Step> steps;
+        private final Action fallback;
+
+        private Attempt(List<Step> steps, Action fallback) {
+            this.steps = steps;
+            this.fallback = fallback;
+        }
+
+        /** Sets the time limit of the most recently added attempt. */
+        public Attempt within(double seconds) {
+            if (!(seconds > 0.0) || Double.isNaN(seconds)) {
+                throw new IllegalArgumentException("Attempt time limit must be positive.");
+            }
+            List<Step> updated = new ArrayList<>(steps);
+            Step last = updated.remove(updated.size() - 1);
+            updated.add(new Step(last.action(), seconds));
+            return new Attempt(List.copyOf(updated), fallback);
+        }
+
+        /** Adds the next attempt, tried when the previous one fails. */
+        public Attempt orTry(Action next) {
+            Objects.requireNonNull(next, "next");
+            List<Step> updated = new ArrayList<>(steps);
+            updated.add(new Step(next, Double.POSITIVE_INFINITY));
+            return new Attempt(List.copyOf(updated), fallback);
+        }
+
+        /** Completes the chain with an Action that runs when every attempt failed. */
+        public Action orElse(Action fallbackAction) {
+            return new Attempt(steps, Objects.requireNonNull(fallbackAction, "fallbackAction")).toAction();
+        }
+
+        /** Returns the chain as an Action; when every attempt fails it completes. */
+        public Action toAction() {
+            // Built back to front: attempt i runs, then either completes (its flag was marked) or
+            // continues with attempt i+1, or with the fallback after the last attempt.
+            Action chain = fallback;
+            for (int index = steps.size() - 1; index >= 0; index--) {
+                Step step = steps.get(index);
+                Flag flag = new Flag();
+                Action attemptAction = new Then(new DoOnce(flag::clear), timedAttempt(step, flag));
+                Action skip = chain == null ? new DoOnce(() -> { }) : chain;
+                chain = new Then(attemptAction, new Choice(ctx -> flag.set, new DoOnce(() -> { }), skip));
+            }
+            return chain;
+        }
+
+        private static Action timedAttempt(Step step, Flag flag) {
+            Action body = new Then(step.action(), new DoOnce(flag::mark));
+            return Double.isFinite(step.seconds()) ? new Timeout(body, step.seconds()) : body;
+        }
+
+        record Step(Action action, double seconds) {
+        }
+
+        private static final class Flag {
+            private boolean set;
+
+            void mark() { set = true; }
+
+            void clear() { set = false; }
+        }
+    }
+
     public record Neutral() implements Action, Output.Neutral {
     }
 
@@ -413,19 +625,31 @@ public final class Actions {
         }
     }
 
-    public record ControlPosition(ControlBinding<?> control, double position) implements Action, Output.Position {
+    public record ControlPosition(ControlBinding<?> control, double position, MotionPolicy policy)
+            implements Action, Output.Position {
+        public ControlPosition(ControlBinding<?> control, double position) {
+            this(control, position, MotionPolicy.INHERIT);
+        }
+
         public ControlPosition {
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.POSITION);
             requireFinite(position, "Control position");
+            policy = policy == null ? MotionPolicy.INHERIT : policy;
         }
     }
 
-    public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier) implements Action, Output.Position {
+    public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, MotionPolicy policy)
+            implements Action, Output.Position {
+        public DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier) {
+            this(control, positionSupplier, MotionPolicy.INHERIT);
+        }
+
         public DynamicControlPosition {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(positionSupplier, "positionSupplier");
             requireControlMode(control, ControlMode.POSITION);
+            policy = policy == null ? MotionPolicy.INHERIT : policy;
         }
 
         @Override
@@ -434,19 +658,31 @@ public final class Actions {
         }
     }
 
-    public record ControlVelocity(ControlBinding<?> control, double velocity) implements Action, Output.Velocity {
+    public record ControlVelocity(ControlBinding<?> control, double velocity, MotionPolicy policy)
+            implements Action, Output.Velocity {
+        public ControlVelocity(ControlBinding<?> control, double velocity) {
+            this(control, velocity, MotionPolicy.INHERIT);
+        }
+
         public ControlVelocity {
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.VELOCITY);
             requireFinite(velocity, "Control velocity");
+            policy = policy == null ? MotionPolicy.INHERIT : policy;
         }
     }
 
-    public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier) implements Action, Output.Velocity {
+    public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, MotionPolicy policy)
+            implements Action, Output.Velocity {
+        public DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier) {
+            this(control, velocitySupplier, MotionPolicy.INHERIT);
+        }
+
         public DynamicControlVelocity {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(velocitySupplier, "velocitySupplier");
             requireControlMode(control, ControlMode.VELOCITY);
+            policy = policy == null ? MotionPolicy.INHERIT : policy;
         }
 
         @Override
@@ -687,6 +923,7 @@ public final class Actions {
         private final List<SequenceStep> steps = new ArrayList<>();
         private final List<SequenceStep> stepView = Collections.unmodifiableList(steps);
         private final List<Action> started = new ArrayList<>();
+        private final Set<SequenceStep> timedSteps = Collections.newSetFromMap(new IdentityHashMap<>());
         private Action next;
         private double timeoutSeconds = Double.POSITIVE_INFINITY;
 
@@ -699,11 +936,18 @@ public final class Actions {
         }
 
         public Sequence forTime(double seconds, Action action) {
-            steps.add(new SequenceStep(
+            SequenceStep step = new SequenceStep(
                     alongsideStarted(action),
                     ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds),
-                    true));
+                    true);
+            steps.add(step);
+            timedSteps.add(step);
             return this;
+        }
+
+        /** True when the step's completion is bounded by its own time limit (forTime). */
+        boolean boundedStep(SequenceStep step) {
+            return timedSteps.contains(step);
         }
 
         public Sequence until(ActionCondition condition, Action action) {
@@ -886,6 +1130,7 @@ public final class Actions {
 
     private static void validate(Action action, Set<Action> visited) {
         if (action == null || !visited.add(action)) return;
+        rejectNestedRootOnly(action);
         if (action instanceof Sequence sequence) {
             validateSequence(sequence);
             for (SequenceStep step : sequence.steps()) validate(step.action(), visited);

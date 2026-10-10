@@ -80,6 +80,10 @@ public final class PidGains implements ControlLoop, TelemetrySource {
 
     private final class Runtime implements ControlLoopRuntime {
         private final PidController controller;
+        private double seenP = p;
+        private double seenI = i;
+        private double seenD = d;
+        private double seenIZone = iZone;
 
         private Runtime(ca.frc6390.athena.hardware.device.Range continuousRange) {
             PidController configured = PidGains.this.controller()
@@ -91,6 +95,22 @@ public final class PidGains implements ControlLoop, TelemetrySource {
 
         @Override public void reset(ControlLoopContext context) {
             controller.reset();
+        }
+
+        @Override public boolean consumeGainChange() {
+            boolean changed = p != seenP || i != seenI || d != seenD || iZone != seenIZone;
+            if (changed) {
+                seenP = p;
+                seenI = i;
+                seenD = d;
+                seenIZone = iZone;
+                controller.resetDerivative();
+            }
+            return changed;
+        }
+
+        @Override public boolean bumpTo(double targetVolts, double currentVolts) {
+            return controller.bumpTo(targetVolts, currentVolts);
         }
 
         @Override public ControlOutput calculate(ControlLoopContext context) {
