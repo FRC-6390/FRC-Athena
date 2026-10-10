@@ -359,6 +359,11 @@ final class MechanismRuntime {
     }
 
     /** Arbitrates the candidates from {@link #evaluateCandidates} and applies the winners. */
+    /** Installs the staging caps for the coming output cycle. */
+    void stageCaps(Map<ca.frc6390.athena.mechanism.core.ControlBinding<?>, ca.frc6390.athena.mechanism.staging.StageCaps> caps) {
+        applier.stageCaps(caps);
+    }
+
     Set<MotorDevice> applyCandidates(List<ResolvedOutput> outputs, Map<Object, Long> reservations) {
         Objects.requireNonNull(outputs, "outputs");
         Objects.requireNonNull(reservations, "reservations");

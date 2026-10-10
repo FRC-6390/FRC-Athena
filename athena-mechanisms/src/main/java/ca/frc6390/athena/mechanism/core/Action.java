@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.mechanism.staging.Staging;
 import edu.wpi.first.units.Measure;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -24,6 +25,18 @@ public interface Action extends DeviceAction {
      */
     default void request() {
         ActionRequests.request(this);
+    }
+
+    /**
+     * Makes a declared {@link Staging} active only while this Action runs: its conditions are evaluated and
+     * its caps apply only during that time. Returns this Action unchanged so it can be used as a field.
+     *
+     * @param staging declared staging
+     * @return this action
+     */
+    default Action staged(Staging<?> staging) {
+        Objects.requireNonNull(staging, "staging").gate(this);
+        return this;
     }
 
     default Action until(ActionCondition condition) {

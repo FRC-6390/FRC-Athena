@@ -45,6 +45,7 @@ public record PowerSnapshot(
      * @param derateFraction thermal derate fraction in effect
      * @param temperatureCelsius fused winding temperature, NaN when unknown
      * @param shareWeight relative share weight
+     * @param sustainedAmps declared sustained cap of the profile, zero when none
      * @param status applied status text
      */
     public record Motor(
@@ -54,6 +55,7 @@ public record PowerSnapshot(
             double derateFraction,
             double temperatureCelsius,
             double shareWeight,
+            double sustainedAmps,
             String status) {
     }
 }

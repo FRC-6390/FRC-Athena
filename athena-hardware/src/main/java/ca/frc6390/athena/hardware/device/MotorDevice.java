@@ -174,7 +174,7 @@ public record MotorDevice(
     /** Returns the fused winding temperature estimate in Celsius. */
     public double temperatureCelsius() {
         RuntimeMotor runtime = RUNTIMES.find(this);
-        return runtime == null ? MotorThermalSpec.forKind(kind).ambientCelsius() : runtime.thermal().celsius();
+        return runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius();
     }
 
     /** Returns the thermal load in {@code [0, 1]}: 0 at the derate start, 1 at the derate end. */

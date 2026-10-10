@@ -230,7 +230,9 @@ final class MechanismIntrospector {
     }
 
     private static boolean isDeclaration(Object value) {
-        return value instanceof MotorDevice
+        return value instanceof ca.frc6390.athena.mechanism.staging.Staging<?>
+                || value instanceof ca.frc6390.athena.hardware.power.PowerPolicy
+                || value instanceof MotorDevice
                 || value instanceof EncoderDevice
                 || value instanceof ImuDevice
                 || value instanceof DigitalInputDevice

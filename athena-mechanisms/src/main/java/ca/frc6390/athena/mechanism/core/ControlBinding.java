@@ -15,6 +15,7 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.staging.StageModifier;
 import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
@@ -333,6 +334,36 @@ public record ControlBinding<U extends Unit>(
 
     public List<MotorDevice> motors() {
         return motors;
+    }
+
+    /**
+     * Stage cap that scales voltage and percent output of this binding while a staging stage is active.
+     *
+     * @param fraction multiplier in {@code [0, 1]}
+     * @return modifier for {@link ca.frc6390.athena.mechanism.staging.Staging#stage}
+     */
+    public StageModifier limitEffort(double fraction) {
+        return new StageModifier(this, StageModifier.Kind.EFFORT, fraction);
+    }
+
+    /**
+     * Stage cap that scales maximum velocity (and velocity targets) of this binding.
+     *
+     * @param fraction multiplier in {@code [0, 1]}
+     * @return modifier for {@link ca.frc6390.athena.mechanism.staging.Staging#stage}
+     */
+    public StageModifier limitSpeed(double fraction) {
+        return new StageModifier(this, StageModifier.Kind.SPEED, fraction);
+    }
+
+    /**
+     * Stage cap that scales maximum acceleration of this binding.
+     *
+     * @param fraction multiplier in {@code [0, 1]}
+     * @return modifier for {@link ca.frc6390.athena.mechanism.staging.Staging#stage}
+     */
+    public StageModifier limitAccel(double fraction) {
+        return new StageModifier(this, StageModifier.Kind.ACCELERATION, fraction);
     }
 
     public ControlBinding<U> disabled() {
