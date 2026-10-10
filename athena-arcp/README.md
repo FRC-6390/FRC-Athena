@@ -128,4 +128,10 @@ offline cache on this machine. Use the `-p` list above.
 - Budget: when `bandwidthBudgetBytesPerSecond` is set, the newest subscription's rate is halved each
   second it exceeds the budget. It is restored when traffic falls below half the budget. Throttled
   subscriptions are reported in `status()`.
-- File service: `FILE_LIST`, `FILE_DOWNLOAD` and `FILE_DELETE` act on plain file names in `fileRoot`.
+- File service: `FILE_LIST`, `FILE_DOWNLOAD` and `FILE_DELETE` act on plain file names in `fileRoot` and on
+  `category/file` names in the named categories (`NativeArcpServer(config, categories, ...)`, one absolute
+  directory per category). The robot bridge registers `replays`, `store`, `models`, `tuning` and `status`.
+- Replay stream: `REPLAY_SUBSCRIBE` (kind 0x12) opts a session in. `ArcpSink.publishRecords` sends complete
+  replay record envelopes to opted-in sessions unchanged. `BACKFILL(from, to)` (kind 0x60) asks the robot
+  through `ArcpSink.backfill(...)`; the reply holds `varint length, group` pairs, capped at 1 MiB.
+- The robot-side usage is in `docs/arcp.md`.

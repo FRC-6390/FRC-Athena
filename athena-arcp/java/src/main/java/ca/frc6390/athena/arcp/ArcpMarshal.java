@@ -28,6 +28,7 @@ final class ArcpMarshal {
     static final int OP_WRITE = 1;
     static final int OP_ACTION_RUN = 2;
     static final int OP_ACTION_CANCEL = 3;
+    static final int OP_BACKFILL = 4;
 
     static final int INITIAL_CAPACITY = 16 * 1024;
 
@@ -170,13 +171,44 @@ final class ArcpMarshal {
             }
         }
 
+        /** Writes an unsigned LEB128 varint. */
+        void varint(long v) {
+            while ((v & ~0x7FL) != 0) {
+                u8((int) ((v & 0x7F) | 0x80));
+                v >>>= 7;
+            }
+            u8((int) v);
+        }
+
+        /** Writes raw bytes. */
+        void bytes(byte[] src, int offset, int count) {
+            ensure(count);
+            buf.put(length, src, offset, count);
+            length += count;
+        }
+
         void cycle(ArcpCycle cycle) {
             reset();
-            List<ArcpCycle.Entry> entries = cycle.entries();
-            u32(entries.size());
-            for (ArcpCycle.Entry e : entries) {
-                u64(e.signalId());
-                value(e.value());
+            int n = cycle.size();
+            u32(n);
+            for (int i = 0; i < n; i++) {
+                u64(cycle.signalId(i));
+                int kind = cycle.kind(i);
+                switch (kind) {
+                    case KIND_BOOL -> {
+                        u8(KIND_BOOL);
+                        u8(cycle.bits(i) != 0 ? 1 : 0);
+                    }
+                    case KIND_I64 -> {
+                        u8(KIND_I64);
+                        u64(cycle.bits(i));
+                    }
+                    case KIND_F64 -> {
+                        u8(KIND_F64);
+                        u64(cycle.bits(i));
+                    }
+                    default -> value(cycle.object(i));
+                }
             }
         }
     }
