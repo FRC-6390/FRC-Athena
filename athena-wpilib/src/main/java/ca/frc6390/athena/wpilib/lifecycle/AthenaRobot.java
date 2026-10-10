@@ -17,6 +17,7 @@ import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
+import ca.frc6390.athena.wpilib.telemetry.PowerTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.SystemTelemetryPublisher;
 import ca.frc6390.athena.wpilib.system.MemoryPressure;
 import ca.frc6390.athena.wpilib.system.SystemRuntime;
@@ -49,6 +50,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private AutoPreviewPublisher autoPreviewPublisher;
     private SystemRuntime systemRuntime;
     private SystemTelemetryPublisher systemTelemetryPublisher;
+    private PowerTelemetryPublisher powerTelemetryPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
@@ -107,6 +109,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         lastTimestampSeconds = timestampSeconds();
         lastSimulationTimestampSeconds = lastTimestampSeconds;
         runtime = createRuntime(RobotBase.isSimulation(), digitalInputs);
+        runtime.powerBusVoltage(edu.wpi.first.wpilibj.RobotController::getBatteryVoltage);
         runtime.failureReporter(new ca.frc6390.athena.robot.RuntimeFailureReporter() {
             @Override public void error(String message, Throwable cause) {
                 DriverStation.reportError(message, cause == null ? new StackTraceElement[0] : cause.getStackTrace());
@@ -128,6 +131,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         autoPreviewPublisher = new AutoPreviewPublisher();
         systemRuntime = SystemRuntime.create(systemTuning, RobotBase.isReal());
         systemTelemetryPublisher = new SystemTelemetryPublisher();
+        powerTelemetryPublisher = new PowerTelemetryPublisher();
         systemRuntime.start();
         publishSystemTelemetry();
         publishMechanismTelemetry();
@@ -231,8 +235,15 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                 eventContext);
     }
 
+    private void publishPowerTelemetry() {
+        if (runtime != null && powerTelemetryPublisher != null) {
+            powerTelemetryPublisher.publish(runtime.powerSnapshot());
+        }
+    }
+
     private void publishTraces() {
         publishSystemTelemetry();
+        publishPowerTelemetry();
         if (tracePublisher != null && pressure() == MemoryPressure.NORMAL) {
             tracePublisher.publish(athena().mechanismTraces());
         }
@@ -355,6 +366,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         failure = closeResource(failure, mechanismTelemetryPublisher, "mechanism telemetry publisher");
         failure = closeResource(failure, autoPreviewPublisher, "auto preview publisher");
         failure = closeResource(failure, systemTelemetryPublisher, "system telemetry publisher");
+        failure = closeResource(failure, powerTelemetryPublisher, "power telemetry publisher");
         failure = closeResource(failure, systemRuntime, "system runtime");
         for (DigitalInput input : digitalInputs.values()) {
             failure = closeResource(failure, input, "digital input");
