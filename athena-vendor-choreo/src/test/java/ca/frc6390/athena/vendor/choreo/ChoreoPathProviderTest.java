@@ -74,7 +74,7 @@ class ChoreoPathProviderTest {
         assertTrue(runtime.isFinished(path, context(1.12)));
         runtime.end(path, context(1.1), false);
         assertEquals(1, resetCalls.get());
-        assertEquals(2, followCalls.get());
+        assertEquals(1, followCalls.get());
     }
 
     @Test
@@ -102,6 +102,82 @@ class ChoreoPathProviderTest {
         assertTrue(runtime.ownership(path).isEmpty());
         assertFalse(runtime.isFinished(path, context(0.5)));
         assertTrue(runtime.isFinished(path, context(0.52)));
+    }
+
+    @Test
+    void odometryResetIsAppliedBeforeTheFirstFollowSample() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        Pose2d[] pose = {new Pose2d(5.0, 5.0, new edu.wpi.first.math.geometry.Rotation2d())};
+        List<Pose2d> followPoses = new ArrayList<>();
+        ca.frc6390.athena.hardware.device.MotorDevice motor = ca.frc6390.athena.hardware.device.MotorDevice.of(
+                ca.frc6390.athena.api.hardware.MotorKinds.KRAKEN_X60, 1);
+        Action drive = motor.percent(0.2);
+        ChoreoPathProvider provider = new ChoreoPathProvider(
+                client,
+                () -> pose[0],
+                initial -> Actions.doOnce(() -> pose[0] = initial),
+                sample -> { followPoses.add(pose[0]); return drive; },
+                () -> false);
+        DriveMechanism mechanism = new DriveMechanism(motor);
+        PathAction path = Paths.choreo("Score").resetOdometry();
+        ca.frc6390.athena.mechanism.core.MechanismScheduler scheduler =
+                ca.frc6390.athena.mechanism.core.MechanismScheduler.create()
+                        .register(mechanism)
+                        .bindInMemoryRuntime()
+                        .path(path, provider.runtime())
+                        .declarationOwner(path, mechanism);
+
+        scheduler.request(path);
+        scheduler.autoPeriodic(0.0, 0.02);
+
+        assertEquals(1, followPoses.size());
+        assertEquals(0.0, followPoses.get(0).getX(), 1.0e-9, "follower used the pre-reset pose");
+    }
+
+    @Test
+    void completedMarkersCanRetriggerAndPendingMarkersAreReported() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        ChoreoPathProvider provider = new ChoreoPathProvider(
+                client, Pose2d::new, pose -> Actions.neutral(), sample -> Actions.neutral(), () -> false);
+        PathAction path = Paths.choreo("Score").marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral());
+        PathRuntime runtime = provider.runtime();
+
+        runtime.initialize(path, context(0.0));
+        assertEquals(List.of("Intake", "Shoot"), List.copyOf(runtime.pendingMarkers(path)));
+        runtime.execute(path, context(0.6));
+        assertEquals(List.of("Shoot"), List.copyOf(runtime.pendingMarkers(path)));
+        assertTrue(runtime.activeMarkers(path, context(0.6)).containsKey("Intake"));
+
+        runtime.markerCompleted(path, "Intake");
+        assertFalse(runtime.activeMarkers(path, context(0.6)).containsKey("Intake"));
+        runtime.execute(path, context(0.7));
+        assertFalse(runtime.activeMarkers(path, context(0.7)).containsKey("Intake"), "a marker fires once per crossing");
+    }
+
+    @Test
+    void samePathActionCannotRunTwiceConcurrently() {
+        FakeClient client = new FakeClient(Map.of("Score", trajectory()));
+        ChoreoPathProvider provider = new ChoreoPathProvider(
+                client, Pose2d::new, pose -> Actions.neutral(), sample -> Actions.neutral(), () -> false);
+        PathAction path = Paths.choreo("Score");
+        PathRuntime runtime = provider.runtime();
+
+        runtime.initialize(path, context(0.0));
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class, () -> runtime.initialize(path, context(0.0)));
+        assertTrue(error.getMessage().contains("already running"));
+
+        runtime.end(path, context(0.1), true);
+        runtime.initialize(path, context(0.2));
+    }
+
+    private static final class DriveMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        @SuppressWarnings("unused")
+        private final ca.frc6390.athena.hardware.device.MotorDevice motor;
+
+        private DriveMechanism(ca.frc6390.athena.hardware.device.MotorDevice motor) {
+            this.motor = motor;
+        }
     }
 
     private static MechanismContext context(double time) {

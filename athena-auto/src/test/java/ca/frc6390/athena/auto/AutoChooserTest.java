@@ -74,4 +74,24 @@ class AutoChooserTest {
         assertEquals("ScoreTwo", chooser.defaultName());
         assertTrue(chooser.optionNames().contains(wait.getClass().getSimpleName()));
     }
+
+    @Test
+    void disambiguatesDerivedNamesWhenAutosShareAFirstPath() {
+        Action first = Actions.sequence()
+                .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
+                .waitSeconds(1.0);
+        Action second = Actions.sequence()
+                .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
+                .waitSeconds(2.0);
+        Action third = Actions.sequence()
+                .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
+                .waitSeconds(3.0);
+
+        AutoChooser chooser = Autos.chooser().defaultAuto(first).auto(second).auto(third);
+
+        assertEquals(java.util.List.of("Start", "Start (2)", "Start (3)"),
+                java.util.List.copyOf(chooser.optionNames()));
+        assertSame(second, chooser.options().get("Start (2)"));
+        assertThrows(IllegalArgumentException.class, () -> chooser.auto("Start", first));
+    }
 }

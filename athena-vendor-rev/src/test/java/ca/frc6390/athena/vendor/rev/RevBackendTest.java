@@ -80,8 +80,62 @@ class RevBackendTest {
     }
 
     @Test
-    void defaultConfigurationPreservesUndeclaredHardwareClientCurrentLimits() throws Exception {
-        RevMotorOptions options = new RevMotorOptions();
+    void undeclaredBrushlessCurrentLimitAppliesSafeDefault() throws Exception {
+        Map<Integer, Object> neo = parameters(RevMotorHandle.activationConfig(
+                MotorDevice.of(MotorKinds.NEO, 2), new RevMotorOptions(), false));
+        Map<Integer, Object> neo550 = parameters(RevMotorHandle.activationConfig(
+                MotorDevice.of(MotorKinds.NEO_550, 3), new RevMotorOptions(), false));
+        Map<Integer, Object> vortex = parameters(RevMotorHandle.activationConfig(
+                MotorDevice.of(MotorKinds.NEO_VORTEX, 4), new RevMotorOptions(), true));
+        Map<Integer, Object> cim = parameters(RevMotorHandle.activationConfig(
+                MotorDevice.of(MotorKinds.CIM, 5), new RevMotorOptions(), false));
+
+        assertEquals(RevMotorHandle.DEFAULT_NEO_CURRENT_LIMIT_AMPS,
+                neo.get(SparkParameters.kSmartCurrentStallLimit.value));
+        assertEquals(RevMotorHandle.DEFAULT_NEO_550_CURRENT_LIMIT_AMPS,
+                neo550.get(SparkParameters.kSmartCurrentStallLimit.value));
+        assertEquals(RevMotorHandle.DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS,
+                vortex.get(SparkParameters.kSmartCurrentStallLimit.value));
+        assertFalse(cim.containsKey(SparkParameters.kSmartCurrentStallLimit.value));
+        assertFalse(cim.containsKey(SparkParameters.kCurrentChop.value));
+    }
+
+    @Test
+    void failedActivationReleasesTheSparkSoTheBindRetryDoesNotLeakHandles() {
+        RecordingSparkController controller = new RecordingSparkController();
+        controller.configureResult = false;
+        RevMotorHandle handle = new RevMotorHandle(MotorDevice.of(MotorKinds.NEO, 1), null, controller);
+
+        assertThrows(IllegalStateException.class, handle::activate);
+        assertTrue(controller.closed);
+
+        RecordingSparkController throwing = new RecordingSparkController();
+        throwing.configureFailure = new IllegalStateException("Invalid parameter");
+        RevMotorHandle rejected = new RevMotorHandle(MotorDevice.of(MotorKinds.NEO, 2), null, throwing);
+        IllegalStateException failure = assertThrows(IllegalStateException.class, rejected::activate);
+        assertTrue(failure.getMessage().contains("Invalid parameter"));
+        assertTrue(throwing.closed);
+    }
+
+    @Test
+    void hardwareFollowerIsConfiguredOnceByFollow() {
+        RecordingSparkController leaderController = new RecordingSparkController();
+        RecordingSparkController followerController = new RecordingSparkController();
+        MotorDevice leaderDevice = MotorDevice.of(MotorKinds.NEO, 1);
+        RevMotorHandle leader = new RevMotorHandle(leaderDevice, null, leaderController);
+        RevMotorHandle follower = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.NEO, 2).follow(leaderDevice), null, followerController);
+
+        follower.activate();
+        follower.follow(leader, false);
+
+        assertEquals(0, followerController.configureCalls);
+        assertEquals(1, followerController.followLeaderId);
+    }
+
+    @Test
+    void preservedDeviceCurrentLimitLeavesHardwareClientValue() throws Exception {
+        RevMotorOptions options = new RevMotorOptions().preserveDeviceCurrentLimit(true);
         SparkBaseConfig config = RevMotorHandle.activationConfig(
                 MotorDevice.of(MotorKinds.NEO, 2), options, false);
         Map<Integer, Object> motorParameters = parameters(config);
@@ -394,6 +448,8 @@ class RevBackendTest {
 
     private static final class RecordingSparkController implements RevMotorHandle.SparkController {
         private int configureCalls;
+        private boolean configureResult = true;
+        private RuntimeException configureFailure;
         private MotorDevice device;
         private RevMotorOptions options;
         private int positionReads;
@@ -416,7 +472,10 @@ class RevBackendTest {
             configureCalls++;
             this.device = device;
             this.options = options;
-            return true;
+            if (configureFailure != null) {
+                throw configureFailure;
+            }
+            return configureResult;
         }
 
         @Override

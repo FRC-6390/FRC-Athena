@@ -2,9 +2,13 @@ package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
+import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
+import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
-import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearAcceleration;
 import java.util.Objects;
 
 /**
@@ -55,6 +59,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE IMU is disconnected: " + device.defaultName());
         }
+        controller.refreshSignals();
         yawDegrees = controller.yawDegrees();
         pitchDegrees = controller.pitchDegrees();
         rollDegrees = controller.rollDegrees();
@@ -164,6 +169,9 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     interface Pigeon2Controller extends AutoCloseable {
         default boolean isConnected() { return true; }
 
+        /** Refreshes all cached status signals in one batched call before the getters are read. */
+        default void refreshSignals() { }
+
         double yawDegrees();
 
         double pitchDegrees();
@@ -194,59 +202,91 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     private static final class PhoenixPigeon2Controller implements Pigeon2Controller {
         private final Pigeon2 pigeon;
+        private final StatusSignal<Angle> yaw;
+        private final StatusSignal<Angle> pitch;
+        private final StatusSignal<Angle> roll;
+        private final StatusSignal<AngularVelocity> yawRate;
+        private final StatusSignal<AngularVelocity> pitchRate;
+        private final StatusSignal<AngularVelocity> rollRate;
+        private final StatusSignal<LinearAcceleration> accelerationX;
+        private final StatusSignal<LinearAcceleration> accelerationY;
+        private final StatusSignal<LinearAcceleration> accelerationZ;
+        private final StatusSignal<Double> gravityX;
+        private final StatusSignal<Double> gravityY;
+        private final StatusSignal<Double> gravityZ;
+        private final BaseStatusSignal[] signals;
 
         private PhoenixPigeon2Controller(ImuDevice device) {
             pigeon = new Pigeon2(device.id(), new CANBus(device.canbus()));
+            yaw = pigeon.getYaw();
+            pitch = pigeon.getPitch();
+            roll = pigeon.getRoll();
+            yawRate = pigeon.getAngularVelocityZDevice();
+            pitchRate = pigeon.getAngularVelocityYDevice();
+            rollRate = pigeon.getAngularVelocityXDevice();
+            accelerationX = pigeon.getAccelerationX();
+            accelerationY = pigeon.getAccelerationY();
+            accelerationZ = pigeon.getAccelerationZ();
+            gravityX = pigeon.getGravityVectorX();
+            gravityY = pigeon.getGravityVectorY();
+            gravityZ = pigeon.getGravityVectorZ();
+            signals = new BaseStatusSignal[] {
+                yaw, pitch, roll, yawRate, pitchRate, rollRate,
+                accelerationX, accelerationY, accelerationZ, gravityX, gravityY, gravityZ
+            };
         }
 
         @Override public boolean isConnected() { return pigeon.isConnected(); }
 
         @Override
+        public void refreshSignals() {
+            BaseStatusSignal.refreshAll(signals);
+        }
+
+        // Phoenix reports these signals in degrees, degrees/second and g, so the raw doubles need no conversion.
+        @Override
         public double yawDegrees() {
-            return pigeon.getYaw().refresh().getValue().in(Units.Degrees);
+            return yaw.getValueAsDouble();
         }
 
         @Override
         public double pitchDegrees() {
-            return pigeon.getPitch().refresh().getValue().in(Units.Degrees);
+            return pitch.getValueAsDouble();
         }
 
         @Override
         public double rollDegrees() {
-            return pigeon.getRoll().refresh().getValue().in(Units.Degrees);
+            return roll.getValueAsDouble();
         }
 
         @Override
         public double yawRateDegreesPerSecond() {
-            return pigeon.getAngularVelocityZDevice().refresh().getValueAsDouble();
+            return yawRate.getValueAsDouble();
         }
 
         @Override
         public double pitchRateDegreesPerSecond() {
-            return pigeon.getAngularVelocityYDevice().refresh().getValueAsDouble();
+            return pitchRate.getValueAsDouble();
         }
 
         @Override
         public double rollRateDegreesPerSecond() {
-            return pigeon.getAngularVelocityXDevice().refresh().getValueAsDouble();
+            return rollRate.getValueAsDouble();
         }
 
         @Override
         public double linearAccelerationXG() {
-            return pigeon.getAccelerationX().refresh().getValueAsDouble()
-                    - pigeon.getGravityVectorX().refresh().getValueAsDouble();
+            return accelerationX.getValueAsDouble() - gravityX.getValueAsDouble();
         }
 
         @Override
         public double linearAccelerationYG() {
-            return pigeon.getAccelerationY().refresh().getValueAsDouble()
-                    - pigeon.getGravityVectorY().refresh().getValueAsDouble();
+            return accelerationY.getValueAsDouble() - gravityY.getValueAsDouble();
         }
 
         @Override
         public double linearAccelerationZG() {
-            return pigeon.getAccelerationZ().refresh().getValueAsDouble()
-                    - pigeon.getGravityVectorZ().refresh().getValueAsDouble();
+            return accelerationZ.getValueAsDouble() - gravityZ.getValueAsDouble();
         }
 
         @Override

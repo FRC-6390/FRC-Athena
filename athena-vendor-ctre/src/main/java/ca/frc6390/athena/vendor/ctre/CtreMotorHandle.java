@@ -10,8 +10,11 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
+import com.ctre.phoenix6.StatusSignal;
+import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.configs.SlotConfigs;
 import com.ctre.phoenix6.configs.MotorOutputConfigs;
 import com.ctre.phoenix6.configs.CommutationConfigs;
@@ -29,7 +32,11 @@ import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
 import com.ctre.phoenix6.signals.MotorArrangementValue;
-import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Voltage;
+import edu.wpi.first.wpilibj.DriverStation;
 import java.util.Objects;
 
 /**
@@ -134,6 +141,7 @@ public final class CtreMotorHandle implements MotorHandle {
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE motor is disconnected: " + device.defaultName());
         }
+        controller.refreshSignals();
         positionRotations = controller.positionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
         appliedVoltage = controller.appliedVoltage();
@@ -148,7 +156,22 @@ public final class CtreMotorHandle implements MotorHandle {
             throw new IllegalArgumentException("CTRE motor " + device.defaultName()
                     + " can only follow another CTRE motor.");
         }
+        String followerBus = normalizedBus(device.canbus());
+        String leaderBus = normalizedBus(ctreLeader.device.canbus());
+        if (!followerBus.equalsIgnoreCase(leaderBus)) {
+            // Phoenix Follower requests address the leader by CAN ID only, on the follower's own bus.
+            // Across buses the follower would silently do nothing or follow an unrelated device
+            // that happens to share the ID.
+            throw new IllegalStateException("CTRE motor " + device.defaultName() + " on CAN bus '" + followerBus
+                    + "' cannot hardware-follow " + ctreLeader.device.defaultName() + " on CAN bus '" + leaderBus
+                    + "'. Phoenix followers must share the leader's bus; move the devices to one bus or use"
+                    + " software following.");
+        }
         controller.follow(ctreLeader.device.id(), inverted);
+    }
+
+    static String normalizedBus(String canbus) {
+        return canbus == null || canbus.isBlank() ? "rio" : canbus.trim();
     }
 
     @Override
@@ -355,6 +378,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
         double velocityRotationsPerSecond();
 
+        /** Refreshes all cached status signals in one batched call before the getters are read. */
+        default void refreshSignals() { }
+
         default double appliedVoltage() { return 0.0; }
 
         default double supplyCurrentAmps() { return 0.0; }
@@ -369,9 +395,20 @@ public final class CtreMotorHandle implements MotorHandle {
         private final NeutralOut neutral = new NeutralOut();
         private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
         private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
+        private final PositionVoltage simplePositionVoltage = new PositionVoltage(0.0);
+        private final VelocityVoltage simpleVelocityVoltage = new VelocityVoltage(0.0);
+        private final Follower follower = new Follower(0, MotorAlignmentValue.Aligned);
+        private final TalonSignals signals;
+        private final PendingPositionSet pendingPosition = new PendingPositionSet();
 
         private PhoenixTalonController(MotorDevice device) {
             talon = new TalonFX(device.id(), new CANBus(device.canbus()));
+            signals = new TalonSignals(
+                    talon.getPosition(),
+                    talon.getVelocity(),
+                    talon.getMotorVoltage(),
+                    talon.getSupplyCurrent(),
+                    talon.getStatorCurrent());
         }
 
         @Override public boolean isConnected() { return talon.isConnected(); }
@@ -388,17 +425,19 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void setPositionTarget(double rotations) {
-            talon.setControl(new PositionVoltage(rotations));
+            talon.setControl(simplePositionVoltage.withPosition(rotations));
         }
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {
-            talon.setControl(new VelocityVoltage(rotationsPerSecond));
+            talon.setControl(simpleVelocityVoltage.withVelocity(rotationsPerSecond));
         }
 
         @Override
         public void setSensorPosition(double rotations) {
-            talon.setPosition(rotations);
+            if (talon.setPosition(rotations).isOK()) {
+                pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
+            }
         }
 
         @Override
@@ -441,9 +480,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void follow(int leaderId, boolean inverted) {
-            talon.setControl(new Follower(
-                    leaderId,
-                    inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
+            talon.setControl(follower
+                    .withLeaderID(leaderId)
+                    .withMotorAlignment(inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
         }
 
         @Override
@@ -466,18 +505,23 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
+        public void refreshSignals() {
+            signals.refresh();
+        }
+
+        @Override
         public double positionRotations() {
-            return talon.getPosition().refresh().getValue().in(Units.Rotations);
+            return pendingPosition.resolve(signals.position.getValueAsDouble(), signals.positionTimeSeconds());
         }
 
         @Override
         public double velocityRotationsPerSecond() {
-            return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
+            return signals.velocity.getValueAsDouble();
         }
 
-        @Override public double appliedVoltage() { return talon.getMotorVoltage().refresh().getValue().in(Units.Volts); }
-        @Override public double supplyCurrentAmps() { return talon.getSupplyCurrent().refresh().getValue().in(Units.Amps); }
-        @Override public double statorCurrentAmps() { return talon.getStatorCurrent().refresh().getValue().in(Units.Amps); }
+        @Override public double appliedVoltage() { return signals.voltage.getValueAsDouble(); }
+        @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
+        @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
     }
 
     private static final class PhoenixTalonFxsController implements TalonController {
@@ -488,10 +532,21 @@ public final class CtreMotorHandle implements MotorHandle {
         private final NeutralOut neutral = new NeutralOut();
         private final PositionVoltage positionVoltage = new PositionVoltage(0.0);
         private final VelocityVoltage velocityVoltage = new VelocityVoltage(0.0);
+        private final PositionVoltage simplePositionVoltage = new PositionVoltage(0.0);
+        private final VelocityVoltage simpleVelocityVoltage = new VelocityVoltage(0.0);
+        private final Follower follower = new Follower(0, MotorAlignmentValue.Aligned);
+        private final TalonSignals signals;
+        private final PendingPositionSet pendingPosition = new PendingPositionSet();
 
         private PhoenixTalonFxsController(MotorDevice device) {
             talon = new TalonFXS(device.id(), new CANBus(device.canbus()));
             arrangement = arrangement(device);
+            signals = new TalonSignals(
+                    talon.getPosition(),
+                    talon.getVelocity(),
+                    talon.getMotorVoltage(),
+                    talon.getSupplyCurrent(),
+                    talon.getStatorCurrent());
         }
 
         @Override public boolean isConnected() { return talon.isConnected(); }
@@ -523,17 +578,19 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void setPositionTarget(double rotations) {
-            talon.setControl(new PositionVoltage(rotations));
+            talon.setControl(simplePositionVoltage.withPosition(rotations));
         }
 
         @Override
         public void setVelocityTarget(double rotationsPerSecond) {
-            talon.setControl(new VelocityVoltage(rotationsPerSecond));
+            talon.setControl(simpleVelocityVoltage.withVelocity(rotationsPerSecond));
         }
 
         @Override
         public void setSensorPosition(double rotations) {
-            talon.setPosition(rotations);
+            if (talon.setPosition(rotations).isOK()) {
+                pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
+            }
         }
 
         @Override
@@ -576,9 +633,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void follow(int leaderId, boolean inverted) {
-            talon.setControl(new Follower(
-                    leaderId,
-                    inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
+            talon.setControl(follower
+                    .withLeaderID(leaderId)
+                    .withMotorAlignment(inverted ? MotorAlignmentValue.Opposed : MotorAlignmentValue.Aligned));
         }
 
         @Override
@@ -604,18 +661,23 @@ public final class CtreMotorHandle implements MotorHandle {
         }
 
         @Override
+        public void refreshSignals() {
+            signals.refresh();
+        }
+
+        @Override
         public double positionRotations() {
-            return talon.getPosition().refresh().getValue().in(Units.Rotations);
+            return pendingPosition.resolve(signals.position.getValueAsDouble(), signals.positionTimeSeconds());
         }
 
         @Override
         public double velocityRotationsPerSecond() {
-            return talon.getVelocity().refresh().getValue().in(Units.RotationsPerSecond);
+            return signals.velocity.getValueAsDouble();
         }
 
-        @Override public double appliedVoltage() { return talon.getMotorVoltage().refresh().getValue().in(Units.Volts); }
-        @Override public double supplyCurrentAmps() { return talon.getSupplyCurrent().refresh().getValue().in(Units.Amps); }
-        @Override public double statorCurrentAmps() { return talon.getStatorCurrent().refresh().getValue().in(Units.Amps); }
+        @Override public double appliedVoltage() { return signals.voltage.getValueAsDouble(); }
+        @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
+        @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
     }
 
     private static boolean configureCurrentLimits(
@@ -638,9 +700,45 @@ public final class CtreMotorHandle implements MotorHandle {
             int supplyAmps,
             int statorAmps,
             int torqueAmps) {
+        // TalonFXS has no TorqueCurrentConfigs; a torque limit is not applicable, not a failure.
+        if (torqueAmps > 0) {
+            DriverStation.reportWarning("CTRE TalonFXS " + talon.getDeviceID()
+                    + " ignores torqueCurrentLimitAmps(" + torqueAmps + "); use stator/supply limits.", false);
+        }
         CurrentLimitsConfigs limits = currentLimits(supplyAmps, statorAmps);
-        boolean currentLimitsApplied = talon.getConfigurator().apply(limits).isOK();
-        return currentLimitsApplied && torqueAmps <= 0;
+        return talon.getConfigurator().apply(limits).isOK();
+    }
+
+    /** Status signals read every loop, refreshed together with one CAN/JNI call. */
+    private static final class TalonSignals {
+        private final StatusSignal<Angle> position;
+        private final StatusSignal<AngularVelocity> velocity;
+        private final StatusSignal<Voltage> voltage;
+        private final StatusSignal<Current> supplyCurrent;
+        private final StatusSignal<Current> statorCurrent;
+        private final BaseStatusSignal[] all;
+
+        private TalonSignals(
+                StatusSignal<Angle> position,
+                StatusSignal<AngularVelocity> velocity,
+                StatusSignal<Voltage> voltage,
+                StatusSignal<Current> supplyCurrent,
+                StatusSignal<Current> statorCurrent) {
+            this.position = position;
+            this.velocity = velocity;
+            this.voltage = voltage;
+            this.supplyCurrent = supplyCurrent;
+            this.statorCurrent = statorCurrent;
+            all = new BaseStatusSignal[] {position, velocity, voltage, supplyCurrent, statorCurrent};
+        }
+
+        private void refresh() {
+            BaseStatusSignal.refreshAll(all);
+        }
+
+        private double positionTimeSeconds() {
+            return position.getAllTimestamps().getSystemTimestamp().getTime();
+        }
     }
 
     private static CurrentLimitsConfigs currentLimits(int supplyAmps, int statorAmps) {

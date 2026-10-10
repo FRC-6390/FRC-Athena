@@ -21,6 +21,7 @@ import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
@@ -34,6 +35,8 @@ import org.photonvision.targeting.PhotonTrackedTarget;
  * PhotonVision camera adapter backed by PhotonLib.
  */
 public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoCloseable {
+    private static volatile AprilTagFieldLayout defaultFieldLayout;
+
     private final PhotonVisionDevice device;
     private final PhotonClient client;
     private final PhotonPoseClient poseClient;
@@ -56,7 +59,57 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                defaultPoseClient(device::mountPose));
+                defaultPoseClient(device::mountPose, defaultFieldLayout()));
+    }
+
+    /**
+     * Creates an adapter using a real PhotonLib camera and an explicit AprilTag field layout.
+     *
+     * <p>This is a factory rather than a constructor on purpose: {@link java.util.ServiceLoader}
+     * reflects over every public constructor, so a constructor mentioning a WPILib AprilTag type
+     * would stop adapter discovery on classpaths without apriltag-java.</p>
+     *
+     * @param device PhotonVision camera device
+     * @param fieldLayout AprilTag layout used for pose estimation; null uses {@link #defaultFieldLayout()}
+     * @return adapter
+     */
+    public static PhotonVisionCameraAdapter withFieldLayout(
+            PhotonVisionDevice device, AprilTagFieldLayout fieldLayout) {
+        return new PhotonVisionCameraAdapter(
+                device,
+                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                defaultPoseClient(device::mountPose, fieldLayout == null ? defaultFieldLayout() : fieldLayout));
+    }
+
+    /**
+     * Sets the AprilTag field layout used by cameras that the runtime binds automatically.
+     *
+     * <p>Call this before the robot runtime starts (for example in the robot constructor) to use
+     * a non-default field, such as a practice-field or district layout. Passing null restores
+     * WPILib's {@link AprilTagFields#kDefaultField}.</p>
+     *
+     * @param fieldLayout field layout, or null for the WPILib default field
+     */
+    public static void defaultFieldLayout(AprilTagFieldLayout fieldLayout) {
+        defaultFieldLayout = fieldLayout;
+    }
+
+    /**
+     * Returns the AprilTag field layout used by automatically bound cameras.
+     *
+     * @return field layout
+     */
+    public static AprilTagFieldLayout defaultFieldLayout() {
+        AprilTagFieldLayout layout = defaultFieldLayout;
+        if (layout == null) {
+            synchronized (PhotonVisionCameraAdapter.class) {
+                if (defaultFieldLayout == null) {
+                    defaultFieldLayout = AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
+                }
+                layout = defaultFieldLayout;
+            }
+        }
+        return layout;
     }
 
     /**
@@ -78,10 +131,30 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
      */
     public PhotonVisionCameraAdapter(
             PhotonVisionDevice device, PhotonPoseEstimator poseEstimator, PhotonPoseEstimator.PoseStrategy poseStrategy) {
+        this(device, poseEstimator, poseStrategy, null);
+    }
+
+    /**
+     * Creates an adapter using a real PhotonLib camera, pose estimator, and reference pose.
+     *
+     * <p>The reference pose is used by {@code CLOSEST_TO_REFERENCE_POSE}; supply the current robot
+     * estimate (for example {@code localization::pose2d}). When the supplier is null or returns
+     * null, that strategy falls back to the lowest-ambiguity single-tag solution.</p>
+     *
+     * @param device PhotonVision camera device
+     * @param poseEstimator PhotonLib pose estimator
+     * @param poseStrategy pose strategy to use when reading estimates
+     * @param referencePose current robot pose estimate, or null
+     */
+    public PhotonVisionCameraAdapter(
+            PhotonVisionDevice device,
+            PhotonPoseEstimator poseEstimator,
+            PhotonPoseEstimator.PoseStrategy poseStrategy,
+            Supplier<Pose2d> referencePose) {
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy, device::mountPose));
+                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy, device::mountPose, referencePose));
     }
 
     PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client) {
@@ -242,7 +315,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 result.latencySeconds(),
                 pose.ambiguity(),
                 pose.targetCount(),
-                averageTargetDistance(result.targets()),
+                Double.isFinite(pose.averageTargetDistanceMeters())
+                        ? pose.averageTargetDistanceMeters()
+                        : averageTargetDistance(result.targets()),
                 MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
                 source));
     }
@@ -361,23 +436,30 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     }
 
     static final class PhotonPoseEstimatorClient implements PhotonPoseClient {
+        private static final double SAME_POSE_TOLERANCE_METERS = 1.0e-6;
         private final PhotonPoseEstimator estimator;
         private final PhotonPoseEstimator.PoseStrategy strategy;
         private final Supplier<CameraMountPose> mountPose;
-
-        private PhotonPoseEstimatorClient(PhotonPoseEstimator estimator, PhotonPoseEstimator.PoseStrategy strategy) {
-            this(estimator, strategy, null);
-        }
+        private final Supplier<Pose2d> referencePose;
 
         private PhotonPoseEstimatorClient(
                 PhotonPoseEstimator estimator,
                 PhotonPoseEstimator.PoseStrategy strategy,
                 Supplier<CameraMountPose> mountPose) {
+            this(estimator, strategy, mountPose, null);
+        }
+
+        PhotonPoseEstimatorClient(
+                PhotonPoseEstimator estimator,
+                PhotonPoseEstimator.PoseStrategy strategy,
+                Supplier<CameraMountPose> mountPose,
+                Supplier<Pose2d> referencePose) {
             this.estimator = Objects.requireNonNull(estimator, "estimator");
             this.strategy = strategy == null
                     ? PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
                     : strategy;
             this.mountPose = mountPose;
+            this.referencePose = referencePose;
         }
 
         @Override
@@ -385,15 +467,115 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             if (mountPose != null) {
                 estimator.setRobotToCameraTransform(transform(mountPose.get()));
             }
-            return estimateWithConfiguredStrategy(result).map(estimate -> {
-                Pose3d pose3d = estimate.estimatedPose;
-                var pose2d = pose3d.toPose2d();
+            return estimateWithConfiguredStrategy(result).map(estimate -> toEstimate(
+                    estimate, estimator.getFieldTags(), estimator.getRobotToCameraTransform()));
+        }
+
+        static PhotonVisionPoseEstimate toEstimate(
+                org.photonvision.EstimatedRobotPose estimate,
+                AprilTagFieldLayout layout,
+                Transform3d robotToCamera) {
+            var pose2d = estimate.estimatedPose.toPose2d();
+            PoseSnapshot pose = new PoseSnapshot(pose2d.getX(), pose2d.getY(), pose2d.getRotation().getRadians());
+            List<PhotonTrackedTarget> used = estimate.targetsUsed == null ? List.of() : estimate.targetsUsed;
+            if (isMultiTag(estimate.strategy)) {
                 return new PhotonVisionPoseEstimate(
-                        new PoseSnapshot(pose2d.getX(), pose2d.getY(), pose2d.getRotation().getRadians()),
-                        estimate.timestampSeconds,
-                        ambiguity(estimate.targetsUsed),
-                        estimate.targetsUsed == null ? 0 : estimate.targetsUsed.size());
-            });
+                        pose, estimate.timestampSeconds, ambiguity(used), used.size());
+            }
+            if (estimate.strategy == PhotonPoseEstimator.PoseStrategy.AVERAGE_BEST_TARGETS) {
+                // An average of single-tag solves is still ambiguous; report the worst tag so
+                // ambiguity filters stay meaningful.
+                return new PhotonVisionPoseEstimate(
+                        pose, estimate.timestampSeconds, maxAmbiguity(used), used.size());
+            }
+            // PhotonLib reports every visible target in targetsUsed even for single-tag solves.
+            // Report the one tag that produced the pose so single-tag covariance and
+            // VisionFilters.maxAmbiguity apply to it.
+            PhotonTrackedTarget tag = singleTagUsed(estimate, used, layout, robotToCamera);
+            if (tag == null) {
+                return new PhotonVisionPoseEstimate(
+                        pose, estimate.timestampSeconds, maxAmbiguity(used), used.isEmpty() ? 0 : 1);
+            }
+            return new PhotonVisionPoseEstimate(
+                    pose,
+                    estimate.timestampSeconds,
+                    tag.getPoseAmbiguity(),
+                    1,
+                    tag.getBestCameraToTarget().getTranslation().getNorm());
+        }
+
+        private static boolean isMultiTag(PhotonPoseEstimator.PoseStrategy strategy) {
+            return strategy == PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
+                    || strategy == PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_RIO
+                    || strategy == PhotonPoseEstimator.PoseStrategy.CONSTRAINED_SOLVEPNP;
+        }
+
+        private static PhotonTrackedTarget singleTagUsed(
+                org.photonvision.EstimatedRobotPose estimate,
+                List<PhotonTrackedTarget> used,
+                AprilTagFieldLayout layout,
+                Transform3d robotToCamera) {
+            if (used.isEmpty()) {
+                return null;
+            }
+            if (estimate.strategy == PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY) {
+                return lowestAmbiguityTarget(used);
+            }
+            if (estimate.strategy == PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE) {
+                return used.get(0);
+            }
+            return targetProducing(estimate.estimatedPose, used, layout, robotToCamera);
+        }
+
+        /** Mirrors PhotonLib's lowest-ambiguity selection (first target with the smallest valid ambiguity). */
+        static PhotonTrackedTarget lowestAmbiguityTarget(List<PhotonTrackedTarget> targets) {
+            PhotonTrackedTarget lowest = null;
+            double lowestScore = 10.0;
+            for (PhotonTrackedTarget target : targets) {
+                if (target == null) {
+                    continue;
+                }
+                double score = target.getPoseAmbiguity();
+                if (score != -1 && score < lowestScore) {
+                    lowestScore = score;
+                    lowest = target;
+                }
+            }
+            return lowest;
+        }
+
+        /** Finds the tag whose best or alternate solve reproduces the estimated pose. */
+        private static PhotonTrackedTarget targetProducing(
+                Pose3d estimated,
+                List<PhotonTrackedTarget> targets,
+                AprilTagFieldLayout layout,
+                Transform3d robotToCamera) {
+            if (layout == null || robotToCamera == null || estimated == null) {
+                return null;
+            }
+            for (PhotonTrackedTarget target : targets) {
+                if (target == null || target.getFiducialId() == -1) {
+                    continue;
+                }
+                Optional<Pose3d> tagPose = layout.getTagPose(target.getFiducialId());
+                if (tagPose.isEmpty()) {
+                    continue;
+                }
+                if (matches(estimated, tagPose.get(), target.getBestCameraToTarget(), robotToCamera)
+                        || matches(estimated, tagPose.get(), target.getAlternateCameraToTarget(), robotToCamera)) {
+                    return target;
+                }
+            }
+            return null;
+        }
+
+        private static boolean matches(
+                Pose3d estimated, Pose3d tagPose, Transform3d cameraToTarget, Transform3d robotToCamera) {
+            if (cameraToTarget == null) {
+                return false;
+            }
+            Pose3d candidate = tagPose.transformBy(cameraToTarget.inverse()).transformBy(robotToCamera.inverse());
+            return candidate.getTranslation().getDistance(estimated.getTranslation()) <= SAME_POSE_TOLERANCE_METERS;
         }
 
         private Optional<org.photonvision.EstimatedRobotPose> estimateWithConfiguredStrategy(
@@ -401,8 +583,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             return switch (strategy) {
                 case LOWEST_AMBIGUITY -> estimator.estimateLowestAmbiguityPose(result);
                 case CLOSEST_TO_CAMERA_HEIGHT -> estimator.estimateClosestToCameraHeightPose(result);
-                case CLOSEST_TO_REFERENCE_POSE -> estimator.estimateClosestToReferencePose(
-                        result, Pose3d.kZero);
+                case CLOSEST_TO_REFERENCE_POSE -> closestToReference(result);
                 case AVERAGE_BEST_TARGETS -> estimator.estimateAverageBestTargetsPose(result);
                 case MULTI_TAG_PNP_ON_COPROCESSOR -> multiTagThenSingleTag(
                         estimator.estimateCoprocMultiTagPose(result),
@@ -411,6 +592,15 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 default -> estimator.estimateCoprocMultiTagPose(result)
                         .or(() -> estimator.estimateLowestAmbiguityPose(result));
             };
+        }
+
+        private Optional<org.photonvision.EstimatedRobotPose> closestToReference(PhotonPipelineResult result) {
+            Pose2d reference = referencePose == null ? null : referencePose.get();
+            if (reference == null) {
+                // Without a current estimate, "closest to the field origin" is meaningless.
+                return estimator.estimateLowestAmbiguityPose(result);
+            }
+            return estimator.estimateClosestToReferencePose(result, new Pose3d(reference));
         }
 
         private static double ambiguity(List<PhotonTrackedTarget> targets) {
@@ -424,6 +614,18 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                     .min()
                     .orElse(0.0);
         }
+
+        private static double maxAmbiguity(List<PhotonTrackedTarget> targets) {
+            if (targets == null || targets.isEmpty()) {
+                return 0.0;
+            }
+            return targets.stream()
+                    .filter(Objects::nonNull)
+                    .mapToDouble(PhotonTrackedTarget::getPoseAmbiguity)
+                    .filter(Double::isFinite)
+                    .max()
+                    .orElse(0.0);
+        }
     }
 
     static <T> Optional<T> multiTagThenSingleTag(Optional<T> multiTag, Supplier<Optional<T>> singleTag) {
@@ -431,10 +633,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         return primary.isPresent() ? primary : Objects.requireNonNull(singleTag, "singleTag").get();
     }
 
-    private static PhotonPoseClient defaultPoseClient(Supplier<CameraMountPose> mount) {
+    private static PhotonPoseClient defaultPoseClient(
+            Supplier<CameraMountPose> mount, AprilTagFieldLayout fieldLayout) {
         Supplier<CameraMountPose> safeMount = mount == null ? CameraMountPose::identity : mount;
         PhotonPoseEstimator estimator = new PhotonPoseEstimator(
-                AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField),
+                Objects.requireNonNull(fieldLayout, "fieldLayout"),
                 transform(CameraMountPose.identity()));
         return new PhotonPoseEstimatorClient(
                 estimator,
@@ -481,16 +684,27 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
+    /**
+     * Pose estimate seam.
+     *
+     * @param averageTargetDistanceMeters distance of the tags that produced the pose; NaN means
+     *     "use the average of every visible target"
+     */
     static record PhotonVisionPoseEstimate(
             PoseSnapshot pose,
             double timestampSeconds,
             double ambiguity,
-            int targetCount) {
+            int targetCount,
+            double averageTargetDistanceMeters) {
         PhotonVisionPoseEstimate {
             pose = Objects.requireNonNull(pose, "pose");
             timestampSeconds = finiteOrZero(timestampSeconds);
             ambiguity = Math.max(0.0, finiteOrZero(ambiguity));
             targetCount = Math.max(0, targetCount);
+        }
+
+        PhotonVisionPoseEstimate(PoseSnapshot pose, double timestampSeconds, double ambiguity, int targetCount) {
+            this(pose, timestampSeconds, ambiguity, targetCount, Double.NaN);
         }
     }
 

@@ -17,8 +17,13 @@ contract lives in `ActionLifecycleContractTest` and must change with this docume
 
 - `action.request()` and `MechanismScheduler.request(action)` create a lease for the
   complete action tree.
-- A lease reserves every resource the tree may target, including resources in later
-  sequence steps and inactive conditional branches.
+- A lease reserves the resources it is using or can use soon: the active node subtree, the
+  next sequence/`then` stage (so consecutive stages hand a resource over without a gap), both
+  branches of a live conditional, every step of a cycle, and a running path's ownership plus
+  its pending and running markers. Stages two or more steps ahead, completed paths, and
+  completed markers are not reserved, so older leases (default drive, homing) keep running
+  while a newer lease does not need their resources. Opaque provider paths keep their full
+  compiled reservation.
 - Disjoint leases run together.
 - For a conflicting resource, the most recently requested lease supplies the output.
 - A preempted lease remains active. It resumes automatically when all newer conflicting
@@ -45,10 +50,22 @@ contract lives in `ActionLifecycleContractTest` and must change with this docume
 - A finite action completes when its action tree reports completion. Athena then releases
   its lease and records completion for `isComplete(action)`.
 - Requesting a completed action clears the old completion and starts it from the beginning.
-- `cancel(action)` releases the action and clears its completion record.
+- `cancel(action)` releases the action, clears its completion record, and cancels leases the
+  action requested while it was running. Actions that only appear inside its tree but were
+  requested independently (for example by a button) keep running.
 - A released resource is neutralized exactly once unless another active lease drives it
   in that cycle. Holding position or retaining output requires an active action; stale
   output is never a completion behavior.
+
+## Faults
+
+- `RobotRuntime` isolates runtime exceptions per mechanism and lease: the faulting lease
+  contributes no output that cycle (its motors go neutral), other leases and mechanisms keep
+  running, and the fault is reported (rate limited) through the runtime failure reporter and
+  the mechanism `State/Fault` telemetry value. `PANIC` failure policies still propagate.
+  A bare `MechanismScheduler` throws unless `isolateFaults(true)` is set.
+- Non-finite dynamic targets hold the last valid value (or neutral when there is none); non-finite
+  open-loop efforts are neutral. Both report a rate-limited warning instead of throwing.
 
 ## Control Bindings
 

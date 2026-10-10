@@ -50,6 +50,55 @@ public final class MechanismScheduler {
     private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, Set<MotorDevice>> faultSuppressions = new IdentityHashMap<>();
     private final Map<MotorDevice, Integer> faultSuppressionCounts = new IdentityHashMap<>();
+    private final Map<Action, Set<Object>> liveResourceCache = new IdentityHashMap<>();
+    private final Map<PathAction, Set<Object>> pathOwnershipCache = new IdentityHashMap<>();
+    private final Map<Object, Set<Action>> spawnedLeases = new IdentityHashMap<>();
+    private final List<Object> evaluatingLeases = new ArrayList<>();
+    private final List<RuntimeFault> pendingFaults = new ArrayList<>();
+    private final Map<String, FaultHistory> faultHistory = new LinkedHashMap<>();
+    private static final double FAULT_REPORT_PERIOD_SECONDS = 5.0;
+    private boolean isolateFaults;
+    private double cycleSeconds;
+    private final MechanismRuntime.LeaseResources leaseResources = new MechanismRuntime.LeaseResources() {
+        @Override
+        public Set<Object> of(Action action) {
+            Set<Object> cached = liveResourceCache.get(action);
+            if (cached == null) {
+                cached = actionResources(action);
+                liveResourceCache.put(action, cached);
+            }
+            return cached;
+        }
+
+        @Override
+        public Set<Object> pathOwnership(PathAction path) {
+            Set<Object> cached = pathOwnershipCache.get(path);
+            if (cached == null) {
+                Set<Object> resources = new LinkedHashSet<>();
+                PathRuntime runtime = pathRuntimes.get(path);
+                if (runtime != null) runtime.ownership(path).forEach(value -> collectOwnedResource(value, resources));
+                cached = Set.copyOf(resources);
+                pathOwnershipCache.put(path, cached);
+            }
+            return cached;
+        }
+    };
+    private final MechanismRuntime.RuntimeHooks runtimeHooks = new MechanismRuntime.RuntimeHooks() {
+        @Override
+        public void enterLease(Object owner) {
+            evaluatingLeases.add(owner);
+        }
+
+        @Override
+        public void exitLease() {
+            if (!evaluatingLeases.isEmpty()) evaluatingLeases.remove(evaluatingLeases.size() - 1);
+        }
+
+        @Override
+        public void fault(String location, RuntimeException exception) {
+            recordFault(location, exception);
+        }
+    };
     private final OutputResolver resolver;
     private long requestSequence;
     private Runnable simulationStep = () -> {
@@ -141,6 +190,8 @@ public final class MechanismScheduler {
     public MechanismScheduler path(PathAction path, PathRuntime runtime) {
         pathRuntimes.put(Objects.requireNonNull(path, "path"), Objects.requireNonNull(runtime, "runtime"));
         compiledActions.clear();
+        liveResourceCache.clear();
+        pathOwnershipCache.clear();
         return this;
     }
 
@@ -510,7 +561,9 @@ public final class MechanismScheduler {
                     partition.action(),
                     recency,
                     partition.resources(),
-                    actionRootPath(action) + " partition[" + graph.node(entry.getKey()).name() + "]");
+                    actionRootPath(action) + " partition[" + graph.node(entry.getKey()).name() + "]",
+                    key,
+                    !partition.opaque());
             registrations.add(new LeaseRegistration(runtimeKey, runtime));
         }
         leaseTargets.put(key, List.copyOf(registrations));
@@ -569,7 +622,8 @@ public final class MechanismScheduler {
                     resources = Set.copyOf(conservativeResources);
                 }
             }
-            CompiledPartition compiled = new CompiledPartition(partitioned, resources);
+            CompiledPartition compiled = new CompiledPartition(
+                    partitioned, resources, containsOpaqueRuntimeGraph(partitioned));
             compiledPartitions.put(entry.getKey(), compiled);
             allResources.addAll(resources);
         }
@@ -621,6 +675,11 @@ public final class MechanismScheduler {
         } else if (action instanceof Action.Then then) {
             validateConcurrentResourceConflicts(then.action(), path + ".then.action", visited);
             validateConcurrentResourceConflicts(then.next(), path + ".then.next", visited);
+        } else if (action instanceof PathAction pathAction) {
+            // Markers may overlap each other or the path drive; the later-triggered output wins at
+            // runtime. Each marker's own concurrent groups must still be conflict-free.
+            pathAction.markers().forEach((name, marker) ->
+                    validateConcurrentResourceConflicts(marker, path + ".marker[" + name + "]", visited));
         }
     }
 
@@ -804,15 +863,28 @@ public final class MechanismScheduler {
     public MechanismScheduler request(Action action) {
         Action safeAction = Objects.requireNonNull(action, "action");
         activateLease(safeAction, safeAction, true);
+        // A request made while a lease evaluates (for example doOnce(() -> intake.request()))
+        // belongs to that lease and is cancelled with it. Any other request is independent, even
+        // when the same action was previously spawned by a lease.
+        for (Set<Action> spawned : spawnedLeases.values()) spawned.remove(safeAction);
+        if (!evaluatingLeases.isEmpty()) {
+            Object parent = evaluatingLeases.get(evaluatingLeases.size() - 1);
+            if (parent != null && parent != safeAction) {
+                spawnedLeases.computeIfAbsent(parent, ignored -> Collections.newSetFromMap(new IdentityHashMap<>()))
+                        .add(safeAction);
+            }
+        }
         return this;
     }
 
     /**
-     * Cancels an action and any marker/start leases it launched. Resources no longer
-     * driven by another lease are neutralized during the next output cycle.
+     * Cancels an action and every lease it requested while it was running. Leases for actions
+     * that merely appear inside its tree but were requested independently (for example by a
+     * button) keep running. Resources no longer driven by another lease are neutralized during
+     * the next output cycle.
      */
     public MechanismScheduler cancel(Action action) {
-        cancelNested(Objects.requireNonNull(action, "action"),
+        cancelSpawned(Objects.requireNonNull(action, "action"),
                 Collections.newSetFromMap(new IdentityHashMap<>()));
         return this;
     }
@@ -841,40 +913,111 @@ public final class MechanismScheduler {
         return true;
     }
 
-    private void cancelNested(Action action, Set<Action> visited) {
-        if (action == null || !visited.add(action)) return;
-        forgetCompletion(action);
-        releaseLease(action);
-        if (action instanceof PathAction path) {
-            path.markers().values().forEach(marker -> cancelNested(marker, visited));
-        } else if (action instanceof Actions.Sequence sequence) {
-            sequence.steps().forEach(step -> cancelNested(step.action(), visited));
-            cancelNested(sequence.next(), visited);
-        } else if (action instanceof Actions.Parallel parallel) {
-            parallel.Actions().forEach(child -> cancelNested(child, visited));
-        } else if (action instanceof Actions.Race race) {
-            race.Actions().forEach(child -> cancelNested(child, visited));
-        } else if (action instanceof Actions.Deadline deadline) {
-            deadline.Actions().forEach(child -> cancelNested(child, visited));
-        } else if (action instanceof Actions.Choice choice) {
-            cancelNested(choice.active(), visited); cancelNested(choice.inactive(), visited);
-        } else if (action instanceof Actions.WhenBranch branch) {
-            cancelNested(branch.active(), visited);
-        } else if (action instanceof Actions.Timeout timeout) {
-            cancelNested(timeout.action(), visited);
-        } else if (action instanceof Actions.WithinTolerance within) {
-            cancelNested(within.action(), visited);
-        } else if (action instanceof Actions.VelocityContribution contribution) {
-            cancelNested(contribution.driveAction(), visited);
-        } else if (action instanceof Actions.Conditional conditional) {
-            cancelNested(conditional.action(), visited); cancelNested(conditional.next(), visited);
-        } else if (action instanceof Action.Conditional conditional) {
-            cancelNested(conditional.action(), visited); cancelNested(conditional.next(), visited);
-        } else if (action instanceof Actions.Then then) {
-            cancelNested(then.action(), visited); cancelNested(then.next(), visited);
-        } else if (action instanceof Action.Then then) {
-            cancelNested(then.action(), visited); cancelNested(then.next(), visited);
+    private void cancelSpawned(Object key, Set<Object> visited) {
+        if (key == null || !visited.add(key)) return;
+        forgetCompletion(key);
+        releaseLease(key);
+        Set<Action> spawned = spawnedLeases.remove(key);
+        if (spawned == null) return;
+        for (Action child : List.copyOf(spawned)) cancelSpawned(child, visited);
+    }
+
+    /**
+     * Contains runtime exceptions per mechanism and lease instead of propagating them out of
+     * {@link #periodic}. A faulted lease contributes no outputs that cycle (its motors go neutral)
+     * and the fault is queued for {@link #drainRuntimeFaults()}. Exceptions raised under a
+     * {@code PANIC} failure policy still propagate. Disabled by default so tests and tools fail fast.
+     */
+    public MechanismScheduler isolateFaults(boolean isolate) {
+        isolateFaults = isolate;
+        return this;
+    }
+
+    public boolean isolatesFaults() {
+        return isolateFaults;
+    }
+
+    /**
+     * Returns and clears faults to report. Each distinct fault is returned at most once every
+     * five seconds while it keeps occurring; {@link RuntimeFault#occurrences()} counts repeats.
+     */
+    public List<RuntimeFault> drainRuntimeFaults() {
+        if (pendingFaults.isEmpty()) return List.of();
+        List<RuntimeFault> drained = List.copyOf(pendingFaults);
+        pendingFaults.clear();
+        return drained;
+    }
+
+    /**
+     * Returns and clears rate-limited warnings for runtime values that were held or neutralized
+     * instead of throwing (for example a non-finite dynamic target or interpolation input).
+     */
+    public List<String> drainRuntimeWarnings() {
+        return FaultIsolation.drainWarnings();
+    }
+
+    /** Returns the fault its root mechanism raised this cycle (telemetry), or an empty string when healthy. */
+    public String fault(Mechanism mechanism) {
+        MechanismRuntime runtime = runtimes.get(mechanism);
+        if (runtime == null) {
+            RequestTarget target = declarationTargets.get(mechanism);
+            runtime = target == null ? null : runtimes.get(target.root());
         }
+        return runtime == null || !runtime.faultedThisCycle() ? "" : runtime.lastFault();
+    }
+
+    private void isolate(
+            MechanismRuntime runtime,
+            String phase,
+            RuntimeException exception,
+            Set<MechanismRuntime> faulted) {
+        if (!isolateFaults || FaultIsolation.isPanic(exception)) throw exception;
+        faulted.add(runtime);
+        runtime.markFault(phase, exception);
+        recordFault(runtime.name() + " " + phase, exception);
+    }
+
+    private void recordFault(String location, RuntimeException exception) {
+        if (!isolateFaults) throw exception;
+        String key = location + "|" + exception.getClass().getName();
+        FaultHistory history = faultHistory.get(key);
+        if (history == null) {
+            if (faultHistory.size() >= COMPLETION_HISTORY_LIMIT) {
+                faultHistory.remove(faultHistory.keySet().iterator().next());
+            }
+            history = new FaultHistory();
+            faultHistory.put(key, history);
+        }
+        history.occurrences++;
+        if (history.reported && cycleSeconds - history.lastReportSeconds < FAULT_REPORT_PERIOD_SECONDS
+                && cycleSeconds >= history.lastReportSeconds) {
+            return;
+        }
+        history.reported = true;
+        history.lastReportSeconds = cycleSeconds;
+        pendingFaults.add(new RuntimeFault(location, exception, history.occurrences));
+        if (pendingFaults.size() > COMPLETION_HISTORY_LIMIT) pendingFaults.remove(0);
+    }
+
+    /** A contained runtime fault: where it happened, the cause, and how often it has occurred. */
+    public record RuntimeFault(String location, RuntimeException exception, int occurrences) {
+        public RuntimeFault {
+            Objects.requireNonNull(location, "location");
+            Objects.requireNonNull(exception, "exception");
+        }
+
+        public String message() {
+            String detail = exception.getMessage();
+            return "Athena mechanism fault in " + location + " (outputs neutralized; occurrences="
+                    + occurrences + "): " + exception.getClass().getSimpleName()
+                    + (detail == null ? "" : ": " + detail);
+        }
+    }
+
+    private static final class FaultHistory {
+        private int occurrences;
+        private boolean reported;
+        private double lastReportSeconds;
     }
 
     public Action action(Mechanism mechanism) {
@@ -895,13 +1038,39 @@ public final class MechanismScheduler {
         Set<MotorDevice> globallyDriven = globallyDrivenScratch;
         drivenByRuntime.clear();
         globallyDriven.clear();
+        cycleSeconds = safeMechanismContext.nowSeconds();
+        Set<MechanismRuntime> faulted = Collections.newSetFromMap(new IdentityHashMap<>());
         try {
             for (MechanismRuntime runtime : runtimes.values()) {
-                runtime.runHooks(eventContext, false);
+                try {
+                    runtime.runHooks(eventContext, false);
+                } catch (RuntimeException exception) {
+                    isolate(runtime, "hooks", exception, faulted);
+                }
+            }
+            // Evaluate every lease first so reservations reflect where each lease is in its tree
+            // this cycle, then arbitrate and apply against those reservations.
+            for (MechanismRuntime runtime : runtimes.values()) {
+                try {
+                    runtime.evaluateCandidates(safeMechanismContext);
+                } catch (RuntimeException exception) {
+                    evaluatingLeases.clear();
+                    isolate(runtime, "evaluation", exception, faulted);
+                }
             }
             Map<Object, Long> reservations = globalLeaseReservations();
             for (MechanismRuntime runtime : runtimes.values()) {
-                Set<MotorDevice> driven = runtime.periodicOutputsInto(safeMechanismContext, outputs, reservations);
+                Set<MotorDevice> driven;
+                if (faulted.contains(runtime)) {
+                    driven = runtime.neutralizeAfterFault();
+                } else {
+                    try {
+                        driven = runtime.applyCandidates(outputs, reservations);
+                    } catch (RuntimeException exception) {
+                        isolate(runtime, "output", exception, faulted);
+                        driven = runtime.neutralizeAfterFault();
+                    }
+                }
                 drivenByRuntime.put(runtime, driven);
                 globallyDriven.addAll(driven);
             }
@@ -960,8 +1129,11 @@ public final class MechanismScheduler {
                 continue;
             }
             LeaseReservation lease = leaseReservations.get(key);
-            for (Object resource : lease.resources()) {
-                reservations.merge(resource, lease.recency(), Math::max);
+            for (int index = 0; index < registrations.size(); index++) {
+                LeaseRegistration registration = registrations.get(index);
+                for (Object resource : registration.runtime().leaseReservation(registration.runtimeKey())) {
+                    reservations.merge(resource, lease.recency(), Math::max);
+                }
             }
         }
         return reservations;
@@ -1051,6 +1223,7 @@ public final class MechanismScheduler {
             }
         };
         return MechanismRuntime.of(runtimeNode, actionContext, resolver, pathRuntimes, leases)
+                .integration(leaseResources, runtimeHooks)
                 .simulationStep(simulationStep);
     }
 
@@ -1405,7 +1578,7 @@ public final class MechanismScheduler {
         }
     }
 
-    private record CompiledPartition(Action action, Set<Object> resources) {
+    private record CompiledPartition(Action action, Set<Object> resources, boolean opaque) {
         private CompiledPartition {
             action = Objects.requireNonNull(action, "action");
             resources = Set.copyOf(resources);

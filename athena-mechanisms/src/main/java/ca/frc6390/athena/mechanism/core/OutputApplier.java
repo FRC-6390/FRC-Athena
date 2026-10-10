@@ -8,7 +8,6 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
@@ -140,7 +139,7 @@ final class OutputApplier {
             apply(handle, applied);
         } catch (RuntimeException exception) {
             if (motor.failurePolicy() == FailurePolicy.PANIC) {
-                throw exception;
+                throw FaultIsolation.panic(exception);
             }
             context.hardwareFailure(motor, exception);
             motor.recordCommand(MotorCommandSnapshot.neutral());
@@ -162,7 +161,7 @@ final class OutputApplier {
             try {
                 motor.stop();
             } catch (RuntimeException exception) {
-                if (motor.device().failurePolicy() == FailurePolicy.PANIC) throw exception;
+                if (motor.device().failurePolicy() == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
                 context.hardwareFailure(motor.device(), exception);
             }
         });
@@ -184,6 +183,52 @@ final class OutputApplier {
             state.active = false;
         }
         controlsAppliedThisCycle.clear();
+    }
+
+    /**
+     * Neutralizes the hardware of an output whose application threw, so a faulted control never
+     * keeps its previous command, and lets its control state reset at the end of the cycle.
+     */
+    void abandon(OutputRequest request) {
+        ControlBinding control = request.control();
+        if (control != null) {
+            controlsAppliedThisCycle.remove(control);
+            if (control.sink() != null) {
+                try {
+                    control.sink().release();
+                } catch (RuntimeException ignored) {
+                    // Best effort while already handling a fault.
+                }
+            }
+        }
+        for (MotorDevice motor : request.motors()) {
+            try {
+                context.motor(motor).stop();
+            } catch (RuntimeException ignored) {
+                // Best effort while already handling a fault.
+            }
+            motor.recordCommand(MotorCommandSnapshot.neutral());
+        }
+    }
+
+    /**
+     * Re-seeds profile and loop state for every control whose feedback is the encoder that was just
+     * re-zeroed, so a running profiled/PID control does not chase a stale reference. The requested
+     * position is used directly because cached hardware inputs may not reflect the new value yet.
+     */
+    void encoderPositionSet(EncoderDevice encoder, double position) {
+        for (Map.Entry<ControlBinding, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
+            ControlBinding control = entry.getKey();
+            FeedbackBinding feedback = control.feedback();
+            boolean direct = feedback != null && encoder.equals(feedback.position());
+            boolean fedBy = direct
+                    || feedback != null && feedback.dependencies().contains(encoder)
+                    || feedback == null && control.output() != null && encoder.equals(control.output().encoder());
+            if (!fedBy) continue;
+            ControlRuntimeState state = entry.getValue();
+            state.reseedPending = true;
+            state.reseedPosition = direct && Double.isFinite(position) ? position : Double.NaN;
+        }
     }
 
     void beginCycle() {
@@ -249,6 +294,11 @@ final class OutputApplier {
         ControlRuntimeState state = controlRuntimes(control);
         double position = firstFeedbackPosition(control);
         double velocity = firstFeedbackVelocity(control);
+        if (state.reseedPending) {
+            state.reseedPending = false;
+            if (Double.isFinite(state.reseedPosition)) position = state.reseedPosition;
+            resetControlState(state, Outputs.neutral(), mechanismContext, position, velocity);
+        }
         state.lastContext = mechanismContext;
         state.lastPosition = finiteOrZero(position);
         state.lastVelocity = finiteOrZero(velocity);
@@ -363,8 +413,7 @@ final class OutputApplier {
         }
         RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
         if (transformed instanceof Output.Position positionTarget && overrides.hasTuning(control)) {
-            transformed = Outputs.position(Math.max(tuning.minimumPosition(),
-                    Math.min(tuning.maximumPosition(), positionTarget.position())));
+            transformed = Outputs.position(clampTunedPosition(tuning, positionTarget.position()));
         } else if (transformed instanceof Output.Velocity velocityTarget) {
             transformed = Outputs.velocity(Math.max(-tuning.maxVelocity(),
                     Math.min(tuning.maxVelocity(), velocityTarget.velocity())));
@@ -400,6 +449,11 @@ final class OutputApplier {
                 return null;
             }
             double goal = result.value();
+            if (overrides.hasTuning(control)) {
+                // Dashboard-tuned limits must also bound what a planner returns (a planner may pick
+                // a wrap candidate outside the tuned window).
+                goal = clampTunedPosition(overrides.tuning(control), goal);
+            }
             if (profile == null) {
                 return new StagedRequest(
                         Outputs.position(goal),
@@ -412,8 +466,9 @@ final class OutputApplier {
                     velocity,
                     goal,
                     mechanismContext.dtSeconds());
-            Range positionRange = Constraints.positionRange(control.constraints());
-            double boundedPosition = positionRange.clamp(reference.position());
+            // The tuning range starts as the declared constraint range and narrows with dashboard
+            // overrides, so profile references never leave either window.
+            double boundedPosition = clampTunedPosition(overrides.tuning(control), reference.position());
             if (Double.compare(boundedPosition, reference.position()) != 0) {
                 state.profileRuntime(profile).reset(boundedPosition, 0.0);
                 reference = MotionReference.stationary(boundedPosition);
@@ -500,6 +555,10 @@ final class OutputApplier {
         return new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0);
     }
 
+    private static double clampTunedPosition(RuntimeOverrides.ControlTuning tuning, double position) {
+        return Math.max(tuning.minimumPosition(), Math.min(tuning.maximumPosition(), position));
+    }
+
     private static double finiteOrZero(double value) {
         return Double.isFinite(value) ? value : 0.0;
     }
@@ -520,13 +579,21 @@ final class OutputApplier {
             return false;
         }
         if (!hasTargetConstraints(control)) return true;
+        // Probe an infinitesimal move in the output direction. A fixed probe distance (for example
+        // one unit) depends on the control's units: in radians it reaches far past nearby edges and
+        // blocks outputs long before the mechanism is at its limit.
+        double probe = current + direction * directionProbe(current);
         ConstraintResult<Double> result = Constraints.evaluate(
                 control.constraints(),
-                new ConstraintContext<>(current, current + direction, context));
+                new ConstraintContext<>(current, probe, context));
         if (!result.accepted()) {
             return false;
         }
         return direction > 0.0 ? result.value() > current : result.value() < current;
+    }
+
+    private static double directionProbe(double current) {
+        return Math.max(1.0, Math.abs(current)) * 1.0e-9;
     }
 
     private Output guardFinalOutput(
@@ -705,6 +772,11 @@ final class OutputApplier {
         }
         if (!control.constraints().isEmpty() || effectiveProfile(control) != null
                 || control.planner() != null) {
+            return null;
+        }
+        // Device closed loops do not know Athena's continuous input range and would take the long
+        // way around a wrapped mechanism. Keep continuous controls on the software loop.
+        if (control.continuousRange() != null) {
             return null;
         }
         MotorClosedLoopConfig config = closedLoopConfig(control);
@@ -997,6 +1069,8 @@ final class OutputApplier {
         private double lastPosition;
         private double lastVelocity;
         private boolean active;
+        private boolean reseedPending;
+        private double reseedPosition = Double.NaN;
 
         private ControlRuntimeState(ControlBinding binding) {
             this.binding = binding;

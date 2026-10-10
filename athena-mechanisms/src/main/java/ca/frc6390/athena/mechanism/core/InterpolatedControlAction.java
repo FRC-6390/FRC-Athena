@@ -95,6 +95,22 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         return sampledTarget;
     }
 
+    /**
+     * Robot-loop form of {@link #target()} that never throws. A non-finite input, point, value, or
+     * result, or duplicate runtime points, holds the last valid target (NaN when there is none, which
+     * the runtime turns into neutral output) and reports a rate-limited warning.
+     */
+    synchronized double runtimeTarget() {
+        try {
+            return target();
+        } catch (RuntimeException exception) {
+            FaultIsolation.warn(this, "Interpolated " + control.mode().name().toLowerCase(java.util.Locale.ROOT)
+                    + " target unavailable: " + exception.getMessage()
+                    + (sampled ? "; holding last valid target " + lastTarget : "; output neutral"));
+            return sampled ? lastTarget : Double.NaN;
+        }
+    }
+
     /** Returns the number of configured interpolation points. */
     public int size() {
         return entries.size();
@@ -118,7 +134,11 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
 
     private synchronized double[] sampledInputs() {
         if (entries.isEmpty()) return new double[0];
-        runtimeData.beginEvaluation();
+        try {
+            runtimeData.beginEvaluation();
+        } catch (RuntimeException exception) {
+            return new double[0];
+        }
         double[] points = new double[entries.size()];
         for (int index = 0; index < points.length; index++) points[index] = runtimeData.point(index);
         return points;
@@ -126,24 +146,40 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
 
     private synchronized double[] sampledValues() {
         if (entries.isEmpty()) return new double[0];
-        runtimeData.beginEvaluation();
-        double[] values = new double[entries.size()];
-        for (int index = 0; index < values.length; index++) values[index] = runtimeData.value(index);
-        return values;
+        try {
+            runtimeData.beginEvaluation();
+            double[] values = new double[entries.size()];
+            for (int index = 0; index < values.length; index++) values[index] = runtimeData.value(index);
+            return values;
+        } catch (RuntimeException exception) {
+            return new double[0];
+        }
     }
 
     private synchronized Point2d[] configuredPoints() {
         if (entries.isEmpty()) return new Point2d[0];
-        runtimeData.beginEvaluation();
-        Point2d[] points = new Point2d[entries.size()];
-        for (int index = 0; index < points.length; index++) {
-            points[index] = new Point2d(runtimeData.point(index), runtimeData.value(index));
+        try {
+            runtimeData.beginEvaluation();
+            Point2d[] points = new Point2d[entries.size()];
+            for (int index = 0; index < points.length; index++) {
+                points[index] = new Point2d(runtimeData.point(index), runtimeData.value(index));
+            }
+            return points;
+        } catch (RuntimeException exception) {
+            return new Point2d[0];
         }
-        return points;
     }
 
     private synchronized Point2d[] curvePoints() {
         if (entries.size() < 2) return configuredPoints();
+        try {
+            return sampledCurvePoints();
+        } catch (RuntimeException exception) {
+            return new Point2d[0];
+        }
+    }
+
+    private Point2d[] sampledCurvePoints() {
         runtimeData.beginEvaluation();
         Point2d[] points = new Point2d[(entries.size() - 1) * CURVE_SAMPLES_PER_SEGMENT + 1];
         int output = 0;

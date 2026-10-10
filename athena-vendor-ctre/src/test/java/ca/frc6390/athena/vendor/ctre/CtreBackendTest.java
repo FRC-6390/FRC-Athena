@@ -174,6 +174,80 @@ class CtreBackendTest {
     }
 
     @Test
+    void motorFollowerOnDifferentCanBusFailsLoudly() {
+        RecordingTalonController followerController = new RecordingTalonController();
+        CtreMotorHandle leader = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1).canbus("canivore"), null, new RecordingTalonController());
+        CtreMotorHandle follower = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 2), null, followerController);
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> follower.follow(leader, false));
+
+        assertTrue(failure.getMessage().contains("canivore"));
+        assertTrue(failure.getMessage().contains("rio"));
+        assertEquals(-1, followerController.followLeaderId);
+    }
+
+    @Test
+    void encoderActivationOnlyWarnsAboutStoredConfigByDefault() {
+        RecordingCancoderController controller = new RecordingCancoderController();
+        controller.stored = new CtreEncoderHandle.MagnetConfig(0.125, false, 1.0);
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+        CtreEncoderHandle handle = new CtreEncoderHandle(
+                EncoderDevice.of(EncoderKinds.CANCODER, 3), controller, warnings::add);
+
+        handle.activate();
+        handle.activate();
+
+        assertEquals(0, controller.baselineCalls);
+        assertEquals(1, warnings.size());
+        assertTrue(warnings.get(0).contains("0.125"));
+        assertTrue(warnings.get(0).contains("CW+"));
+        assertTrue(warnings.get(0).contains(EncoderDevice.of(EncoderKinds.CANCODER, 3).defaultName()));
+
+        RecordingCancoderController matching = new RecordingCancoderController();
+        java.util.List<String> quiet = new java.util.ArrayList<>();
+        new CtreEncoderHandle(EncoderDevice.of(EncoderKinds.CANCODER, 4), matching, quiet::add).activate();
+        assertTrue(quiet.isEmpty());
+    }
+
+    @Test
+    void encoderBaselineIsWrittenOnlyWhenOptedInAndReportsFailures() {
+        RecordingCancoderController controller = new RecordingCancoderController();
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+        CtreEncoderHandle handle = new CtreEncoderHandle(
+                EncoderDevice.of(EncoderKinds.CANCODER, 3).applyBaselineConfig().offset(0.2).inverted(),
+                controller,
+                warnings::add);
+
+        handle.activate();
+        handle.activate();
+        assertEquals(1, controller.baselineCalls);
+        assertTrue(warnings.isEmpty());
+
+        RecordingCancoderController failing = new RecordingCancoderController();
+        failing.baselineFailure = "CAN frame not received";
+        CtreEncoderHandle failingHandle = new CtreEncoderHandle(
+                EncoderDevice.of(EncoderKinds.CANCODER, 4).applyBaselineConfig(), failing);
+        IllegalStateException failure = assertThrows(IllegalStateException.class, failingHandle::activate);
+        assertTrue(failure.getMessage().contains("CAN frame not received"));
+    }
+
+    @Test
+    void pendingPositionSetBridgesFramesReceivedBeforeTheSet() {
+        PendingPositionSet pending = new PendingPositionSet();
+        assertEquals(1.0, pending.resolve(1.0, 5.0), 1.0e-9);
+
+        pending.set(4.0, 10.0);
+
+        assertEquals(4.0, pending.resolve(1.0, 9.99), 1.0e-9);
+        assertEquals(4.0, pending.resolve(1.0, 10.0), 1.0e-9);
+        assertEquals(4.01, pending.resolve(4.01, 10.02), 1.0e-9);
+        assertEquals(4.5, pending.resolve(4.5, 9.0), 1.0e-9);
+    }
+
+    @Test
     void motorInputsAreCachedUntilNextRefresh() {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.FALCON_500, 2), null, controller);
@@ -398,6 +472,9 @@ class CtreBackendTest {
     }
 
     private static final class RecordingCancoderController implements CtreEncoderHandle.CANCoderController {
+        private int baselineCalls;
+        private String baselineFailure;
+        private CtreEncoderHandle.MagnetConfig stored = new CtreEncoderHandle.MagnetConfig(0.0, true, 0.5);
         private int positionCalls;
         private int absolutePositionCalls;
         private int velocityCalls;
@@ -425,6 +502,17 @@ class CtreBackendTest {
         public boolean setPositionRotations(double rotations) {
             setPositionRotations = rotations;
             return true;
+        }
+
+        @Override
+        public String configureBaseline() {
+            baselineCalls++;
+            return baselineFailure;
+        }
+
+        @Override
+        public CtreEncoderHandle.MagnetConfig readMagnetConfig() {
+            return stored;
         }
     }
 

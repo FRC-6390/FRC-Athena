@@ -10,6 +10,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.api.hardware.CameraKinds;
+import edu.wpi.first.apriltag.AprilTag;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.geometry.Transform3d;
+import org.photonvision.EstimatedRobotPose;
+import org.photonvision.PhotonPoseEstimator;
+import org.photonvision.targeting.PhotonTrackedTarget;
+import org.photonvision.targeting.TargetCorner;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
@@ -166,6 +175,109 @@ class PhotonVisionCameraAdapterTest {
 
         assertThrows(IllegalStateException.class, adapter::latestPoses);
         assertThrows(IllegalStateException.class, adapter::poseSignal);
+    }
+
+    @Test
+    void singleTagFallbackReportsOnlyTheTagThatProducedThePose() {
+        Pose3d robot = new Pose3d(2.0, 0.0, 0.0, new Rotation3d());
+        Pose3d tagOne = new Pose3d(5.0, 0.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        Pose3d tagTwo = new Pose3d(5.0, 1.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        List<PhotonTrackedTarget> visible = List.of(
+                target(1, new Transform3d(robot, tagOne), 0.30),
+                target(2, new Transform3d(robot, tagTwo), 0.10));
+        // PhotonLib's lowest-ambiguity fallback reports every visible target in targetsUsed.
+        EstimatedRobotPose fallback = new EstimatedRobotPose(
+                robot, 1.0, visible, PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY);
+
+        PhotonVisionCameraAdapter.PhotonVisionPoseEstimate estimate =
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.toEstimate(
+                        fallback, layout(tagOne, tagTwo), new Transform3d());
+
+        assertEquals(1, estimate.targetCount());
+        assertEquals(0.10, estimate.ambiguity(), 1.0e-9);
+        assertEquals(new Transform3d(robot, tagTwo).getTranslation().getNorm(),
+                estimate.averageTargetDistanceMeters(), 1.0e-9);
+    }
+
+    @Test
+    void multiTagEstimateKeepsAllTargets() {
+        Pose3d robot = new Pose3d(2.0, 0.0, 0.0, new Rotation3d());
+        Pose3d tagOne = new Pose3d(5.0, 0.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        Pose3d tagTwo = new Pose3d(5.0, 1.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        EstimatedRobotPose multi = new EstimatedRobotPose(
+                robot,
+                1.0,
+                List.of(target(1, new Transform3d(robot, tagOne), 0.30),
+                        target(2, new Transform3d(robot, tagTwo), 0.10)),
+                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
+
+        PhotonVisionCameraAdapter.PhotonVisionPoseEstimate estimate =
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.toEstimate(
+                        multi, layout(tagOne, tagTwo), new Transform3d());
+
+        assertEquals(2, estimate.targetCount());
+        assertTrue(Double.isNaN(estimate.averageTargetDistanceMeters()));
+    }
+
+    @Test
+    void referencePoseStrategyReportsTheTagWhoseSolveProducedThePose() {
+        Pose3d robot = new Pose3d(2.0, 0.0, 0.0, new Rotation3d());
+        Pose3d wrongRobot = new Pose3d(4.0, 3.0, 0.0, new Rotation3d());
+        Pose3d tagOne = new Pose3d(5.0, 0.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        Pose3d tagTwo = new Pose3d(5.0, 1.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        // Tag one's alternate solve produced the pose; tag two has the lower ambiguity.
+        EstimatedRobotPose closest = new EstimatedRobotPose(
+                robot,
+                1.0,
+                List.of(target(2, new Transform3d(wrongRobot, tagTwo), new Transform3d(wrongRobot, tagTwo), 0.05),
+                        target(1, new Transform3d(wrongRobot, tagOne), new Transform3d(robot, tagOne), 0.25)),
+                PhotonPoseEstimator.PoseStrategy.CLOSEST_TO_REFERENCE_POSE);
+
+        PhotonVisionCameraAdapter.PhotonVisionPoseEstimate estimate =
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.toEstimate(
+                        closest, layout(tagOne, tagTwo), new Transform3d());
+
+        assertEquals(1, estimate.targetCount());
+        assertEquals(0.25, estimate.ambiguity(), 1.0e-9);
+    }
+
+    @Test
+    void singleTagEstimateDistanceOverridesAverageOfAllVisibleTargets() {
+        PhotonVisionCameraAdapter.PhotonVisionResult result = new PhotonVisionCameraAdapter.PhotonVisionResult(
+                1.0,
+                0.01,
+                List.of(PhotonVisionTarget.aprilTag(1, 0.0, 0.0, 2.0, 0.3),
+                        PhotonVisionTarget.aprilTag(2, 0.0, 0.0, 6.0, 0.1)),
+                Optional.of(new PhotonVisionCameraAdapter.PhotonVisionPoseEstimate(
+                        new PoseSnapshot(1.0, 1.0, 0.0), 1.0, 0.1, 1, 6.0)));
+
+        PoseMeasurementSample pose =
+                (PoseMeasurementSample) PhotonVisionCameraAdapter.poseMeasurementsFromResult(result, this).get(0);
+
+        assertEquals(6.0, pose.averageTargetDistanceMeters(), 1.0e-9);
+        assertEquals(1, pose.targetCount());
+    }
+
+    private static AprilTagFieldLayout layout(Pose3d... tags) {
+        List<AprilTag> layoutTags = new java.util.ArrayList<>();
+        for (int index = 0; index < tags.length; index++) {
+            layoutTags.add(new AprilTag(index + 1, tags[index]));
+        }
+        return new AprilTagFieldLayout(layoutTags, 16.0, 8.0);
+    }
+
+    private static PhotonTrackedTarget target(int id, Transform3d cameraToTarget, double ambiguity) {
+        return target(id, cameraToTarget, cameraToTarget, ambiguity);
+    }
+
+    private static PhotonTrackedTarget target(
+            int id, Transform3d best, Transform3d alternate, double ambiguity) {
+        return new PhotonTrackedTarget(
+                0.0, 0.0, 1.0, 0.0, id, -1, -1.0f, best, alternate, ambiguity, corners(), corners());
+    }
+
+    private static List<TargetCorner> corners() {
+        return List.of(new TargetCorner(0, 0), new TargetCorner(1, 0), new TargetCorner(1, 1), new TargetCorner(0, 1));
     }
 
     private record FakePhotonClient(List<PhotonVisionCameraAdapter.PhotonVisionResult> results)

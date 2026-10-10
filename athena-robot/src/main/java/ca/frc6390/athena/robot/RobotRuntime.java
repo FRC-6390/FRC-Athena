@@ -89,7 +89,9 @@ public final class RobotRuntime implements AutoCloseable {
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
         this.hardwareGraph = Objects.requireNonNull(hardwareGraph, "hardwareGraph");
         this.simulationSession = simulationSession;
-        mechanisms = MechanismScheduler.create(hardwareGraph);
+        // A runtime exception in one mechanism's actions neutralizes that mechanism and is reported,
+        // instead of stopping robot code. PANIC failure policies still propagate.
+        mechanisms = MechanismScheduler.create(hardwareGraph).isolateFaults(true);
         cycleSnapshot = new RuntimeCycleSnapshot(
                 0, 0.0, 0.0, LifecycleMode.ROBOT, LifecyclePhase.PERIODIC,
                 false, false, simulationSession != null, HardwareCycleSnapshot.empty(),
@@ -841,10 +843,23 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     private List<ResolvedOutput> runMechanisms(MechanismContext mechanismContext, EventContext eventContext) {
-        if (simulationSession != null) {
-            return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
+        try {
+            if (simulationSession != null) {
+                return simulationSession.withDigitalInputs(() -> mechanisms.periodic(mechanismContext, eventContext));
+            }
+            return mechanisms.periodic(mechanismContext, eventContext);
+        } finally {
+            reportMechanismFaults();
         }
-        return mechanisms.periodic(mechanismContext, eventContext);
+    }
+
+    private void reportMechanismFaults() {
+        for (MechanismScheduler.RuntimeFault fault : mechanisms.drainRuntimeFaults()) {
+            failureReporter.error(fault.message(), fault.exception());
+        }
+        for (String warning : mechanisms.drainRuntimeWarnings()) {
+            failureReporter.warning("Athena runtime value: " + warning, null);
+        }
     }
 
     private void updateCycleSnapshot(MechanismContext context, EventContext eventContext) {

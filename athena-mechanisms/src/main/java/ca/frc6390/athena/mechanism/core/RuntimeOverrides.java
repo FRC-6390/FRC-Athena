@@ -23,6 +23,7 @@ final class RuntimeOverrides {
     private final Map<ControlBinding, TelemetryValue> controlTelemetry = new IdentityHashMap<>();
     private final Map<ControlBinding, Double> controlTestPercent = new IdentityHashMap<>();
     private final Map<ControlBinding, ControlTuning> controlTunings = new IdentityHashMap<>();
+    private final Map<ControlBinding, ControlTuning> declaredTunings = new IdentityHashMap<>();
     private final Set<ControlBinding> controlProfileOverrides = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<MotorDevice, MotorRuntimeConfig> motorConfigs = new IdentityHashMap<>();
     private final Map<MotorDevice, String> motorStatus = new IdentityHashMap<>();
@@ -173,7 +174,11 @@ final class RuntimeOverrides {
     }
 
     ControlTuning tuning(ControlBinding control) {
-        return controlTunings.getOrDefault(control, ControlTuning.declared(control));
+        ControlTuning tuned = controlTunings.get(control);
+        if (tuned != null) return tuned;
+        // Declared tuning only depends on the immutable binding. Cache it so the several lookups
+        // per control per cycle neither allocate nor re-run constraint validation in the loop.
+        return declaredTunings.computeIfAbsent(control, ControlTuning::declared);
     }
 
     boolean hasTuning(ControlBinding control) {

@@ -33,9 +33,12 @@ public final class AutoChooser {
         return this;
     }
 
-    /** Adds a default auto named from the Action type. */
+    /**
+     * Adds a default auto named from its first path (or Action type). When that derived name is
+     * already taken, a numeric suffix such as {@code " (2)"} is appended instead of failing.
+     */
     public AutoChooser defaultAuto(Action action) {
-        return defaultAuto(actionName(action), action);
+        return defaultAuto(uniqueName(actionName(action)), action);
     }
 
     /** Adds another autonomous Action. */
@@ -45,9 +48,13 @@ public final class AutoChooser {
         return this;
     }
 
-    /** Adds an auto named from the Action type. */
+    /**
+     * Adds an auto named from its first path (or Action type). Autos that share a first path are
+     * disambiguated with a numeric suffix such as {@code " (2)"}; use {@link #auto(String, Action)}
+     * for a stable dashboard name.
+     */
     public AutoChooser auto(Action action) {
-        return auto(actionName(action), action);
+        return auto(uniqueName(actionName(action)), action);
     }
 
     /** Changes the next autonomous selection without starting or interrupting any Action. */
@@ -138,6 +145,15 @@ public final class AutoChooser {
         }
         revision++;
         return normalized;
+    }
+
+    private String uniqueName(String derived) {
+        String base = normalize(derived, "auto");
+        if (!options.containsKey(base)) return base;
+        for (int suffix = 2; ; suffix++) {
+            String candidate = base + " (" + suffix + ")";
+            if (!options.containsKey(candidate)) return candidate;
+        }
     }
 
     private void requireOptions() {

@@ -105,6 +105,7 @@ final class RobotGraph {
         state.values.put("ActiveAction", TelemetryValue.string(() -> activeActionName(inspected, scheduler)));
         state.values.put("ActionRunning", TelemetryValue.bool(() -> anyAction(inspected, scheduler, true)));
         state.values.put("ActionComplete", TelemetryValue.bool(() -> anyAction(inspected, scheduler, false)));
+        state.values.put("Fault", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.fault(mechanism)));
         inspected.Actions().forEach((actionName, action) -> {
             if (!isExposedActionField(mechanism, actionName, action)) return;
             ownedNode

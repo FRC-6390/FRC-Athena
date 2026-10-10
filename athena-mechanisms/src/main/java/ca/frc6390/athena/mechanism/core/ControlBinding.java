@@ -52,6 +52,8 @@ public record ControlBinding(
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         loops = loops == null ? List.of() : List.copyOf(loops);
         constraints = constraints == null ? List.of() : List.copyOf(constraints);
+        // Reject non-overlapping position ranges when the binding is declared, not in the robot loop.
+        ca.frc6390.athena.mechanism.constraint.Constraints.positionRange(constraints);
         validateMotorTargets(output, followers);
         if (output != null && sink != null) {
             throw new IllegalArgumentException("A control binding cannot target both a motor and a scalar sink.");
@@ -434,7 +436,7 @@ public record ControlBinding(
 
     public Action percent(DoubleSupplier percent) {
         requireOutput();
-        return Actions.percent(this, finiteSupplier(percent, "Control percent"));
+        return Actions.percent(this, finiteSupplier(percent, "Control percent", false));
     }
 
     public Action voltage(double volts) {
@@ -445,7 +447,7 @@ public record ControlBinding(
 
     public Action voltage(DoubleSupplier volts) {
         requireOutput();
-        return Actions.voltage(this, finiteSupplier(volts, "Control voltage"));
+        return Actions.voltage(this, finiteSupplier(volts, "Control voltage", false));
     }
 
     /** Stops driving this control and applies the motor's configured neutral mode. */
@@ -464,7 +466,7 @@ public record ControlBinding(
     public Action position(DoubleSupplier position) {
         requireOutput();
         requireMode(ControlMode.POSITION, "Position targets");
-        return Actions.position(this, finiteSupplier(position, "Control position"));
+        return Actions.position(this, finiteSupplier(position, "Control position", true));
     }
 
     public Action velocity(double velocity) {
@@ -477,7 +479,7 @@ public record ControlBinding(
     public Action velocity(DoubleSupplier velocity) {
         requireOutput();
         requireMode(ControlMode.VELOCITY, "Velocity targets");
-        return Actions.velocity(this, finiteSupplier(velocity, "Control velocity"));
+        return Actions.velocity(this, finiteSupplier(velocity, "Control velocity", true));
     }
 
     private FeedbackBinding requireFeedback() {
@@ -518,12 +520,36 @@ public record ControlBinding(
         }
     }
 
-    private static DoubleSupplier finiteSupplier(DoubleSupplier supplier, String description) {
+    /**
+     * Wraps a robot-code supplier so a non-finite (or throwing) sample never throws in the robot
+     * loop. Targets hold the last valid sample; open-loop efforts return NaN, which the runtime turns
+     * into neutral output. Either way a rate-limited warning is reported.
+     */
+    private static DoubleSupplier finiteSupplier(DoubleSupplier supplier, String description, boolean holdLast) {
         Objects.requireNonNull(supplier, "supplier");
-        return () -> {
-            double value = supplier.getAsDouble();
-            requireFinite(value, description);
-            return value;
+        return new DoubleSupplier() {
+            private double lastValid = Double.NaN;
+
+            @Override
+            public double getAsDouble() {
+                double value;
+                try {
+                    value = supplier.getAsDouble();
+                } catch (RuntimeException exception) {
+                    value = Double.NaN;
+                    FaultIsolation.warn(this, description + " supplier threw " + exception
+                            + (holdLast && Double.isFinite(lastValid) ? "; holding last valid target" : "; output neutral"));
+                    return holdLast ? lastValid : Double.NaN;
+                }
+                if (Double.isFinite(value)) {
+                    if (holdLast) lastValid = value;
+                    return value;
+                }
+                FaultIsolation.warn(this, description + " supplier returned " + value
+                        + (holdLast && Double.isFinite(lastValid) ? "; holding last valid target " + lastValid
+                                : "; output neutral"));
+                return holdLast ? lastValid : Double.NaN;
+            }
         };
     }
 }

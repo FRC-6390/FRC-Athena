@@ -32,6 +32,13 @@ import java.util.Objects;
  * REV Spark motor handle backed by REVLib.
  */
 public final class RevMotorHandle implements MotorHandle, AutoCloseable {
+    /** Smart current limit applied to a NEO when robot code declares no limit. */
+    static final int DEFAULT_NEO_CURRENT_LIMIT_AMPS = 40;
+    /** Smart current limit applied to a NEO 550 when robot code declares no limit. */
+    static final int DEFAULT_NEO_550_CURRENT_LIMIT_AMPS = 20;
+    /** Smart current limit applied to a NEO Vortex when robot code declares no limit. */
+    static final int DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS = 60;
+
     private final MotorDevice device;
     private final RevMotorOptions options;
     private final SparkController controller;
@@ -93,11 +100,37 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void activate() {
-        if (!activated) {
-            if (!controller.configure(device, options)) {
-                throw new IllegalStateException("Failed to configure " + device.defaultName());
-            }
+        if (activated) {
+            return;
+        }
+        if (device.follower() != null) {
+            // A hardware follower receives its full activation config together with the follow
+            // request in follow(). Configuring here too would write (and persist) twice per boot.
             activated = true;
+            return;
+        }
+        configureOrRelease(() -> controller.configure(device, options), "configure");
+        activated = true;
+    }
+
+    /**
+     * Runs one blocking SPARK configuration call. On failure the native SPARK handle is released
+     * before the exception propagates: the hardware graph discards this handle and retries the
+     * binding with a new one, and leaked handles would otherwise accumulate on the CAN ID every
+     * retry.
+     */
+    private void configureOrRelease(java.util.function.BooleanSupplier configure, String operation) {
+        boolean ok;
+        try {
+            ok = configure.getAsBoolean();
+        } catch (RuntimeException exception) {
+            controller.close();
+            throw new IllegalStateException("Failed to " + operation + " " + device.defaultName()
+                    + ": " + exception.getMessage(), exception);
+        }
+        if (!ok) {
+            controller.close();
+            throw new IllegalStateException("Failed to " + operation + " " + device.defaultName());
         }
     }
 
@@ -126,9 +159,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             throw new IllegalArgumentException("REV motor " + device.defaultName()
                     + " can only follow another REV motor.");
         }
-        if (!controller.follow(device, options, revLeader.device.id(), inverted)) {
-            throw new IllegalStateException("Failed to configure follower " + device.defaultName());
-        }
+        configureOrRelease(
+                () -> controller.follow(device, options, revLeader.device.id(), inverted),
+                "configure follower");
     }
 
     @Override
@@ -312,6 +345,14 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     static int effectiveSmartCurrentLimit(MotorDevice device, RevMotorOptions options) {
+        int declared = declaredSmartCurrentLimit(device, options);
+        if (declared > 0 || (options != null && options.preserveDeviceCurrentLimit())) {
+            return declared;
+        }
+        return defaultSmartCurrentLimit(device);
+    }
+
+    private static int declaredSmartCurrentLimit(MotorDevice device, RevMotorOptions options) {
         int vendorLimit = options == null ? 0 : options.smartCurrentLimitAmps();
         if (vendorLimit > 0) {
             return vendorLimit;
@@ -329,6 +370,27 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         // REV only exposes a phase-current limiter. The lower requested ceiling is
         // the conservative mapping when Athena declares both current domains.
         return Math.min(supplyLimit, statorLimit);
+    }
+
+    /**
+     * Returns the smart current limit used when robot code declares none.
+     *
+     * <p>Leaving the limit unset previously kept whatever the SPARK had stored (80 A from the
+     * factory), so several stalled NEOs at enable could brown out the roboRIO. Brushed motors keep
+     * the device value because their secondary limit is a hard chopper with no safe generic default.</p>
+     */
+    static int defaultSmartCurrentLimit(MotorDevice device) {
+        if (!isBrushless(device)) {
+            return 0;
+        }
+        if (device.kind().motorKind() instanceof ca.frc6390.athena.api.hardware.MotorKinds motor) {
+            return switch (motor) {
+                case NEO_550 -> DEFAULT_NEO_550_CURRENT_LIMIT_AMPS;
+                case NEO_VORTEX -> DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS;
+                default -> DEFAULT_NEO_CURRENT_LIMIT_AMPS;
+            };
+        }
+        return DEFAULT_NEO_CURRENT_LIMIT_AMPS;
     }
 
     static SparkBaseConfig activationConfig(MotorDevice device, RevMotorOptions options, boolean flex) {
@@ -528,6 +590,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             int supply = configuration.supplyCurrentLimitAmps();
             int stator = configuration.statorCurrentLimitAmps();
             int effective = supply <= 0 ? stator : stator <= 0 ? supply : Math.min(supply, stator);
+            if (effective <= 0 && brushless) {
+                effective = flex ? DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS : DEFAULT_NEO_CURRENT_LIMIT_AMPS;
+            }
             if (effective > 0) {
                 if (brushless) config.smartCurrentLimit(effective);
                 else config.secondaryCurrentLimit(effective);
@@ -560,11 +625,18 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         }
 
         private boolean apply(SparkBaseConfig config, boolean reset, boolean persist) {
-            return spark.configure(
-                            config,
-                            reset ? ResetMode.kResetSafeParameters : ResetMode.kNoResetSafeParameters,
-                            persist ? PersistMode.kPersistParameters : PersistMode.kNoPersistParameters)
-                    == REVLibError.kOk;
+            ResetMode resetMode = reset ? ResetMode.kResetSafeParameters : ResetMode.kNoResetSafeParameters;
+            REVLibError status = spark.configure(
+                    config,
+                    resetMode,
+                    persist ? PersistMode.kPersistParameters : PersistMode.kNoPersistParameters);
+            if (persist && status == REVLibError.kCannotPersistParametersWhileEnabled) {
+                // A SPARK that (re)binds while the robot is enabled (late power-up, breaker trip)
+                // cannot burn flash. Apply the configuration for this power cycle instead of failing
+                // and retrying the whole bind every few seconds.
+                status = spark.configure(config, resetMode, PersistMode.kNoPersistParameters);
+            }
+            return status == REVLibError.kOk;
         }
 
         @Override

@@ -86,7 +86,11 @@ final class OutputResolver {
             return;
         }
         if (action instanceof MechanismRuntime.ScheduledOutputs scheduled) {
-            resolveStates(scheduled.actions(), context, outputs);
+            if (scheduled.laterWins()) {
+                resolvePrecedence(scheduled.actions(), context, outputs);
+            } else {
+                resolveStates(scheduled.actions(), context, outputs);
+            }
             return;
         }
         if (action instanceof Actions.Race race) {
@@ -144,6 +148,59 @@ final class OutputResolver {
         }
     }
 
+    /**
+     * Resolves actions in precedence order: an output from a later action removes earlier outputs
+     * (from other actions) that share any motor or control sink with it.
+     */
+    private void resolvePrecedence(List<Action> actions, MechanismContext context, List<ResolvedOutput> outputs) {
+        int start = outputs.size();
+        int[] groupEnds = new int[actions.size()];
+        for (int index = 0; index < actions.size(); index++) {
+            resolveState(actions.get(index), context, outputs);
+            groupEnds[index] = outputs.size();
+        }
+        if (actions.size() < 2 || outputs.size() - start < 2) return;
+        Map<Object, Integer> claimedByGroup = new IdentityHashMap<>();
+        boolean[] dropped = new boolean[outputs.size() - start];
+        int group = actions.size() - 1;
+        for (int index = outputs.size() - 1; index >= start; index--) {
+            while (group > 0 && index < groupEnds[group - 1]) group--;
+            OutputRequest request = outputs.get(index).request();
+            boolean preempted = false;
+            for (Object resource : resources(request)) {
+                Integer owner = claimedByGroup.get(resource);
+                if (owner != null && owner > group) {
+                    preempted = true;
+                    break;
+                }
+            }
+            if (preempted) {
+                dropped[index - start] = true;
+                continue;
+            }
+            for (Object resource : resources(request)) {
+                claimedByGroup.putIfAbsent(resource, group);
+            }
+        }
+        int write = start;
+        for (int read = start; read < outputs.size(); read++) {
+            if (!dropped[read - start]) outputs.set(write++, outputs.get(read));
+        }
+        while (outputs.size() > write) outputs.remove(outputs.size() - 1);
+    }
+
+    private static List<Object> resources(OutputRequest request) {
+        List<Object> resources = new ArrayList<>();
+        ControlBinding control = request.control();
+        if (control != null) {
+            resources.addAll(control.motors());
+            if (control.sink() != null) resources.add(control.sink());
+        } else if (request.motor() != null) {
+            resources.add(request.motor());
+        }
+        return resources;
+    }
+
     private void resolveRequest(OutputRequest request, List<ResolvedOutput> outputs) {
         if (request != null) {
             outputs.add(resolve(request));
@@ -175,6 +232,13 @@ final class OutputResolver {
             return OutputRequest.of(motor, output);
         }
         return null;
+    }
+
+    private static boolean finite(double value, Action source) {
+        if (Double.isFinite(value)) return true;
+        FaultIsolation.warn(source, "Dynamic " + source.getClass().getSimpleName()
+                + " produced " + value + "; output neutral this cycle.");
+        return false;
     }
 
     private static boolean staticOutput(Action action) {
@@ -247,26 +311,35 @@ final class OutputResolver {
     private static Output output(Action action) {
         // Freeze dynamic suppliers once per runtime cycle. Output application, arbitration, and
         // telemetry must all observe the same value without evaluating robot code again.
+        // Non-finite dynamic samples resolve to neutral instead of throwing in the robot loop.
+        // Control target suppliers already hold their last valid sample when one exists.
         if (action instanceof Actions.DynamicMotorPercent value) {
-            return Outputs.percent(value.percent());
+            double percent = value.percentSupplier().getAsDouble();
+            return finite(percent, action) ? Outputs.percent(percent) : Outputs.neutral();
         }
         if (action instanceof Actions.DynamicMotorVoltage value) {
-            return Outputs.voltage(value.volts());
+            double volts = value.voltsSupplier().getAsDouble();
+            return finite(volts, action) ? Outputs.voltage(volts) : Outputs.neutral();
         }
         if (action instanceof Actions.DynamicControlPercent value) {
-            return Outputs.percent(value.percent());
+            double percent = value.percentSupplier().getAsDouble();
+            return finite(percent, action) ? Outputs.percent(percent) : Outputs.neutral();
         }
         if (action instanceof Actions.DynamicControlVoltage value) {
-            return Outputs.voltage(value.volts());
+            double volts = value.voltsSupplier().getAsDouble();
+            return finite(volts, action) ? Outputs.voltage(volts) : Outputs.neutral();
         }
         if (action instanceof Actions.DynamicControlPosition value) {
-            return Outputs.position(value.position());
+            double position = value.positionSupplier().getAsDouble();
+            return finite(position, action) ? Outputs.position(position) : Outputs.neutral();
         }
         if (action instanceof Actions.DynamicControlVelocity value) {
-            return Outputs.velocity(value.velocity());
+            double velocity = value.velocitySupplier().getAsDouble();
+            return finite(velocity, action) ? Outputs.velocity(velocity) : Outputs.neutral();
         }
         if (action instanceof InterpolatedControlAction interpolated) {
-            double target = interpolated.target();
+            double target = interpolated.runtimeTarget();
+            if (!Double.isFinite(target)) return Outputs.neutral();
             return interpolated.control().mode() == ControlMode.VELOCITY
                     ? Outputs.velocity(target)
                     : Outputs.position(target);

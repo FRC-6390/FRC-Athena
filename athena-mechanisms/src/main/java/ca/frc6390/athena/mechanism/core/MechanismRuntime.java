@@ -23,6 +23,7 @@ import ca.frc6390.athena.api.FailurePolicy;
  * Minimal Athena-owned runtime loop for the new mechanism model.
  */
 final class MechanismRuntime {
+    private static final String MARKER_PREFIX = "pathMarker:";
     private final Mechanism mechanism;
     private final MechanismNode node;
     private final ActionContext actionContext;
@@ -51,6 +52,29 @@ final class MechanismRuntime {
     private MechanismTraceLevel traceLevel = MechanismTraceLevel.OFF;
     private double tracePeriodSeconds = 0.10;
     private double lastTraceSeconds = Double.NEGATIVE_INFINITY;
+    private LeaseResources leaseResources;
+    private RuntimeHooks runtimeHooks;
+    private MechanismContext evaluatedContext = MechanismContext.empty();
+    private MechanismContext evaluatedTimedContext = MechanismContext.empty();
+    private String lastFault = "";
+    private boolean faultedThisCycle;
+
+    /** Resolves the static resources of action subtrees for dynamic lease reservations. */
+    interface LeaseResources {
+        Set<Object> of(Action action);
+
+        Set<Object> pathOwnership(PathAction path);
+    }
+
+    /** Scheduler callbacks used for spawn tracking and per-mechanism fault isolation. */
+    interface RuntimeHooks {
+        void enterLease(Object owner);
+
+        void exitLease();
+
+        /** Records a fault, or rethrows it when the scheduler does not isolate faults. */
+        void fault(String location, RuntimeException exception);
+    }
 
     private MechanismRuntime(
             MechanismNode node,
@@ -63,10 +87,11 @@ final class MechanismRuntime {
         this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.applier = OutputApplier.using(actionContext, resolver.overrides());
-        this.hookRuntime = new HookRuntime(leaseController, applier::resetControls);
+        this.hookRuntime = new HookRuntime(leaseController, applier::resetControls, applier::encoderPositionSet);
         this.hookBindings = List.copyOf(node.hooks().values());
         this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
-        this.scheduler = new StateScheduler(actionContext, pathRuntimes);
+        this.scheduler = new StateScheduler(
+                actionContext, pathRuntimes, resolver.overrides(), applier::encoderPositionSet);
         this.action = Actions.neutral();
         this.traceSnapshot = emptyTrace();
     }
@@ -119,6 +144,29 @@ final class MechanismRuntime {
         return this;
     }
 
+    MechanismRuntime integration(LeaseResources resources, RuntimeHooks hooks) {
+        this.leaseResources = resources;
+        this.runtimeHooks = hooks;
+        return this;
+    }
+
+    String name() {
+        return node.name();
+    }
+
+    String lastFault() {
+        return lastFault;
+    }
+
+    boolean faultedThisCycle() {
+        return faultedThisCycle;
+    }
+
+    void markFault(String location, RuntimeException exception) {
+        faultedThisCycle = true;
+        lastFault = location + ": " + exception;
+    }
+
     MechanismRuntime simulationStep(Runnable simulationStep) {
         this.simulationStep = simulationStep == null ? () -> {
         } : simulationStep;
@@ -169,11 +217,27 @@ final class MechanismRuntime {
             long recency,
             Set<Object> reservedResources,
             String diagnosticLocation) {
+        activateLease(key, action, recency, reservedResources, diagnosticLocation, null, false);
+    }
+
+    /**
+     * Activates a lease. A narrowable lease reserves only resources of nodes that are active or
+     * reachable soon (see {@link StateScheduler#collectLive}); otherwise it reserves its compiled set.
+     */
+    void activateLease(
+            Object key,
+            Action action,
+            long recency,
+            Set<Object> reservedResources,
+            String diagnosticLocation,
+            Object owner,
+            boolean narrowable) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(action, "action");
         if (!activeLeases.containsKey(key)) {
             ActiveLease lease = new ActiveLease(
-                    action, recency, actionContext, pathRuntimes, reservedResources, diagnosticLocation);
+                    action, recency, actionContext, pathRuntimes, resolver.overrides(),
+                    applier::encoderPositionSet, reservedResources, diagnosticLocation, owner, narrowable);
             activeLeases.put(key, lease);
             leasesByRecency.add(lease);
             leasesByRecency.sort(Comparator.comparingLong(ActiveLease::recency));
@@ -214,7 +278,8 @@ final class MechanismRuntime {
     void periodicOutputsInto(
             MechanismContext mechanismContext,
             List<ResolvedOutput> outputs) {
-        Set<MotorDevice> driven = periodicOutputsInto(mechanismContext, outputs, leaseReservations());
+        evaluateCandidates(mechanismContext);
+        Set<MotorDevice> driven = applyCandidates(outputs, leaseReservations());
         finishOutputCycle(driven, driven);
     }
 
@@ -222,9 +287,82 @@ final class MechanismRuntime {
             MechanismContext mechanismContext,
             List<ResolvedOutput> outputs,
             Map<Object, Long> reservations) {
+        evaluateCandidates(mechanismContext);
+        return applyCandidates(outputs, reservations);
+    }
+
+    /**
+     * Evaluates the base action and every lease for this cycle without touching hardware. After
+     * this call each lease's {@link #leaseReservation(Object) reservation} reflects its current
+     * position in its action tree.
+     */
+    void evaluateCandidates(MechanismContext mechanismContext) {
+        MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        evaluatedContext = safeMechanismContext;
+        evaluatedTimedContext = safeMechanismContext;
+        faultedThisCycle = false;
+        List<CandidateOutput> candidates = candidateScratch;
+        candidates.clear();
+        if (!safeMechanismContext.enabled()) {
+            return;
+        }
+        if (Double.isNaN(stateStartSeconds)) {
+            stateStartSeconds = safeMechanismContext.nowSeconds();
+        }
+        MechanismContext timedContext = withTimeInState(
+                safeMechanismContext,
+                safeMechanismContext.nowSeconds() - stateStartSeconds);
+        try {
+            Action updated = mechanism.update(action, timedContext);
+            if (updated != action) {
+                action = Objects.requireNonNull(updated, "updated");
+                stateStartSeconds = safeMechanismContext.nowSeconds();
+                scheduler.reset();
+                timedContext = withTimeInState(safeMechanismContext, 0.0);
+            }
+            addCandidates(
+                    candidates,
+                    "base",
+                    actionRecency,
+                    scheduler.evaluate(action, timedContext),
+                    null,
+                    baseActionLocation(action));
+        } catch (RuntimeException exception) {
+            truncate(candidates, 0);
+            reportFault(baseActionLocation(action), exception);
+        }
+        evaluatedTimedContext = timedContext;
+        for (int leaseIndex = 0; leaseIndex < leasesByRecency.size(); leaseIndex++) {
+            ActiveLease lease = leasesByRecency.get(leaseIndex);
+            if (lease.scheduler().complete()) {
+                lease.refreshReservation(leaseResources);
+                continue;
+            }
+            int firstCandidate = candidates.size();
+            if (runtimeHooks != null) runtimeHooks.enterLease(lease.owner());
+            try {
+                addCandidates(
+                        candidates,
+                        "lease",
+                        lease.recency(),
+                        lease.evaluate(safeMechanismContext),
+                        lease.reservedResources(),
+                        lease.diagnosticLocation());
+            } catch (RuntimeException exception) {
+                truncate(candidates, firstCandidate);
+                reportFault(lease.diagnosticLocation(), exception);
+            } finally {
+                if (runtimeHooks != null) runtimeHooks.exitLease();
+            }
+            lease.refreshReservation(leaseResources);
+        }
+    }
+
+    /** Arbitrates the candidates from {@link #evaluateCandidates} and applies the winners. */
+    Set<MotorDevice> applyCandidates(List<ResolvedOutput> outputs, Map<Object, Long> reservations) {
         Objects.requireNonNull(outputs, "outputs");
         Objects.requireNonNull(reservations, "reservations");
-        MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        MechanismContext safeMechanismContext = evaluatedContext;
         if (!safeMechanismContext.enabled()) {
             applier.stopAll();
             previouslyDrivenMotors.clear();
@@ -251,40 +389,8 @@ final class MechanismRuntime {
             lastTraceSeconds = safeMechanismContext.nowSeconds();
             return Set.of();
         }
-        if (Double.isNaN(stateStartSeconds)) {
-            stateStartSeconds = safeMechanismContext.nowSeconds();
-        }
-        MechanismContext timedContext = withTimeInState(
-                safeMechanismContext,
-                safeMechanismContext.nowSeconds() - stateStartSeconds);
-        Action updated = mechanism.update(action, timedContext);
-        if (updated != action) {
-            action = Objects.requireNonNull(updated, "updated");
-            stateStartSeconds = safeMechanismContext.nowSeconds();
-            scheduler.reset();
-            timedContext = withTimeInState(safeMechanismContext, 0.0);
-        }
+        MechanismContext timedContext = evaluatedTimedContext;
         List<CandidateOutput> candidates = candidateScratch;
-        candidates.clear();
-        addCandidates(
-                candidates,
-                "base",
-                actionRecency,
-                scheduler.evaluate(action, timedContext),
-                null,
-                baseActionLocation(action));
-        for (int leaseIndex = 0; leaseIndex < leasesByRecency.size(); leaseIndex++) {
-            ActiveLease lease = leasesByRecency.get(leaseIndex);
-            if (lease.scheduler().complete()) continue;
-            addCandidates(
-                    candidates,
-                    "lease",
-                    lease.recency(),
-                    lease.evaluate(safeMechanismContext),
-                    lease.reservedResources(),
-                    lease.diagnosticLocation());
-        }
-
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
         Set<MotorDevice> drivenNow = drivenScratch;
         drivenNow.clear();
@@ -292,9 +398,15 @@ final class MechanismRuntime {
         try {
             for (int candidateIndex = 0; candidateIndex < selected.size(); candidateIndex++) {
                 CandidateOutput candidate = selected.get(candidateIndex);
+                try {
+                    applier.apply(candidate.output(), candidate.context());
+                } catch (RuntimeException exception) {
+                    applier.abandon(candidate.output().request());
+                    reportFault(candidate.location(), exception);
+                    continue;
+                }
                 outputs.add(candidate.output());
                 addMotors(drivenNow, candidate.output().request());
-                applier.apply(candidate.output(), candidate.context());
             }
         } finally {
             applier.endCycle();
@@ -305,6 +417,39 @@ final class MechanismRuntime {
             lastTraceSeconds = timedContext.nowSeconds();
         }
         return drivenNow;
+    }
+
+    /** Neutralizes every output of this mechanism after an unrecoverable evaluation fault. */
+    Set<MotorDevice> neutralizeAfterFault() {
+        candidateScratch.clear();
+        drivenScratch.clear();
+        try {
+            applier.stopAll();
+        } catch (RuntimeException ignored) {
+            // Best effort: the scheduler still neutralizes previously driven motors.
+        }
+        return drivenScratch;
+    }
+
+    /** Returns the resources a lease currently reserves against older leases. */
+    Set<Object> leaseReservation(Object key) {
+        ActiveLease lease = activeLeases.get(key);
+        return lease == null ? Set.of() : lease.currentReservation();
+    }
+
+    private void reportFault(String location, RuntimeException exception) {
+        faultedThisCycle = true;
+        lastFault = location + ": " + exception;
+        if (runtimeHooks == null || FaultIsolation.isPanic(exception)) {
+            throw exception;
+        }
+        runtimeHooks.fault(node.name() + " " + location, exception);
+    }
+
+    private static void truncate(List<CandidateOutput> candidates, int size) {
+        while (candidates.size() > size) {
+            candidates.remove(candidates.size() - 1);
+        }
     }
 
     private boolean traceDue(double nowSeconds) {
@@ -321,7 +466,7 @@ final class MechanismRuntime {
                 try {
                     actionContext.motor(motor).stop();
                 } catch (RuntimeException exception) {
-                    if (motor.failurePolicy() == FailurePolicy.PANIC) throw exception;
+                    if (motor.failurePolicy() == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
                     actionContext.hardwareFailure(motor, exception);
                 }
                 motor.recordCommand(ca.frc6390.athena.hardware.signal.MotorCommandSnapshot.neutral());
@@ -353,9 +498,10 @@ final class MechanismRuntime {
             CandidateOutput candidate;
             if (order < candidatePool.size()) {
                 candidate = candidatePool.get(order);
-                candidate.reset(output, active.context(), source, recency, order);
+                candidate.reset(output, active.context(), source, recency, order, diagnosticLocation);
             } else {
-                candidate = new CandidateOutput(output, active.context(), source, recency, order);
+                candidate = new CandidateOutput(
+                        output, active.context(), source, recency, order, diagnosticLocation);
                 candidatePool.add(candidate);
             }
             candidates.add(candidate);
@@ -639,7 +785,7 @@ final class MechanismRuntime {
             if (lease.scheduler().complete()) {
                 continue;
             }
-            for (Object resource : lease.reservedResources()) {
+            for (Object resource : lease.currentReservation()) {
                 reservations.merge(resource, lease.recency(), Math::max);
             }
         }
@@ -731,14 +877,16 @@ final class MechanismRuntime {
         private String source;
         private long recency;
         private int order;
+        private String location;
 
         private CandidateOutput(
                 ResolvedOutput output,
                 MechanismContext context,
                 String source,
                 long recency,
-                int order) {
-            reset(output, context, source, recency, order);
+                int order,
+                String location) {
+            reset(output, context, source, recency, order, location);
         }
 
         private void reset(
@@ -746,13 +894,17 @@ final class MechanismRuntime {
                 MechanismContext context,
                 String source,
                 long recency,
-                int order) {
+                int order,
+                String location) {
             this.output = output;
             this.context = context;
             this.source = source;
             this.recency = recency;
             this.order = order;
+            this.location = location;
         }
+
+        private String location() { return location; }
 
         private ResolvedOutput output() { return output; }
         private MechanismContext context() { return context; }
@@ -767,13 +919,24 @@ final class MechanismRuntime {
 
     static final class ScheduledOutputs implements Action {
         private final List<Action> actions;
+        private final boolean laterWins;
 
         private ScheduledOutputs(List<Action> actions) {
+            this(actions, false);
+        }
+
+        private ScheduledOutputs(List<Action> actions, boolean laterWins) {
             this.actions = actions;
+            this.laterWins = laterWins;
         }
 
         List<Action> actions() {
             return actions;
+        }
+
+        /** Whether later actions preempt earlier ones on shared resources (path markers). */
+        boolean laterWins() {
+            return laterWins;
         }
     }
 
@@ -783,6 +946,10 @@ final class MechanismRuntime {
         private final StateScheduler scheduler;
         private final Set<Object> reservedResources;
         private final String diagnosticLocation;
+        private final Object owner;
+        private final boolean narrowable;
+        private final Set<Object> liveResources = new LinkedHashSet<>();
+        private boolean liveComputed;
         private double startSeconds = Double.NaN;
 
         private ActiveLease(
@@ -790,14 +957,41 @@ final class MechanismRuntime {
                 long recency,
                 ActionContext actionContext,
                 Map<PathAction, PathRuntime> pathRuntimes,
+                RuntimeOverrides overrides,
+                java.util.function.ObjDoubleConsumer<ca.frc6390.athena.hardware.device.EncoderDevice> encoderSet,
                 Set<Object> reservedResources,
-                String diagnosticLocation) {
+                String diagnosticLocation,
+                Object owner,
+                boolean narrowable) {
             this.action = action;
             this.recency = recency;
-            this.scheduler = new StateScheduler(actionContext, pathRuntimes);
+            this.scheduler = new StateScheduler(actionContext, pathRuntimes, overrides, encoderSet);
             this.reservedResources = reservedResources == null ? Set.of() : Set.copyOf(reservedResources);
             this.diagnosticLocation = diagnosticLocation == null || diagnosticLocation.isBlank()
                     ? "requestedAction" : diagnosticLocation;
+            this.owner = owner;
+            this.narrowable = narrowable;
+        }
+
+        private Object owner() {
+            return owner;
+        }
+
+        /**
+         * Recomputes the resources this lease blocks older leases from: those of nodes that are
+         * active now or reachable soon. Before the first evaluation the compiled set is used.
+         */
+        private void refreshReservation(LeaseResources resources) {
+            if (!narrowable || resources == null) return;
+            liveResources.clear();
+            liveComputed = true;
+            if (scheduler.complete()) return;
+            scheduler.collectLive(action, resources, liveResources);
+            liveResources.retainAll(reservedResources);
+        }
+
+        private Set<Object> currentReservation() {
+            return narrowable && liveComputed ? liveResources : reservedResources;
         }
 
         private long recency() {
@@ -845,15 +1039,23 @@ final class MechanismRuntime {
     private static final class StateScheduler {
         private final ActionContext actionContext;
         private final Map<PathAction, PathRuntime> pathRuntimes;
+        private final RuntimeOverrides overrides;
+        private final java.util.function.ObjDoubleConsumer<ca.frc6390.athena.hardware.device.EncoderDevice> encoderSet;
         private final Result result = new Result();
         private SchedulerNode root;
         private String scheduledActionType = "";
         private int step = -1;
         private boolean complete;
 
-        private StateScheduler(ActionContext actionContext, Map<PathAction, PathRuntime> pathRuntimes) {
+        private StateScheduler(
+                ActionContext actionContext,
+                Map<PathAction, PathRuntime> pathRuntimes,
+                RuntimeOverrides overrides,
+                java.util.function.ObjDoubleConsumer<ca.frc6390.athena.hardware.device.EncoderDevice> encoderSet) {
             this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
             this.pathRuntimes = Objects.requireNonNull(pathRuntimes, "pathRuntimes");
+            this.overrides = Objects.requireNonNull(overrides, "overrides");
+            this.encoderSet = Objects.requireNonNull(encoderSet, "encoderSet");
         }
 
         void reset() {
@@ -877,6 +1079,161 @@ final class MechanismRuntime {
 
         String scheduledActionType() {
             return scheduledActionType;
+        }
+
+        /**
+         * Collects resources this scheduler may drive now or soon: the active node subtree, the
+         * next sequence/then stage (so consecutive stages hand a resource over without a gap),
+         * both branches of live conditionals, path ownership plus pending and running markers, and
+         * every step of a cycle. Stages two or more steps ahead are not reserved.
+         */
+        void collectLive(Action action, LeaseResources resources, Set<Object> out) {
+            if (root == null || root.action() != action) {
+                out.addAll(resources.of(action));
+                return;
+            }
+            collectLive(root, resources, out);
+        }
+
+        private void collectLive(SchedulerNode schedule, LeaseResources resources, Set<Object> out) {
+            Action action = schedule.action();
+            Node node = schedule.runtime;
+            if (node == null) {
+                out.addAll(resources.of(action));
+                return;
+            }
+            if (action instanceof Actions.Sequence sequence) {
+                List<Actions.SequenceStep> steps = sequence.steps();
+                if (node.terminal || node.index >= steps.size()) {
+                    if (sequence.next() != null) {
+                        collectChild(schedule.namedChildren.get("next"), sequence.next(), resources, out);
+                    }
+                    return;
+                }
+                Action current = steps.get(node.index).action();
+                collectChild(schedule.indexedChild(node.index), current, resources, out);
+                if (node.index + 1 < steps.size()) {
+                    out.addAll(resources.of(steps.get(node.index + 1).action()));
+                } else if (sequence.next() != null) {
+                    out.addAll(resources.of(sequence.next()));
+                }
+                return;
+            }
+            if (action instanceof Actions.Parallel || action instanceof Actions.Race
+                    || action instanceof Actions.Deadline) {
+                if (node.terminal) return;
+                List<Action> children = action instanceof Actions.Parallel parallel ? parallel.Actions()
+                        : action instanceof Actions.Race race ? race.Actions()
+                        : ((Actions.Deadline) action).Actions();
+                for (int index = 0; index < children.size(); index++) {
+                    collectChild(schedule.indexedChild(index), children.get(index), resources, out);
+                }
+                return;
+            }
+            if (action instanceof Actions.Timeout timeout) {
+                if (!node.terminal) {
+                    collectChild(schedule.namedChildren.get("timeout"), timeout.action(), resources, out);
+                }
+                return;
+            }
+            if (action instanceof Actions.WithinTolerance within) {
+                if (!node.terminal) {
+                    collectChild(schedule.namedChildren.get("withinTolerance"), within.action(), resources, out);
+                }
+                return;
+            }
+            if (action instanceof Actions.Conditional conditional) {
+                collectConditional(schedule, node, conditional.action(), conditional.next(), resources, out);
+                return;
+            }
+            if (action instanceof Action.Conditional conditional) {
+                collectConditional(schedule, node, conditional.action(), conditional.next(), resources, out);
+                return;
+            }
+            if (action instanceof Actions.Then then) {
+                collectThen(schedule, node, then.action(), then.next(), resources, out);
+                return;
+            }
+            if (action instanceof Action.Then then) {
+                collectThen(schedule, node, then.action(), then.next(), resources, out);
+                return;
+            }
+            if (action instanceof PathAction path) {
+                if (node.pathComplete) return;
+                if (!node.entered || node.pathRuntime == null) {
+                    out.addAll(resources.of(path));
+                    return;
+                }
+                out.addAll(resources.pathOwnership(path));
+                java.util.Collection<String> pending = node.pathRuntime.pendingMarkers(path);
+                for (Map.Entry<String, Action> marker : path.markers().entrySet()) {
+                    String name = marker.getKey();
+                    if (node.completedMarkers.contains(name)) continue;
+                    SchedulerNode running = schedule.namedChildren.get(MARKER_PREFIX + name);
+                    if (running != null) {
+                        collectChild(running, marker.getValue(), resources, out);
+                    } else if (pending == null || pending.contains(name)) {
+                        out.addAll(resources.of(marker.getValue()));
+                    }
+                }
+                for (Map.Entry<String, SchedulerNode> child : schedule.namedChildren.entrySet()) {
+                    String name = child.getKey();
+                    if (name.startsWith(MARKER_PREFIX)
+                            && !path.markers().containsKey(name.substring(MARKER_PREFIX.length()))) {
+                        collectLive(child.getValue(), resources, out);
+                    }
+                }
+                return;
+            }
+            if (node.terminal && (action instanceof Actions.Computed
+                    || action instanceof Actions.HardwareComputed
+                    || action instanceof Actions.VelocityContribution
+                    || action instanceof Actions.ControlSysIdAction)) {
+                return;
+            }
+            // Leaves, computed ownership, cycles, and conditional branches reserve their full static
+            // shape: a branch may switch on any cycle and a cycle may wrap back to any step.
+            out.addAll(resources.of(action));
+        }
+
+        private void collectConditional(
+                SchedulerNode schedule,
+                Node node,
+                Action wrapped,
+                Action next,
+                LeaseResources resources,
+                Set<Object> out) {
+            if (node.terminal) {
+                if (next != null) collectChild(schedule.namedChildren.get("next"), next, resources, out);
+                return;
+            }
+            collectChild(schedule.namedChildren.get("conditional"), wrapped, resources, out);
+            if (next != null) collectChild(schedule.namedChildren.get("next"), next, resources, out);
+        }
+
+        private void collectThen(
+                SchedulerNode schedule,
+                Node node,
+                Action wrapped,
+                Action next,
+                LeaseResources resources,
+                Set<Object> out) {
+            if (!node.terminal) {
+                collectChild(schedule.namedChildren.get("thenState"), wrapped, resources, out);
+            }
+            collectChild(schedule.namedChildren.get("thenNext"), next, resources, out);
+        }
+
+        private void collectChild(
+                SchedulerNode child,
+                Action expected,
+                LeaseResources resources,
+                Set<Object> out) {
+            if (child == null || child.action() != expected) {
+                out.addAll(resources.of(expected));
+            } else {
+                collectLive(child, resources, out);
+            }
         }
 
         int step() {
@@ -967,7 +1324,7 @@ final class MechanismRuntime {
             if (action instanceof Actions.WithinTolerance within) {
                 Evaluation child = evaluate(schedule.named("withinTolerance", within.action()), context);
                 boolean complete = child.complete()
-                        || isWithinTolerance(child.output(), within.tolerance());
+                        || isWithinTolerance(child.output(), within.tolerance(), local);
                 return schedule.result(child.output(), complete, child.context());
             }
             if (action instanceof Actions.Conditional conditional) {
@@ -1008,6 +1365,7 @@ final class MechanismRuntime {
                     try {
                         actionContext.encoder(setPosition.encoder()).setPositionRotations(
                                 setPosition.encoder().rotationsFromPosition(setPosition.position()));
+                        encoderSet.accept(setPosition.encoder(), setPosition.position());
                     } catch (RuntimeException exception) {
                         handleHardwareMutationFailure(
                                 setPosition.encoder(), setPosition.encoder().failurePolicy(), exception);
@@ -1069,6 +1427,28 @@ final class MechanismRuntime {
                     return schedule.result(null, true, local);
                 }
                 node.groupOutputs.clear();
+                // Markers run before the drive output is requested so instant markers such as an
+                // odometry reset are applied before the follower computes this cycle's sample.
+                Map<String, Action> activeMarkers = Objects.requireNonNull(
+                        runtime.activeMarkers(pathState, local), "active path markers");
+                node.completedMarkers.retainAll(activeMarkers.keySet());
+                schedule.retainMarkerChildren(activeMarkers.keySet());
+                List<Action> markerOutputs = node.markerOutputs;
+                markerOutputs.clear();
+                for (Map.Entry<String, Action> entry : activeMarkers.entrySet()) {
+                    String name = entry.getKey();
+                    if (node.completedMarkers.contains(name)) continue;
+                    String childName = MARKER_PREFIX + name;
+                    Evaluation markerOutput = evaluate(schedule.named(childName, entry.getValue()), context);
+                    if (markerOutput.complete()) {
+                        // Finite marker actions stop once complete; continuous ones run until path end.
+                        node.completedMarkers.add(name);
+                        schedule.removeNamed(childName);
+                        runtime.markerCompleted(pathState, name);
+                        continue;
+                    }
+                    if (markerOutput.output() != null) markerOutputs.add(markerOutput.output());
+                }
                 Action pathOutput = runtime.output(pathState, local);
                 if (pathOutput != null) {
                     Evaluation drive = evaluate(schedule.named("pathOutput", pathOutput), context);
@@ -1076,14 +1456,14 @@ final class MechanismRuntime {
                 } else {
                     schedule.removeNamed("pathOutput");
                 }
-                Map<String, Action> activeMarkers = Objects.requireNonNull(
-                        runtime.activeMarkers(pathState, local), "active path markers");
-                schedule.retainMarkerChildren(activeMarkers.keySet());
-                activeMarkers.forEach((name, marker) -> {
-                    Evaluation markerOutput = evaluate(schedule.named("pathMarker:" + name, marker), context);
-                    if (markerOutput.output() != null) node.groupOutputs.add(markerOutput.output());
-                });
-                return schedule.result(groupOutput(node), false, local);
+                // Later-triggered markers follow earlier ones; the resolver lets later outputs win a
+                // shared motor or sink instead of failing the cycle with an output conflict.
+                node.groupOutputs.addAll(markerOutputs);
+                if (node.groupOutputs.isEmpty()) return schedule.result(null, false, local);
+                return schedule.result(
+                        node.groupOutputs.size() == 1 ? node.groupOutputs.get(0) : node.precedenceOutputs,
+                        false,
+                        local);
             }
             return schedule.result(action, false, local);
         }
@@ -1169,10 +1549,22 @@ final class MechanismRuntime {
             boolean anyComplete = false;
             boolean allComplete = !actions.isEmpty();
             boolean deadlineComplete = false;
+            if (mode == GroupMode.PARALLEL
+                    && (node.latchedComplete == null || node.latchedComplete.length != actions.size())) {
+                node.latchedComplete = new boolean[actions.size()];
+            }
             for (int i = 0; i < actions.size(); i++) {
                 Evaluation child = evaluate(schedule.indexed(i, actions.get(i)), context);
-                anyComplete |= child.complete();
-                allComplete &= child.complete();
+                boolean childComplete = child.complete();
+                if (mode == GroupMode.PARALLEL) {
+                    // A child that reached completion once (for example untilWithin on a shooter
+                    // spin-up) stays complete for the group, but keeps contributing its output so
+                    // it holds until the whole group finishes.
+                    childComplete |= node.latchedComplete[i];
+                    node.latchedComplete[i] = childComplete;
+                }
+                anyComplete |= childComplete;
+                allComplete &= childComplete;
                 if (mode == GroupMode.DEADLINE && i == deadlineIndex && child.complete()) {
                     deadlineComplete = true;
                 }
@@ -1233,21 +1625,60 @@ final class MechanismRuntime {
             return child;
         }
 
-        private boolean isWithinTolerance(Action output, double tolerance) {
+        private boolean isWithinTolerance(Action output, double tolerance, MechanismContext context) {
             ControlTarget target = controlTarget(output);
-            if (target == null) {
+            if (target == null || !Double.isFinite(target.value())) {
                 return false;
             }
-            if (target.control().feedback() != null) {
-                return RuntimeHardwareAccess.call(
-                        actionContext,
-                        () -> target.control().isAt(target.value(), tolerance));
+            ControlBinding control = target.control();
+            double measurement = RuntimeHardwareAccess.call(actionContext, () -> switch (target.mode()) {
+                case POSITION -> feedbackPosition(control);
+                case VELOCITY -> feedbackVelocity(control);
+            });
+            if (!Double.isFinite(measurement)) {
+                return false;
             }
-            double measurement = switch (target.mode()) {
-                case POSITION -> feedbackPosition(target.control());
-                case VELOCITY -> feedbackVelocity(target.control());
-            };
-            return Math.abs(target.value() - measurement) <= tolerance;
+            double goal = constrainedTarget(target, measurement, context);
+            if (!Double.isFinite(goal)) {
+                return false;
+            }
+            double error = goal - measurement;
+            if (target.mode() == ControlMode.POSITION && control.continuousRange() != null) {
+                double span = control.continuousRange().maximum() - control.continuousRange().minimum();
+                error = Math.IEEEremainder(error, span);
+            }
+            return Math.abs(error) <= tolerance;
+        }
+
+        /**
+         * Returns the target the control will actually drive to: after range constraints, the
+         * motion planner, and dashboard-tuned limits. Comparing against the raw request would never
+         * complete for out-of-range targets. Returns NaN when the request is rejected.
+         */
+        private double constrainedTarget(ControlTarget target, double measurement, MechanismContext context) {
+            ControlBinding control = target.control();
+            RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
+            if (target.mode() == ControlMode.POSITION) {
+                double requested = target.value();
+                if (overrides.hasTuning(control)) {
+                    requested = Math.max(tuning.minimumPosition(), Math.min(tuning.maximumPosition(), requested));
+                }
+                ca.frc6390.athena.mechanism.constraint.ConstraintContext<Double> constraintContext =
+                        new ca.frc6390.athena.mechanism.constraint.ConstraintContext<>(measurement, requested, context);
+                ca.frc6390.athena.mechanism.constraint.ConstraintResult<Double> result = control.planner() == null
+                        ? ca.frc6390.athena.mechanism.constraint.Constraints.evaluate(
+                                control.constraints(), constraintContext)
+                        : control.planner().plan(constraintContext, control.constraints());
+                if (!result.accepted()) return Double.NaN;
+                return Math.max(tuning.minimumPosition(), Math.min(tuning.maximumPosition(), result.value()));
+            }
+            double requested = Math.max(-tuning.maxVelocity(), Math.min(tuning.maxVelocity(), target.value()));
+            ca.frc6390.athena.mechanism.constraint.ConstraintResult<Double> result =
+                    ca.frc6390.athena.mechanism.constraint.Constraints.evaluate(
+                            control.constraints(),
+                            new ca.frc6390.athena.mechanism.constraint.ConstraintContext<>(
+                                    measurement, requested, context));
+            return result.accepted() ? result.value() : Double.NaN;
         }
 
         private double feedbackPosition(ControlBinding control) {
@@ -1268,7 +1699,7 @@ final class MechanismRuntime {
                 Object declaration,
                 FailurePolicy policy,
                 RuntimeException exception) {
-            if (policy == FailurePolicy.PANIC) throw exception;
+            if (policy == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
             actionContext.hardwareFailure(declaration, exception);
         }
 
@@ -1285,19 +1716,21 @@ final class MechanismRuntime {
                 return new ControlTarget(position.control(), ControlMode.POSITION, position.position());
             }
             if (action instanceof Actions.DynamicControlPosition position) {
-                return new ControlTarget(position.control(), ControlMode.POSITION, position.position());
+                return new ControlTarget(
+                        position.control(), ControlMode.POSITION, position.positionSupplier().getAsDouble());
             }
             if (action instanceof Actions.ControlVelocity velocity) {
                 return new ControlTarget(velocity.control(), ControlMode.VELOCITY, velocity.velocity());
             }
             if (action instanceof Actions.DynamicControlVelocity velocity) {
-                return new ControlTarget(velocity.control(), ControlMode.VELOCITY, velocity.velocity());
+                return new ControlTarget(
+                        velocity.control(), ControlMode.VELOCITY, velocity.velocitySupplier().getAsDouble());
             }
             if (action instanceof InterpolatedControlAction interpolated) {
                 return new ControlTarget(
                         interpolated.control(),
                         interpolated.control().mode(),
-                        interpolated.target());
+                        interpolated.runtimeTarget());
             }
             return null;
         }
@@ -1375,8 +1808,12 @@ final class MechanismRuntime {
             private MechanismContext lastPathContext;
             private boolean pathComplete;
             private boolean terminal;
+            private boolean[] latchedComplete;
             private final List<Action> groupOutputs = new ArrayList<>();
             private final ScheduledOutputs scheduledOutputs = new ScheduledOutputs(groupOutputs);
+            private final ScheduledOutputs precedenceOutputs = new ScheduledOutputs(groupOutputs, true);
+            private final List<Action> markerOutputs = new ArrayList<>();
+            private final Set<String> completedMarkers = new java.util.HashSet<>();
 
             private Node(double startSeconds) {
                 this.startSeconds = startSeconds;
@@ -1414,6 +1851,10 @@ final class MechanismRuntime {
             private MechanismContext localContext(MechanismContext context) {
                 Node node = runtime(context);
                 return withTimeInState(context, context.nowSeconds() - node.startSeconds);
+            }
+
+            private SchedulerNode indexedChild(int index) {
+                return index < indexedChildren.size() ? indexedChildren.get(index) : null;
             }
 
             private SchedulerNode indexed(int index, Action childState) {
@@ -1474,11 +1915,16 @@ final class MechanismRuntime {
             }
 
             private void retainMarkerChildren(Set<String> activeMarkers) {
-                List<String> inactive = namedChildren.keySet().stream()
-                        .filter(name -> name.startsWith("pathMarker:"))
-                        .filter(name -> !activeMarkers.contains(name.substring("pathMarker:".length())))
-                        .toList();
-                inactive.forEach(this::removeNamed);
+                if (namedChildren.isEmpty()) return;
+                List<String> inactive = null;
+                for (String name : namedChildren.keySet()) {
+                    if (name.startsWith(MARKER_PREFIX)
+                            && !activeMarkers.contains(name.substring(MARKER_PREFIX.length()))) {
+                        if (inactive == null) inactive = new ArrayList<>();
+                        inactive.add(name);
+                    }
+                }
+                if (inactive != null) inactive.forEach(this::removeNamed);
             }
 
             private Evaluation result(Action output, boolean complete, MechanismContext context) {

@@ -6,7 +6,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.DoubleUnaryOperator;
 
-/** Standard and custom normalized controller-axis curves. */
+/**
+ * Standard and custom normalized controller-axis curves.
+ *
+ * <p>Fluent setters such as {@code expo(0.3)} return a new curve and never modify the receiver, so a
+ * base curve can be safely derived into several variants. Live tuning through a curve's telemetry
+ * still updates that one instance, which is how several axes intentionally share a tunable curve.</p>
+ */
 public final class AxisCurves {
     private AxisCurves() {
     }
@@ -50,9 +56,9 @@ public final class AxisCurves {
             setExpo(expo);
         }
 
+        /** Returns a copy with a different expo; this curve is unchanged. */
         public ExpoCurve expo(double value) {
-            setExpo(value);
-            return this;
+            return new ExpoCurve(value);
         }
 
         public double expo() { return expo; }
@@ -81,9 +87,9 @@ public final class AxisCurves {
             setExponent(exponent);
         }
 
+        /** Returns a copy with a different exponent; this curve is unchanged. */
         public PowerCurve exponent(double value) {
-            setExponent(value);
-            return this;
+            return new PowerCurve(value);
         }
 
         public double exponent() { return exponent; }
@@ -116,19 +122,19 @@ public final class AxisCurves {
             setExpo(expo);
         }
 
+        /** Returns a copy with a different RC rate; this curve is unchanged. */
         public SuperRateCurve rcRate(double value) {
-            setRcRate(value);
-            return this;
+            return new SuperRateCurve(value, superRate, expo);
         }
 
+        /** Returns a copy with a different super rate; this curve is unchanged. */
         public SuperRateCurve superRate(double value) {
-            setSuperRate(value);
-            return this;
+            return new SuperRateCurve(rcRate, value, expo);
         }
 
+        /** Returns a copy with a different expo; this curve is unchanged. */
         public SuperRateCurve expo(double value) {
-            setExpo(value);
-            return this;
+            return new SuperRateCurve(rcRate, superRate, value);
         }
 
         public double rcRate() { return rcRate; }

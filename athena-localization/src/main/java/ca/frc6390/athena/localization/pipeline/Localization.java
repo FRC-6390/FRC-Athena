@@ -8,6 +8,7 @@ import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
+import ca.frc6390.athena.runtime.measurement.MeasurementSignal;
 import ca.frc6390.athena.runtime.measurement.MeasurementSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
@@ -283,17 +284,71 @@ public final class Localization implements PoseSignal {
         return publishNetworkTables;
     }
 
+    /**
+     * Returns the runtime timestamp of the cycle currently being evaluated by this node.
+     *
+     * <p>Filters can use this as "now" (for example to reject stale camera frames). It is
+     * {@code NaN} when the node is evaluated outside a runtime refresh.</p>
+     *
+     * @return cycle timestamp in seconds, or NaN
+     */
+    public double cycleTimestampSeconds() {
+        synchronized (state) {
+            return state.evaluatingTimestamp;
+        }
+    }
+
     private void refreshInputs(ActionContext context, double timestampSeconds, double dtSeconds) {
-        for (PoseSignal input : inputs) {
-            if (input instanceof Localization localization) {
+        for (MeasurementSignal upstream : refreshableUpstreams()) {
+            if (upstream instanceof Localization localization) {
                 localization.refresh(context, timestampSeconds, dtSeconds);
-            } else if (input instanceof HardwareMeasurementSignal hardware) {
+            } else if (upstream instanceof HardwareMeasurementSignal hardware) {
                 hardware.refresh(context, timestampSeconds, dtSeconds);
             }
         }
     }
 
+    /**
+     * Returns the upstream nodes this node must refresh before evaluating, in input order.
+     *
+     * <p>Derived signals such as {@code translationOnly()}, {@code headingOnly()} or tag covariance
+     * wrappers are not refreshable themselves; they are walked through {@link MeasurementSignal#sources()}
+     * so the {@link Localization} or hardware signal they wrap is refreshed first in the same cycle.
+     * Without this, a node fed by {@code other.translationOnly()} would read {@code other}'s
+     * previous-cycle output whenever the runtime refreshed it after this node.</p>
+     */
+    private List<MeasurementSignal> refreshableUpstreams() {
+        List<MeasurementSignal> cached = state.refreshables;
+        if (cached != null) {
+            return cached;
+        }
+        List<MeasurementSignal> found = new ArrayList<>();
+        Set<MeasurementSignal> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (PoseSignal input : inputs) {
+            collectRefreshable(input, found, visited);
+        }
+        state.refreshables = List.copyOf(found);
+        return state.refreshables;
+    }
+
+    private static void collectRefreshable(
+            MeasurementSignal signal,
+            List<MeasurementSignal> found,
+            Set<MeasurementSignal> visited) {
+        if (signal == null || !visited.add(signal)) {
+            return;
+        }
+        if (signal instanceof Localization || signal instanceof HardwareMeasurementSignal) {
+            found.add(signal);
+            return;
+        }
+        for (MeasurementSignal source : signal.sources()) {
+            collectRefreshable(source, found, visited);
+        }
+    }
+
     private void evaluate(double timestampSeconds) {
+        state.evaluatingTimestamp = timestampSeconds;
         List<Measurement> accepted = new ArrayList<>();
         List<Measurement> rejected = new ArrayList<>();
         SwerveOdometry odometry = null;
@@ -640,6 +695,8 @@ public final class Localization implements PoseSignal {
         private boolean runtimeOwned;
         private KalmanEngine kalman;
         private StructPublisher<Pose2d> posePublisher;
+        private List<MeasurementSignal> refreshables;
+        private double evaluatingTimestamp = Double.NaN;
     }
 
     private static final class CycleResult implements PoseSignal, MeasurementSnapshot.CycleView {
@@ -818,11 +875,14 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
-            if (trustsHeading(sample) && headingResidual(sample) > maxHeadingResidualRadians) {
-                visionRecovery.remove(source);
-                return;
-            }
-            if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
+            // Heading-residual and innovation gates share one recovery path: a source whose samples
+            // are rejected but stay self-consistent for several frames (e.g. after a gyro slip or a
+            // reset to the wrong heading) is re-admitted instead of being locked out forever.
+            boolean headingRejected = trustsHeading(sample)
+                    && headingResidual(sample) > maxHeadingResidualRadians;
+            boolean innovationRejected = Double.isFinite(innovationGate)
+                    && innovation(sample, stdDevs) > innovationGate;
+            if (headingRejected || innovationRejected) {
                 VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
                 if (!recovery.accepts(sample)) {
                     return;
@@ -948,13 +1008,38 @@ public final class Localization implements PoseSignal {
                             (speeds.xMetersPerSecond() + other.speeds.xMetersPerSecond()) / 2.0,
                             (speeds.yMetersPerSecond() + other.speeds.yMetersPerSecond()) / 2.0,
                             (speeds.angularRadiansPerSecond() + other.speeds.angularRadiansPerSecond()) / 2.0),
-                    Math.max(timestampSeconds, other.timestampSeconds),
+                    fusedTimestamp(other, bestWeight),
                     xVar,
                     yVar,
                     hVar,
                     Math.max(ambiguity, other.ambiguity),
                     targetCount + other.targetCount,
                     averageFinite(averageTargetDistanceMeters, other.averageTargetDistanceMeters));
+        }
+
+        /**
+         * Stamps the fused pose with the information-weighted mean of the operand timestamps.
+         *
+         * <p>Samples inside one group can be up to {@code groupWithinSeconds} apart and the pipeline
+         * has no pose history here to motion-compensate them (camera samples carry no velocity and
+         * odometry is only available inside the Kalman node). The fused mean pose is therefore a
+         * blend of poses from different instants; stamping it with the same weights used to blend
+         * the poses makes the timestamp describe the instant the pose actually represents, instead
+         * of claiming the newest frame's time for data that is partly older. Keep the group window
+         * small (default 30 ms) to bound the residual motion blur.</p>
+         */
+        private double fusedTimestamp(FusedEstimate other, double weight) {
+            double first = weight * information();
+            double second = (1.0 - weight) * other.information();
+            double total = first + second;
+            if (!Double.isFinite(total) || total <= 0.0) {
+                return Math.max(timestampSeconds, other.timestampSeconds);
+            }
+            return (first * timestampSeconds + second * other.timestampSeconds) / total;
+        }
+
+        private double information() {
+            return 1.0 / xVariance + 1.0 / yVariance + 1.0 / headingVariance;
         }
 
         private MeasurementStdDevs stdDevs() {

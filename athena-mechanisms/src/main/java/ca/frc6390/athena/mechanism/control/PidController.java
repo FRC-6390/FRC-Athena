@@ -129,11 +129,14 @@ public final class PidController {
         if (!continuous) {
             return value;
         }
+        // Errors and measurement deltas are differences, so they wrap into the symmetric
+        // shortest-path interval [-span/2, span/2) regardless of where the input range starts.
         double modulus = maximumInput - minimumInput;
-        double wrapped = (value - minimumInput) % modulus;
+        double halfSpan = modulus / 2.0;
+        double wrapped = (value + halfSpan) % modulus;
         if (wrapped < 0.0) {
             wrapped += modulus;
         }
-        return wrapped + minimumInput;
+        return wrapped - halfSpan;
     }
 }

@@ -125,6 +125,26 @@ class WpilibLocalizationParityTest {
     }
 
     @Test
+    void headingResidualGateRecoversFromConsistentCameraHeading() {
+        ParityRig rig = new ParityRig(
+                Double.POSITIVE_INFINITY,
+                false,
+                Math.toRadians(35.0));
+        Object camera = new Object();
+
+        rig.stepAthenaOnly(0.00, vision(1.0, 0.0, Math.PI / 2.0, 0.00,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        rig.stepAthenaOnly(0.02, vision(1.0, 0.0, Math.PI / 2.0, 0.02,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+
+        rig.stepAthenaOnly(0.04, vision(1.0, 0.0, Math.PI / 2.0, 0.04,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+
+        assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+    }
+
+    @Test
     void headingOnlyRecoveryIgnoresSyntheticTranslationChanges() {
         ParityRig rig = new ParityRig(
                 9.0,

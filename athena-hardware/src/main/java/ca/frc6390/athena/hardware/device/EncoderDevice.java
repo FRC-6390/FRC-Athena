@@ -26,8 +26,20 @@ public record EncoderDevice(
         double conversion,
         double offset,
         EncoderUnit units,
-        FailurePolicy failurePolicy) implements PositionSignal, VelocitySignal {
+        FailurePolicy failurePolicy,
+        boolean baselineConfigApplied) implements PositionSignal, VelocitySignal {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
+
+    public EncoderDevice(
+            EncoderSource source,
+            boolean isInverted,
+            double gearRatio,
+            double conversion,
+            double offset,
+            EncoderUnit units,
+            FailurePolicy failurePolicy) {
+        this(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, false);
+    }
 
     public EncoderDevice(
             EncoderSource source,
@@ -138,7 +150,8 @@ public record EncoderDevice(
                     conversion,
                     offset,
                     units,
-                    failurePolicy);
+                    failurePolicy,
+                    baselineConfigApplied);
         }
         return this;
     }
@@ -148,11 +161,13 @@ public record EncoderDevice(
     }
 
     public EncoderDevice inverted(boolean inverted) {
-        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units, failurePolicy);
+        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied);
     }
 
     public EncoderDevice gearRatio(double gearRatio) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied);
     }
 
     public EncoderDevice gearRatio(GearRatio gearRatio) {
@@ -161,7 +176,8 @@ public record EncoderDevice(
     }
 
     public EncoderDevice conversion(double conversion) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied);
     }
 
     public EncoderDevice wheelDiameterMeters(double diameterMeters) {
@@ -176,17 +192,45 @@ public record EncoderDevice(
     }
 
     public EncoderDevice units(EncoderUnit units) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied);
     }
 
     public EncoderDevice offset(double offset) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied);
     }
 
     /** Selects how Athena responds if this encoder cannot be created or stops responding. */
     public EncoderDevice failurePolicy(FailurePolicy policy) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units,
-                Objects.requireNonNull(policy, "policy"));
+                Objects.requireNonNull(policy, "policy"), baselineConfigApplied);
+    }
+
+    /**
+     * Lets the backend overwrite sensor configuration stored on the device with the raw baseline
+     * Athena expects (for a CANcoder: magnet offset 0, counter-clockwise positive, discontinuity
+     * 0.5) when the encoder is activated.
+     *
+     * <p>Off by default: offsets in robot code are usually measured against whatever is stored on
+     * the device, so overwriting it would shift them. Without this, the backend only warns when the
+     * stored configuration differs from the baseline. Re-measure {@link #offset(double)} after
+     * enabling it.</p>
+     *
+     * @return updated declaration
+     */
+    public EncoderDevice applyBaselineConfig() {
+        return applyBaselineConfig(true);
+    }
+
+    /**
+     * Enables or disables writing the backend's baseline sensor configuration at activation.
+     *
+     * @param apply true to overwrite stored device configuration
+     * @return updated declaration
+     */
+    public EncoderDevice applyBaselineConfig(boolean apply) {
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, apply);
     }
 
     /**

@@ -12,6 +12,7 @@ public final class RevMotorOptions {
     }
 
     private int smartCurrentLimitAmps;
+    private boolean preserveDeviceCurrentLimit;
     private double openLoopRampSeconds;
     private boolean openLoopRampConfigured;
     private double closedLoopRampSeconds;
@@ -45,6 +46,19 @@ public final class RevMotorOptions {
      */
     public RevMotorOptions smartCurrentLimit(int amps) {
         smartCurrentLimitAmps = Math.max(0, amps);
+        return this;
+    }
+
+    /**
+     * Keeps the smart current limit stored on the SPARK (for example from the REV Hardware Client)
+     * when robot code declares no limit. By default Athena applies a conservative per-motor default
+     * (NEO 40 A, NEO 550 20 A, NEO Vortex 60 A) instead.
+     *
+     * @param preserve true to leave the device's stored limit untouched
+     * @return this options object
+     */
+    public RevMotorOptions preserveDeviceCurrentLimit(boolean preserve) {
+        preserveDeviceCurrentLimit = preserve;
         return this;
     }
 
@@ -193,6 +207,8 @@ public final class RevMotorOptions {
     }
 
     boolean closedLoopRampConfigured() { return closedLoopRampConfigured; }
+
+    public boolean preserveDeviceCurrentLimit() { return preserveDeviceCurrentLimit; }
 
     public boolean resetSafeParameters() { return resetSafeParameters; }
 

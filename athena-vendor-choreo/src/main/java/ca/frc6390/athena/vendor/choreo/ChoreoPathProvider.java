@@ -172,6 +172,14 @@ public final class ChoreoPathProvider implements PathProvider {
         private final Map<PathAction, ActivePath> active = new IdentityHashMap<>();
 
         @Override public void initialize(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            // Runtime state is keyed by the PathAction instance, and one follower drives one robot.
+            // Running the same PathAction in two places at once would silently share and then
+            // corrupt that state, so it is rejected (the scheduler reports it as a lease fault).
+            if (active.containsKey(path)) {
+                throw new IllegalStateException("Choreo path '" + path.key()
+                        + "' is already running in another action; the same PathAction cannot run twice"
+                        + " concurrently. Cancel the other action first or use a separate path.");
+            }
             Trajectory<? extends TrajectorySample<?>> trajectory = selected(path);
             boolean mirrored = mirrorForAlliance.getAsBoolean();
             ActivePath state = new ActivePath(trajectory, mirrored);
@@ -189,7 +197,11 @@ public final class ChoreoPathProvider implements PathProvider {
             state.trajectory.sampleAt(time, state.mirrored).ifPresent(sample -> {
                 if (!(sample instanceof SwerveSample swerve))
                     throw new IllegalStateException("Choreo path '" + path.name() + "' is not a swerve trajectory.");
-                state.output = followAction(swerve, context.dtSeconds());
+                // The follower's PID runs in output(), after this cycle's markers (including the
+                // odometry reset) have been applied, so the first sample never uses a stale pose.
+                state.sample = swerve;
+                state.sampleDtSeconds = context.dtSeconds();
+                state.followPending = true;
             });
             for (var marker : state.trajectory.events()) {
                 if (marker.timestamp <= time && state.triggeredMarkers.add(marker)) {
@@ -200,7 +212,28 @@ public final class ChoreoPathProvider implements PathProvider {
         }
 
         @Override public Action output(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
-            return path.onlyResetsPose() ? null : requireActive(path).output;
+            if (path.onlyResetsPose()) return null;
+            ActivePath state = requireActive(path);
+            if (state.followPending && state.sample != null) {
+                state.followPending = false;
+                state.output = followAction(state.sample, state.sampleDtSeconds);
+            }
+            return state.output;
+        }
+
+        @Override public void markerCompleted(PathAction path, String marker) {
+            ActivePath state = active.get(path);
+            if (state != null) state.activeMarkers.remove(marker);
+        }
+
+        @Override public java.util.Collection<String> pendingMarkers(PathAction path) {
+            ActivePath state = active.get(path);
+            if (state == null) return null;
+            Set<String> pending = new java.util.LinkedHashSet<>();
+            for (var marker : state.trajectory.events()) {
+                if (!state.triggeredMarkers.contains(marker)) pending.add(marker.event);
+            }
+            return pending;
         }
 
         @Override public List<?> ownership(PathAction path) {
@@ -261,6 +294,9 @@ public final class ChoreoPathProvider implements PathProvider {
         private final Set<Object> triggeredMarkers = new HashSet<>();
         private final Map<String, Action> activeMarkers = new java.util.LinkedHashMap<>();
         private Action output;
+        private SwerveSample sample;
+        private double sampleDtSeconds;
+        private boolean followPending;
         private boolean finalSampleEvaluated;
         private ActivePath(Trajectory<? extends TrajectorySample<?>> trajectory, boolean mirrored) {
             this.trajectory = trajectory; this.mirrored = mirrored;

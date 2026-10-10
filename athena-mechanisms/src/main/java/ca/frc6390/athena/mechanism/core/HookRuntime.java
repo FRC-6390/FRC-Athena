@@ -22,6 +22,7 @@ final class HookRuntime {
 
     private final LeaseController leases;
     private final Runnable immediateMutation;
+    private final java.util.function.ObjDoubleConsumer<ca.frc6390.athena.hardware.device.EncoderDevice> encoderSet;
     private final Map<HookBinding, Boolean> previousEventActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> previousSourceActive = new IdentityHashMap<>();
     private final Map<EventBinding, Boolean> consumedEvents = new IdentityHashMap<>();
@@ -37,8 +38,16 @@ final class HookRuntime {
     }
 
     HookRuntime(LeaseController leases, Runnable immediateMutation) {
+        this(leases, immediateMutation, null);
+    }
+
+    HookRuntime(
+            LeaseController leases,
+            Runnable immediateMutation,
+            java.util.function.ObjDoubleConsumer<ca.frc6390.athena.hardware.device.EncoderDevice> encoderSet) {
         this.leases = leases;
         this.immediateMutation = immediateMutation == null ? () -> { } : immediateMutation;
+        this.encoderSet = encoderSet == null ? (encoder, position) -> { } : encoderSet;
     }
 
     /**
@@ -113,6 +122,9 @@ final class HookRuntime {
             if (isImmediateDeviceMutation(binding.action())) {
                 if (binding.phase().shouldRun(event, wasActive, active)) {
                     applyImmediateMutation(binding.action(), actionContext);
+                    if (binding.action() instanceof Actions.EncoderSetPosition encoderAction) {
+                        encoderSet.accept(encoderAction.encoder(), encoderAction.position());
+                    }
                     immediateMutation.run();
                 }
                 continue;
@@ -207,7 +219,7 @@ final class HookRuntime {
         try {
             action.apply(context);
         } catch (RuntimeException exception) {
-            if (policy == FailurePolicy.PANIC) throw exception;
+            if (policy == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
             context.hardwareFailure(declaration, exception);
         }
     }

@@ -133,6 +133,29 @@ class AxisSignalTest {
     }
 
     @Test
+    void fluentCurveSettersReturnNewCurvesWithoutChangingTheBase() {
+        AxisCurves.SuperRateCurve base = AxisCurves.superRate();
+        AxisCurves.SuperRateCurve soft = base.expo(0.2);
+        AxisCurves.SuperRateCurve aggressive = base.expo(0.8).rcRate(1.5).superRate(0.5);
+        AxisCurves.ExpoCurve expo = AxisCurves.expo(0.1);
+        AxisCurves.ExpoCurve stronger = expo.expo(0.9);
+        AxisCurves.PowerCurve square = AxisCurves.power(2.0);
+        AxisCurves.PowerCurve cube = square.exponent(3.0);
+
+        assertEquals(0.0, base.expo(), 1.0e-9);
+        assertEquals(1.0, base.rcRate(), 1.0e-9);
+        assertEquals(0.0, base.superRate(), 1.0e-9);
+        assertEquals(0.2, soft.expo(), 1.0e-9);
+        assertEquals(0.8, aggressive.expo(), 1.0e-9);
+        assertEquals(1.5, aggressive.rcRate(), 1.0e-9);
+        assertEquals(0.5, aggressive.superRate(), 1.0e-9);
+        assertEquals(0.1, expo.expo(), 1.0e-9);
+        assertEquals(0.9, stronger.expo(), 1.0e-9);
+        assertEquals(2.0, square.exponent(), 1.0e-9);
+        assertEquals(3.0, cube.exponent(), 1.0e-9);
+    }
+
+    @Test
     void sharedCurveUpdatesSeveralAxesWithoutSharingAxisState() {
         AxisCurves.ExpoCurve curve = AxisCurves.expo(0.0);
         double[] firstRaw = {0.5};

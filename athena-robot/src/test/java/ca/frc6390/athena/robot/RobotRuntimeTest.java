@@ -58,6 +58,7 @@ import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.device.CameraDevice;
+import java.util.ArrayList;
 import ca.frc6390.athena.vision.runtime.CameraAdapters;
 import ca.frc6390.athena.vision.runtime.VisionGraph;
 import java.util.List;
@@ -254,6 +255,29 @@ class RobotRuntimeTest {
         }
     }
 
+
+    @Test
+    void mechanismActionExceptionIsReportedAndDoesNotStopRobotCode() {
+        SimulationSession simulation = SimulationSession.create();
+        FaultingMechanism mechanism = new FaultingMechanism();
+        List<String> errors = new ArrayList<>();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation)
+                .failureReporter(new RuntimeFailureReporter() {
+                    @Override public void error(String message, Throwable cause) { errors.add(message); }
+                    @Override public void warning(String message, Throwable cause) { }
+                })
+                .register(mechanism);
+
+        runtime.request(mechanism.healthy);
+        runtime.request(mechanism.broken);
+        runtime.teleopPeriodic(0.02, 0.02);
+        runtime.teleopPeriodic(0.04, 0.02);
+
+        assertEquals(12.0, simulation.motor(mechanism.healthyMotor).appliedVoltage(), 1e-9);
+        assertEquals(0.0, simulation.motor(mechanism.brokenMotor).appliedVoltage(), 1e-9);
+        assertEquals(1, errors.size());
+        assertTrue(errors.get(0).contains("bad sensor math"));
+    }
 
     @Test
     void selectedAutoIsAnOrdinaryMechanismActionAndCancelsWhenDisabled() {
@@ -762,6 +786,15 @@ class RobotRuntimeTest {
         public Object source() {
             return null;
         }
+    }
+
+    private static final class FaultingMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
+        private final MotorDevice healthyMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 48);
+        private final MotorDevice brokenMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 49);
+        private final Action healthy = healthyMotor.percent(1.0);
+        private final Action broken = Actions.compute(() -> {
+            throw new IllegalStateException("bad sensor math");
+        }, brokenMotor);
     }
 
     private static final class MotorMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

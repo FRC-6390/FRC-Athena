@@ -15,6 +15,16 @@ public final class MotionPlanners {
         return (context, constraints) -> Constraints.evaluate(constraints, context);
     }
 
+    /**
+     * Picks the equivalent angle ({@code requested + k * period}) closest to the current position
+     * that the constraints accept unchanged.
+     *
+     * <p>Only candidates whose constraint result is {@link ConstraintResult.Allowed} qualify. A
+     * {@link ConstraintResult.Corrected} result (for example a range clamp) disqualifies that wrap
+     * candidate, because the corrected value is no longer the requested angle. When no candidate is
+     * allowed unchanged, the planner falls back to evaluating the original request, which may then be
+     * corrected (clamped) or rejected.</p>
+     */
     public static MotionPlanner boundedAngular(double period) {
         if (!Double.isFinite(period) || period <= 0.0) {
             throw new IllegalArgumentException("Angular period must be positive.");

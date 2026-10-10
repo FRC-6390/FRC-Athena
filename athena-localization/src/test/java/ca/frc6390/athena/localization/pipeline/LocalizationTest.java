@@ -133,7 +133,9 @@ class LocalizationTest {
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
         assertTrue(fused.pose().xMeters() >= 1.0 && fused.pose().xMeters() <= 3.0);
         assertTrue(fused.pose().yMeters() >= 1.0 && fused.pose().yMeters() <= 2.0);
-        assertEquals(1.02, fused.timestampSeconds(), EPSILON);
+        // Fused poses blend frames from different instants, so the stamp is the
+        // information-weighted mean of the grouped frames rather than the newest frame.
+        assertTrue(fused.timestampSeconds() > 1.00 && fused.timestampSeconds() < 1.02);
         assertTrue(Double.isFinite(fused.stdDevs().xMeters()));
         assertTrue(Double.isFinite(fused.stdDevs().yMeters()));
         assertTrue(fused.stdDevs().xMeters() >= 0.2);
@@ -300,6 +302,47 @@ class LocalizationTest {
         assertEquals(0.3, multi.stdDevs().headingRadians(), EPSILON);
         assertSame(singleCamera, single.source());
         assertSame(multiCamera, multi.source());
+    }
+
+    @Test
+    void derivedInputsRefreshTheirSourceLocalizationInTheSameCycle() {
+        Object camera = new Object();
+        java.util.concurrent.atomic.AtomicReference<List<Measurement>> current =
+                new java.util.concurrent.atomic.AtomicReference<>(List.of(sample(1.0, 0.0, 0.0, 1.0, 0.0, 2, 1.0,
+                        MeasurementStdDevs.of(0.2, 0.2, 0.1), camera)));
+        PoseSignal cameraSignal = current::get;
+        Localization filtered = Localizations.filter().input(cameraSignal).name("filtered");
+        Localization fused = Localizations.latestValid().input(filtered.translationOnly()).name("fused");
+
+        fused.refresh(null, 1.0, 0.02);
+        filtered.refresh(null, 1.0, 0.02);
+        assertEquals(1.0, fused.pose().xMeters(), EPSILON);
+
+        current.set(List.of(sample(2.0, 0.0, 0.0, 2.0, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera)));
+        // The runtime may refresh the downstream node first; it must still see this cycle's data.
+        fused.refresh(null, 2.0, 0.02);
+
+        assertEquals(2.0, fused.pose().xMeters(), EPSILON);
+    }
+
+    @Test
+    void maxLatencyRejectsFramesOlderThanTheLimitAtTheRuntimeTimestamp() {
+        Sample frame = sample(1.0, 2.0, 0.0, 1.0, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Localization latency = Localizations.filter()
+                .input(signal(frame))
+                .filter(VisionFilters.maxLatencySeconds(0.1));
+        Localization age = Localizations.filter()
+                .input(signal(frame))
+                .filter(VisionFilters.maxAgeSeconds(0.1));
+
+        assertEquals(1, latency.measurements().size());
+        assertEquals(1, latency.refresh(null, 1.05, 0.02).measurements().size());
+        assertTrue(latency.refresh(null, 1.5, 0.02).measurements().isEmpty());
+        assertEquals(List.of(frame), latency.rejectedMeasurements());
+        assertEquals(1, age.refresh(null, 1.05, 0.02).measurements().size());
+        assertTrue(age.refresh(null, 1.5, 0.02).measurements().isEmpty());
     }
 
     private static PoseSignal signal(Measurement... measurements) {
