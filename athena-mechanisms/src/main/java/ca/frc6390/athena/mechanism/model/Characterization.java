@@ -1,7 +1,9 @@
 package ca.frc6390.athena.mechanism.model;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorConstants;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -135,8 +137,38 @@ public final class Characterization implements TelemetrySource {
     public static Characterization of(ControlBinding<?> control) {
         Objects.requireNonNull(control, "control");
         return new Characterization(control, DEFAULT_MAX_VOLTAGE, DEFAULT_RAMP_RATE, false,
-                DriftMonitor.DEFAULT_TOLERANCE, 1.0, null,
+                DriftMonitor.DEFAULT_TOLERANCE, gearFromFeedback(control), null,
                 newState(control.motionKind()));
+    }
+
+    /**
+     * Motor turns per mechanism turn, read from the binding's feedback encoder. The encoder position is
+     * {@code raw * gearRatio * conversion} in its measured unit, so one raw turn is
+     * {@code gearRatio * conversion / unitsPerRevolution} mechanism turns. Without an encoder, or when the encoder
+     * measures a distance, the default of 1 is used; {@link #gearRatio(double)} overrides it either way.
+     */
+    static double gearFromFeedback(ControlBinding<?> control) {
+        if (control.feedback() == null || !(control.feedback().position() instanceof EncoderDevice encoder)) {
+            return 1.0;
+        }
+        double unitsPerRevolution;
+        if (encoder.measuresUnit() instanceof edu.wpi.first.units.AngleUnit) {
+            unitsPerRevolution = encoder.measuresUnit() == Units.Degrees ? 360.0
+                    : encoder.measuresUnit() == Units.Radians ? 2.0 * Math.PI : 1.0;
+        } else if (encoder.units() == EncoderUnit.DEGREES) {
+            unitsPerRevolution = 360.0;
+        } else if (encoder.units() == EncoderUnit.ROTATIONS) {
+            unitsPerRevolution = 1.0;
+        } else if (encoder.units() == EncoderUnit.RADIANS) {
+            unitsPerRevolution = 2.0 * Math.PI;
+        } else {
+            return 1.0;
+        }
+        double mechanismTurnsPerRawTurn = encoder.gearRatio() * encoder.conversion() / unitsPerRevolution;
+        if (!(mechanismTurnsPerRawTurn > 0.0) || !Double.isFinite(mechanismTurnsPerRawTurn)) {
+            return 1.0;
+        }
+        return 1.0 / mechanismTurnsPerRawTurn;
     }
 
     private static State newState(MotionKind kind) {
@@ -457,6 +489,11 @@ public final class Characterization implements TelemetrySource {
     /** Snapshots the running estimate at the end of a match. */
     public void recordMatchEnd() {
         snapshot("match");
+    }
+
+    /** Motor turns per mechanism turn in effect (encoder-derived unless overridden). */
+    double gearRatio() {
+        return gearRatio;
     }
 
     /** Returns the store key set by {@link #persistAs}, or null when the characterization is not persisted. */
