@@ -1,6 +1,7 @@
 import { allWidgets } from '../../lib/board/registry';
 import { registerCoreWidgets } from './core';
 import { registerRobotWidgets } from './robot';
+import { registerControlWidgets } from './controls';
 
 /**
  * Registers every board widget once. Widget packs add their own `register…Widgets()` here.
@@ -15,4 +16,5 @@ export function registerAllWidgets(): void {
   registered = true;
   registerCoreWidgets();
   registerRobotWidgets();
+  registerControlWidgets();
 }
