@@ -1,0 +1,243 @@
+/*
+ * Athena dashboard design system.
+ *
+ * Token names keep the classic dashboard's variables (--surface, --border, --text, --brand...) so the canvas
+ * widgets inherit the new look. Colour carries meaning: red is the Athena brand and primary action, the
+ * semantic tones (ok / warn / fault / info / locked / stale) describe robot state and nothing else.
+ */
+:root {
+  /* Surfaces: graphite, slightly cool. Elevation goes up in small, even steps. */
+  --bg-0: #0a0c0f;
+  --bg-1: #0d1014;
+  --bg-2: #0d1014;
+  --surface: #12161b;
+  --surface-2: #171c22;
+  --surface-3: #1e242b;
+  --surface-hover: #222932;
+  --surface-active: #28303a;
+
+  --border: #232a32;
+  --border-subtle: #2c343e;
+  --border-emphasis: #3b4552;
+
+  /* Text */
+  --text-strong: #f3f5f8;
+  --text: #d3d8df;
+  --text-soft: #8a94a1;
+  --text-faint: #5b6572;
+  --muted: var(--text-soft);
+
+  /* Brand */
+  --brand: #d4343f;
+  --brand-strong: #b0262f;
+  --brand-soft: rgba(212, 52, 63, 0.14);
+  --accent: var(--brand);
+
+  /* Semantic tones (fg, soft background) */
+  --ok: #3dbb83;
+  --ok-soft: rgba(61, 187, 131, 0.13);
+  --warn: #e3a63b;
+  --warn-soft: rgba(227, 166, 59, 0.14);
+  --fault: #ef5257;
+  --fault-soft: rgba(239, 82, 87, 0.14);
+  --info: #4d9ef0;
+  --info-soft: rgba(77, 158, 240, 0.14);
+  --locked: #a98bf5;
+  --locked-soft: rgba(169, 139, 245, 0.14);
+  --stale: #6b7480;
+  --stale-soft: rgba(107, 116, 128, 0.16);
+  --danger: var(--fault);
+  --danger-soft: var(--fault-soft);
+  --success: var(--ok);
+
+  /* Plot series */
+  --series-target: #e3a63b;
+  --series-reference: #4d9ef0;
+  --series-measured: #3dbb83;
+  --series-4: #c678dd;
+  --series-5: #56c2d6;
+
+  /* Type */
+  --font-display: 'Inter', 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'Inter', 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, 'Cascadia Mono', monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 24px;
+
+  /* Space and shape */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --rail-width: 72px;
+  --topbar-height: 48px;
+
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg-0);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Primitives (class based so any component can use them) ---------- */
+
+.ui-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+}
+
+.ui-panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.ui-panel-title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.ui-panel-sub {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-panel-body {
+  padding: var(--sp-3);
+}
+
+.ui-label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ui-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-spacer {
+  flex: 1;
+}
+
+/* Badges: tone carries meaning */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-soft);
+  background: var(--surface-3);
+}
+.ui-badge[data-tone='ok'] { color: var(--ok); background: var(--ok-soft); }
+.ui-badge[data-tone='warn'] { color: var(--warn); background: var(--warn-soft); }
+.ui-badge[data-tone='fault'] { color: var(--fault); background: var(--fault-soft); }
+.ui-badge[data-tone='info'] { color: var(--info); background: var(--info-soft); }
+.ui-badge[data-tone='locked'] { color: var(--locked); background: var(--locked-soft); }
+.ui-badge[data-tone='stale'] { color: var(--stale); background: var(--stale-soft); }
+.ui-badge[data-tone='brand'] { color: #fff; background: var(--brand); }
+
+.ui-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--stale);
+}
+.ui-dot[data-tone='ok'] { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.ui-dot[data-tone='warn'] { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.ui-dot[data-tone='fault'] { background: var(--fault); box-shadow: 0 0 0 3px var(--fault-soft); }
+.ui-dot[data-tone='info'] { background: var(--info); }
+
+/* Buttons */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-3);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ui-btn:hover { background: var(--surface-hover); border-color: var(--border-emphasis); }
+.ui-btn:active { background: var(--surface-active); }
+.ui-btn:disabled { opacity: 0.45; cursor: default; }
+.ui-btn:focus-visible { outline: 2px solid var(--info); outline-offset: 1px; }
+.ui-btn[data-variant='primary'] { background: var(--brand); border-color: var(--brand); color: #fff; }
+.ui-btn[data-variant='primary']:hover { background: var(--brand-strong); }
+.ui-btn[data-variant='ghost'] { background: transparent; border-color: transparent; color: var(--text-soft); }
+.ui-btn[data-variant='ghost']:hover { background: var(--surface-3); color: var(--text); }
+.ui-btn[data-size='sm'] { height: 24px; padding: 0 8px; font-size: var(--fs-xs); }
+
+/* Inputs */
+.ui-input {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-1);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.ui-input:focus { outline: none; border-color: var(--info); }
+
+/* Key / value rows */
+.ui-kv {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.ui-kv:first-child { border-top: none; }
+.ui-kv-key { color: var(--text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-kv-value { color: var(--text-strong); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-emphasis) transparent; }
