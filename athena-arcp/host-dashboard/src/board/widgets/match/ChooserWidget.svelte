@@ -17,7 +17,7 @@
     void ctx.live.current;
     return signal ? ctx.latest(signal) : undefined;
   });
-  const state = $derived(selectionState(options, current));
+  const selection = $derived(selectionState(options, current));
   const reply = $derived.by(() => {
     void ctx.live.current;
     const r = signal ? ctx.reply(signal) : undefined;
@@ -47,8 +47,8 @@
 <div class="chooser">
   <div class="status">
     <span class="label">Auto</span>
-    <span class="chosen" class:none={state.selected === null}>
-      {state.selected ?? (state.unknownValue !== null ? `Robot has "${state.unknownValue}"` : 'None chosen')}
+    <span class="chosen" class:none={selection.selected === null}>
+      {selection.selected ?? (selection.unknownValue !== null ? `Robot has "${selection.unknownValue}"` : 'None chosen')}
     </span>
     {#if locked}<span class="hint">locked</span>{/if}
     {#if reply && !reply.accepted}<span class="hint rejected" title={reply.reason}>{reply.reason}</span>{/if}
@@ -61,7 +61,7 @@
         <button
           type="button"
           class="choice"
-          class:selected={state.selected === option}
+          class:selected={selection.selected === option}
           class:busy={pending === option}
           disabled={!signal || ctx.editing || locked}
           onclick={() => choose(option)}
