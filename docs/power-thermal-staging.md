@@ -108,10 +108,19 @@ MotorDevice arm = MotorDevice.of(MotorKinds.KRAKEN_X60, 44).currentLimit(80)
 Derate fraction = `1 - (1 - minFraction) * thermalLoad`. The power pass applies it to the declared
 limit before the budget, so the two combine through `min`.
 
-> **Caveat.** `MotorThermalSpec` values are nominal placeholders derived from typical published
-> stall current, free speed and resistance figures. They are not calibrated. Replace them with
-> characterized values (B1 thermal run) before relying on temperature estimates. Motor kinds not in
-> the table use `MotorThermalSpec.GENERIC`.
+> **Caveat.** The constants come from one nominal table, `MotorSpec` (I4), which feeds both
+> `MotorConstants` (electrical: R, Kt, Kv, free speed, stall and free current) and `MotorThermalSpec`
+> (thermal: winding resistance and speed constant from the same electrical values, plus heat capacity,
+> cooling time constant and rated winding temperature). The values are not calibrated. Replace them with
+> characterized values (thermal run) before relying on temperature estimates. Motor kinds without a row,
+> such as `MINION`, use `MotorThermalSpec.GENERIC`. Those kinds previously had thermal-only values; they now
+> need a `MotorSpec` row to get any.
+
+### Vendor temperature (I8)
+
+- CTRE TalonFX and TalonFXS: `DeviceTemp` is part of the existing `refreshAll` batch. An invalid status or a
+  non-finite value reads as empty, never as zero.
+- REV SPARK: `getMotorTemperature()` is read with the other inputs. NaN reads as empty.
 
 ## Staging (B9)
 
@@ -157,9 +166,17 @@ directly.
 `Status` is one of `Declared`, `Power capped`, `Power shed`, `Thermal derate`, `Unsupported`, or
 `Unavailable` / `Error: ...`.
 
+## Current-limit writes per vendor (I9)
+
+- **CTRE**: current limits are a `CurrentLimitsConfigs` apply on the TalonFX, the same path as before.
+- **REV**: each cap is a blocking `SparkBase.configure` call (one per motor per write, with reset/persist modes).
+  A cost was not measured on a roboRIO in this change, so the switch to model-based voltage scaling (no CAN configure
+  writes) has **not** been made. Decision pending a measured write time. Until then the write rate limit above
+  (0.25 s per motor, 2 A deadband) is the mitigation.
+
 ## Limits and not done
 
-- The battery resistance is estimated but not persisted per battery. Persistence waits on A1.
+- The battery resistance is estimated and persisted as a rolling prior (I3c); it is not stored per battery.
 - Thermal constants are nominal, not characterized (see the caveat above).
 - Closed-loop outputs that the device computes on the controller (offloaded control) do not receive
   the staging effort cap. Use `limitSpeed`/`limitAccel` for those.

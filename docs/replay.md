@@ -76,6 +76,19 @@ Each block holds self-contained segments. A segment starts with the full diction
 decodes without earlier data. Seek with `ReplayReader.Cursor.seekBlock(i)`. The byte format is the one implemented in
 `ca.frc6390.athena.runtime.wire`. Frames, dictionary and marker records use that codec unchanged.
 
+Marker sources (integration, I1):
+
+- `RuntimeMarkers` (the SPI mechanism code uses) is installed by `RobotRuntime.replay(...)` with a
+  `ReplayRuntimeMarkers` bound to the recorder. `mark` goes to the recorder, `requestFullCapture` forces a keyframe,
+  and `recordMetadata` reports the FMS event, match type and number, the recording session as `replayId`, and the
+  latest cycle sequence as `frameIndex`. The install is removed when the runtime closes.
+- Staging transitions and faults are emitted as `RuntimeEvents` (`STAGE_CHANGE`, `FAULT`). The replay bridge subscribes
+  and records them as `STAGE_CHANGE` and `FAULT` markers. `RuntimeEvents` has any number of listeners, so the replay
+  bridge and the explorer can both consume them. `drainStageChanges()` still works and is not used for markers.
+- Persisted writes (`PERSISTED_WRITE`) come from the telemetry persistence layer.
+- Rejected writes: a write refused by a lock group is recorded as `CHECK` (not `OVERRIDE`, which means a forced
+  state). The message carries the reason and the value.
+
 Marker kinds are the appendix E1-W kinds: BOOT, MATCH_IDENTIFIED, AUTO_START, TELEOP_START, MATCH_END,
 DISABLE, FAULT, STAGE_CHANGE, CHECK, OVERRIDE, PERSISTED_WRITE, RECORD, TEST_START, and BROWNOUT (14,
 `ReplayMarkers.BROWNOUT` = `Wire.MARKER_BROWNOUT`), which marks battery recovery from a brownout.
