@@ -5,7 +5,10 @@ import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -22,7 +25,13 @@ import java.util.function.Supplier;
  *   <li>{@code athena/power/battery/voltage}: f64, volts;</li>
  *   <li>{@code athena/power/bus/demandAmps}: f64, total requested current from the power pass;</li>
  *   <li>{@code athena/power/bus/shedding}: bool, true while the power budget sheds current.</li>
+ *   <li>{@code athena/power/<motor>/current}: f64, amps: the motor's estimated current draw;</li>
+ *   <li>{@code athena/power/<motor>/capAmps}: f64, amps: the planner's cap on the motor, 0 when it is not capped.</li>
  * </ul>
+ *
+ * <p>The per-motor paths exist only once the power pass has reported the motor, which happens after its first cycle.
+ * {@link #discoverMotors()} adds them and the dictionary grows; existing ids never change. Entries are only ever
+ * added.</p>
  *
  * <p>Numbers that are not finite are not published; clients keep the last value they received. Sampling runs on
  * the robot thread and publishes only the values that changed.</p>
@@ -53,6 +62,11 @@ final class ArcpSystemSignals {
         double busDemandAmps();
 
         boolean busShedding();
+
+        /** The power pass's per-motor state. Empty until the power pass has cycled. */
+        default List<PowerSnapshot.Motor> motors() {
+            return List.of();
+        }
 
         /**
          * The live robot: RobotController for the battery, DriverStation for mode, match clock and alliance, and the
@@ -98,19 +112,40 @@ final class ArcpSystemSignals {
                 public boolean busShedding() {
                     return power.get().shedding();
                 }
+
+                @Override
+                public List<PowerSnapshot.Motor> motors() {
+                    return power.get().motors();
+                }
             };
         }
     }
 
+    /** One motor's channels, keyed by the motor name the power pass reports. */
+    private static final class MotorChannel {
+        final long currentId;
+        final long capId;
+        double lastCurrent = Double.NaN;
+        double lastCap = Double.NaN;
+
+        MotorChannel(long currentId, long capId) {
+            this.currentId = currentId;
+            this.capId = capId;
+        }
+    }
+
+    private static final String POWER_PREFIX = "athena/power/";
+
     private final Source source;
     private final List<ArcpDictEntry> dictionary;
+    private final Map<String, MotorChannel> motors = new HashMap<>();
     private final long modeId;
     private final long matchTimeId;
     private final long allianceId;
     private final long batteryId;
     private final long demandId;
     private final long sheddingId;
-    private final long nextId;
+    private long nextId;
 
     private String lastMode;
     private String lastAlliance;
@@ -135,13 +170,13 @@ final class ArcpSystemSignals {
         demandId = id++;
         sheddingId = id++;
         nextId = id;
-        dictionary = List.of(
+        dictionary = new ArrayList<>(List.of(
                 entry(modeId, MODE, TYPE_STRING, ""),
                 entry(matchTimeId, MATCH_TIME, TYPE_F64, "s"),
                 entry(allianceId, ALLIANCE, TYPE_STRING, ""),
                 entry(batteryId, BATTERY_VOLTS, TYPE_F64, "V"),
                 entry(demandId, BUS_DEMAND_AMPS, TYPE_F64, "A"),
-                entry(sheddingId, BUS_SHEDDING, TYPE_BOOL, ""));
+                entry(sheddingId, BUS_SHEDDING, TYPE_BOOL, "")));
     }
 
     private static ArcpDictEntry entry(long id, String path, int typeTag, String unit) {
@@ -150,12 +185,35 @@ final class ArcpSystemSignals {
 
     /** The dictionary entries, in signal id order. */
     List<ArcpDictEntry> dictionary() {
-        return dictionary;
+        return List.copyOf(dictionary);
     }
 
     /** The first id not used by these entries. */
     long nextId() {
         return nextId;
+    }
+
+    /**
+     * Adds the current and cap entries of every motor the power pass reports that is not known yet. Returns true when
+     * the dictionary grew, so the caller republishes it. Reads the power snapshot, so call it at the export cadence,
+     * not every cycle.
+     *
+     * @return true when entries were added
+     */
+    boolean discoverMotors() {
+        boolean grew = false;
+        for (PowerSnapshot.Motor motor : source.motors()) {
+            if (motors.containsKey(motor.name())) {
+                continue;
+            }
+            long currentId = nextId++;
+            long capId = nextId++;
+            motors.put(motor.name(), new MotorChannel(currentId, capId));
+            dictionary.add(entry(currentId, POWER_PREFIX + motor.name() + "/current", TYPE_F64, "A"));
+            dictionary.add(entry(capId, POWER_PREFIX + motor.name() + "/capAmps", TYPE_F64, "A"));
+            grew = true;
+        }
+        return grew;
     }
 
     /**
@@ -193,6 +251,25 @@ final class ArcpSystemSignals {
         if (lastShedding == null || shedding != lastShedding) {
             cycle.setBoolean(sheddingId, shedding);
             lastShedding = shedding;
+        }
+        if (!motors.isEmpty()) {
+            for (PowerSnapshot.Motor motor : source.motors()) {
+                MotorChannel channel = motors.get(motor.name());
+                if (channel == null) {
+                    continue;
+                }
+                double current = motor.demandAmps();
+                if (Double.isFinite(current) && current != channel.lastCurrent) {
+                    cycle.setNumber(channel.currentId, current);
+                    channel.lastCurrent = current;
+                }
+                // The planner cap is +infinity when the motor is not capped; 0 means "no cap" on the wire.
+                double cap = Double.isFinite(motor.capAmps()) ? motor.capAmps() : 0.0;
+                if (cap != channel.lastCap) {
+                    cycle.setNumber(channel.capId, cap);
+                    channel.lastCap = cap;
+                }
+            }
         }
     }
 

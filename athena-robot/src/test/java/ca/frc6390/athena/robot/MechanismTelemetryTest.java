@@ -19,6 +19,7 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.mechanism.core.TelemetrySchema;
+import ca.frc6390.athena.mechanism.staging.Staging;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import org.junit.jupiter.api.Test;
 
@@ -180,6 +181,54 @@ class MechanismTelemetryTest {
                 "interpolationTelemetryMechanism/Values/shot/Visualization/Curve"));
         assertTrue(runtime.mechanismTelemetrySchema().values().containsKey(
                 "interpolationTelemetryMechanism/Values/shot/Visualization/Current"));
+    }
+
+    @Test
+    void controlSetpointsOutputThermalPowerAndStageCarryValuesInSimulation() {
+        StagedMechanism mechanism = new StagedMechanism();
+        SimulationSession simulation = SimulationSession.create();
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
+        TelemetrySchema schema = runtime.mechanismTelemetrySchema();
+        String control = "stagedMechanism/Controls/control/State/";
+        String motor = "stagedMechanism/Devices/motor/State/";
+
+        assertEquals("NORMAL", schema.values().get("stagedMechanism/State/Stage").value());
+        assertTrue(Double.isNaN(schema.values().get(control + "Target").number()), "not driven yet");
+        assertTrue(Double.isNaN(schema.values().get(control + "Output").number()), "not driven yet");
+
+        runtime.request(mechanism.spin);
+        runtime.robotPeriodic(0.0, 0.02);
+
+        assertEquals(5.0, schema.values().get(control + "Target").number(), 1e-9);
+        assertTrue(Double.isFinite(schema.values().get(control + "Reference").number()));
+        assertTrue(Double.isFinite(schema.values().get(control + "ReferenceVelocity").number()));
+        assertTrue(Double.isFinite(schema.values().get(control + "Error").number()));
+        assertTrue(Double.isNaN(schema.values().get(control + "Output").number()),
+                "a velocity loop on the motor controller has no software volts to report");
+
+        runtime.request(mechanism.volts);
+        runtime.robotPeriodic(0.02, 0.02);
+        assertEquals(3.0, schema.values().get(control + "Target").number(), 1e-9);
+        assertEquals(3.0, schema.values().get(control + "Output").number(), 1e-9, "a voltage request is its output");
+        assertEquals(simulation.motor(mechanism.motor).appliedVoltage(),
+                schema.values().get(control + "Output").number(), 1e-9, "the output is what the motor was commanded");
+
+        double temperature = schema.values().get(motor + "TemperatureCelsius").number();
+        assertEquals(mechanism.motor.temperatureCelsius(), temperature, 1e-9);
+        double derate = schema.values().get(motor + "Derate").number();
+        assertTrue(derate >= 0.0 && derate <= 1.0, "derate is a fraction: " + derate);
+        assertTrue(schema.values().get(motor + "PowerCapAmps").number() >= 0.0);
+    }
+
+    private static final class StagedMechanism implements Mechanism {
+        final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 12);
+        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+        final Action spin = control.velocity(5.0);
+        final Action volts = control.voltage(3.0);
+        final Staging<Stage> health = Staging.of(Stage.NORMAL)
+                .stage(Stage.HOT, () -> false, control.limitEffort(0.5));
+
+        enum Stage { NORMAL, HOT }
     }
 
     private static final class TunedMechanism implements Mechanism {

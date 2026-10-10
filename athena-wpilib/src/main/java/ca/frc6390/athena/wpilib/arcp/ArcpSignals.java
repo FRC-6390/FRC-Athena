@@ -26,8 +26,13 @@ import java.util.function.Predicate;
  *       number arrays; points and geometry are not sent over ARCP);</li>
  *   <li>every {@link TelemetryAction} under its path, carrying its running state, role 5;</li>
  *   <li>one lock-state boolean per lock group in use, at {@code athena/locks/<group class name>}, role 7;</li>
- *   <li>the robot-level system signals of {@link ArcpSystemSignals}, role 8.</li>
+ *   <li>the robot-level system signals of {@link ArcpSystemSignals}, role 8, including the per-motor power
+ *       channels that appear once the power pass has reported the motor (see {@link #discoverPowerMotors()}).</li>
  * </ul>
+ *
+ * <p>Units: a control's {@code State/Output} is volts, {@code TemperatureCelsius} is degrees Celsius,
+ * and {@code PowerCapAmps} is amps. The control targets, references and error use the control's own feedback units,
+ * which telemetry does not declare yet, so they carry no unit. {@code Derate} is a fraction and also has none.</p>
  *
  * <p>Writes go through {@link TelemetryValue#tryWrite}, so the robot's lock rules and value ranges decide.
  * Actions go through {@link TelemetryAction#request()} and {@link TelemetryAction#cancel()}.</p>
@@ -113,13 +118,27 @@ final class ArcpSignals {
                     ArcpDictEntry.ROLE_LOCK, 0, "", 0));
         }
         this.system = new ArcpSystemSignals(nextId, system);
-        nextId = this.system.nextId();
-        dictionary.addAll(this.system.dictionary());
     }
 
-    /** The dictionary entries, in signal id order. */
+    /**
+     * The dictionary entries, in signal id order. The list grows when {@link #discoverPowerMotors()} returns true;
+     * the caller then publishes it again.
+     */
     List<ArcpDictEntry> dictionary() {
-        return List.copyOf(dictionary);
+        List<ArcpDictEntry> all = new ArrayList<>(dictionary.size() + 8);
+        all.addAll(dictionary);
+        all.addAll(system.dictionary());
+        return all;
+    }
+
+    /**
+     * Adds the per-motor power channels for motors the power pass has reported since the last call. Returns true when
+     * the dictionary grew. Call at the export cadence, not every cycle.
+     *
+     * @return true when the dictionary grew
+     */
+    boolean discoverPowerMotors() {
+        return system.discoverMotors();
     }
 
     /** Number of published values (not counting actions and lock signals). */
@@ -306,7 +325,7 @@ final class ArcpSignals {
             int role = value.writable() ? ArcpDictEntry.ROLE_CONTROL : roleOf(path);
             int flags = (value.writable() ? ArcpDictEntry.FLAG_WRITABLE : 0)
                     | (value.isPersisted() ? ArcpDictEntry.FLAG_PERSISTED : 0);
-            dictionary.add(new ArcpDictEntry(id, path, typeTag, "", role, flags, channel.lockGroupName, 0));
+            dictionary.add(new ArcpDictEntry(id, path, typeTag, unitOf(path), role, flags, channel.lockGroupName, 0));
             if (value.lockGroup() != null) {
                 groups.putIfAbsent(value.lockGroup(), Boolean.TRUE);
             }
@@ -340,12 +359,30 @@ final class ArcpSignals {
         };
     }
 
-    /** Role from the telemetry group a value sits in (State, Devices, Hooks, ...). */
+    /**
+     * Unit of a value from its path, for the values whose unit is fixed by their name. Other values carry no unit (see
+     * the class notes). Control outputs are volts; a motor's temperature is Celsius and its power cap is amps.
+     */
+    static String unitOf(String path) {
+        if (path.contains("/Controls/") && path.endsWith("/State/Output")) return "V";
+        if (path.endsWith("/State/TemperatureCelsius")) return "C";
+        if (path.endsWith("/State/PowerCapAmps")) return "A";
+        return "";
+    }
+
+    /**
+     * Role from the telemetry group a value sits in. A value under {@code State} is role state wherever the group sits,
+     * including under a control or device. Otherwise the first group in the path decides, as before.
+     */
     static int roleOf(String path) {
-        for (String segment : path.split("/")) {
+        String[] segments = path.split("/");
+        for (String segment : segments) {
+            if ("State".equals(segment)) {
+                return ArcpDictEntry.ROLE_STATE;
+            }
+        }
+        for (String segment : segments) {
             switch (segment) {
-                case "State":
-                    return ArcpDictEntry.ROLE_STATE;
                 case "Devices":
                     return ArcpDictEntry.ROLE_DEVICE;
                 case "Controls":

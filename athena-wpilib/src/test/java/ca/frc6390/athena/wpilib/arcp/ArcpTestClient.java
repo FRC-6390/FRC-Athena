@@ -47,7 +47,7 @@ final class ArcpTestClient implements AutoCloseable {
     record WriteAnswer(boolean accepted, String reason, Object actualValue) {
     }
 
-    record Dict(long id, String path, int typeTag, int role, int flags, String lockGroup) {
+    record Dict(long id, String path, int typeTag, String unit, int role, int flags, String lockGroup) {
     }
 
     /** A realtime frame: timestamp, sequence and the changed values by signal id. */
@@ -257,12 +257,12 @@ final class ArcpTestClient implements AutoCloseable {
             long id = r.varint();
             String path = r.string();
             int typeTag = r.u8();
-            r.string();
+            String unit = r.string();
             int role = r.u8();
             int flags = r.u8();
             String lockGroup = r.string();
             r.varint();
-            dictionary.put(path, new Dict(id, path, typeTag, role, flags, lockGroup));
+            dictionary.put(path, new Dict(id, path, typeTag, unit, role, flags, lockGroup));
         }
     }
 
