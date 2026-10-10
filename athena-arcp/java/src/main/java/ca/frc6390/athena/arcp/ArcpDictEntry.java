@@ -1,11 +1,11 @@
-package ca.frc6390.athena.arcp.v2;
+package ca.frc6390.athena.arcp;
 
 /**
  * One signal announced in the dictionary (appendix E1-W, DICTIONARY record).
  *
  * @param signalId stable numeric id used by frames
  * @param path mechanism-tree path, for example {@code robot/turret/angle}
- * @param typeTag wire type tag, see {@link ArcpCodec}
+ * @param typeTag ARCP typeTag (appendix E1-W, "typeTag values")
  * @param unit unit label, empty when none
  * @param role one of the {@code ROLE_*} constants
  * @param flags bit set of {@link #FLAG_WRITABLE} and {@link #FLAG_PERSISTED}

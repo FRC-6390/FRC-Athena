@@ -1,57 +1,46 @@
 import org.gradle.internal.os.OperatingSystem
 
-plugins {
-    id 'java'
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
-}
+// ARCP is a thin JNI binding over the Rust server in ../rust. This module contains no protocol
+// code. Gradle builds the native library with cargo and packages it as jar resources:
+//   /native/<os>-<arch>/libarcp_jni.so | libarcp_jni.dylib | arcp_jni.dll
+//   /native/linux-arm32/libarcp_jni.so                    (roboRIO, when it has been cross-built)
+//
+// Properties:
+//   -ParcpSkipNative=true        no cargo, no native library (CI without Rust). Native tests are excluded.
+//   -ParcpCargoRelease=true      build the host library with --release (default: debug, faster)
+//   -ParcpCargo=<path>           cargo executable (default: PATH, then ~/.cargo/bin)
+//   -ParcpCargoOffline=true      pass --offline to cargo
+//   -ParcpRoborioNative=true     make the jar step cross-build the roboRIO library first
+//   -ParcpRoborioLinker=<path>   roboRIO C linker (default: WPILib 2026 roborio toolchain)
+//   -ParcpPublish=true           allow publishing this module to Maven Local (off by default)
 
 dependencies {
-    // Wire codec (appendix E1-W) is the reference implementation in athena-runtime.
-    api project(':athena-runtime')
+    // Tests decode the ARCP control and frame bytes with athena-runtime's reference reader.
+    testImplementation project(':athena-runtime')
 }
 
-test {
-    // Golden vectors live at docs/wire-vectors (shared with the Rust arcp-core tests).
-    systemProperty 'athena.repoRoot', rootProject.projectDir.absolutePath
-}
+final String ROBORIO_TRIPLE = 'armv7-unknown-linux-gnueabi'
+final String ROBORIO_RESOURCE_DIR = 'linux-arm32'
+final String ROBORIO_LIBRARY = 'libarcp_jni.so'
 
-def rustWorkspaceDir = rootProject.file('athena-arcp/rust')
-def rustManifestPath = new File(rustWorkspaceDir, 'Cargo.toml')
-def rustTargetDir = new File(rustWorkspaceDir, 'target')
-def resolveArtifactTargetDir = { -> rustTargetDir }
-def generatedNativeRoot = layout.buildDirectory.dir('generated/arcp-native-resources/main')
-def generatedNativeDir = generatedNativeRoot.map { new File(it.asFile, 'native') }
+def rustDir = rootProject.file('athena-arcp/rust')
+def targetRoot = new File(rustDir, 'target')
 
-def vendorTargetTriples = [
-        'armv7-unknown-linux-gnueabi',
-        'x86_64-unknown-linux-gnu',
-        'aarch64-unknown-linux-gnu',
-        'x86_64-pc-windows-gnu'
-]
+boolean skipNative = ((findProperty('arcpSkipNative') ?: 'false') as String).trim().toBoolean()
+boolean cargoRelease = ((findProperty('arcpCargoRelease') ?: 'false') as String).trim().toBoolean()
+boolean cargoOffline = ((findProperty('arcpCargoOffline') ?: 'false') as String).trim().toBoolean()
+boolean roborioInBuild = ((findProperty('arcpRoborioNative') ?: 'false') as String).trim().toBoolean()
+boolean arcpPublishEnabled = ((findProperty('arcpPublish') ?: 'false') as String).trim().toBoolean()
 
-def fullTargetTriples = [
-        'armv7-unknown-linux-gnueabi',
-        'x86_64-unknown-linux-gnu',
-        'aarch64-unknown-linux-gnu',
-        'x86_64-apple-darwin',
-        'aarch64-apple-darwin',
-        'x86_64-pc-windows-gnu'
-]
-
-def normalizeArch = { String raw ->
-    def arch = (raw ?: '').toLowerCase(Locale.ROOT)
-    if (arch in ['x86_64', 'amd64']) return 'x86_64'
-    if (arch in ['aarch64', 'arm64']) return 'aarch64'
-    if (arch.startsWith('armv7') || arch == 'arm') return 'arm32'
-    return arch
-}
+def profileDir = cargoRelease ? 'release' : 'debug'
 
 def hostOs = OperatingSystem.current()
-def hostArch = normalizeArch(System.getProperty('os.arch'))
+def hostArch = { ->
+    def raw = (System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT)
+    if (raw in ['x86_64', 'amd64']) return 'x86_64'
+    if (raw in ['aarch64', 'arm64']) return 'aarch64'
+    return raw
+}()
 def hostResourceDir
 def hostLibraryFile
 if (hostOs.isLinux()) {
@@ -64,618 +53,153 @@ if (hostOs.isLinux()) {
     hostResourceDir = "windows-${hostArch}"
     hostLibraryFile = 'arcp_jni.dll'
 } else {
-    throw new GradleException("Unsupported host OS for ARCP JNI build: ${System.getProperty('os.name')}")
+    throw new GradleException("Unsupported host OS for the ARCP native library: ${System.getProperty('os.name')}")
 }
 
-def knownTargets = [
-        host: [
-                resourceDir : hostResourceDir,
-                fileName    : hostLibraryFile,
-                artifactPath: { -> new File(resolveArtifactTargetDir(), "release/${hostLibraryFile}") }
-        ],
-        'armv7-unknown-linux-gnueabi': [
-                resourceDir : 'linux-arm32',
-                fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabi/release/libarcp_jni.so') }
-        ],
-        'armv7-unknown-linux-gnueabihf': [
-                resourceDir : 'linux-arm32',
-                fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'armv7-unknown-linux-gnueabi/release/libarcp_jni.so') }
-        ],
-        'x86_64-unknown-linux-gnu'     : [
-                resourceDir : 'linux-x86_64',
-                fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-unknown-linux-gnu/release/libarcp_jni.so') }
-        ],
-        'aarch64-unknown-linux-gnu'    : [
-                resourceDir : 'linux-aarch64',
-                fileName    : 'libarcp_jni.so',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'aarch64-unknown-linux-gnu/release/libarcp_jni.so') }
-        ],
-        'x86_64-apple-darwin'          : [
-                resourceDir : 'macos-x86_64',
-                fileName    : 'libarcp_jni.dylib',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-apple-darwin/release/libarcp_jni.dylib') }
-        ],
-        'aarch64-apple-darwin'         : [
-                resourceDir : 'macos-aarch64',
-                fileName    : 'libarcp_jni.dylib',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'aarch64-apple-darwin/release/libarcp_jni.dylib') }
-        ],
-        'x86_64-pc-windows-gnu'        : [
-                resourceDir : 'windows-x86_64',
-                fileName    : 'arcp_jni.dll',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-pc-windows-gnu/release/arcp_jni.dll') }
-        ],
-        'x86_64-pc-windows-msvc'       : [
-                resourceDir : 'windows-x86_64',
-                fileName    : 'arcp_jni.dll',
-                artifactPath: { -> new File(resolveArtifactTargetDir(), 'x86_64-pc-windows-msvc/release/arcp_jni.dll') }
-        ],
-]
+def hostLibrary = new File(targetRoot, "${profileDir}/${hostLibraryFile}")
+def roborioLibrary = new File(targetRoot, "${ROBORIO_TRIPLE}/release/${ROBORIO_LIBRARY}")
+def nativeResourceRoot = layout.buildDirectory.dir('generated/arcp-native-resources/main')
 
-// ARCP is an optional module. Its publications and JNI cross-builds only run when asked for explicitly.
-def arcpPublishEnabled = ((project.findProperty('arcpPublish') ?: 'false') as String).trim().toBoolean()
-def publishTaskRequested = arcpPublishEnabled && gradle.startParameter.taskNames.any { name ->
-    def lower = name.toLowerCase(Locale.ROOT)
-    lower.contains('publish') || lower.contains('copytowpilib')
-}
-def wpilibRootDir = new File(System.getenv('PUBLIC') ?: 'C:/Users/Public', 'wpilib/2026/roborio/bin')
-def wpilibArmGcc = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-gcc.exe' : 'arm-frc2025-linux-gnueabi-gcc')
-def wpilibArmAr = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linux-gnueabi-ar.exe' : 'arm-frc2025-linux-gnueabi-ar')
-def configuredNativeModeRaw = (project.findProperty('arcpNativeMode')
-        ?: System.getenv('ARCP_NATIVE_MODE')) as String
-def nativeModeExplicitlyConfigured = configuredNativeModeRaw != null && !configuredNativeModeRaw.trim().isEmpty()
-// Default is 'none' so ./gradlew build never runs cargo; set -ParcpNativeMode=host to stage the JNI library.
-def nativeMode = ((nativeModeExplicitlyConfigured ? configuredNativeModeRaw : 'none') as String)
-        .trim()
-        .toLowerCase(Locale.ROOT)
-def publishDefaultTargets = [
-        'armv7-unknown-linux-gnueabi',
-        'host'
-]
-def explicitTargetsRaw = (project.findProperty('arcpJniTargets') ?: System.getenv('ARCP_JNI_TARGETS')) as String
-def dockerCrossDefault = (nativeMode == 'none')
-        ? 'false'
-        : 'true'
-def useDockerCross = ((project.findProperty('arcpUseDockerCross')
-        ?: System.getenv('ARCP_USE_DOCKER_CROSS')
-        ?: dockerCrossDefault) as String).toBoolean()
-def dockerImageName = ((project.findProperty('arcpDockerImage')
-        ?: System.getenv('ARCP_DOCKER_IMAGE')
-        ?: 'athena-arcp-cross:latest') as String).trim()
-def dockerRebuildImage = ((project.findProperty('arcpDockerRebuild')
-        ?: System.getenv('ARCP_DOCKER_REBUILD')
-        ?: 'false') as String).toBoolean()
-def dockerfilePath = rootProject.file('athena-arcp/rust/docker/Dockerfile.cross')
-def dockerContextDir = rustWorkspaceDir
-def dockerCacheDir = rootProject.file('athena-arcp/rust/.docker-cache')
-def dockerCargoHomeDir = new File(dockerCacheDir, 'cargo-home')
-def dockerTargetDir = new File(dockerCacheDir, 'target')
-def dockerSupportedTargets = [
-        'armv7-unknown-linux-gnueabi',
-        'x86_64-unknown-linux-gnu',
-        'aarch64-unknown-linux-gnu',
-        'x86_64-pc-windows-gnu',
-] as Set<String>
-resolveArtifactTargetDir = { -> useDockerCross ? dockerTargetDir : rustTargetDir }
-
-def selectedTargets
-if (explicitTargetsRaw != null && !explicitTargetsRaw.trim().isEmpty()) {
-    selectedTargets = explicitTargetsRaw
-            .split(',')
-            .collect { it.trim() }
-            .findAll { !it.isEmpty() }
-} else if (publishTaskRequested && !nativeModeExplicitlyConfigured) {
-    selectedTargets = publishDefaultTargets
-} else {
-    switch (nativeMode) {
-        case 'none':
-            selectedTargets = []
-            break
-        case 'full':
-            selectedTargets = fullTargetTriples
-            break
-        case 'vendor':
-            selectedTargets = vendorTargetTriples
-            break
-        case 'host':
-        default:
-            selectedTargets = ['host']
-            break
+// Finds an executable on PATH, then in the usual rustup location.
+def findExecutable = { String name ->
+    def exe = hostOs.isWindows() ? "${name}.exe" : name
+    def dirs = (System.getenv('PATH') ?: '').split(File.pathSeparator).toList()
+    dirs << new File(System.getProperty('user.home'), '.cargo/bin').absolutePath
+    for (dir in dirs) {
+        def candidate = new File(dir, exe)
+        if (candidate.isFile() && candidate.canExecute()) {
+            return candidate.absolutePath
+        }
     }
+    return null
 }
 
-def installRustTargets = ((project.findProperty('arcpInstallRustTargets')
-        ?: System.getenv('ARCP_INSTALL_RUST_TARGETS')
-        ?: 'true') as String).toBoolean()
-
-def targetLinkers = [
-        'armv7-unknown-linux-gnueabi' : (hostOs.isWindows() ? wpilibArmGcc.absolutePath : 'arm-linux-gnueabi-gcc'),
-        'armv7-unknown-linux-gnueabihf': (hostOs.isWindows() ? wpilibArmGcc.absolutePath : 'arm-linux-gnueabi-gcc'),
-        'aarch64-unknown-linux-gnu'    : 'aarch64-linux-gnu-gcc',
-        'x86_64-pc-windows-gnu'        : 'x86_64-w64-mingw32-gcc'
-]
-
-def targetArchivers = [
-        'armv7-unknown-linux-gnueabi' : (hostOs.isWindows() ? wpilibArmAr.absolutePath : 'arm-linux-gnueabi-ar'),
-        'armv7-unknown-linux-gnueabihf': (hostOs.isWindows() ? wpilibArmAr.absolutePath : 'arm-linux-gnueabi-ar'),
-]
-
-def resolveNativeTargetTriple = { String triple ->
-    if (triple == 'armv7-unknown-linux-gnueabihf') {
-        return 'armv7-unknown-linux-gnueabi'
+def resolveCargo = { ->
+    def configured = findProperty('arcpCargo') as String
+    if (configured) {
+        return configured
     }
-    if (triple == 'x86_64-pc-windows-gnu' && hostOs.isWindows() && !useDockerCross) {
-        return 'x86_64-pc-windows-msvc'
+    def cargo = findExecutable('cargo')
+    if (cargo == null) {
+        throw new GradleException(
+                'cargo was not found on PATH or in ~/.cargo/bin. The ARCP native library is built with Rust. '
+                + 'Install Rust from https://rustup.rs, pass -ParcpCargo=<path>, or build without the native library '
+                + 'with -ParcpSkipNative=true (ARCP is then unavailable at runtime).')
     }
-    triple
+    return cargo
 }
 
-def resolveDockerHostTriple = {
-    if (hostOs.isWindows()) {
-        if (hostArch == 'x86_64') {
-            return 'x86_64-pc-windows-gnu'
-        }
-        return null
-    }
-    if (hostOs.isLinux()) {
-        if (hostArch == 'arm32') {
-            return 'armv7-unknown-linux-gnueabi'
-        }
-        if (hostArch == 'aarch64') {
-            return 'aarch64-unknown-linux-gnu'
-        }
-        if (hostArch == 'x86_64') {
-            return 'x86_64-unknown-linux-gnu'
-        }
-        return null
-    }
-    null
+def captureOutput = { List<String> command ->
+    Process process = new ProcessBuilder(command).redirectErrorStream(true).start()
+    String text = process.inputStream.getText('UTF-8')
+    process.waitFor()
+    return text
 }
 
-def resolveBuildTripleForTarget = { String requestedTarget ->
-    if (useDockerCross) {
-        if (requestedTarget == 'host') {
-            return resolveDockerHostTriple()
-        }
-        return requestedTarget
-    }
-    if (requestedTarget == 'host') {
-        return 'host'
-    }
-    resolveNativeTargetTriple(requestedTarget)
-}
+def roborioLinker = (findProperty('arcpRoborioLinker') as String) ?: {
+    def wpilibRoot = hostOs.isWindows()
+            ? new File(System.getenv('PUBLIC') ?: 'C:/Users/Public', 'wpilib/2026')
+            : new File(System.getProperty('user.home'), 'wpilib/2026')
+    new File(wpilibRoot, "roborio/bin/arm-frc2025-linux-gnueabi-gcc${hostOs.isWindows() ? '.exe' : ''}").absolutePath
+}()
 
-def optionalTargetsRaw = (project.findProperty('arcpOptionalTargets')
-        ?: System.getenv('ARCP_OPTIONAL_TARGETS')
-        ?: 'armv7-unknown-linux-gnueabi') as String
-def optionalTargets = optionalTargetsRaw
-        .split(',')
-        .collect { it.trim() }
-        .findAll { !it.isEmpty() } as Set<String>
-
-def requireAllTargets = ((project.findProperty('arcpRequireAllTargets')
-        ?: System.getenv('ARCP_REQUIRE_ALL_TARGETS')
-        ?: 'false') as String).toBoolean()
-
-def hasExecutable = { String executable ->
-    if (executable == null || executable.trim().isEmpty()) {
-        return false
-    }
-    if (executable.contains('/') || executable.contains('\\') || executable.contains(':')) {
-        return new File(executable).exists()
-    }
-    def probeCommand = hostOs.isWindows()
-            ? ['where', executable]
-            : ['sh', '-c', "command -v ${executable} >/dev/null 2>&1"]
-    try {
-        def probe = exec {
-            workingDir rootProject.projectDir
-            commandLine probeCommand
-            standardOutput = new ByteArrayOutputStream()
-            errorOutput = new ByteArrayOutputStream()
-            ignoreExitValue = true
-        }
-        return probe.exitValue == 0
-    } catch (Exception ignored) {
-        return false
-    }
-}
-
-def dockerDaemonReachable = null
-def dockerDaemonError = null
-
-def checkDockerDaemonReachable = {
-    if (dockerDaemonReachable != null) {
-        return dockerDaemonReachable
-    }
-    def stdout = new ByteArrayOutputStream()
-    def stderr = new ByteArrayOutputStream()
-    try {
-        def probe = exec {
-            workingDir rootProject.projectDir
-            commandLine 'docker', 'info'
-            standardOutput = stdout
-            errorOutput = stderr
-            ignoreExitValue = true
-        }
-        dockerDaemonReachable = (probe.exitValue == 0)
-    } catch (Exception ignored) {
-        dockerDaemonReachable = false
-    }
-    if (!dockerDaemonReachable) {
-        dockerDaemonError = stderr.toString('UTF-8').trim()
-        if (dockerDaemonError == null || dockerDaemonError.isEmpty()) {
-            dockerDaemonError = stdout.toString('UTF-8').trim()
-        }
-    } else {
-        dockerDaemonError = null
-    }
-    dockerDaemonReachable
-}
-
-def ensureDockerDaemonReachable = { String context ->
-    if (!checkDockerDaemonReachable()) {
-        def hostHint = hostOs.isWindows()
-                ? "Start Docker Desktop and wait for \"Engine running\", or disable Docker cross-build with -ParcpUseDockerCross=false."
-                : "Start Docker Engine and ensure your user can access it, or disable Docker cross-build with -ParcpUseDockerCross=false."
-        def detail = (dockerDaemonError != null && !dockerDaemonError.isEmpty())
-                ? "\nDocker CLI output: ${dockerDaemonError}"
-                : ""
-        throw new GradleException("Docker is installed but Docker daemon is not reachable for ${context}. ${hostHint}${detail}")
-    }
-}
-
-def ensureExecutableAvailable = { String executable, String context ->
-    if (!hasExecutable(executable)) {
-        throw new GradleException("Missing required executable '${executable}' for ${context}. Install the cross toolchain or override targets with -ParcpJniTargets=...")
-    }
-}
-
-def readCommandStdout = { List<String> command ->
-    def output = new ByteArrayOutputStream()
-    def result = exec {
-        workingDir rootProject.projectDir
-        commandLine command
-        standardOutput = output
-        errorOutput = new ByteArrayOutputStream()
-        ignoreExitValue = true
-    }
-    if (result.exitValue != 0) {
-        return null
-    }
-    output.toString('UTF-8').trim()
-}
-
-def dockerImageReady = false
-
-def ensureDockerImageReady = {
-    ensureExecutableAvailable('docker', 'ARCP Docker cross-build')
-    ensureDockerDaemonReachable('ARCP Docker cross-build')
-    if (!dockerfilePath.exists()) {
-        throw new GradleException("Missing ARCP Dockerfile: ${dockerfilePath}")
-    }
-    if (dockerImageReady && !dockerRebuildImage) {
-        return
-    }
-    if (!dockerRebuildImage) {
-        def inspectStdout = new ByteArrayOutputStream()
-        def inspectStderr = new ByteArrayOutputStream()
-        def inspect = exec {
-            workingDir rootProject.projectDir
-            commandLine 'docker', 'image', 'inspect', dockerImageName
-            standardOutput = inspectStdout
-            errorOutput = inspectStderr
-            ignoreExitValue = true
-        }
-        if (inspect.exitValue == 0) {
-            dockerImageReady = true
-            return
-        }
-    }
-    logger.lifecycle("Building ARCP cross image: ${dockerImageName}")
-    exec {
-        workingDir rootProject.projectDir
-        commandLine 'docker', 'build',
-                '-t', dockerImageName,
-                '-f', dockerfilePath.absolutePath,
-                dockerContextDir.absolutePath
-    }
-    dockerImageReady = true
-}
-
-def checkTargetBuildReadiness = { String buildTriple ->
-    if (useDockerCross) {
-        def missing = [] as List<String>
-        if (!hasExecutable('docker')) {
-            missing << 'docker'
-        } else if (!checkDockerDaemonReachable()) {
-            missing << (hostOs.isWindows()
-                    ? 'docker-daemon(start Docker Desktop or set -ParcpUseDockerCross=false)'
-                    : 'docker-daemon(start Docker Engine or set -ParcpUseDockerCross=false)')
-        }
-        if (buildTriple == null) {
-            missing << "docker-host-target(unsupported host OS/arch ${System.getProperty('os.name')} ${hostArch}; use -ParcpUseDockerCross=false)"
-        } else if (!dockerSupportedTargets.contains(buildTriple)) {
-            missing << "docker-toolchain(${buildTriple})"
-        }
-        return missing
-    }
-    def missing = [] as List<String>
-    def nativeTriple = buildTriple
-    if (!hasExecutable('cargo')) {
-        missing << 'cargo'
-    }
-    if (nativeTriple != 'host' && !hasExecutable('rustup')) {
-        missing << 'rustup'
-    }
-    def linker = targetLinkers[nativeTriple]
-    if (linker != null && !hasExecutable(linker as String)) {
-        missing << (linker as String)
-    }
-    missing
-}
-
-def ensureRustTargetInstalled = { String triple ->
-    ensureExecutableAvailable('rustup', "Rust target setup (${triple})")
-    def installedOut = new ByteArrayOutputStream()
-    exec {
-        workingDir rustWorkspaceDir
-        commandLine 'rustup', 'target', 'list', '--installed'
-        standardOutput = installedOut
-        errorOutput = new ByteArrayOutputStream()
-    }
-    def installed = installedOut.toString('UTF-8').readLines().collect { it.trim() }
-    if (!installed.contains(triple)) {
-        if (!installRustTargets) {
-            throw new GradleException("Rust target ${triple} is not installed. Set -ParcpInstallRustTargets=true to auto-install.")
-        }
-        logger.lifecycle("Installing missing Rust target: ${triple}")
-        exec {
-            workingDir rustWorkspaceDir
-            commandLine 'rustup', 'target', 'add', triple
-        }
-    }
-}
-
-def runCargoBuild = { String triple ->
-    ensureExecutableAvailable('cargo', "ARCP JNI build (${triple})")
-    def linker = targetLinkers[triple]
-    def archiver = targetArchivers[triple]
-    if (linker != null) {
-        ensureExecutableAvailable(linker as String, "ARCP JNI cross-link (${triple})")
-    }
-    if (archiver != null) {
-        ensureExecutableAvailable(archiver as String, "ARCP JNI archiver (${triple})")
-    }
-    def command = [
-            'cargo',
-            'build',
-            '--manifest-path', rustManifestPath.absolutePath,
-            '-p', 'arcp-jni',
-            '--release'
-    ]
-    if (triple != 'host') {
-        command += ['--target', triple]
-    }
-    logger.lifecycle("ARCP JNI build -> ${triple}")
-    exec {
-        workingDir rustWorkspaceDir
-        commandLine command
-        if (triple == 'armv7-unknown-linux-gnueabi' || triple == 'armv7-unknown-linux-gnueabihf') {
-            environment 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER', linker as String
-            environment 'CC_armv7_unknown_linux_gnueabi', linker as String
-            if (archiver != null) {
-                environment 'AR_armv7_unknown_linux_gnueabi', archiver as String
-            }
-        }
-    }
-}
-
-def runCargoBuildDocker = { String triple ->
-    ensureDockerImageReady()
-
-    if (!dockerCargoHomeDir.exists() && !dockerCargoHomeDir.mkdirs()) {
-        throw new GradleException("Failed to create ARCP Docker cargo cache directory: ${dockerCargoHomeDir}")
-    }
-    if (!dockerTargetDir.exists() && !dockerTargetDir.mkdirs()) {
-        throw new GradleException("Failed to create ARCP Docker target cache directory: ${dockerTargetDir}")
-    }
-
-    def linkerEnv = [] as List<String>
-    switch (triple) {
-        case 'armv7-unknown-linux-gnueabi':
-            linkerEnv += ['-e', 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER=arm-linux-gnueabi-gcc']
-            linkerEnv += ['-e', 'CC_armv7_unknown_linux_gnueabi=arm-linux-gnueabi-gcc']
-            linkerEnv += ['-e', 'AR_armv7_unknown_linux_gnueabi=arm-linux-gnueabi-ar']
-            break
-        case 'aarch64-unknown-linux-gnu':
-            linkerEnv += ['-e', 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc']
-            linkerEnv += ['-e', 'CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc']
-            linkerEnv += ['-e', 'AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar']
-            break
-        case 'x86_64-pc-windows-gnu':
-            linkerEnv += ['-e', 'CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc']
-            break
-        default:
-            break
-    }
-
-    def command = [
-            'docker',
-            'run',
-            '--rm'
-    ]
-
-    if (!hostOs.isWindows()) {
-        def uid = readCommandStdout(['id', '-u'])
-        def gid = readCommandStdout(['id', '-g'])
-        if (uid != null && gid != null) {
-            command += ['--user', "${uid}:${gid}"]
-        }
-    }
-
-    command += [
-            '-e', 'CARGO_HOME=/cargo-home',
-            '-e', 'CARGO_TARGET_DIR=/cargo-target',
-            '-v', "${dockerCargoHomeDir.absolutePath}:/cargo-home",
-            '-v', "${dockerTargetDir.absolutePath}:/cargo-target",
-            '-v', "${rootProject.projectDir.absolutePath}:/workspace",
-            '-w', '/workspace/athena-arcp/rust',
-    ]
-    command += linkerEnv
-    command += [
-            dockerImageName,
-            'cargo',
-            'build',
-            '--manifest-path', '/workspace/athena-arcp/rust/Cargo.toml',
-            '-p', 'arcp-jni',
-            '--release',
-            '--target', triple
-    ]
-
-    logger.lifecycle("ARCP JNI docker build -> ${triple}")
-    exec {
-        workingDir rootProject.projectDir
-        commandLine command
-    }
-}
-
-tasks.register('prepareArcpNativeResources') {
+tasks.register('buildArcpNativeHost', Exec) {
     group = 'build'
-    description = 'Builds optimized ARCP JNI native libraries and stages them into jar resources.'
+    description = 'Builds the ARCP JNI library for this host with cargo (used by simulation and tests).'
+    workingDir rustDir
+    onlyIf { !skipNative }
+    doFirst {
+        List<String> args = [resolveCargo(), 'build', '-p', 'arcp-jni']
+        if (cargoRelease) args << '--release'
+        if (cargoOffline) args << '--offline'
+        commandLine args
+    }
+}
 
-    inputs.property('nativeMode', nativeMode)
-    inputs.property('useDockerCross', useDockerCross)
-    inputs.property('dockerImageName', dockerImageName)
-    inputs.property('dockerRebuildImage', dockerRebuildImage)
-    inputs.property('selectedTargets', selectedTargets.join(','))
-    inputs.property('optionalTargets', optionalTargets.join(','))
-    inputs.property('requireAllTargets', requireAllTargets)
-    inputs.file(rustManifestPath)
-    inputs.file(dockerfilePath)
-    inputs.dir(new File(rustWorkspaceDir, 'crates/arcp-core/src'))
-    inputs.dir(new File(rustWorkspaceDir, 'crates/arcp-server/src'))
-    inputs.dir(new File(rustWorkspaceDir, 'crates/arcp-jni/src'))
-    outputs.dir(generatedNativeDir)
+tasks.register('buildArcpNativeRoboRio', Exec) {
+    group = 'build'
+    description = "Cross-compiles the ARCP JNI library for the roboRIO (${ROBORIO_TRIPLE}). Not part of build."
+    workingDir rustDir
+    onlyIf { !skipNative }
+    doFirst {
+        def cargo = resolveCargo()
+        def rustup = findExecutable('rustup')
+        def installed = rustup == null ? '' : captureOutput([rustup, 'target', 'list', '--installed'])
+        if (installed.readLines().every { it.trim() != ROBORIO_TRIPLE }) {
+            throw new GradleException("Rust target ${ROBORIO_TRIPLE} is not installed. Run: rustup target add ${ROBORIO_TRIPLE}")
+        }
+        if (!new File(roborioLinker).isFile()) {
+            throw new GradleException("roboRIO linker not found at ${roborioLinker}. Install the WPILib 2026 roboRIO toolchain or pass -ParcpRoborioLinker=<path>.")
+        }
+        environment 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER', roborioLinker
+        List<String> args = [cargo, 'build', '-p', 'arcp-jni', '--release', '--target', ROBORIO_TRIPLE]
+        if (cargoOffline) args << '--offline'
+        commandLine args
+    }
+}
 
+tasks.register('stageArcpNative') {
+    group = 'build'
+    description = 'Copies the ARCP native libraries into the jar resources (/native/<os>-<arch>/).'
+    if (!skipNative) {
+        dependsOn tasks.named('buildArcpNativeHost')
+        if (roborioInBuild) {
+            dependsOn tasks.named('buildArcpNativeRoboRio')
+        }
+    }
+    inputs.files(hostLibrary, roborioLibrary).optional()
+    inputs.property('skipNative', skipNative)
+    outputs.dir(nativeResourceRoot)
     doLast {
-        def outputDir = generatedNativeDir.get()
-        delete outputDir
-        outputDir.mkdirs()
-
-        if (selectedTargets.isEmpty()) {
-            logger.lifecycle("ARCP JNI native staging skipped (mode=${nativeMode})")
+        def root = nativeResourceRoot.get().asFile
+        delete root
+        if (skipNative) {
+            logger.lifecycle('ARCP native library skipped (-ParcpSkipNative=true); ARCP is unavailable at runtime.')
             return
         }
-
-        def builtTargets = [] as List<String>
-        def skippedTargets = [] as List<String>
-
-        selectedTargets.each { target ->
-            def info = knownTargets[target]
-            if (info == null) {
-                throw new GradleException("Unsupported ARCP JNI target '${target}'. Known targets: ${knownTargets.keySet().sort().join(', ')}")
-            }
-            def buildTriple = resolveBuildTripleForTarget(target)
-            def canSkip = optionalTargets.contains(target) && !requireAllTargets
-
-            def missing = checkTargetBuildReadiness(buildTriple)
-            if (!missing.isEmpty()) {
-                if (canSkip) {
-                    logger.warn("Skipping ARCP JNI target '${target}' (missing toolchain: ${missing.join(', ')})")
-                    skippedTargets << target
-                    return
-                }
-                throw new GradleException("Cannot build ARCP JNI target '${target}'. Missing toolchain: ${missing.join(', ')}. Install toolchain or mark optional with -ParcpOptionalTargets=${target}")
-            }
-
-            try {
-                if (!useDockerCross && buildTriple != 'host') {
-                    if (buildTriple != target) {
-                        logger.lifecycle("ARCP JNI native fallback: ${target} -> ${buildTriple}")
-                    }
-                    ensureRustTargetInstalled(buildTriple)
-                }
-                if (useDockerCross) {
-                    if (buildTriple == 'host' || buildTriple == null) {
-                        throw new GradleException("Internal error: Docker build triple resolution failed for '${target}'.")
-                    }
-                    if (target == 'host') {
-                        logger.lifecycle("ARCP JNI docker host-target mapping: host -> ${buildTriple}")
-                    }
-                    runCargoBuildDocker(buildTriple)
-                } else {
-                    runCargoBuild(buildTriple)
-                }
-                def buildInfo = knownTargets[buildTriple]
-                if (buildInfo == null) {
-                    throw new GradleException("No artifact mapping for resolved build triple '${buildTriple}' (requested '${target}').")
-                }
-                File artifact = buildInfo.artifactPath()
-                if (!artifact.exists()) {
-                    throw new GradleException("Expected ARCP JNI artifact not found for '${target}': ${artifact}")
-                }
-                File targetDir = new File(outputDir, info.resourceDir as String)
-                targetDir.mkdirs()
-                copy {
-                    from artifact
-                    into targetDir
-                    rename { info.fileName as String }
-                }
-            } catch (Exception ex) {
-                if (canSkip) {
-                    def detail = (ex.message != null && !ex.message.trim().isEmpty())
-                            ? ex.message
-                            : ex.class.simpleName
-                    logger.warn("Skipping ARCP JNI target '${target}' (build failed: ${detail})")
-                    skippedTargets << target
-                    return
-                }
-                throw ex
-            }
-            builtTargets << target
+        if (!hostLibrary.isFile()) {
+            throw new GradleException("Host ARCP library missing at ${hostLibrary}; buildArcpNativeHost did not produce it.")
         }
-
-        if (builtTargets.isEmpty()) {
-            throw new GradleException("No ARCP JNI targets were built. Requested=${selectedTargets.join(', ')} skipped=${skippedTargets.join(', ')}")
+        copy {
+            from hostLibrary
+            into new File(root, "native/${hostResourceDir}")
         }
-        logger.lifecycle("ARCP JNI staged targets: ${builtTargets.join(', ')}")
-        if (!skippedTargets.isEmpty()) {
-            logger.lifecycle("ARCP JNI skipped optional targets: ${skippedTargets.join(', ')}")
+        logger.lifecycle("ARCP native library staged for ${hostResourceDir}")
+        if (roborioLibrary.isFile()) {
+            copy {
+                from roborioLibrary
+                into new File(root, "native/${ROBORIO_RESOURCE_DIR}")
+            }
+            logger.lifecycle("ARCP roboRIO library staged for ${ROBORIO_RESOURCE_DIR}")
+        } else {
+            logger.lifecycle("ARCP roboRIO library not built; run :athena-arcp:buildArcpNativeRoboRio to include it.")
         }
     }
 }
 
 sourceSets {
     main {
-        resources.srcDir(generatedNativeRoot)
+        resources.srcDir(nativeResourceRoot)
     }
 }
 
 tasks.named('processResources') {
-    dependsOn tasks.named('prepareArcpNativeResources')
+    dependsOn tasks.named('stageArcpNative')
 }
 
-// The sources jar packages the staged resource directory, so it must run after staging.
 tasks.named('sourcesJar') {
-    dependsOn tasks.named('prepareArcpNativeResources')
+    dependsOn tasks.named('stageArcpNative')
 }
 
-tasks.register('arcpNativeCrossBuild') {
-    group = 'build'
-    description = 'Forces vendor cross-build matrix (armv7 + linux x86_64 + linux aarch64 + windows x86_64).'
-    doFirst {
-        if (nativeMode == 'none') {
-            throw new GradleException("arcpNativeCrossBuild requires natives enabled (set -ParcpNativeMode=vendor or provide -ParcpJniTargets).")
-        }
+test {
+    // Golden vectors live at docs/wire-vectors (shared with the Rust arcp-core tests).
+    systemProperty 'athena.repoRoot', rootProject.projectDir.absolutePath
+    if (skipNative) {
+        exclude 'ca/frc6390/athena/arcp/NativeArcpServerTest*'
     }
-    dependsOn tasks.named('prepareArcpNativeResources')
 }
 
-// Keep ARCP out of default publishing (buildAndPublish / publishToLocalWpilib) unless -ParcpPublish=true.
+// ARCP stays out of Maven Local unless explicitly requested (see the root publishing tasks).
 tasks.matching { it.name.startsWith('publish') && it.name.endsWith('ToMavenLocal') }.configureEach {
     enabled = arcpPublishEnabled
 }
