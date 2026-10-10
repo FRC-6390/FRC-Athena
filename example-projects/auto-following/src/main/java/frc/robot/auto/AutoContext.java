@@ -1,8 +1,7 @@
 package frc.robot.auto;
 
 import ca.frc6390.athena.vendor.choreo.ChoreoPathProvider;
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import ca.frc6390.athena.wpilib.geometry.AllianceTransform;
 
 /** Shared dependencies passed to every one-file auto example. */
 public final class AutoContext {
@@ -15,6 +14,6 @@ public final class AutoContext {
         this.drive = drive;
         choreo = ChoreoPathProvider.swerve(
                 drive.pathFollower,
-                () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red);
+                AllianceTransform::isRedAlliance);
     }
 }

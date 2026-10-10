@@ -24,6 +24,12 @@ swerve odometry -----------------------> estimatedFieldPose
 
 `LocalizationExamples.pose()` exposes the final result as `Pose2d`. Start preserves the current translation and resets the complete localization chain to zero heading. Back resets it to the example field pose `(2 m, 4 m, 0 rad)`.
 
+## Alliance geometry
+
+`LocalizationExamples.ALLIANCE` is an `AllianceTransform.rotate180(...)` over the field size. `blueStartPose` is a
+blue-side pose that resolves to the red side on red. `resetHeadingForAlliance()` zeroes heading relative to the
+alliance, so forward is toward the far wall for each alliance. `resetHeading()` keeps its field-zero behavior.
+
 ## Drive and hardware
 
 The drivetrain uses `HardwareBus.rio()`, filled SDS module slots, absolute CANcoder offsets, brake mode, current `ControlSignal` bindings, and a teleop-only `Events.teleopPeriodic()` drive action. Replace the zero module offsets before using real hardware. Athena steering PID and drive feedforward outputs are volts.

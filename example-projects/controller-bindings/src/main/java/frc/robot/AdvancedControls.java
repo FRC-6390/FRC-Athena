@@ -58,6 +58,13 @@ public final class AdvancedControls implements Mechanism {
         ControlSignals.noneOf(operator.leftBumper(), operator.rightBumper())
                 .onTrue(() -> serviceMode = false);
 
+        // Binding set: these bindings exist only while service mode is on. Outside service mode the POV buttons do
+        // nothing here, and bindings made directly on the operator controller are never gated by the set.
+        operator.in(() -> serviceMode, pad -> {
+            pad.povLeft().whileTrue(robot.intake.collect).onFalse(robot.intake.stop);
+            pad.povRight().whileTrue(robot.intake.eject).onFalse(robot.intake.stop);
+        });
+
         ControlSignals.chord(operator.back(), operator.start())
                 .within(Duration.ofMillis(200))
                 .onTrue(() -> robot.athena().schedule(wpilibCommand));
