@@ -113,7 +113,7 @@ public class TelemetrySchemaBenchmark {
     private static final class AxisMechanism implements Mechanism {
         private final MotorDevice motor;
         private final EncoderDevice encoder;
-        private final ControlBinding position;
+        private final ControlBinding<?> position;
         public final Action hold;
 
         private final TelemetryValue testOutput = TelemetryValue.number(0.25);

@@ -68,7 +68,7 @@ class PersistentControlBindingTest {
 
     private static final class ControlledMechanism implements Mechanism {
         private final MotorDevice motor = MOTOR;
-        private final ControlBinding position;
+        private final ControlBinding<?> position;
         private final Action firstTarget;
         private final Action secondTarget;
 

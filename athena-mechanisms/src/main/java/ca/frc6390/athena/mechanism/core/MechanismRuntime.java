@@ -587,7 +587,7 @@ final class MechanismRuntime {
                                 + "' outside its compiled resource graph. Add it to the computed action ownership.");
             }
         }
-        ControlBinding control = request.control();
+        ControlBinding<?> control = request.control();
         if (control != null && control.sink() != null && !reservedResources.contains(control.sink())) {
             throw new IllegalStateException(
                     "Action emitted a control sink outside its compiled resource graph. "
@@ -650,7 +650,7 @@ final class MechanismRuntime {
         node.declarations().values().forEach(declaration -> {
             if (declaration instanceof MotorDevice motor) {
                 motors.add(motor);
-            } else if (declaration instanceof ControlBinding control) {
+            } else if (declaration instanceof ControlBinding<?> control) {
                 motors.addAll(control.motors());
             }
         });
@@ -1630,7 +1630,7 @@ final class MechanismRuntime {
             if (target == null || !Double.isFinite(target.value())) {
                 return false;
             }
-            ControlBinding control = target.control();
+            ControlBinding<?> control = target.control();
             double measurement = RuntimeHardwareAccess.call(actionContext, () -> switch (target.mode()) {
                 case POSITION -> feedbackPosition(control);
                 case VELOCITY -> feedbackVelocity(control);
@@ -1656,7 +1656,7 @@ final class MechanismRuntime {
          * complete for out-of-range targets. Returns NaN when the request is rejected.
          */
         private double constrainedTarget(ControlTarget target, double measurement, MechanismContext context) {
-            ControlBinding control = target.control();
+            ControlBinding<?> control = target.control();
             RuntimeOverrides.ControlTuning tuning = overrides.tuning(control);
             if (target.mode() == ControlMode.POSITION) {
                 double requested = target.value();
@@ -1681,14 +1681,14 @@ final class MechanismRuntime {
             return result.accepted() ? result.value() : Double.NaN;
         }
 
-        private double feedbackPosition(ControlBinding control) {
+        private double feedbackPosition(ControlBinding<?> control) {
             if (control.feedback() != null) {
                 return RuntimeHardwareAccess.call(actionContext, control.feedback().position()::position);
             }
             return actionContext.motor(control.output()).integratedPositionRotations();
         }
 
-        private double feedbackVelocity(ControlBinding control) {
+        private double feedbackVelocity(ControlBinding<?> control) {
             if (control.feedback() != null) {
                 return RuntimeHardwareAccess.call(actionContext, control.feedback().velocity()::velocity);
             }
@@ -1752,7 +1752,7 @@ final class MechanismRuntime {
             DEADLINE
         }
 
-        private record ControlTarget(ControlBinding control, ControlMode mode, double value) {
+        private record ControlTarget(ControlBinding<?> control, ControlMode mode, double value) {
         }
 
         private static final class Evaluation {

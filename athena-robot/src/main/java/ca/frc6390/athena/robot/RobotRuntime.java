@@ -71,7 +71,7 @@ public final class RobotRuntime implements AutoCloseable {
     private final Set<CameraDevice> registeredCameras =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final Set<SimModel> registeredSimulationModels = new LinkedHashSet<>();
-    private final Set<ControlBinding> registeredSimulationControls =
+    private final Set<ControlBinding<?>> registeredSimulationControls =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final Set<MotorDevice> modeledSimulationMotors = new LinkedHashSet<>();
     private RuntimeWorkers workers = RuntimeWorkers.none();
@@ -299,7 +299,7 @@ public final class RobotRuntime implements AutoCloseable {
                 simulationSession.model("mechanism-" + registeredSimulationModels.size(), model);
             }
         }
-        for (ControlBinding control : mechanisms.controlBindings()) {
+        for (ControlBinding<?> control : mechanisms.controlBindings()) {
             if (registeredSimulationControls.contains(control)
                     || control.motors().isEmpty()
                     || control.motors().stream().anyMatch(modeledSimulationMotors::contains)) {

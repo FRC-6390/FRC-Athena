@@ -22,7 +22,7 @@ public final class ControlSysId {
     private static final double DEFAULT_STEP_VOLTAGE = 7.0;
     private static final double DEFAULT_TIMEOUT = 10.0;
 
-    private final ControlBinding control;
+    private final ControlBinding<?> control;
     private final String name;
     private final SysIdUnit unit;
     private final double rampRateVoltsPerSecond;
@@ -33,7 +33,7 @@ public final class ControlSysId {
     private boolean active;
 
     private ControlSysId(
-            ControlBinding control,
+            ControlBinding<?> control,
             String name,
             SysIdUnit unit,
             double rampRateVoltsPerSecond,
@@ -49,8 +49,8 @@ public final class ControlSysId {
         this.configuredLog = configuredLog;
     }
 
-    public static ControlSysId forControl(ControlBinding control) {
-        ControlBinding safeControl = Objects.requireNonNull(control, "control");
+    public static ControlSysId forControl(ControlBinding<?> control) {
+        ControlBinding<?> safeControl = Objects.requireNonNull(control, "control");
         if (safeControl.output() == null) {
             throw new IllegalStateException("SysId requires a control output motor.");
         }
@@ -126,7 +126,7 @@ public final class ControlSysId {
     }
 
     /** Returns the characterized control binding. */
-    public ControlBinding control() {
+    public ControlBinding<?> control() {
         return control;
     }
 
@@ -212,7 +212,7 @@ public final class ControlSysId {
         return new ControlSysId(control, name, unit, rampRate, stepVoltage, timeout, log);
     }
 
-    private static SysIdUnit inferUnit(ControlBinding control) {
+    private static SysIdUnit inferUnit(ControlBinding<?> control) {
         if (control.feedback().position() instanceof EncoderDevice encoder) {
             return switch (encoder.units()) {
                 case DEGREES -> SysIdUnit.DEGREES;

@@ -124,7 +124,7 @@ final class OutputResolver {
             resolveRequest(outputRequest(null, null, dynamic.output().apply(context)), outputs);
             return;
         }
-        ControlBinding control = control(action);
+        ControlBinding<?> control = control(action);
         MotorDevice motor = motor(action);
         if (!available(control, motor)) return;
         Output output = output(action);
@@ -191,7 +191,7 @@ final class OutputResolver {
 
     private static List<Object> resources(OutputRequest request) {
         List<Object> resources = new ArrayList<>();
-        ControlBinding control = request.control();
+        ControlBinding<?> control = request.control();
         if (control != null) {
             resources.addAll(control.motors());
             if (control.sink() != null) resources.add(control.sink());
@@ -207,12 +207,12 @@ final class OutputResolver {
         }
     }
 
-    private OutputRequest outputRequest(ControlBinding control, MotorDevice motor, Output output) {
+    private OutputRequest outputRequest(ControlBinding<?> control, MotorDevice motor, Output output) {
         if (output == null || !available(control, motor)) return null;
         return request(control, motor, output);
     }
 
-    private boolean available(ControlBinding control, MotorDevice motor) {
+    private boolean available(ControlBinding<?> control, MotorDevice motor) {
         if (control != null && (overrides.disabled(control)
                 || (control.output() != null && overrides.disabled(control.output())))) {
             return false;
@@ -224,7 +224,7 @@ final class OutputResolver {
         return true;
     }
 
-    private static OutputRequest request(ControlBinding control, MotorDevice motor, Output output) {
+    private static OutputRequest request(ControlBinding<?> control, MotorDevice motor, Output output) {
         if (control != null) {
             return OutputRequest.of(control, output);
         }
@@ -252,7 +252,7 @@ final class OutputResolver {
                 || action instanceof Actions.ControlVelocity;
     }
 
-    private static ControlBinding control(Action action) {
+    private static ControlBinding<?> control(Action action) {
         if (action instanceof Actions.ControlNeutral controlState) {
             return controlState.control();
         }

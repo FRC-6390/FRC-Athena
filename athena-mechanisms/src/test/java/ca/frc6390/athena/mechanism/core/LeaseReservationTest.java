@@ -148,7 +148,7 @@ class LeaseReservationTest {
     private static final class DriveRobot implements Mechanism {
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
-        private final ControlBinding heading = Controls.position(angular)
+        private final ControlBinding<?> heading = Controls.position(angular)
                 .feedback(() -> 0.0)
                 .pid(1.0, 0.0, 0.0)
                 .constraint(Constraints.clamp(0.5));

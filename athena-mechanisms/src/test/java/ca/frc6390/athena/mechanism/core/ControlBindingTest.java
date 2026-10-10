@@ -38,8 +38,8 @@ class ControlBindingTest {
         MotorDevice second = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
         MotorDevice third = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
 
-        ControlBinding position = Controls.position(first, second, third);
-        ControlBinding velocity = Controls.velocity(first, second, third);
+        ControlBinding<?> position = Controls.position(first, second, third);
+        ControlBinding<?> velocity = Controls.velocity(first, second, third);
 
         assertEquals(List.of(first, second, third), position.motors());
         assertEquals(List.of(first, second, third), velocity.motors());
@@ -51,7 +51,7 @@ class ControlBindingTest {
     void positionFactoryAcceptsScalarSinkAndContinuousInput() {
         RobotVelocityPool.AngularChannel angular = new RobotVelocityPool().angularChannel();
 
-        ControlBinding control = Controls.position(angular)
+        ControlBinding<?> control = Controls.position(angular)
                 .feedback(() -> 0.0, () -> 0.0)
                 .continuous(-Math.PI, Math.PI)
                 .constraint(Constraints.clamp(2.0));
@@ -68,7 +68,7 @@ class ControlBindingTest {
     void motorsArePrecomputedAndImmutable() {
         MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
-        ControlBinding control = new ControlBinding(ControlMode.POSITION, null, null, null, null, null)
+        ControlBinding<?> control = new ControlBinding<>(ControlMode.POSITION, null, null, null, null, null)
                 .output(leader)
                 .follower(follower);
 
@@ -84,7 +84,7 @@ class ControlBindingTest {
         MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
 
-        ControlBinding control = Controls.position(leader)
+        ControlBinding<?> control = Controls.position(leader)
                 .slot(-1)
                 .follower(follower)
                 .slot(3)
@@ -99,7 +99,7 @@ class ControlBindingTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2);
 
-        ControlBinding control = Controls.position(motor).feedback(encoder);
+        ControlBinding<?> control = Controls.position(motor).feedback(encoder);
 
         assertSame(encoder, control.feedback().position());
         assertSame(encoder, control.feedback().velocity());
@@ -113,7 +113,7 @@ class ControlBindingTest {
         VelocitySignal velocity = () -> -3.0;
         FeedbackBinding feedback = new FeedbackBinding(position, velocity);
 
-        ControlBinding control = Controls.position(motor).feedback(feedback);
+        ControlBinding<?> control = Controls.position(motor).feedback(feedback);
 
         assertSame(feedback, control.feedback());
         assertSame(position, control.feedback().position());
@@ -128,7 +128,7 @@ class ControlBindingTest {
             @Override public List<?> dependencies() { return List.of(dependency); }
         };
 
-        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
                 .feedback(position);
 
         assertSame(position, control.feedback().position());
@@ -140,7 +140,7 @@ class ControlBindingTest {
     void measurementsAndTargetConditionsUseConfiguredFeedback() {
         double[] position = {0.08};
         double[] velocity = {1.5};
-        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
                 .feedback(() -> position[0], () -> velocity[0]);
         var atExtended = control.at(0.10, 0.025);
 
@@ -157,9 +157,9 @@ class ControlBindingTest {
 
     @Test
     void velocityConditionsUseVelocityFeedbackAndValidateConfiguration() {
-        ControlBinding velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
+        ControlBinding<?> velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
                 .feedback(() -> 4.0, () -> 19.5);
-        ControlBinding unconfigured = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 2));
+        ControlBinding<?> unconfigured = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 2));
 
         assertEquals(19.5, velocity.measurement(), 1.0e-9);
         assertEquals(true, velocity.isAt(20.0, 0.5));
@@ -184,7 +184,7 @@ class ControlBindingTest {
         PidGains finalPid = PidGains.of(2.0, 0.5, 0.1).iZone(3.0);
         FeedforwardGains finalFeedforward = FeedforwardGains.of(0.2, 1.5, 0.4, 0.6);
 
-        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1))
                 .loop(custom)
                 .pid(1.0, 0.0, 0.0)
                 .ff(0.1, 1.0, 0.2)
@@ -214,8 +214,8 @@ class ControlBindingTest {
 
     @Test
     void targetFactoriesEnforceControlModeAndFiniteValues() {
-        ControlBinding position = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
-        ControlBinding velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 2));
+        ControlBinding<?> position = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
+        ControlBinding<?> velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 2));
 
         assertInstanceOf(Actions.ControlPosition.class, position.set(2.0));
         assertInstanceOf(Actions.ControlVelocity.class, velocity.set(3.0));
@@ -243,14 +243,14 @@ class ControlBindingTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 3);
-        ControlBinding original = Controls.position(motor)
+        ControlBinding<?> original = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.2, 0.01, 0.03)
                 .ff(0.1, 0.2, 0.3)
                 .constraint(Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-1.0, 1.0)))
                 .dependency(encoder);
 
-        ControlBinding copied = original.follower(follower).slot(2);
+        ControlBinding<?> copied = original.follower(follower).slot(2);
 
         assertEquals(List.of(), original.followers());
         assertEquals(List.of(follower), copied.followers());
@@ -269,7 +269,7 @@ class ControlBindingTest {
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
         MotorDevice unrelated = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
 
-        ControlBinding control = new ControlBinding(
+        ControlBinding<?> control = new ControlBinding<>(
                 ControlMode.POSITION,
                 leader,
                 0,
@@ -289,7 +289,7 @@ class ControlBindingTest {
     void motorTargetsRejectSelfFollowingAndDuplicates() {
         MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 2);
-        ControlBinding control = Controls.position(leader).follower(follower);
+        ControlBinding<?> control = Controls.position(leader).follower(follower);
 
         assertThrows(IllegalArgumentException.class, () -> Controls.position(leader).follower(leader));
         assertThrows(IllegalArgumentException.class, () -> control.follower(follower));
@@ -298,7 +298,7 @@ class ControlBindingTest {
 
     @Test
     void incompleteAndNullConfigurationsFailClearly() {
-        ControlBinding incomplete = Controls.of(ControlMode.POSITION);
+        ControlBinding<?> incomplete = Controls.of(ControlMode.POSITION);
 
         assertThrows(NullPointerException.class, () -> Controls.of(null));
         assertThrows(IllegalStateException.class, () -> incomplete.position(1.0));
@@ -312,7 +312,7 @@ class ControlBindingTest {
 
     @Test
     void positionOnlyFeaturesRejectVelocityBindings() {
-        ControlBinding velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
+        ControlBinding<?> velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
 
         assertThrows(IllegalStateException.class,
                 () -> velocity.profile(MotionProfiles.trapezoid(1.0, 1.0)));

@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * Runtime binding data available when a control-loop ref is activated.
  */
-public record ControlLoopBinding(ControlBinding control, ActionContext actionContext) {
+public record ControlLoopBinding(ControlBinding<?> control, ActionContext actionContext) {
     public ControlLoopBinding {
         Objects.requireNonNull(control, "control");
         actionContext = actionContext == null ? ActionContext.empty() : actionContext;

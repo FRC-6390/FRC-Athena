@@ -1,7 +1,10 @@
 package ca.frc6390.athena.mechanism.constraint;
 
 import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
+import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.Unit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -20,9 +23,77 @@ public final class Constraints {
         return new RangeConstraint(Objects.requireNonNull(range, "range"));
     }
 
+    /**
+     * Typed range limit. Both bounds must measure the same dimension (for example degrees); the
+     * constraint is converted to the binding's unit when attached to a unit-typed control binding.
+     *
+     * @param minimum lower bound measure
+     * @param maximum upper bound measure
+     * @return range constraint in the bounds' dimension
+     */
+    public static Constraint<Double> range(Measure<?> minimum, Measure<?> maximum) {
+        Objects.requireNonNull(minimum, "minimum");
+        Objects.requireNonNull(maximum, "maximum");
+        if (!UnitConversions.sameDimension(minimum.unit(), maximum.unit())) {
+            throw new IllegalArgumentException("Range bounds must measure the same dimension.");
+        }
+        double low = minimum.baseUnitMagnitude();
+        double high = maximum.baseUnitMagnitude();
+        if (!(low <= high)) {
+            throw new IllegalArgumentException("Range minimum must not exceed maximum.");
+        }
+        return new TypedRangeConstraint(minimum.unit(), low, high);
+    }
+
     /** Declares maximum reference velocity and acceleration for a control. */
     public static Constraint<Double> motion(double maximumVelocity, double maximumAcceleration) {
         return new MotionConstraint(new MotionProfile(maximumVelocity, maximumAcceleration));
+    }
+
+    /**
+     * Typed motion limits. {@code maximumVelocity} measures a rate of the control's unit (for example
+     * degrees per second); {@code maximumAcceleration} measures a rate of that rate. Converted when
+     * attached to a unit-typed control binding.
+     *
+     * @param maximumVelocity maximum velocity measure
+     * @param maximumAcceleration maximum acceleration measure
+     * @return motion constraint in the measures' dimension
+     */
+    public static Constraint<Double> motion(Measure<?> maximumVelocity, Measure<?> maximumAcceleration) {
+        Objects.requireNonNull(maximumVelocity, "maximumVelocity");
+        Objects.requireNonNull(maximumAcceleration, "maximumAcceleration");
+        double velocity = maximumVelocity.baseUnitMagnitude();
+        double acceleration = maximumAcceleration.baseUnitMagnitude();
+        // Validates positivity exactly as MotionProfile does, in base units.
+        new MotionProfile(velocity, acceleration);
+        return new TypedMotionConstraint(maximumVelocity.unit(), maximumAcceleration.unit(), velocity, acceleration);
+    }
+
+    private record TypedRangeConstraint(Unit dimension, double minimumBase, double maximumBase)
+            implements UnitConstraint {
+        @Override
+        public Constraint<Double> expressedIn(Unit unit) {
+            if (!UnitConversions.sameDimension(dimension, unit)) {
+                throw new IllegalArgumentException("Range limits measure " + dimension.name()
+                        + " and cannot be applied to " + unit.name() + ".");
+            }
+            return range(Range.of(unit.fromBaseUnits(minimumBase), unit.fromBaseUnits(maximumBase)));
+        }
+    }
+
+    private record TypedMotionConstraint(Unit velocityUnit, Unit accelerationUnit, double velocityBase,
+            double accelerationBase) implements UnitConstraint {
+        @Override
+        public Constraint<Double> expressedIn(Unit unit) {
+            Unit perSecond = UnitConversions.perSecond(unit);
+            if (!UnitConversions.sameDimension(velocityUnit, perSecond)
+                    || !UnitConversions.sameDimension(accelerationUnit, UnitConversions.perSecond(perSecond))) {
+                throw new IllegalArgumentException("Motion limits measure " + velocityUnit.name() + " and "
+                        + accelerationUnit.name() + " and cannot be applied to " + unit.name() + ".");
+            }
+            double scale = UnitConversions.baseScale(unit);
+            return motion(velocityBase / scale, accelerationBase / scale);
+        }
     }
 
     private record RangeConstraint(Range range) implements Constraint<Double> {

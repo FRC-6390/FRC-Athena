@@ -188,23 +188,23 @@ class MechanismTelemetryTest {
         final ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 2);
         final PidGains pid = PidGains.of(1.0, 0.0, 0.0);
         final FeedforwardGains feedforward = FeedforwardGains.of(0.0, 1.0, 0.0, 0.0);
-        final ControlBinding control = Controls.position(motor)
+        final ControlBinding<?> control = Controls.position(motor)
                 .feedback(encoder).pid(pid).feedforward(feedforward);
         final TelemetryValue position = TelemetryValue.number(encoder::position);
         final Action run = control.percent(0.5);
     }
 
     private static final class ControlOnlyMechanism implements Mechanism {
-        final ControlBinding control = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 9));
+        final ControlBinding<?> control = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 9));
     }
 
     private static final class EmbeddedLoopMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 10);
-        final ControlBinding control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
     }
 
     private static final class InterpolationTelemetryMechanism implements Mechanism {
-        private final ControlBinding velocity = Controls.velocity(
+        private final ControlBinding<?> velocity = Controls.velocity(
                 MotorDevice.of(MotorKinds.KRAKEN_X60, 11));
         public final Action shot = velocity
                 .interpolate(ca.frc6390.athena.mechanism.interpolation.InterpolationKinds.LINEAR, () -> 2.0)

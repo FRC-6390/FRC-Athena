@@ -117,7 +117,7 @@ final class RobotGraph {
                         () -> scheduler != null && scheduler.isComplete(action)));
         });
         inspected.declarations().forEach((declarationName, declaration) -> {
-            if (!(declaration instanceof ControlBinding control) || control.output() == null) return;
+            if (!(declaration instanceof ControlBinding<?> control) || control.output() == null) return;
             MutableTelemetryNode testNode = ownedNode
                     .child(TelemetrySchema.Group.CONTROLS.path(), TelemetryNode.Kind.GROUP)
                     .child(declarationName, TelemetryNode.Kind.GROUP)
@@ -272,7 +272,7 @@ final class RobotGraph {
             values.put(inputInfo + "/DeclaredInverted", TelemetryValue.bool(input::isInverted));
             values.put(mechanismPath + "/Devices/" + valuePath + "/Setup/ClearEdges",
                     TelemetryValue.command(input::clearLatchedEdges));
-        } else if (declaration instanceof ControlBinding control) {
+        } else if (declaration instanceof ControlBinding<?> control) {
             String controlPath = mechanismPath + "/Controls/" + valuePath;
             values.put(controlPath + "/Config/Disabled", overrides.controlDisabled(control));
             values.put(controlPath + "/State/Mode", TelemetryValue.string(() -> control.mode().name()));
@@ -537,7 +537,7 @@ final class RobotGraph {
         return false;
     }
 
-    private static void collectControlDeclarations(ControlBinding control, Set<Object> declarations) {
+    private static void collectControlDeclarations(ControlBinding<?> control, Set<Object> declarations) {
         declarations.addAll(control.motors());
         if (control.feedback() != null) {
             declarations.addAll(control.feedback().dependencies());
@@ -562,7 +562,7 @@ final class RobotGraph {
             return;
         }
         declarations.add(declaration);
-        if (declaration instanceof ControlBinding control) {
+        if (declaration instanceof ControlBinding<?> control) {
             collectControlDeclarations(control, declarations);
         } else if (declaration instanceof SimModel simulation) {
             collectSimDeclarations(simulation, declarations);

@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import edu.wpi.first.units.Measure;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.sysid.SysIdState;
@@ -35,7 +36,7 @@ public final class Actions {
         return NEUTRAL;
     }
 
-    static Action neutral(ControlBinding control) {
+    static Action neutral(ControlBinding<?> control) {
         return new ControlNeutral(control);
     }
 
@@ -51,11 +52,11 @@ public final class Actions {
         return new DynamicMotorPercent(motor, percent);
     }
 
-    static Action percent(ControlBinding control, double percent) {
+    static Action percent(ControlBinding<?> control, double percent) {
         return new ControlPercent(control, percent);
     }
 
-    static Action percent(ControlBinding control, DoubleSupplier percent) {
+    static Action percent(ControlBinding<?> control, DoubleSupplier percent) {
         return new DynamicControlPercent(control, percent);
     }
 
@@ -67,11 +68,11 @@ public final class Actions {
         return new DynamicMotorVoltage(motor, volts);
     }
 
-    static Action voltage(ControlBinding control, double volts) {
+    static Action voltage(ControlBinding<?> control, double volts) {
         return new ControlVoltage(control, volts);
     }
 
-    static Action voltage(ControlBinding control, DoubleSupplier volts) {
+    static Action voltage(ControlBinding<?> control, DoubleSupplier volts) {
         return new DynamicControlVoltage(control, volts);
     }
 
@@ -102,19 +103,19 @@ public final class Actions {
         throw new IllegalArgumentException("Device action was not created by Athena mechanisms.");
     }
 
-    static Action position(ControlBinding control, double position) {
+    static Action position(ControlBinding<?> control, double position) {
         return new ControlPosition(control, position);
     }
 
-    static Action position(ControlBinding control, DoubleSupplier position) {
+    static Action position(ControlBinding<?> control, DoubleSupplier position) {
         return new DynamicControlPosition(control, position);
     }
 
-    static Action velocity(ControlBinding control, double velocity) {
+    static Action velocity(ControlBinding<?> control, double velocity) {
         return new ControlVelocity(control, velocity);
     }
 
-    static Action velocity(ControlBinding control, DoubleSupplier velocity) {
+    static Action velocity(ControlBinding<?> control, DoubleSupplier velocity) {
         return new DynamicControlVelocity(control, velocity);
     }
 
@@ -254,6 +255,32 @@ public final class Actions {
         return new WithinTolerance(action, tolerance);
     }
 
+    /** Typed tolerance; converted with the action's control binding unit at declaration. */
+    public static Action untilWithin(Action action, Measure<?> tolerance) {
+        Objects.requireNonNull(tolerance, "tolerance");
+        ControlBinding<?> control = toleranceControl(action);
+        return new WithinTolerance(action, control.modeValue(tolerance));
+    }
+
+    private static ControlBinding<?> toleranceControl(Action action) {
+        if (action instanceof ControlPosition position) {
+            return position.control();
+        }
+        if (action instanceof DynamicControlPosition position) {
+            return position.control();
+        }
+        if (action instanceof ControlVelocity velocity) {
+            return velocity.control();
+        }
+        if (action instanceof DynamicControlVelocity velocity) {
+            return velocity.control();
+        }
+        if (action instanceof InterpolatedControlAction interpolated) {
+            return interpolated.control();
+        }
+        throw new IllegalArgumentException("untilWithin requires one position or velocity control action.");
+    }
+
     public static Action then(Action action, Action next) {
         Objects.requireNonNull(next, "next");
         if (action instanceof Action.Conditional conditional) {
@@ -271,7 +298,7 @@ public final class Actions {
     public record Neutral() implements Action, Output.Neutral {
     }
 
-    public record ControlNeutral(ControlBinding control) implements Action, Output.Neutral {
+    public record ControlNeutral(ControlBinding<?> control) implements Action, Output.Neutral {
         public ControlNeutral {
             Objects.requireNonNull(control, "control");
         }
@@ -319,7 +346,7 @@ public final class Actions {
         }
     }
 
-    public record ControlPercent(ControlBinding control, double percent) implements Action, Output.Percent {
+    public record ControlPercent(ControlBinding<?> control, double percent) implements Action, Output.Percent {
         public ControlPercent {
             Objects.requireNonNull(control, "control");
             requireControlOutput(control);
@@ -327,7 +354,7 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlPercent(ControlBinding control, DoubleSupplier percentSupplier) implements Action, Output.Percent {
+    public record DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier) implements Action, Output.Percent {
         public DynamicControlPercent {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(percentSupplier, "percentSupplier");
@@ -340,7 +367,7 @@ public final class Actions {
         }
     }
 
-    public record ControlVoltage(ControlBinding control, double volts) implements Action, Output.Voltage {
+    public record ControlVoltage(ControlBinding<?> control, double volts) implements Action, Output.Voltage {
         public ControlVoltage {
             Objects.requireNonNull(control, "control");
             requireControlOutput(control);
@@ -348,7 +375,7 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlVoltage(ControlBinding control, DoubleSupplier voltsSupplier) implements Action, Output.Voltage {
+    public record DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier) implements Action, Output.Voltage {
         public DynamicControlVoltage {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(voltsSupplier, "voltsSupplier");
@@ -386,7 +413,7 @@ public final class Actions {
         }
     }
 
-    public record ControlPosition(ControlBinding control, double position) implements Action, Output.Position {
+    public record ControlPosition(ControlBinding<?> control, double position) implements Action, Output.Position {
         public ControlPosition {
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.POSITION);
@@ -394,7 +421,7 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlPosition(ControlBinding control, DoubleSupplier positionSupplier) implements Action, Output.Position {
+    public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier) implements Action, Output.Position {
         public DynamicControlPosition {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(positionSupplier, "positionSupplier");
@@ -407,7 +434,7 @@ public final class Actions {
         }
     }
 
-    public record ControlVelocity(ControlBinding control, double velocity) implements Action, Output.Velocity {
+    public record ControlVelocity(ControlBinding<?> control, double velocity) implements Action, Output.Velocity {
         public ControlVelocity {
             Objects.requireNonNull(control, "control");
             requireControlMode(control, ControlMode.VELOCITY);
@@ -415,7 +442,7 @@ public final class Actions {
         }
     }
 
-    public record DynamicControlVelocity(ControlBinding control, DoubleSupplier velocitySupplier) implements Action, Output.Velocity {
+    public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier) implements Action, Output.Velocity {
         public DynamicControlVelocity {
             Objects.requireNonNull(control, "control");
             Objects.requireNonNull(velocitySupplier, "velocitySupplier");
@@ -1014,13 +1041,13 @@ public final class Actions {
         return false;
     }
 
-    private static void requireControlOutput(ControlBinding control) {
+    private static void requireControlOutput(ControlBinding<?> control) {
         if (control.output() == null && control.sink() == null) {
             throw new IllegalStateException("Control actions require an output destination.");
         }
     }
 
-    private static void requireControlMode(ControlBinding control, ControlMode required) {
+    private static void requireControlMode(ControlBinding<?> control, ControlMode required) {
         requireControlOutput(control);
         if (control.mode() != required) {
             throw new IllegalStateException(required.name().toLowerCase(java.util.Locale.ROOT)

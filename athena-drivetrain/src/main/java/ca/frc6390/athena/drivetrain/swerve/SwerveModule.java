@@ -27,8 +27,8 @@ public abstract class SwerveModule implements MechanismTemplate {
     public final MotorSlot<SwerveModule> drive = Slots.motor(this, "drive", this::configureIfReady);
     public final MotorSlot<SwerveModule> steer = Slots.motor(this, "steer", this::configureIfReady);
     public final EncoderSlot<SwerveModule> angle = Slots.encoder(this, "angle", this::configureIfReady);
-    public ControlBinding driveVelocity;
-    public ControlBinding steerPosition;
+    public ControlBinding<?> driveVelocity;
+    public ControlBinding<?> steerPosition;
     private double driveMaxSpeedMetersPerSecond = Double.NaN;
     private PidGains steerPid;
     private double heldAngleRotations = Double.NaN;

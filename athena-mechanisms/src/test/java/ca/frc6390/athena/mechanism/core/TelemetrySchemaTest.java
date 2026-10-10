@@ -225,13 +225,13 @@ class TelemetrySchemaTest {
 
     private static final class SysIdMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
-        private final ControlBinding control = Controls.position(motor).feedback(motor.encoder());
+        private final ControlBinding<?> control = Controls.position(motor).feedback(motor.encoder());
         public final ControlSysId sysId = control.sysId();
     }
 
     private static final class CommissioningMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4);
-        private final ControlBinding control = Controls.position(motor)
+        private final ControlBinding<?> control = Controls.position(motor)
                 .feedback(motor.encoder())
                 .constraints(
                         Constraints.range(Range.of(-1.0, 2.0)),
@@ -241,7 +241,7 @@ class TelemetrySchemaTest {
 
     private static final class VelocityCommissioningMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
-        private final ControlBinding control = Controls.velocity(motor)
+        private final ControlBinding<?> control = Controls.velocity(motor)
                 .feedback(motor.encoder())
                 .constraints(
                         Constraints.motion(10.0, 2.0),

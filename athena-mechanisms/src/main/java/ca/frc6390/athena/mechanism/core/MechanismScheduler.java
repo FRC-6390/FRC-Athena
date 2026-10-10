@@ -311,7 +311,7 @@ public final class MechanismScheduler {
             } catch (RuntimeException ignored) {
                 // A failed device may be unable to accept the neutral command.
             }
-        } else if (declaration instanceof ControlBinding control) {
+        } else if (declaration instanceof ControlBinding<?> control) {
             suppressFault(declaration, new LinkedHashSet<>(control.motors()));
         }
     }
@@ -325,7 +325,7 @@ public final class MechanismScheduler {
         Set<MotorDevice> motors = new LinkedHashSet<>();
         for (Object owned : graph.declarations(List.of(target.owner()))) {
             if (owned instanceof MotorDevice motor) motors.add(motor);
-            else if (owned instanceof ControlBinding control) motors.addAll(control.motors());
+            else if (owned instanceof ControlBinding<?> control) motors.addAll(control.motors());
         }
         suppressFault(declaration, motors);
         return true;
@@ -462,10 +462,10 @@ public final class MechanismScheduler {
      *
      * @return declared controls
      */
-    public Set<ControlBinding> controlBindings() {
-        Set<ControlBinding> controls = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    public Set<ControlBinding<?>> controlBindings() {
+        Set<ControlBinding<?>> controls = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
         for (Object declaration : graph.declarations(runtimes.keySet())) {
-            if (declaration instanceof ControlBinding control) {
+            if (declaration instanceof ControlBinding<?> control) {
                 controls.add(control);
             }
         }
@@ -511,7 +511,7 @@ public final class MechanismScheduler {
                 collectMotors(motor.follower().leader(), motors);
             }
             motors.add(motor);
-        } else if (declaration instanceof ControlBinding control) {
+        } else if (declaration instanceof ControlBinding<?> control) {
             control.motors().forEach(motor -> collectMotors(motor, motors));
         } else if (declaration instanceof Iterable<?> values) {
             values.forEach(value -> collectMotors(value, motors));
@@ -521,7 +521,7 @@ public final class MechanismScheduler {
     private static void collectEncoders(Object declaration, Set<EncoderDevice> encoders) {
         if (declaration instanceof EncoderDevice encoder) {
             encoders.add(encoder);
-        } else if (declaration instanceof ControlBinding control) {
+        } else if (declaration instanceof ControlBinding<?> control) {
             controlDeclarations(control).forEach(value -> collectEncoders(value, encoders));
         } else if (declaration instanceof Iterable<?> values) {
             values.forEach(value -> collectEncoders(value, encoders));
@@ -803,12 +803,12 @@ public final class MechanismScheduler {
     }
 
     private void collectOwnedResource(Object declaration, Set<Object> resources) {
-        if (declaration instanceof ControlBinding control && control.sink() != null) {
+        if (declaration instanceof ControlBinding<?> control && control.sink() != null) {
             resources.add(control.sink());
         }
         if (declaration instanceof MotorDevice motor) {
             resources.add(motor);
-        } else if (declaration instanceof ControlBinding control) {
+        } else if (declaration instanceof ControlBinding<?> control) {
             resources.addAll(control.motors());
         } else if (declaration instanceof Mechanism mechanism) {
             resources.addAll(resourcesFor(mechanism));
@@ -1318,7 +1318,7 @@ public final class MechanismScheduler {
             return;
         }
         declarationTargets.put(declaration, target);
-        if (declaration instanceof ControlBinding control) {
+        if (declaration instanceof ControlBinding<?> control) {
             for (Object dependency : controlDeclarations(control)) {
                 indexDeclarationTarget(dependency, target);
             }
@@ -1440,7 +1440,7 @@ public final class MechanismScheduler {
         }
     }
 
-    private static Set<Object> controlDeclarations(ControlBinding control) {
+    private static Set<Object> controlDeclarations(ControlBinding<?> control) {
         Set<Object> declarations = new LinkedHashSet<>();
         declarations.addAll(control.motors());
         if (control.feedback() != null) {
@@ -1456,7 +1456,7 @@ public final class MechanismScheduler {
         return declarations;
     }
 
-    private static ControlBinding control(Action action) {
+    private static ControlBinding<?> control(Action action) {
         if (action instanceof Actions.ControlNeutral control) {
             return control.control();
         }

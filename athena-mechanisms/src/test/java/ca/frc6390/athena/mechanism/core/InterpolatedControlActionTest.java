@@ -22,7 +22,7 @@ class InterpolatedControlActionTest {
     @Test
     void linearInterpolationSortsPointsInterpolatesAndClamps() {
         double[] input = {2.0};
-        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
         InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> input[0])
                 .at(3.0, 30.0)
                 .at(1.0, 10.0);
@@ -140,14 +140,14 @@ class InterpolatedControlActionTest {
     void schedulerOwnsAndAppliesInterpolatedControlActions() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         RecordingMotor handle = new RecordingMotor(motor);
-        ControlBinding control = Controls.position(motor)
+        ControlBinding<?> control = Controls.position(motor)
                 .constraint(Constraints.range(Range.of(0.0, 5.0)));
         InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> 2.0)
                 .at(1.0, 4.0)
                 .at(3.0, 8.0);
         Mechanism mechanism = new Mechanism() {
             @SuppressWarnings("unused")
-            private final ControlBinding position = control;
+            private final ControlBinding<?> position = control;
             @SuppressWarnings("unused")
             private final Action automatic = action;
         };
@@ -164,7 +164,7 @@ class InterpolatedControlActionTest {
 
     @Test
     void invalidTablesAndRuntimeValuesFailClearly() {
-        ControlBinding control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 6));
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 6));
         InterpolatedControlAction empty = control.interpolate(InterpolationKinds.LINEAR, () -> 0.0);
 
         assertThrows(IllegalStateException.class, empty::target);
