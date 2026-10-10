@@ -85,7 +85,6 @@ describe('hand-built E1-W vectors', () => {
         writable: true,
         persisted: true,
         lockGroup: '',
-        lockState: 'unknown',
         structSchemaId: 0
       }
     ]);

@@ -2,8 +2,8 @@
  * Little-endian primitive reader and writer for the ARCP v2 / replay format (E1-W).
  * Mirrors athena-runtime `ca.frc6390.athena.runtime.wire.WireReader` / `WireWriter`.
  *
- * 64-bit integers are represented as JavaScript numbers. Timestamps (micros) and sequence numbers stay
- * well inside the 2^53 safe range; i64 signal values beyond that range lose precision.
+ * 64-bit integers are numbers when exact. Timestamps (micros) and sequence numbers stay inside the 2^53
+ * safe range. i64 signal values use `zigzagBig` and are normalised by the decoder (see `I64Value`).
  */
 
 export class WireError extends Error {
@@ -93,6 +93,21 @@ export class WireReader {
   zigzag(): number {
     const raw = this.varint();
     return raw % 2 === 0 ? raw / 2 : -(raw + 1) / 2;
+  }
+
+  /** Signed zigzag varint as a bigint, for i64 values that may exceed 2^53. */
+  zigzagBig(): bigint {
+    let result = 0n;
+    let shift = 0n;
+    for (let i = 0; i < 10; i++) {
+      const byte = this.u8();
+      result |= BigInt(byte & 0x7f) << shift;
+      if ((byte & 0x80) === 0) {
+        return result % 2n === 0n ? result / 2n : -(result + 1n) / 2n;
+      }
+      shift += 7n;
+    }
+    throw new WireError('varint longer than 10 bytes', this.offset);
   }
 
   /** `varint byteLength` followed by UTF-8 bytes. */
@@ -197,6 +212,16 @@ export class WireWriter {
       throw new RangeError(`zigzag value must be an integer: ${value}`);
     }
     return this.varint(value >= 0 ? value * 2 : -value * 2 - 1);
+  }
+
+  /** Signed zigzag varint from a number or bigint. */
+  zigzagBig(value: bigint): this {
+    let raw = value >= 0n ? value * 2n : -value * 2n - 1n;
+    while (raw >= 0x80n) {
+      this.u8(Number(raw & 0x7fn) | 0x80);
+      raw >>= 7n;
+    }
+    return this.u8(Number(raw));
   }
 
   string(value: string): this {

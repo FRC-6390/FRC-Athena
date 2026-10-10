@@ -4,6 +4,7 @@ import type { SignalValue } from './data/types';
 export function formatValue(value: SignalValue | undefined): string {
   if (value === undefined) return '--';
   if (typeof value === 'number') return formatNumber(value);
+  if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'string') return value.length > 0 ? value : '""';
   if (Array.isArray(value)) {
@@ -11,6 +12,7 @@ export function formatValue(value: SignalValue | undefined): string {
     const items = value.map((v) => (typeof v === 'number' ? formatNumber(v) : String(v)));
     return `[${items.join(', ')}]`;
   }
+  if (!('schemaId' in value)) return String(value);
   return `struct #${value.schemaId} (${value.bytes.length} B)`;
 }
 

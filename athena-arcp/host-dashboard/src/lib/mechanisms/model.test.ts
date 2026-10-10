@@ -20,7 +20,6 @@ function mockDictionary(): SignalDescriptor[] {
     writable: spec.writable,
     persisted: spec.persisted,
     lockGroup: spec.lockGroup,
-    lockState: 'unknown',
     structSchemaId: 0
   }));
 }

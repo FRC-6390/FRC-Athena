@@ -3,21 +3,35 @@
  * flywheel. Produces plausible State/Values/Actions/Devices/Controls/Hooks signals and applies writes
  * with the same lock rules the robot enforces (A2, E5).
  */
-import { TYPE_TAG, type LockState, type SignalType, type SignalValue, type TypeTag } from './types';
+import {
+  LOCK_PATH_PREFIX,
+  TYPE_TAG,
+  type SignalRole,
+  type SignalType,
+  type SignalValue,
+  type TypeTag
+} from './types';
 
 export type MockSpec = {
   path: string;
   type: SignalType;
   typeTag: TypeTag;
   unit: string;
-  role: 'state' | 'value' | 'control' | 'device' | 'action' | 'marker';
+  role: SignalRole;
   writable: boolean;
   persisted: boolean;
   lockGroup: string;
 };
 
-const IN_MATCH = 'InMatch';
-const NEVER = 'Never';
+/** Lock groups are identified by fully qualified class names on the wire (E1-W). */
+const IN_MATCH = 'ca.frc6390.athena.mock.InMatch';
+const NEVER = 'ca.frc6390.athena.mock.Never';
+
+/** Simple name of a lock group, as shown to people (`InMatch`). */
+export function lockGroupSimpleName(group: string): string {
+  const dot = group.lastIndexOf('.');
+  return dot < 0 ? group : group.slice(dot + 1);
+}
 
 function num(path: string, unit: string, role: MockSpec['role'], extra: Partial<MockSpec> = {}): MockSpec {
   return { path, type: 'f64', typeTag: TYPE_TAG.f64, unit, role, writable: false, persisted: false, lockGroup: '', ...extra };
@@ -80,8 +94,13 @@ export const MOCK_SPECS: MockSpec[] = [
   gain('robot/shooter/Controls/velocity/kP'),
   gain('robot/shooter/Controls/velocity/kV'),
   limit('robot/shooter/Controls/velocity/Constraints/maxAcceleration', 'rpm/s'),
-  flag('robot/shooter/Hooks/readyToShoot', 'state')
+  flag('robot/shooter/Hooks/readyToShoot', 'hook')
 ];
+
+/** Lock-state signal for a group: boolean, role `lock`, read-only (E1-W). */
+export function lockSpecFor(group: string): MockSpec {
+  return flag(LOCK_PATH_PREFIX + group, 'lock');
+}
 
 export const MATCH_PERIOD_SECONDS = 25;
 const TURRET_SPEED_LIMIT = 120;
@@ -95,6 +114,8 @@ export class MockRobot {
   matchActive = false;
   private readonly values = new Map<string, SignalValue>();
   private readonly specs = new Map<string, MockSpec>();
+  /** Lock-state signal path to the group it reports. */
+  private readonly lockPaths = new Map<string, string>();
   private homingUntil = -1;
   private turretPosition = 0;
   private turretReference = 0;
@@ -107,10 +128,21 @@ export class MockRobot {
   private nextMatchToggle = MATCH_PERIOD_SECONDS;
   private seed = 7;
 
-  constructor(readonly specList: readonly MockSpec[] = MOCK_SPECS) {
-    for (const spec of specList) {
+  readonly specList: readonly MockSpec[];
+
+  constructor(specs: readonly MockSpec[] = MOCK_SPECS) {
+    // Every lock group used by a writable signal gets its own role-7 signal, as the robot publishes it.
+    const groups = [...new Set(specs.filter((s) => s.writable && s.lockGroup).map((s) => s.lockGroup))];
+    const lockSpecs = groups.map(lockSpecFor).filter((spec) => !specs.some((s) => s.path === spec.path));
+    this.specList = [...specs, ...lockSpecs];
+    for (const spec of this.specList) {
       this.specs.set(spec.path, spec);
       this.values.set(spec.path, defaultValue(spec));
+    }
+    for (const group of groups) {
+      const path = LOCK_PATH_PREFIX + group;
+      this.lockPaths.set(path, group);
+      this.values.set(path, this.isLocked(group));
     }
     this.values.set('robot/turret/Values/target', 20);
     this.values.set('robot/turret/Controls/position/kP', 4.0);
@@ -137,13 +169,6 @@ export class MockRobot {
     return this.values.get(path) ?? '';
   }
 
-  /** Lock state of a signal at the current time; `unknown` for signals without a lock group. */
-  lockStateOf(path: string): LockState {
-    const spec = this.specs.get(path);
-    if (!spec || !spec.writable) return 'unknown';
-    return this.isLocked(spec.lockGroup) ? 'locked' : 'open';
-  }
-
   private isLocked(group: string): boolean {
     return group === IN_MATCH && this.matchActive;
   }
@@ -159,6 +184,7 @@ export class MockRobot {
     }
     this.stepTurret(dt);
     this.stepShooter(dt);
+    for (const [path, group] of this.lockPaths) this.values.set(path, this.isLocked(group));
     return events;
   }
 
@@ -280,7 +306,7 @@ export class MockRobot {
     if (!spec) return { accepted: false, reason: 'rejected: unknown signal' };
     if (!spec.writable) return { accepted: false, reason: 'rejected: not writable' };
     if (spec.lockGroup && this.isLocked(spec.lockGroup)) {
-      return { accepted: false, reason: `rejected: locked (${spec.lockGroup})` };
+      return { accepted: false, reason: `rejected: locked (${lockGroupSimpleName(spec.lockGroup)})` };
     }
     const expected = spec.type === 'f64' ? 'number' : spec.type === 'bool' ? 'boolean' : 'string';
     if (typeof value !== expected) {

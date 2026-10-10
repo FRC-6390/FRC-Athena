@@ -32,26 +32,41 @@ export type SignalType =
   | 'string[]'
   | `struct:${string}`;
 
-/** Signal role (E3). The numeric encoding of the dictionary `u8 role` byte is not fixed by the appendix; see ROLE_BY_CODE. */
-export type SignalRole = 'unknown' | 'state' | 'value' | 'control' | 'device' | 'action' | 'marker';
-
 /**
- * Numeric role codes used in DICTIONARY entries. The appendix leaves this mapping open;
- * this is the assumed mapping shared with the Java writer. Unknown codes decode as 'unknown'.
+ * Signal role (E1-W "Dictionary role values", normative). Codes 0-8 map to these names; codes above 8
+ * decode as `unspecified` so newer writers stay readable.
  */
+export type SignalRole =
+  | 'unspecified'
+  | 'state'
+  | 'value'
+  | 'control'
+  | 'device'
+  | 'action'
+  | 'hook'
+  | 'lock'
+  | 'system';
+
+/** Dictionary role code to role name. The index is the wire value. */
 export const ROLE_BY_CODE: readonly SignalRole[] = [
-  'unknown',
+  'unspecified',
   'state',
   'value',
   'control',
   'device',
   'action',
-  'marker'
+  'hook',
+  'lock',
+  'system'
 ];
 
+/** Path prefix of boolean lock-state signals (E1-W "Lock state on the wire"). */
+export const LOCK_PATH_PREFIX = 'athena/locks/';
+
 /**
- * Lock state of a writable value (E3 / A2). Not carried by the wire format today; sources that know
- * it (mock, future schema channel) fill it in. Clients display it but never use it to block writes (E5).
+ * Lock state of a writable signal, derived by the store from the role-7 signal at
+ * `athena/locks/<lockGroup>`. `unknown` when that signal has not been seen. Clients display it but never
+ * use it to block writes (E5).
  */
 export type LockState = 'unknown' | 'open' | 'locked';
 
@@ -66,9 +81,8 @@ export type SignalDescriptor = {
   role: SignalRole;
   writable: boolean;
   persisted: boolean;
-  /** Lock group simple name (e.g. `InMatch`), empty when none. */
+  /** Fully qualified lock group class name as written on the wire (empty when none). */
   lockGroup: string;
-  lockState: LockState;
   /** Non-zero for struct-typed signals. */
   structSchemaId: number;
   /** Mechanism path owning this signal (the segments before the first group segment). */
@@ -79,20 +93,33 @@ export type SignalDescriptor = {
   name: string;
 };
 
-/** Raw values as decoded from FRAME entries. */
+/** Struct-typed value: schema id plus the WPILib struct bytes. */
 export type StructValue = {
   schemaId: number;
   bytes: Uint8Array;
 };
 
+/**
+ * i64 values are numbers while they are exact (|v| <= 2^53 - 1) and bigints otherwise, so precision is
+ * never lost silently. Use `toNumber` before arithmetic that tolerates rounding.
+ */
+export type I64Value = number | bigint;
+
 export type SignalValue =
   | boolean
   | number
+  | bigint
   | string
   | boolean[]
+  | I64Value[]
   | number[]
   | string[]
   | StructValue;
+
+/** Converts an i64 (or any signal number) to a JavaScript number. */
+export function toNumber(value: number | bigint): number {
+  return typeof value === 'bigint' ? Number(value) : value;
+}
 
 /** One timestamped sample. `timestampMicros` is the robot FPGA clock. */
 export type Sample = {

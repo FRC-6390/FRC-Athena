@@ -80,14 +80,13 @@ export function describeV1Signal(row: SignalRow): SignalDescriptor {
     writable: isWritableSignal(row),
     persisted: row.durability !== 'volatile',
     lockGroup: '',
-    lockState: 'unknown',
     structSchemaId: 0
   };
 }
 
 /**
  * Turns the v1 signal table into dictionary + frame records. The dictionary is re-emitted only when the
- * set of signals changes, so the store keeps lock state and history across ordinary updates.
+ * set of signals changes, so the store keeps history across ordinary updates.
  */
 export class V1DataAdapter {
   private signature = '';
@@ -131,26 +130,28 @@ export class V1DataAdapter {
 
 /** Commands over the v1 control channel. v1 cannot cancel actions. */
 export function createV1Commands(): RobotCommands {
-  const reply = (op: CommandReply['op'], signalId: number, accepted: boolean, reason: string | null): CommandReply => ({
-    op,
-    signalId,
-    accepted,
-    reason,
-    receivedAtMs: Date.now()
-  });
-  const fail = (op: CommandReply['op'], signalId: number, error: unknown) =>
-    reply(op, signalId, false, `rejected: ${error instanceof Error ? error.message : String(error)}`);
+  const reply = (
+    requestId: number,
+    op: CommandReply['op'],
+    signalId: number,
+    accepted: boolean,
+    reason: string,
+    actualValue: CommandReply['actualValue'] = null
+  ): CommandReply => ({ requestId, op, signalId, accepted, reason, actualValue, receivedAtMs: Date.now() });
+  const fail = (requestId: number, op: CommandReply['op'], signalId: number, error: unknown) =>
+    reply(requestId, op, signalId, false, `rejected: ${error instanceof Error ? error.message : String(error)}`);
   return {
-    run: (signalId) =>
+    run: (requestId, signalId) =>
       fireAction(signalId).then(
-        () => reply('run', signalId, true, null),
-        (error: unknown) => fail('run', signalId, error)
+        () => reply(requestId, 'run', signalId, true, ''),
+        (error: unknown) => fail(requestId, 'run', signalId, error)
       ),
-    cancel: async (signalId) => reply('cancel', signalId, false, 'rejected: ARCP v1 has no cancel'),
-    write: (signalId, value) =>
+    cancel: async (requestId, signalId) =>
+      reply(requestId, 'cancel', signalId, false, 'rejected: ARCP v1 has no cancel'),
+    write: (requestId, signalId, value) =>
       setSignal(signalId, typeof value === 'string' ? value : JSON.stringify(value)).then(
-        () => reply('write', signalId, true, null),
-        (error: unknown) => fail('write', signalId, error)
+        () => reply(requestId, 'write', signalId, true, ''),
+        (error: unknown) => fail(requestId, 'write', signalId, error)
       )
   };
 }

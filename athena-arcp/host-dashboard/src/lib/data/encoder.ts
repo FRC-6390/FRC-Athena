@@ -54,7 +54,7 @@ export function encodeDictionary(entries: DictionaryInput[]): Uint8Array {
       .string(e.path)
       .u8(e.typeTag)
       .string(e.unit ?? '')
-      .u8(ROLE_BY_CODE.indexOf(e.role ?? 'unknown'))
+      .u8(ROLE_BY_CODE.indexOf(e.role ?? 'unspecified'))
       .u8(flags)
       .string(e.lockGroup ?? '')
       .varint(e.structSchemaId ?? 0);
@@ -68,7 +68,8 @@ export function encodeValue(w: WireWriter, typeTag: TypeTag, value: SignalValue)
       w.u8(value ? 1 : 0);
       return;
     case TYPE_TAG.i64:
-      w.zigzag(value as number);
+      if (typeof value === 'bigint') w.zigzagBig(value);
+      else w.zigzagBig(BigInt(value as number));
       return;
     case TYPE_TAG.f64:
       w.f64(value as number);
@@ -83,9 +84,9 @@ export function encodeValue(w: WireWriter, typeTag: TypeTag, value: SignalValue)
       return;
     }
     case TYPE_TAG['i64[]']: {
-      const arr = value as number[];
+      const arr = value as (number | bigint)[];
       w.varint(arr.length);
-      for (const n of arr) w.zigzag(n);
+      for (const n of arr) w.zigzagBig(typeof n === 'bigint' ? n : BigInt(n));
       return;
     }
     case TYPE_TAG['f64[]']: {
