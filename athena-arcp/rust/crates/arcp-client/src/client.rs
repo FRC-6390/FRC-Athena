@@ -46,8 +46,8 @@ pub struct ClientConfig {
     pub replay: bool,
     /// Request buffered records for every frame sequence gap.
     pub auto_backfill: bool,
-    /// Subscription made right after connecting (pattern, rate). The default is every signal at
-    /// the robot loop rate, so a dashboard gets values without asking; `None` subscribes to nothing.
+    /// Subscription made right after connecting (pattern, rate). The default is every signal on
+    /// change (plus keyframes), so a dashboard gets values without asking; `None` subscribes to nothing.
     pub initial_subscription: Option<(String, Rate)>,
 }
 
@@ -62,7 +62,7 @@ impl ClientConfig {
             udp_advertise: None,
             replay: false,
             auto_backfill: true,
-            initial_subscription: Some(("**".into(), Rate::Hz(50.0))),
+            initial_subscription: Some(("**".into(), Rate::OnChange)),
         }
     }
 }
