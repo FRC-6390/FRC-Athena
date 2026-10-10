@@ -193,6 +193,7 @@ project(':athena-hardware') {
     dependencies {
         api project(':athena-api')
         api project(':athena-runtime')
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
     }
 }
 
