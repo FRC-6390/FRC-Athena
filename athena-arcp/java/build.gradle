@@ -9,6 +9,16 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+dependencies {
+    // Wire codec (appendix E1-W) is the reference implementation in athena-runtime.
+    api project(':athena-runtime')
+}
+
+test {
+    // Golden vectors live at docs/wire-vectors (shared with the Rust arcp-core tests).
+    systemProperty 'athena.repoRoot', rootProject.projectDir.absolutePath
+}
+
 def rustWorkspaceDir = rootProject.file('athena-arcp/rust')
 def rustManifestPath = new File(rustWorkspaceDir, 'Cargo.toml')
 def rustTargetDir = new File(rustWorkspaceDir, 'target')
@@ -105,7 +115,9 @@ def knownTargets = [
         ],
 ]
 
-def publishTaskRequested = gradle.startParameter.taskNames.any { name ->
+// ARCP is an optional module. Its publications and JNI cross-builds only run when asked for explicitly.
+def arcpPublishEnabled = ((project.findProperty('arcpPublish') ?: 'false') as String).trim().toBoolean()
+def publishTaskRequested = arcpPublishEnabled && gradle.startParameter.taskNames.any { name ->
     def lower = name.toLowerCase(Locale.ROOT)
     lower.contains('publish') || lower.contains('copytowpilib')
 }
@@ -115,7 +127,8 @@ def wpilibArmAr = new File(wpilibRootDir, hostOs.isWindows() ? 'arm-frc2025-linu
 def configuredNativeModeRaw = (project.findProperty('arcpNativeMode')
         ?: System.getenv('ARCP_NATIVE_MODE')) as String
 def nativeModeExplicitlyConfigured = configuredNativeModeRaw != null && !configuredNativeModeRaw.trim().isEmpty()
-def nativeMode = ((nativeModeExplicitlyConfigured ? configuredNativeModeRaw : 'host') as String)
+// Default is 'none' so ./gradlew build never runs cargo; set -ParcpNativeMode=host to stage the JNI library.
+def nativeMode = ((nativeModeExplicitlyConfigured ? configuredNativeModeRaw : 'none') as String)
         .trim()
         .toLowerCase(Locale.ROOT)
 def publishDefaultTargets = [
@@ -646,6 +659,11 @@ tasks.named('processResources') {
     dependsOn tasks.named('prepareArcpNativeResources')
 }
 
+// The sources jar packages the staged resource directory, so it must run after staging.
+tasks.named('sourcesJar') {
+    dependsOn tasks.named('prepareArcpNativeResources')
+}
+
 tasks.register('arcpNativeCrossBuild') {
     group = 'build'
     description = 'Forces vendor cross-build matrix (armv7 + linux x86_64 + linux aarch64 + windows x86_64).'
@@ -655,4 +673,9 @@ tasks.register('arcpNativeCrossBuild') {
         }
     }
     dependsOn tasks.named('prepareArcpNativeResources')
+}
+
+// Keep ARCP out of default publishing (buildAndPublish / publishToLocalWpilib) unless -ParcpPublish=true.
+tasks.matching { it.name.startsWith('publish') && it.name.endsWith('ToMavenLocal') }.configureEach {
+    enabled = arcpPublishEnabled
 }

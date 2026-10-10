@@ -70,6 +70,8 @@ include 'athena-robot'
 include 'athena-simulation'
 include 'athena-wpilib'
 include 'athena-benchmarks'
+include 'athena-arcp'
+project(':athena-arcp').projectDir = file('athena-arcp/java')
 include 'athena-vendor-ctre'
 include 'athena-vendor-rev'
 include 'athena-vendor-studica'
