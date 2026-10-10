@@ -252,6 +252,32 @@ class ControlRobustnessTest {
         assertThrows(IllegalStateException.class, () -> scheduler.teleopPeriodic(0.0, 0.02));
     }
 
+    @Test
+    void turretPositionActionFollowsItsDeclaredMotionProfile() {
+        RecordingContext hardware = new RecordingContext();
+        hardware.encoder(ARM_ENCODER).position = 164.8;
+        hardware.motor(ARM).position = 164.8;
+        ControlBinding<?> turret = Controls.position(ARM)
+                .feedback(ARM_ENCODER)
+                .loop(ControlLoops.targetTransform(binding -> context -> ControlOutput.position(context.target())))
+                .pid(0.144, 0.0, 0.006)
+                .constraints(Constraints.range(Range.of(-270.0, 270.0)), Constraints.motion(180.0, 540.0))
+                .planner(MotionPlanners.boundedAngular(360.0));
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware)
+                .register(new Holder(turret, ARM_ENCODER))
+                .traceLevel(MechanismTraceLevel.CAPTURE)
+                .tracePeriodSeconds(0.0);
+        scheduler.request(turret.position(90.0));
+
+        for (int cycle = 0; cycle < 25; cycle++) {
+            scheduler.teleopPeriodic(cycle * 0.02, 0.02);
+        }
+        // 180 deg/s and 540 deg/s^2 from 164.8 deg reach at most ~60 deg of travel in 0.5 s (about 104.8 deg).
+        double reference = scheduler.traceSnapshots().get(0).controls().get(0).referencePosition();
+        assertTrue(reference >= 100.0 && reference <= 110.0,
+                "profile must limit travel to 180 deg/s and 540 deg/s^2, reference=" + reference);
+    }
+
     private static MechanismScheduler scheduler(RecordingContext hardware, Holder holder) {
         return MechanismScheduler.create(hardware).register(holder);
     }
