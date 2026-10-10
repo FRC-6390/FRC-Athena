@@ -1416,6 +1416,8 @@ final class MechanismRuntime {
             if (action instanceof Actions.Timeout timeout) {
                 if (node.terminal) return schedule.result(null, true, local);
                 if (timeout.expired(local)) {
+                    RuntimeEvents.emit(RuntimeEvents.TIMEOUT,
+                            "after " + timeout.seconds() + " s: " + typeName(timeout.action()));
                     schedule.named("timeout", timeout.action()).reset();
                     node.terminal = true;
                     return schedule.result(null, true, local);
@@ -1524,6 +1526,11 @@ final class MechanismRuntime {
                 node.lastPathContext = local;
                 runtime.execute(pathState, local);
                 if (runtime.isFinished(pathState, local)) {
+                    java.util.Collection<String> pending = runtime.pendingMarkers(pathState);
+                    if (pending != null && !pending.isEmpty()) {
+                        RuntimeEvents.emit(RuntimeEvents.PATH_MARKERS_PENDING,
+                                pathState.key() + " pending markers " + pending);
+                    }
                     runtime.end(pathState, local, false);
                     node.entered = false;
                     node.pathComplete = true;
