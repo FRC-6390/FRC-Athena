@@ -59,24 +59,67 @@ produced its outputs and before any motor command is applied:
    cap) is admitted only if `staggerStarts` has passed since the last admitted start. Otherwise it is
    held at the threshold for that cycle.
 6. **Ramp.** Increases are limited to the ramp rate.
-7. **Write.** The effective supply limit is the declared (derated) limit, capped by the planner. It
-   is written through `MotorHandle.applyRuntimeConfiguration`, the same path as the dashboard
-   overrides.
+7. **Cap.** The effective cap is the planner's cap: the declared limit (supply and stator, the tighter of
+   the two, scaled by the derate, never below 1 A) combined with the budget, profile and ramp limits. It is
+   published through `PowerRuntime.capAmps(motor)`. Nothing is written to a controller.
+8. **Enforce.** The output path reads each motor's cap while it applies the command and folds it into the
+   effort voltage clamp (see `docs/effort-and-contact.md`, "Enforcement"). The cap is passed to the clamp only
+   when it is below the motor's declared limit (the supply/stator limit before the derate). Otherwise the
+   motor gets no software clamp: its command and the controller's hardware limit are unchanged from before.
+   A cap that binds is applied to control bindings (software loops), open-loop percent and voltage motor
+   outputs, and software followers. Device-offloaded closed loops are the exception (see below).
 
-### Why configuration writes (and their rate limit)
+### Why the cap is a voltage clamp, not a configuration write
 
-The cap is a controller-side supply-current limit, so it protects the battery even when the RoboRIO
-loop is slow. The alternative, scaling commanded voltage from a model, would not bound the current
-the controller draws. Writes are rate limited:
+The cap is enforced by bounding the commanded voltage so the predicted motor current stays within it:
+`|V - omega/Kv| / R <= cap`. This is the same model the effort ceiling uses (see `docs/effort-and-contact.md`).
 
-- at most one write per motor every 0.25 s (`PowerRuntime.MIN_WRITE_INTERVAL_SECONDS`);
-- only when the change is at least 2 A (`WRITE_DEADBAND_AMPS`), or the limit switches on or off;
-- a user change to the configuration is written at once, because it bypasses the throttle.
+Runtime CAN configuration writes are not used for caps. Both vendors block the robot thread on them:
 
-A cap is never written as `0`: controllers read zero as "no limit", so an active cap is at least 1 A.
+- REV: `SparkBase.configure` is a blocking call with reset and persist modes.
+- CTRE: the configurator apply waits for a timeout.
 
-Handles that do not support runtime configuration are never written. The motor's status reads
-`Unsupported` in telemetry.
+A cap that moves every few cycles would therefore stall the scheduler. Declared static limits
+(`MotorDevice.currentLimit` and the supply/stator variants) are still written once at configuration, as before.
+Athena does not write them again while the robot runs.
+
+Consequences:
+
+- A cap that binds takes effect in the same cycle, with no rate limit and no deadband.
+- Only a cap below the declared limit is enforced in software. A declared limit alone is not re-enforced in software:
+  the controller enforces it in hardware, and a model error (for example a hot winding's resistance) would
+  otherwise under-drive a healthy mechanism. Thermal derate and power shed/profile caps are the cases that enter.
+- Motors without a `MotorSpec` row use a proportional fallback (see below).
+
+### Motors without known constants
+
+A motor kind without a `MotorSpec` row (for example `MINION`) has no resistance or speed constant, so the
+voltage clamp cannot invert its current. For these motors:
+
+- Demand is the measured supply current, not the model estimate.
+- The output path scales the command by `cap / measured supply current` when the measured current is above the
+  cap. The scale is an estimate, not a bound. It settles over several cycles, so brief overshoot is possible.
+- Nothing is written to the controller.
+
+Add a `MotorSpec` row to get a model-based bound.
+
+### Device-offloaded closed loops
+
+A position or velocity binding that the device runs in its own firmware loop is not clamped and is not moved to
+the software loop. A dynamic cap therefore does not reach its current. When such a binding has an active cap that
+is not applied, State/Reason reports `Power cap NN A not applied (device loop)` (NN is the cap in whole amps).
+Use a software loop (for example, declare an effort ceiling on the binding) if the cap must bound it.
+
+### Open-loop and follower outputs
+
+- Open-loop motor outputs (percent or voltage Actions without a control binding) are clamped with the motor's cap
+  and its software followers' caps, the same way a binding's command is.
+- Software followers (`SoftwareFollowerMotorHandle`) receive their leader's command, so the command is clamped
+  against the intersection of the leader's and the followers' limits. A follower's cap therefore bounds the leader
+  too, and the leader's command is scaled as a whole.
+- Hardware followers (the device mirrors the leader in its own firmware) receive the command from the device.
+  Athena cannot clamp it. Their caps are not enforced separately. The leader's command is clamped by the leader's
+  cap, so the follower sees a bounded command. Use a software follower when a follower needs its own cap.
 
 ## Thermal (B8)
 
@@ -163,22 +206,33 @@ directly.
   `Bus/BudgetAmps`, `Bus/DemandAmps`, `Bus/Shedding`.
 - `Motors/<motor>/Demand`, `CapAmps`, `Derate`, `TemperatureCelsius`, `Share`, `Status`.
 
-`Status` is one of `Declared`, `Power capped`, `Power shed`, `Thermal derate`, `Unsupported`, or
-`Unavailable` / `Error: ...`.
+`Status` is one of `Declared`, `Power capped`, `Power shed`, `Thermal derate`, or `Unavailable`.
 
-## Current-limit writes per vendor (I9)
+`State/Reason` (the mechanism's explanation of an applied output) shows `Power cap NN A` when the cap binds on
+the motor of the selected output, `Power cap NN A not applied (device loop)` for a device-offloaded binding (see
+above), and `Thermal derate NN%` when the thermal derate applies. These values are read
+from the same cycle's power pass, so they describe the cap that the output path enforced.
 
-- **CTRE**: current limits are a `CurrentLimitsConfigs` apply on the TalonFX, the same path as before.
-- **REV**: each cap is a blocking `SparkBase.configure` call (one per motor per write, with reset/persist modes).
-  A cost was not measured on a roboRIO in this change, so the switch to model-based voltage scaling (no CAN configure
-  writes) has **not** been made. Decision pending a measured write time. Until then the write rate limit above
-  (0.25 s per motor, 2 A deadband) is the mitigation.
+## Current-limit writes per vendor (I9): decided
+
+Decision: caps are enforced by the effort voltage clamp. Runtime current-limit configuration writes are not used
+for power or thermal caps, on either vendor. The write cost was a blocking call on the robot thread
+(`SparkBase.configure` on REV, a configurator apply with timeout on CTRE), so the earlier rate limit (0.25 s per
+motor, 2 A deadband) is removed with the writes. The `Unsupported` status is removed too: every handle is capped
+by the clamp, so no handle reads as unsupported.
+
+Declared static limits are still written once at configuration, as before.
 
 ## Limits and not done
 
 - The battery resistance is estimated and persisted as a rolling prior (I3c); it is not stored per battery.
 - Thermal constants are nominal, not characterized (see the caveat above).
 - Closed-loop outputs that the device computes on the controller (offloaded control) do not receive
-  the staging effort cap. Use `limitSpeed`/`limitAccel` for those.
+  the staging effort cap or the power cap. Use `limitSpeed`/`limitAccel` for those. The clamp can only bound a
+  voltage Athena commands.
+- Hardware followers are not clamped separately (see "Open-loop and follower outputs").
+- Motors without a `MotorSpec` row are capped by a proportional estimate, not a model-based bound.
+- Caps are compared with the stator current the demand model uses. A supply-current cap is therefore conservative
+  for the battery, not an exact supply limit.
 - Stage transitions are not yet replay markers (C1). They are available through `drainStageChanges()`. An applied
   output that a stage caps is explained by `State/Reason` as `Stage <CONSTANT>` (A5).

@@ -68,6 +68,27 @@ its share.
 Each applied cycle, after saturation and before the loops see the applied output, the output path does one
 thing: it bounds the commanded voltage so the predicted current never exceeds the limit.
 
+The per-motor limit is the smallest of three values:
+
+- the binding ceiling (`Effort.max`, with the YIELD, pushThrough or slow responses applied);
+- the running Action's effort (`Action.effort`);
+- the motor's power or thermal cap from the power pass (`PowerRuntime.capAmps`, see `docs/power-thermal-staging.md`).
+
+The power cap is read once per cycle, after the power pass and before the motor commands are applied. Nothing is
+written to the controller, so a cap that changes every cycle costs nothing on the robot thread.
+
+Every motor command is clamped, not only control bindings:
+
+| Command path | Clamp |
+| --- | --- |
+| Control binding (position, velocity, percent, voltage) | binding ceiling, Action effort and the power cap of each binding motor (the cap only when below the declared limit) |
+| Open-loop motor output (percent or voltage, no binding) | Action effort and the power cap of the motor (only when below the declared limit) |
+| Software follower (receives its leader's command) | the follower's own power cap joins the intersection, so it bounds the shared command (only when below its declared limit) |
+| Device-offloaded position or velocity loop | not clamped; an active cap is reported as `Power cap NN A not applied (device loop)` |
+| Hardware follower (mirrors the leader in firmware) | not clamped separately. The leader's command is clamped by the leader's limits |
+
+Percent commands are clamped at the nominal 12 V and sent as voltage when the clamp changes them.
+
 For motor `i` with resistance `R_i`, speed constant `Kv_i` (rad/s per volt) and measured speed `omega_i`:
 
 ```
@@ -77,11 +98,16 @@ clamp V to [ omega_i/Kv_i - I_i,lim R_i ,  omega_i/Kv_i + I_i,lim R_i ]   (inter
 
 The clamp uses the speed measured at the start of the cycle. A change of speed inside the cycle (for example
 an impact with a hard stop) can push the current above the limit for one cycle. Motors without known constants
-are not clamped and keep the hardware current limit only. When no voltage satisfies every motor, the midpoint of
+are handled by a proportional estimate (see below). When no voltage satisfies every motor, the midpoint of
 the empty interval is used.
 
-Percent outputs are converted to volts at 12 V when a limit applies. Controls that run device-side closed loops
-switch to the software loop while a ceiling is declared, because the device cannot be clamped.
+Motors without known constants (no `MotorSpec` row) have no model to invert. For these the command is scaled by
+`limit / measured supply current` when the measured current is above the limit. This is an estimate: it settles
+over several cycles and can overshoot briefly.
+
+Controls that run device-side closed loops switch to the software loop while a ceiling is declared, because the
+device cannot be clamped. A power cap alone does not switch a binding's loops to software, so a device-side
+closed loop with only a power cap is not clamped.
 
 `EffortCurrentMode` is an extension point. A motor handle that supports a hardware current or torque mode can
 implement it later. No built-in handle does yet, so the voltage clamp is always used.
@@ -149,4 +175,5 @@ The binding's effort loop is a telemetry source, published under the binding's `
 - Hardware torque or current modes (`EffortCurrentMode` is only the hook).
 - Per-motor constants supplied by the user (`MotorConstants.of` is not yet wired into the effort conversions).
 - Replay markers for yield and recovery (C1). Use the telemetry above.
-- Interaction with power profiles (B7) and staging (B9). The effort clamp runs after staging's effort cap.
+- Hardware followers are not clamped separately (see the table above).
+- The effort clamp runs after staging's effort cap. The power cap joins the same intersection.

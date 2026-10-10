@@ -376,6 +376,7 @@ final class MechanismRuntime {
     /** Installs the power pass whose per-motor thermal and budget caps explain this mechanism's outputs. */
     void electrical(PowerRuntime power) {
         electrical = power;
+        applier.electrical(power);
     }
 
     Set<MotorDevice> applyCandidates(List<ResolvedOutput> outputs, Map<Object, Long> reservations) {
@@ -674,6 +675,7 @@ final class MechanismRuntime {
         }
         int thermal = -1;
         int power = -1;
+        int unappliedCap = -1;
         if (electrical != null) {
             for (int candidateIndex = 0; candidateIndex < selected.size(); candidateIndex++) {
                 OutputRequest request = selected.get(candidateIndex).output().request();
@@ -682,7 +684,13 @@ final class MechanismRuntime {
                     int derate = electrical.thermalDeratePercent(motor);
                     if (derate >= 0 && (thermal < 0 || derate < thermal)) thermal = derate;
                     int cap = electrical.powerCapAmps(motor);
-                    if (cap >= 0 && (power < 0 || cap < power)) power = cap;
+                    if (cap < 0) continue;
+                    int unapplied = applier.deviceLoopUnappliedCapAmps(request.control());
+                    if (unapplied >= 0) {
+                        if (unappliedCap < 0 || unapplied < unappliedCap) unappliedCap = unapplied;
+                    } else if (power < 0 || cap < power) {
+                        power = cap;
+                    }
                 }
             }
         }
@@ -692,6 +700,10 @@ final class MechanismRuntime {
         }
         if (power >= 0) {
             setReason(REASON_POWER, null, null, power);
+            return;
+        }
+        if (unappliedCap >= 0) {
+            setReason(REASON_POWER_UNAPPLIED, null, null, unappliedCap);
             return;
         }
         CandidateOutput winner = selected.get(0);
@@ -752,6 +764,7 @@ final class MechanismRuntime {
             case REASON_STAGE -> "Stage " + ((Enum<?>) subject).name();
             case REASON_THERMAL -> "Thermal derate " + number + "%";
             case REASON_POWER -> "Power cap " + number + " A";
+            case REASON_POWER_UNAPPLIED -> "Power cap " + number + " A not applied (device loop)";
             case REASON_RUNNING -> "Running: " + (subject instanceof Action running ? actionName(running) : "unknown");
             default -> "Idle";
         };
@@ -768,6 +781,7 @@ final class MechanismRuntime {
     private static final int REASON_STAGE = 8;
     private static final int REASON_THERMAL = 9;
     private static final int REASON_POWER = 10;
+    private static final int REASON_POWER_UNAPPLIED = 11;
 
     private MechanismTraceSnapshot buildTrace(
             MechanismContext context,

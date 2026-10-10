@@ -35,6 +35,7 @@ class EffortRuntimeTest {
     static final class FakeMotor implements MotorHandle {
         private final MotorDevice device;
         double rotationsPerSecond;
+        double supplyAmps = Double.NaN;
 
         FakeMotor(MotorDevice device) {
             this.device = device;
@@ -48,6 +49,11 @@ class EffortRuntimeTest {
         @Override
         public double integratedVelocityRotationsPerSecond() {
             return rotationsPerSecond;
+        }
+
+        @Override
+        public double supplyCurrentAmps() {
+            return supplyAmps;
         }
     }
 
@@ -275,5 +281,32 @@ class EffortRuntimeTest {
         assertFalse(runtime.yielded());
         assertEquals(0.2 / KRAKEN_K.torqueConstant() * KRAKEN_K.resistanceOhms(),
                 runtime.clampVolts(context, 12.0), 1e-9);
+    }
+
+    @Test
+    void powerCapAndActionEffortCombineAsTheSmallerLimit() {
+        EffortRuntime runtime = EffortRuntime.unlimited(List.of(KRAKEN));
+        FakeContext context = new FakeContext();
+        context.motor(KRAKEN, 0.0);
+        // Action effort 8 A, power cap 5 A: the cap binds.
+        runtime.advance(8.0, new double[] {5.0}, DT, 12.0, 0.0, 0.0);
+        assertEquals(5.0 * KRAKEN_K.resistanceOhms(), runtime.clampVolts(context, 12.0), 1e-12);
+        // Action effort 8 A, power cap 30 A: the Action binds.
+        runtime.advance(8.0, new double[] {30.0}, DT, 12.0, 0.0, 0.0);
+        assertEquals(8.0 * KRAKEN_K.resistanceOhms(), runtime.clampVolts(context, 12.0), 1e-12);
+    }
+
+    @Test
+    void motorWithoutConstantsIsScaledByItsMeasuredSupplyCurrent() {
+        MotorDevice minion = MotorDevice.of(MotorKinds.MINION, 3);
+        EffortRuntime runtime = EffortRuntime.unlimited(List.of(minion));
+        FakeContext context = new FakeContext();
+        context.motor(minion, 0.0).supplyAmps = 40.0;
+        // Cap 20 A against 40 A measured: the command is halved.
+        runtime.advance(Double.POSITIVE_INFINITY, new double[] {20.0}, DT, 12.0, 0.0, 0.0);
+        assertEquals(6.0, runtime.clampVolts(context, 12.0), 1e-9);
+        // Below the cap the command passes unchanged.
+        context.motor(minion, 0.0).supplyAmps = 10.0;
+        assertEquals(12.0, runtime.clampVolts(context, 12.0), 1e-9);
     }
 }
