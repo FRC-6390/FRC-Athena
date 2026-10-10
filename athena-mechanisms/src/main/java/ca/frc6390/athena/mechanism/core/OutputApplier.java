@@ -21,6 +21,7 @@ import ca.frc6390.athena.mechanism.constraint.ConstraintStage;
 import ca.frc6390.athena.mechanism.motion.MotionProfileRuntime;
 import ca.frc6390.athena.mechanism.motion.MotionReference;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
+import ca.frc6390.athena.mechanism.staging.StageCaps;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ final class OutputApplier {
     private final Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean captureTrace;
+    private Map<ControlBinding<?>, StageCaps> stageCaps = java.util.Collections.emptyMap();
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
         this.context = Objects.requireNonNull(context, "context");
@@ -231,6 +233,15 @@ final class OutputApplier {
         }
     }
 
+    /** Installs the staging caps that apply in the coming cycle. */
+    void stageCaps(Map<ControlBinding<?>, StageCaps> caps) {
+        stageCaps = caps == null ? java.util.Collections.emptyMap() : caps;
+    }
+
+    private StageCaps stageCapsFor(ControlBinding<?> control) {
+        return stageCaps.isEmpty() ? StageCaps.NONE : stageCaps.getOrDefault(control, StageCaps.NONE);
+    }
+
     void beginCycle() {
         controlsAppliedThisCycle.clear();
         controlTraces.clear();
@@ -309,6 +320,7 @@ final class OutputApplier {
                 state,
                 position,
                 velocity);
+        transformed = applyStageSpeed(control, transformed);
         if (transformed instanceof Output.Neutral || transformed instanceof Output.Fault) {
             resetControlState(state, transformed, mechanismContext, position, velocity);
             return appliedOutput.set(Outputs.neutral(), ControlRoute.OPEN_LOOP, null)
@@ -355,7 +367,8 @@ final class OutputApplier {
             return appliedOutput.set(Outputs.neutral(), ControlRoute.OPEN_LOOP, null)
                     .withTrace(output.output(), transformed, staged, position, velocity, staged.constrained(), true, false);
         }
-        Output constrainedOutput = applyOutputConstraints(control, resolved, mechanismContext);
+        Output constrainedOutput = applyStageEffort(
+                control, applyOutputConstraints(control, resolved, mechanismContext));
         Output saturated = saturate(control, constrainedOutput);
         notifyApplied(state, loopContext, resolved, saturated);
         Output guarded = guardFinalOutput(
@@ -680,7 +693,31 @@ final class OutputApplier {
     }
 
     private MotionProfile effectiveProfile(ControlBinding<?> control) {
-        return overrides.hasProfile(control) ? overrides.profile(control) : null;
+        if (!overrides.hasProfile(control)) return null;
+        MotionProfile profile = overrides.profile(control);
+        if (stageCaps.isEmpty()) return profile;
+        StageCaps caps = stageCapsFor(control);
+        if (caps.speed() == 1.0 && caps.acceleration() == 1.0) return profile;
+        return new MotionProfile(
+                Math.max(Double.MIN_VALUE, profile.maxVelocity() * caps.speed()),
+                Math.max(Double.MIN_VALUE, profile.maxAcceleration() * caps.acceleration()));
+    }
+
+    /** Scales a velocity target by the staging speed cap. Position targets are limited by the profile instead. */
+    private Output applyStageSpeed(ControlBinding<?> control, Output output) {
+        if (stageCaps.isEmpty() || !(output instanceof Output.Velocity velocity)) return output;
+        double speed = stageCapsFor(control).speed();
+        return speed == 1.0 ? output : Outputs.velocity(velocity.velocity() * speed);
+    }
+
+    /** Scales voltage and percent output by the staging effort cap. */
+    private Output applyStageEffort(ControlBinding<?> control, Output output) {
+        if (stageCaps.isEmpty()) return output;
+        double effort = stageCapsFor(control).effort();
+        if (effort == 1.0) return output;
+        if (output instanceof Output.Voltage voltage) return Outputs.voltage(voltage.volts() * effort);
+        if (output instanceof Output.Percent percent) return Outputs.percent(percent.percent() * effort);
+        return output;
     }
 
     private static boolean isFinite(Output output) {

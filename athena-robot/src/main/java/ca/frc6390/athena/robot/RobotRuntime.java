@@ -698,6 +698,29 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     /** Returns the hierarchical mechanism-owned telemetry and live-tuning contract. */
+    /**
+     * Sets the battery voltage source for the power pass (for example {@code RobotController::getBatteryVoltage}).
+     * Without a finite reading the power budget is inactive.
+     *
+     * @param busVoltage battery voltage supplier
+     * @return this runtime
+     */
+    public RobotRuntime powerBusVoltage(java.util.function.DoubleSupplier busVoltage) {
+        ensureOpen();
+        mechanisms.busVoltage(busVoltage);
+        return this;
+    }
+
+    /** Returns the electrical and thermal state from the latest cycle. */
+    public ca.frc6390.athena.hardware.power.PowerSnapshot powerSnapshot() {
+        return mechanisms.powerSnapshot();
+    }
+
+    /** Returns and clears stage transitions recorded by declared stagings, oldest first. */
+    public List<ca.frc6390.athena.mechanism.staging.Staging.Change<?>> drainStageChanges() {
+        return mechanisms.drainStageChanges();
+    }
+
     public ca.frc6390.athena.mechanism.core.TelemetrySchema mechanismTelemetrySchema() {
         return mechanisms.telemetrySchema();
     }

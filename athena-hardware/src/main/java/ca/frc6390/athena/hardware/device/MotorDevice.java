@@ -15,6 +15,12 @@ import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
 import ca.frc6390.athena.hardware.runtime.RuntimeScope;
 import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
+import ca.frc6390.athena.hardware.power.MotorThermalSpec;
+import ca.frc6390.athena.hardware.power.PowerProfile;
+import ca.frc6390.athena.hardware.power.Thermal;
+import ca.frc6390.athena.hardware.power.ThermalModel;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Temperature;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -30,6 +36,9 @@ import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
  * @param vendorOptions typed vendor-specific configuration
  * @param follower follower relationship, or {@code null} for an independent motor
  * @param isDisabled whether Athena should suppress this motor
+ * @param failurePolicy how Athena responds to failures of this motor
+ * @param power shared electrical budget profile, or {@code null}
+ * @param thermal thermal derate curve, or {@code null} for the motor kind default
  */
 public record MotorDevice(
         MotorKind kind,
@@ -43,7 +52,9 @@ public record MotorDevice(
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
         boolean isDisabled,
-        FailurePolicy failurePolicy) {
+        FailurePolicy failurePolicy,
+        PowerProfile power,
+        Thermal thermal) {
     private static final RuntimeBindings<MotorDevice, RuntimeMotor> RUNTIMES = new RuntimeBindings<>();
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
@@ -54,7 +65,7 @@ public record MotorDevice(
      */
     public static MotorDevice of(MotorKind kind, int id) {
         return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST,
-                0, 0, 0, VendorOptions.empty(), null, false, FailurePolicy.DISABLE_MECHANISM);
+                0, 0, 0, VendorOptions.empty(), null, false, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */
@@ -86,7 +97,7 @@ public record MotorDevice(
             MotorNeutralMode neutralMode, int currentLimitAmps,
             VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
         this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                0, 0, vendorOptions, follower, isDisabled, FailurePolicy.DISABLE_MECHANISM);
+                0, 0, vendorOptions, follower, isDisabled, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
     public MotorDevice(
@@ -96,7 +107,7 @@ public record MotorDevice(
             VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
         this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
                 supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower,
-                isDisabled, FailurePolicy.DISABLE_MECHANISM);
+                isDisabled, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
     public MotorDevice disabled() {
@@ -106,14 +117,75 @@ public record MotorDevice(
     public MotorDevice disabled(boolean disabled) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
                 currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
-                vendorOptions, follower, disabled, failurePolicy);
+                vendorOptions, follower, disabled, failurePolicy, power, thermal);
     }
 
     /** Selects how Athena responds if this motor cannot be created or stops responding. */
     public MotorDevice failurePolicy(FailurePolicy policy) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
                 currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
-                vendorOptions, follower, isDisabled, Objects.requireNonNull(policy, "policy"));
+                vendorOptions, follower, isDisabled, Objects.requireNonNull(policy, "policy"), power, thermal);
+    }
+
+    /**
+     * Attaches a shared electrical budget profile. The profile may be shared by several motors and
+     * changed at runtime; see {@link PowerProfile}.
+     *
+     * @param profile profile, or {@code null} to remove it
+     * @return updated ref
+     */
+    public MotorDevice power(PowerProfile profile) {
+        if (profile != null) {
+            profile.markDeclared();
+        }
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled,
+                failurePolicy, profile, thermal);
+    }
+
+    /**
+     * Sets the thermal derate curve. When absent, {@link MotorThermalSpec#defaultDerate()} for the motor
+     * kind applies. Thermal only scales current limits; it never brakes or locks out the motor.
+     *
+     * @param thermal derate curve, or {@code null} to use the kind default
+     * @return updated ref
+     */
+    public MotorDevice thermal(Thermal thermal) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled,
+                failurePolicy, power, thermal);
+    }
+
+    /** Returns the derate curve in effect: the declared curve or the motor kind default. */
+    public Thermal thermalCurve() {
+        return thermal != null ? thermal : MotorThermalSpec.forKind(kind).defaultDerate();
+    }
+
+    /**
+     * Returns the fused winding temperature estimate: the vendor reading when the controller reports one,
+     * otherwise the lumped model. Before the motor is bound to a runtime this is the ambient temperature.
+     *
+     * @return temperature
+     */
+    public Temperature temperature() {
+        return Units.Celsius.of(temperatureCelsius());
+    }
+
+    /** Returns the fused winding temperature estimate in Celsius. */
+    public double temperatureCelsius() {
+        RuntimeMotor runtime = RUNTIMES.find(this);
+        return runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius();
+    }
+
+    /** Returns the thermal load in {@code [0, 1]}: 0 at the derate start, 1 at the derate end. */
+    public double thermalLoad() {
+        return thermalCurve().load(temperatureCelsius());
+    }
+
+    /** Returns the thermal model bound to this motor, or {@code null} when unbound. */
+    public ThermalModel thermalModel() {
+        RuntimeMotor runtime = RUNTIMES.find(this);
+        return runtime == null ? null : runtime.thermal();
     }
 
     /**
@@ -164,7 +236,7 @@ public record MotorDevice(
     public MotorDevice canbus(String canbus) {
         return new MotorDevice(
                 kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -176,7 +248,7 @@ public record MotorDevice(
     public MotorDevice inverted(boolean inverted) {
         return new MotorDevice(
                 kind, id, canbus, inverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -215,7 +287,7 @@ public record MotorDevice(
     public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
         return new MotorDevice(
                 kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -229,7 +301,7 @@ public record MotorDevice(
      */
     public MotorDevice currentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
+                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -244,7 +316,7 @@ public record MotorDevice(
      */
     public MotorDevice supplyCurrentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy);
+                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -259,7 +331,7 @@ public record MotorDevice(
      */
     public MotorDevice statorCurrentLimit(int amps) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled, failurePolicy);
+                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /** Returns the effective supply and stator limits used by Athena. */
@@ -323,7 +395,7 @@ public record MotorDevice(
 
     /** Binds this declaration to its owning runtime handle. */
     public AutoCloseable bindRuntime(RuntimeScope scope, MotorHandle handle) {
-        return RUNTIMES.bind(this, scope, new RuntimeMotor(handle));
+        return RUNTIMES.bind(this, scope, new RuntimeMotor(handle, MotorThermalSpec.forKind(kind)));
     }
 
     private RuntimeMotor runtime() {
@@ -332,13 +404,17 @@ public record MotorDevice(
 
     private static final class RuntimeMotor {
         private final MotorHandle handle;
+        private final ThermalModel thermal;
         private volatile MotorCommandSnapshot command = MotorCommandSnapshot.neutral();
 
-        private RuntimeMotor(MotorHandle handle) {
+        private RuntimeMotor(MotorHandle handle, MotorThermalSpec spec) {
             this.handle = Objects.requireNonNull(handle, "handle");
+            this.thermal = new ThermalModel(spec);
         }
 
         private MotorHandle handle() { return handle; }
+
+        private ThermalModel thermal() { return thermal; }
 
         private MotorCommandSnapshot command() { return command; }
 
@@ -375,7 +451,7 @@ public record MotorDevice(
                 vendorOptions,
                 new MotorFollowerBinding(leader),
                 isDisabled,
-                failurePolicy);
+                failurePolicy, power, thermal);
     }
 
     /** Returns this motor without a hardware follower declaration. */
@@ -392,7 +468,7 @@ public record MotorDevice(
                 vendorOptions,
                 null,
                 isDisabled,
-                failurePolicy);
+                failurePolicy, power, thermal);
     }
 
     public String defaultName() {
@@ -425,7 +501,7 @@ public record MotorDevice(
                     vendorOptions.with(optionType, options),
                     follower,
                     isDisabled,
-                    failurePolicy);
+                    failurePolicy, power, thermal);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalArgumentException(
                     "Vendor option type must expose a no-argument constructor: " + optionType.getName(),

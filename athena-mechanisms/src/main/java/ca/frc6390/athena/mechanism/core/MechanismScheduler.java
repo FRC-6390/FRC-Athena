@@ -10,6 +10,12 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.MappedActionContext;
+import ca.frc6390.athena.hardware.power.PowerPolicy;
+import ca.frc6390.athena.hardware.power.PowerSnapshot;
+import ca.frc6390.athena.mechanism.staging.StageCaps;
+import ca.frc6390.athena.mechanism.staging.StageHost;
+import ca.frc6390.athena.mechanism.staging.StageModifier;
+import ca.frc6390.athena.mechanism.staging.Staging;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -104,6 +110,14 @@ public final class MechanismScheduler {
         }
     };
     private final OutputResolver resolver;
+    private final PowerRuntime power = new PowerRuntime();
+    private final List<Staging<?>> stagings = new ArrayList<>();
+    private List<MotorDevice> powerMotors = List.of();
+    private final StageHost stageHost = new StageHost() {
+        @Override public void request(Action action) { MechanismScheduler.this.request(action); }
+        @Override public void cancel(Action action) { MechanismScheduler.this.cancel(action); }
+        @Override public boolean isRunning(Action action) { return MechanismScheduler.this.isRunning(action); }
+    };
     private long requestSequence;
     private Runnable simulationStep = () -> {
     };
@@ -163,6 +177,7 @@ public final class MechanismScheduler {
                 graph.node(mechanism).name(),
                 Collections.newSetFromMap(new IdentityHashMap<>()));
         indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
+        refreshPowerDeclarations();
         rebuildCompiledActions();
         refreshDigitalInputs();
         telemetrySchema = null;
@@ -1098,6 +1113,7 @@ public final class MechanismScheduler {
                     isolate(runtime, "hooks", exception, faulted);
                 }
             }
+            evaluateStagings(safeMechanismContext.nowSeconds());
             // Evaluate every lease first so reservations reflect where each lease is in its tree
             // this cycle, then arbitrate and apply against those reservations.
             for (MechanismRuntime runtime : runtimes.values()) {
@@ -1109,6 +1125,13 @@ public final class MechanismScheduler {
                 }
             }
             Map<Object, Long> reservations = globalLeaseReservations();
+            // Electrical and thermal caps use this cycle's controller outputs and are applied before any
+            // motor command below.
+            power.cycle(powerMotors, actionContext, resolver.overrides(), safeMechanismContext.nowSeconds());
+            Map<ControlBinding<?>, StageCaps> caps = stageCapsByControl();
+            for (MechanismRuntime runtime : runtimes.values()) {
+                runtime.stageCaps(caps);
+            }
             for (MechanismRuntime runtime : runtimes.values()) {
                 Set<MotorDevice> driven;
                 if (faulted.contains(runtime)) {
@@ -1136,6 +1159,90 @@ public final class MechanismScheduler {
                 eventContext == null ? LifecycleMode.ROBOT : eventContext.mode(),
                 safeMechanismContext.enabled());
         return outputs;
+    }
+
+    /** Returns the electrical and thermal state from the latest cycle, for telemetry. */
+    public PowerSnapshot powerSnapshot() {
+        return power.snapshot();
+    }
+
+    /** Returns the robot-wide power policy in effect (defaults when none is declared). */
+    public PowerPolicy powerPolicy() {
+        return power.policy();
+    }
+
+    /**
+     * Sets the supplier of the measured battery voltage used by the power pass. Typically the robot
+     * controller battery voltage. A non-finite reading disables budgeting for that cycle.
+     *
+     * @param busVoltage battery voltage in volts
+     * @return this scheduler
+     */
+    public MechanismScheduler busVoltage(java.util.function.DoubleSupplier busVoltage) {
+        power.busVoltage(Objects.requireNonNull(busVoltage, "busVoltage"));
+        return this;
+    }
+
+    /**
+     * Returns and clears recorded stage transitions across all declared stagings, oldest first.
+     *
+     * @return transitions since the last call
+     */
+    public List<Staging.Change<?>> drainStageChanges() {
+        List<Staging.Change<?>> changes = new ArrayList<>();
+        for (Staging<?> staging : stagings) {
+            changes.addAll(staging.drainChanges());
+        }
+        return changes;
+    }
+
+    private void refreshPowerDeclarations() {
+        stagings.clear();
+        PowerPolicy policy = null;
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof Staging<?> staging && !containsIdentity(stagings, staging)) {
+                stagings.add(staging);
+            } else if (declaration instanceof PowerPolicy declared) {
+                if (policy != null && policy != declared) {
+                    throw new IllegalStateException("Only one PowerPolicy may be declared per robot.");
+                }
+                policy = declared;
+            }
+        }
+        if (policy != null) {
+            power.policy(policy);
+        }
+        powerMotors = List.copyOf(motorDevices());
+    }
+
+    private static boolean containsIdentity(List<?> values, Object value) {
+        for (Object existing : values) {
+            if (existing == value) return true;
+        }
+        return false;
+    }
+
+    private void evaluateStagings(double nowSeconds) {
+        for (Staging<?> staging : stagings) {
+            try {
+                staging.evaluate(nowSeconds, stageHost);
+            } catch (RuntimeException exception) {
+                if (FaultIsolation.isPanic(exception)) throw exception;
+                recordFault("staging " + staging.currentStage(), exception);
+            }
+        }
+    }
+
+    private Map<ControlBinding<?>, StageCaps> stageCapsByControl() {
+        if (stagings.isEmpty()) return Map.of();
+        Map<ControlBinding<?>, StageCaps> caps = new IdentityHashMap<>();
+        for (Staging<?> staging : stagings) {
+            for (StageModifier modifier : staging.activeModifiers()) {
+                caps.put(modifier.binding(),
+                        caps.getOrDefault(modifier.binding(), StageCaps.NONE).with(modifier.kind(), modifier.fraction()));
+            }
+        }
+        return caps;
     }
 
     private void retireCompletedRequests() {
