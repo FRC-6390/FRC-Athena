@@ -3,6 +3,7 @@ package ca.frc6390.athena.sim.runtime;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimLimit;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -19,6 +20,9 @@ import java.util.Objects;
 import java.util.Set;
 
 final class SimModelRunner implements SimPhysicsEngine {
+    /** Velocity time constant of a braked, zero-output motor (about 5 degrees of coast at 180 deg/s). */
+    private static final double BRAKE_RESPONSE_SECONDS = 0.03;
+
     private final Map<SimModel, ModelState> states = new IdentityHashMap<>();
 
     @Override
@@ -42,7 +46,9 @@ final class SimModelRunner implements SimPhysicsEngine {
 
         ModelState state = states.computeIfAbsent(simulation, ignored -> initialState(linkedEncoders, session));
         double targetVelocity = targetVelocity(simulation, session, state.position);
-        double responseTime = responseTime(simulation);
+        double responseTime = brakingAtRest(simulation, session)
+                ? BRAKE_RESPONSE_SECONDS
+                : responseTime(simulation);
         double blend = Math.min(1.0, dtSeconds / responseTime);
         state.velocity += (targetVelocity - state.velocity) * blend;
 
@@ -159,6 +165,31 @@ final class SimModelRunner implements SimPhysicsEngine {
             case ELEVATOR -> 8.0;
             case FLYWHEEL -> 12.0;
             case MOTOR -> 10.0;
+        };
+    }
+
+    /**
+     * Whether the model is driven to zero output with a BRAKE neutral mode. A braked motor at zero output
+     * shorts its windings, so its speed collapses within a few hundredths of a second instead of coasting
+     * down on the free-running response time.
+     */
+    private static boolean brakingAtRest(SimModel simulation, SimulationSession session) {
+        boolean brake = false;
+        for (MotorDevice motor : simulation.motors()) {
+            MotorCommand command = command(motor, session);
+            if (command != null && !isZeroOutput(command)) {
+                return false;
+            }
+            brake |= session.motor(motor).runtimeConfiguration().neutralMode() == MotorNeutralMode.BRAKE;
+        }
+        return brake;
+    }
+
+    private static boolean isZeroOutput(MotorCommand command) {
+        return switch (command.kind()) {
+            case NEUTRAL -> true;
+            case PERCENT, VOLTAGE -> command.value() == 0.0;
+            case POSITION, VELOCITY -> false;
         };
     }
 

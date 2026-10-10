@@ -375,6 +375,32 @@ class SimulationSessionTest {
     }
 
     @Test
+    void brakedMotorReleasedAtSpeedStopsWhileCoastingMotorKeepsRolling() {
+        double brakedTravel = releasedTravelRotations(MotorDevice.of(MotorKinds.KRAKEN_X44, 50).brake());
+        double coastTravel = releasedTravelRotations(MotorDevice.of(MotorKinds.KRAKEN_X44, 51).coast());
+
+        assertTrue(brakedTravel < 0.01,
+                () -> "braked motor should stop within about 3.6 degrees at 180 deg/s, travelled "
+                        + brakedTravel * 360.0 + " degrees");
+        assertTrue(coastTravel > 3.0 * brakedTravel,
+                () -> "coasting motor should roll much further: braked=" + brakedTravel
+                        + " coast=" + coastTravel);
+    }
+
+    /** Releases a motor at 180 deg/s with no output and returns the rotations it travels afterwards. */
+    private static double releasedTravelRotations(MotorDevice motor) {
+        EncoderDevice encoder = motor.encoder();
+        SimulationSession session = SimulationSession.create().model("axis", SimModel.motor(motor));
+        session.encoder(encoder).positionRotations(0.0).velocityRotationsPerSecond(0.5);
+        session.motor(motor).stop();
+
+        for (int cycle = 0; cycle < 150; cycle++) {
+            session.step(0.02);
+        }
+        return session.encoder(encoder).positionRotations();
+    }
+
+    @Test
     void separateModelsCannotClaimTheSameMotor() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 42);
         SimulationSession session = SimulationSession.create().model("first", SimModel.motor(motor));
