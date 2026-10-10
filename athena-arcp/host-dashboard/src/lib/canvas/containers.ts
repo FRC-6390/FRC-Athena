@@ -102,7 +102,7 @@ export function normalizedContainerLayouts(ctx: LayoutSource): Map<string, Widge
 
 /** Accordion child fitted to the accordion's content bounds. */
 export function normalizedAccordionChildLayout(
-  ctx: CanvasContext,
+  ctx: LayoutSource,
   widget: DashboardWidget,
   fallback: WidgetLayout
 ): WidgetLayout | null {
@@ -118,7 +118,7 @@ export function normalizedAccordionChildLayout(
 
 /** List child placed at its stacking position among its siblings. */
 export function normalizedListChildLayout(
-  ctx: CanvasContext,
+  ctx: LayoutSource,
   widget: DashboardWidget,
   fallback: WidgetLayout
 ): WidgetLayout | null {
@@ -146,7 +146,7 @@ export function normalizedListChildLayout(
 
 /** Grid child snapped to its cell. */
 export function normalizedGridChildLayout(
-  ctx: CanvasContext,
+  ctx: LayoutSource,
   widget: DashboardWidget,
   fallback: WidgetLayout
 ): WidgetLayout | null {
@@ -161,7 +161,7 @@ export function normalizedGridChildLayout(
 
 /** Live measurement fallback: apply the axis normalisers a container child is subject to, in order. */
 export function normalizeContainerAxisForBounds(
-  ctx: CanvasContext,
+  ctx: LayoutSource,
   widget: DashboardWidget,
   fallback: WidgetLayout
 ): WidgetLayout {
