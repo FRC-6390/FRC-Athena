@@ -2,18 +2,55 @@ import org.gradle.internal.os.OperatingSystem
 
 // ARCP is a thin JNI binding over the Rust server in ../rust. This module contains no protocol
 // code. Gradle builds the native library with cargo and packages it as jar resources:
-//   /native/<os>-<arch>/libarcp_jni.so | libarcp_jni.dylib | arcp_jni.dll
-//   /native/linux-arm32/libarcp_jni.so                    (roboRIO, when it has been cross-built)
+//   /native/linux-x86_64/libarcp_jni.so          host resource names, matching ArcpNative.bundledResourcePath():
+//   /native/linux-aarch64/libarcp_jni.so         <os>-<arch> with os in {linux, macos, windows} and
+//   /native/macos-aarch64/libarcp_jni.dylib      arch in {x86_64, aarch64, arm32}
+//   /native/macos-x86_64/libarcp_jni.dylib
+//   /native/windows-x86_64/arcp_jni.dll
+//   /native/linux-arm32/libarcp_jni.so           roboRIO (armv7-unknown-linux-gnueabi, release)
+//
+// Which libraries a build produces:
+//   ./gradlew build                      host library only (debug). Nothing else is built.
+//   publish tasks (publishToMavenLocal,  host library (release) AND the roboRIO library, because robots
+//   publishToLocalWpilib, buildAndPublish) deploy the roboRIO library. Detected from the task names;
+//                                        -ParcpRoborioNative=false opts out, =true forces it.
+//   -ParcpNativeDir=<dir>                <dir>/native/<os>-<arch>/<lib> files (as produced by the CI
+//                                        workflow .github/workflows/arcp-natives.yml) are copied into the jar.
+//                                        A library present in <dir> is NOT rebuilt; a library absent from
+//                                        <dir> is built locally as usual. Use an absolute path.
+//   -ParcpSkipNative=true                no cargo at all. Only libraries given by -ParcpNativeDir are packaged.
+//                                        Native tests are excluded unless a host library is available.
+//
+// Incremental behaviour: buildArcpNativeHost / buildArcpNativeRoboRio declare every .rs file and Cargo.toml
+// of arcp-core, arcp-server and arcp-jni, the workspace Cargo.toml, Cargo.lock, .cargo/config.toml, and the
+// profile, target directory and linker as inputs, with the produced library as output. When nothing changed
+// Gradle reports UP-TO-DATE and cargo is not started. stageArcpNative is a Sync of the library files, so it
+// is up to date when they are.
 //
 // Properties:
-//   -ParcpSkipNative=true        no cargo, no native library (CI without Rust). Native tests are excluded.
-//   -ParcpCargoRelease=true      build the host library with --release (default: debug, faster; release when publishing)
-//   -ParcpCargo=<path>           cargo executable (default: PATH, then ~/.cargo/bin)
+//   -ParcpSkipNative=true        see above
+//   -ParcpNativeDir=<dir>        prebuilt native libraries (see above)
+//   -ParcpCargoRelease=true      build the host library with --release (default: debug; release when publishing)
+//   -ParcpCargo=<path>           cargo executable (default: PATH, then $CARGO_HOME/bin, then ~/.cargo/bin)
 //   -ParcpCargoOffline=true      pass --offline to cargo
-//   -ParcpRoborioNative=true     make the jar step cross-build the roboRIO library first (default: on when publishing,
-//                                and publishing fails if it cannot be built — robots need it)
-//   -ParcpRoborioLinker=<path>   roboRIO C linker (default: WPILib 2026 roborio toolchain)
+//   -ParcpRoborioNative=<bool>   build the roboRIO library in the jar step (default: on when publishing; the
+//                                publish fails if it cannot be built, because robots need it)
+//   -ParcpRoborioLinker=<path>   roboRIO C linker (default: WPILib 2026 roboRIO toolchain, see below)
 //   -ParcpPublish=false          keep this module out of Maven Local (published by default; athena-wpilib depends on it)
+//
+// Environment:
+//   CARGO_TARGET_DIR             cargo target directory, absolute or relative to athena-arcp/rust
+//                                (default: athena-arcp/rust/target). Gradle passes the same value to cargo and
+//                                reads the libraries from it. Point it outside /tmp on small tmpfs systems, e.g.
+//                                CARGO_TARGET_DIR=$HOME/.cache/athena-arcp-target. Do not commit it.
+//
+// Tasks:
+//   buildArcpNativeHost          host library (part of build via stageArcpNative)
+//   buildArcpNativeRoboRio       roboRIO library, release, armv7-unknown-linux-gnueabi
+//   buildArcpNativeWindowsCross  optional: Windows library cross-compiled from Linux (x86_64-pc-windows-gnu).
+//                                Skipped with a message when the Rust target or the mingw linker is missing.
+//                                Not part of any other task; to ship it, copy it into a -ParcpNativeDir tree.
+//   stageArcpNative              copies the libraries into build/generated/arcp-native-resources
 
 dependencies {
     // Tests decode the ARCP control and frame bytes with athena-runtime's reference reader.
@@ -23,9 +60,16 @@ dependencies {
 final String ROBORIO_TRIPLE = 'armv7-unknown-linux-gnueabi'
 final String ROBORIO_RESOURCE_DIR = 'linux-arm32'
 final String ROBORIO_LIBRARY = 'libarcp_jni.so'
+// The WPILib 2026 roboRIO toolchain ships the arm-frc2025 tuple.
+final String ROBORIO_TOOLCHAIN_TUPLE = 'arm-frc2025-linux-gnueabi'
+final String WINDOWS_CROSS_TRIPLE = 'x86_64-pc-windows-gnu'
+final String WINDOWS_CROSS_LINKER = 'x86_64-w64-mingw32-gcc'
+final String LIBRARY_BASE = 'arcp_jni'
 
 def rustDir = rootProject.file('athena-arcp/rust')
-def targetRoot = new File(rustDir, 'target')
+def targetRoot = (System.getenv('CARGO_TARGET_DIR') ?: '').trim()
+        ? rustDir.toPath().resolve(System.getenv('CARGO_TARGET_DIR').trim()).toFile()
+        : new File(rustDir, 'target')
 
 boolean skipNative = ((findProperty('arcpSkipNative') ?: 'false') as String).trim().toBoolean()
 // Any publish task on the command line (publishToMavenLocal, publishToLocalWpilib, buildAndPublish...) ships the
@@ -39,37 +83,71 @@ boolean arcpPublishEnabled = ((findProperty('arcpPublish') ?: 'true') as String)
 def profileDir = cargoRelease ? 'release' : 'debug'
 
 def hostOs = OperatingSystem.current()
+// Must match ArcpNative.normalizeArch(): x86_64|amd64 -> x86_64, aarch64|arm64 -> aarch64, armv7*|arm -> arm32.
 def hostArch = { ->
     def raw = (System.getProperty('os.arch') ?: '').toLowerCase(Locale.ROOT)
     if (raw in ['x86_64', 'amd64']) return 'x86_64'
     if (raw in ['aarch64', 'arm64']) return 'aarch64'
+    if (raw.startsWith('armv7') || raw == 'arm') return 'arm32'
+    logger.warn("ARCP: unrecognised os.arch '${raw}'; the bundled native library will not be found at runtime.")
     return raw
 }()
 def hostResourceDir
 def hostLibraryFile
 if (hostOs.isLinux()) {
     hostResourceDir = "linux-${hostArch}"
-    hostLibraryFile = 'libarcp_jni.so'
+    hostLibraryFile = "lib${LIBRARY_BASE}.so"
 } else if (hostOs.isMacOsX()) {
     hostResourceDir = "macos-${hostArch}"
-    hostLibraryFile = 'libarcp_jni.dylib'
+    hostLibraryFile = "lib${LIBRARY_BASE}.dylib"
 } else if (hostOs.isWindows()) {
     hostResourceDir = "windows-${hostArch}"
-    hostLibraryFile = 'arcp_jni.dll'
+    hostLibraryFile = "${LIBRARY_BASE}.dll"
 } else {
     throw new GradleException("Unsupported host OS for the ARCP native library: ${System.getProperty('os.name')}")
 }
 
 def hostLibrary = new File(targetRoot, "${profileDir}/${hostLibraryFile}")
 def roborioLibrary = new File(targetRoot, "${ROBORIO_TRIPLE}/release/${ROBORIO_LIBRARY}")
+def windowsCrossLibrary = new File(targetRoot, "${WINDOWS_CROSS_TRIPLE}/release/${LIBRARY_BASE}.dll")
 def nativeResourceRoot = layout.buildDirectory.dir('generated/arcp-native-resources/main')
 
-// Finds an executable on PATH, then in the usual rustup location.
+// Prebuilt libraries: -ParcpNativeDir=<dir> containing native/<os>-<arch>/<lib>.
+String nativeDirProperty = ((findProperty('arcpNativeDir') ?: '') as String).trim()
+File prebuiltNativeRoot = null
+if (nativeDirProperty) {
+    File prebuiltDir = rootProject.file(nativeDirProperty)
+    if (!prebuiltDir.isDirectory()) {
+        throw new GradleException("-ParcpNativeDir=${nativeDirProperty} is not a directory.")
+    }
+    prebuiltNativeRoot = new File(prebuiltDir, 'native')
+    if (!prebuiltNativeRoot.isDirectory()) {
+        throw new GradleException("-ParcpNativeDir=${nativeDirProperty} has no native/ subdirectory (expected native/<os>-<arch>/<lib>).")
+    }
+}
+def hasPrebuilt = { String resourceDir, String libraryFile ->
+    prebuiltNativeRoot != null && new File(prebuiltNativeRoot, "${resourceDir}/${libraryFile}").isFile()
+}
+boolean hostPrebuilt = hasPrebuilt(hostResourceDir, hostLibraryFile)
+boolean roborioPrebuilt = hasPrebuilt(ROBORIO_RESOURCE_DIR, ROBORIO_LIBRARY)
+// Host library needed: built here, unless provided. roboRIO: only when requested and not provided.
+boolean hostRequired = !skipNative && !hostPrebuilt
+boolean roborioRequired = !skipNative && roborioInBuild && !roborioPrebuilt
+// The Java native tests can run when a host library is either built or provided.
+boolean nativeTestsAvailable = hostPrebuilt || !skipNative
+
+// Executable lookup. Windows: name.exe. Order: PATH, $CARGO_HOME/bin, then the rustup default location
+// (%USERPROFILE%\.cargo\bin on Windows, ~/.cargo/bin elsewhere; user.home is the same folder).
 def findExecutable = { String name ->
     def exe = hostOs.isWindows() ? "${name}.exe" : name
     def dirs = (System.getenv('PATH') ?: '').split(File.pathSeparator).toList()
+    if (System.getenv('CARGO_HOME')) dirs << new File(System.getenv('CARGO_HOME'), 'bin').absolutePath
+    if (hostOs.isWindows() && System.getenv('USERPROFILE')) {
+        dirs << new File(System.getenv('USERPROFILE'), '.cargo/bin').absolutePath
+    }
     dirs << new File(System.getProperty('user.home'), '.cargo/bin').absolutePath
     for (dir in dirs) {
+        if (!dir) continue
         def candidate = new File(dir, exe)
         if (candidate.isFile() && candidate.canExecute()) {
             return candidate.absolutePath
@@ -86,9 +164,9 @@ def resolveCargo = { ->
     def cargo = findExecutable('cargo')
     if (cargo == null) {
         throw new GradleException(
-                'cargo was not found on PATH or in ~/.cargo/bin. The ARCP native library is built with Rust. '
-                + 'Install Rust from https://rustup.rs, pass -ParcpCargo=<path>, or build without the native library '
-                + 'with -ParcpSkipNative=true (ARCP is then unavailable at runtime).')
+                'cargo was not found on PATH, in $CARGO_HOME/bin or in ~/.cargo/bin (%USERPROFILE%\\.cargo\\bin on Windows). '
+                + 'The ARCP native library is built with Rust. Install Rust from https://rustup.rs, pass -ParcpCargo=<path>, '
+                + 'or use -ParcpSkipNative=true (ARCP is then unavailable at runtime unless -ParcpNativeDir is given).')
     }
     return cargo
 }
@@ -100,18 +178,46 @@ def captureOutput = { List<String> command ->
     return text
 }
 
+// Installed rust targets, or null when rustup is not available.
+def installedRustTargets = { ->
+    def rustup = findExecutable('rustup')
+    if (rustup == null) return null
+    return captureOutput([rustup, 'target', 'list', '--installed']).readLines()*.trim()
+}
+
 def roborioLinker = (findProperty('arcpRoborioLinker') as String) ?: {
     def wpilibRoot = hostOs.isWindows()
             ? new File(System.getenv('PUBLIC') ?: 'C:/Users/Public', 'wpilib/2026')
             : new File(System.getProperty('user.home'), 'wpilib/2026')
-    new File(wpilibRoot, "roborio/bin/arm-frc2025-linux-gnueabi-gcc${hostOs.isWindows() ? '.exe' : ''}").absolutePath
+    new File(wpilibRoot, "roborio/bin/${ROBORIO_TOOLCHAIN_TUPLE}-gcc${hostOs.isWindows() ? '.exe' : ''}").absolutePath
 }()
+
+// Source files that determine the library output. Only the crates arcp-jni depends on are listed.
+def cargoSourceFiles = fileTree(rustDir) {
+    include 'Cargo.toml', 'Cargo.lock', '.cargo/config.toml'
+    include 'crates/arcp-core/Cargo.toml', 'crates/arcp-core/**/*.rs'
+    include 'crates/arcp-server/Cargo.toml', 'crates/arcp-server/**/*.rs'
+    include 'crates/arcp-jni/Cargo.toml', 'crates/arcp-jni/**/*.rs'
+}
 
 tasks.register('buildArcpNativeHost', Exec) {
     group = 'build'
     description = 'Builds the ARCP JNI library for this host with cargo (used by simulation and tests).'
     workingDir rustDir
-    onlyIf { !skipNative }
+    onlyIf {
+        if (skipNative) return false
+        if (hostPrebuilt) {
+            logger.lifecycle("buildArcpNativeHost skipped: ${hostResourceDir}/${hostLibraryFile} is provided by -ParcpNativeDir.")
+            return false
+        }
+        return true
+    }
+    inputs.files(cargoSourceFiles)
+    inputs.property('cargoRelease', cargoRelease)
+    inputs.property('cargoOffline', cargoOffline)
+    inputs.property('cargoTargetRoot', targetRoot.absolutePath)
+    outputs.file(hostLibrary)
+    environment 'CARGO_TARGET_DIR', targetRoot.absolutePath
     doFirst {
         List<String> args = [resolveCargo(), 'build', '-p', 'arcp-jni']
         if (cargoRelease) args << '--release'
@@ -124,62 +230,114 @@ tasks.register('buildArcpNativeRoboRio', Exec) {
     group = 'build'
     description = "Cross-compiles the ARCP JNI library for the roboRIO (${ROBORIO_TRIPLE}). Not part of build."
     workingDir rustDir
-    onlyIf { !skipNative }
+    onlyIf {
+        if (skipNative) return false
+        if (roborioPrebuilt) {
+            logger.lifecycle("buildArcpNativeRoboRio skipped: ${ROBORIO_RESOURCE_DIR}/${ROBORIO_LIBRARY} is provided by -ParcpNativeDir.")
+            return false
+        }
+        return true
+    }
+    inputs.files(cargoSourceFiles)
+    inputs.file(roborioLinker).optional()
+    inputs.property('cargoOffline', cargoOffline)
+    inputs.property('cargoTargetRoot', targetRoot.absolutePath)
+    inputs.property('roborioTriple', ROBORIO_TRIPLE)
+    outputs.file(roborioLibrary)
+    environment 'CARGO_TARGET_DIR', targetRoot.absolutePath
+    environment 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER', roborioLinker
     doFirst {
         def cargo = resolveCargo()
-        def rustup = findExecutable('rustup')
-        def installed = rustup == null ? '' : captureOutput([rustup, 'target', 'list', '--installed'])
-        if (installed.readLines().every { it.trim() != ROBORIO_TRIPLE }) {
+        def installed = installedRustTargets()
+        if (installed == null) {
+            logger.warn("rustup not found; assuming ${ROBORIO_TRIPLE} is installed.")
+        } else if (!installed.contains(ROBORIO_TRIPLE)) {
             throw new GradleException("Rust target ${ROBORIO_TRIPLE} is not installed. Run: rustup target add ${ROBORIO_TRIPLE}")
         }
         if (!new File(roborioLinker).isFile()) {
-            throw new GradleException("roboRIO linker not found at ${roborioLinker}. Install the WPILib 2026 roboRIO toolchain or pass -ParcpRoborioLinker=<path>.")
+            throw new GradleException("roboRIO linker not found at ${roborioLinker}. Install the WPILib 2026 roboRIO toolchain "
+                    + "(C:\\Users\\Public\\wpilib\\2026 on Windows, ~/wpilib/2026 elsewhere) or pass -ParcpRoborioLinker=<path>.")
         }
-        environment 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER', roborioLinker
         List<String> args = [cargo, 'build', '-p', 'arcp-jni', '--release', '--target', ROBORIO_TRIPLE]
         if (cargoOffline) args << '--offline'
         commandLine args
     }
 }
 
-tasks.register('stageArcpNative') {
+// Optional local cross build. Requires rustup target x86_64-pc-windows-gnu and the mingw linker on PATH
+// (Debian/Ubuntu: apt install mingw-w64). Skipped otherwise.
+def windowsCrossUnavailableReason = { ->
+    def installed = installedRustTargets()
+    if (installed == null) return 'rustup was not found.'
+    if (!installed.contains(WINDOWS_CROSS_TRIPLE)) return "Rust target ${WINDOWS_CROSS_TRIPLE} is not installed (rustup target add ${WINDOWS_CROSS_TRIPLE})."
+    if (findExecutable(WINDOWS_CROSS_LINKER) == null) return "${WINDOWS_CROSS_LINKER} was not found on PATH (apt install mingw-w64)."
+    return null
+}
+
+tasks.register('buildArcpNativeWindowsCross', Exec) {
     group = 'build'
-    description = 'Copies the ARCP native libraries into the jar resources (/native/<os>-<arch>/).'
-    if (!skipNative) {
+    description = "Optional: cross-compiles the ARCP JNI library for Windows (${WINDOWS_CROSS_TRIPLE}) with mingw. Skipped when unavailable."
+    workingDir rustDir
+    onlyIf {
+        if (skipNative) return false
+        def reason = windowsCrossUnavailableReason()
+        if (reason != null) {
+            logger.lifecycle("buildArcpNativeWindowsCross skipped: ${reason}")
+            return false
+        }
+        return true
+    }
+    inputs.files(cargoSourceFiles)
+    inputs.property('cargoOffline', cargoOffline)
+    inputs.property('cargoTargetRoot', targetRoot.absolutePath)
+    inputs.property('windowsCrossTriple', WINDOWS_CROSS_TRIPLE)
+    outputs.file(windowsCrossLibrary)
+    environment 'CARGO_TARGET_DIR', targetRoot.absolutePath
+    doFirst {
+        def cargo = resolveCargo()
+        environment 'CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER', findExecutable(WINDOWS_CROSS_LINKER)
+        List<String> args = [cargo, 'build', '-p', 'arcp-jni', '--release', '--target', WINDOWS_CROSS_TRIPLE]
+        if (cargoOffline) args << '--offline'
+        commandLine args
+    }
+}
+
+tasks.register('stageArcpNative', Sync) {
+    group = 'build'
+    description = 'Copies the ARCP native libraries into the jar resources (/native/<os>-<arch>/). Inputs are the library files.'
+    into nativeResourceRoot
+    if (hostRequired) {
         dependsOn tasks.named('buildArcpNativeHost')
-        if (roborioInBuild) {
-            dependsOn tasks.named('buildArcpNativeRoboRio')
+        from(hostLibrary) { into "native/${hostResourceDir}" }
+    }
+    if (roborioRequired) {
+        dependsOn tasks.named('buildArcpNativeRoboRio')
+    }
+    if (!skipNative && !roborioPrebuilt) {
+        // Built when requested. Otherwise an existing library from an earlier build is packaged as before.
+        from(roborioLibrary) { into "native/${ROBORIO_RESOURCE_DIR}" }
+    }
+    if (prebuiltNativeRoot != null) {
+        from(prebuiltNativeRoot) {
+            include '*/libarcp_jni.so', '*/libarcp_jni.dylib', '*/arcp_jni.dll'
+            into 'native'
         }
     }
-    inputs.files(hostLibrary, roborioLibrary).optional()
     inputs.property('skipNative', skipNative)
     inputs.property('roborioInBuild', roborioInBuild)
-    outputs.dir(nativeResourceRoot)
-    doLast {
-        def root = nativeResourceRoot.get().asFile
-        delete root
-        if (skipNative) {
+    inputs.property('prebuiltNativeRoot', prebuiltNativeRoot?.absolutePath ?: '')
+    doFirst {
+        if (skipNative && prebuiltNativeRoot == null) {
             logger.lifecycle('ARCP native library skipped (-ParcpSkipNative=true); ARCP is unavailable at runtime.')
-            return
         }
-        if (!hostLibrary.isFile()) {
+        if (hostRequired && !hostLibrary.isFile()) {
             throw new GradleException("Host ARCP library missing at ${hostLibrary}; buildArcpNativeHost did not produce it.")
         }
-        copy {
-            from hostLibrary
-            into new File(root, "native/${hostResourceDir}")
-        }
-        logger.lifecycle("ARCP native library staged for ${hostResourceDir}")
-        if (roborioLibrary.isFile()) {
-            copy {
-                from roborioLibrary
-                into new File(root, "native/${ROBORIO_RESOURCE_DIR}")
-            }
-            logger.lifecycle("ARCP roboRIO library staged for ${ROBORIO_RESOURCE_DIR}")
-        } else if (roborioInBuild) {
+        if (roborioRequired && !roborioLibrary.isFile()) {
             throw new GradleException("ARCP roboRIO library missing at ${roborioLibrary}; buildArcpNativeRoboRio did not produce it.")
-        } else {
-            logger.lifecycle("ARCP roboRIO library not built; run :athena-arcp:buildArcpNativeRoboRio to include it.")
+        }
+        if (prebuiltNativeRoot != null) {
+            logger.lifecycle("ARCP native libraries taken from ${prebuiltNativeRoot}")
         }
     }
 }
@@ -201,7 +359,7 @@ tasks.named('sourcesJar') {
 test {
     // Golden vectors live at docs/wire-vectors (shared with the Rust arcp-core tests).
     systemProperty 'athena.repoRoot', rootProject.projectDir.absolutePath
-    if (skipNative) {
+    if (!nativeTestsAvailable) {
         exclude 'ca/frc6390/athena/arcp/NativeArcpServerTest*'
     }
 }

@@ -30,14 +30,10 @@ On macOS/Linux:
 
 `test` runs unit tests. `check` runs verification and tests. `build` compiles, checks, and packages every module.
 
-The ARCP native library is built for the host platform by `:athena-arcp:buildArcpNativeHost`. The roboRIO library is
-cross-compiled separately with the WPILib 2026 roboRIO toolchain:
-
-```bash
-./gradlew :athena-arcp:buildArcpNativeRoboRio :athena-arcp:build
-```
-
-See [`athena-arcp/README.md`](athena-arcp/README.md) for the linker settings and the other native build properties.
+The ARCP native library is built for the host platform only by `./gradlew build`. Publish tasks also build the
+roboRIO library, which robots need. The CI workflow `.github/workflows/arcp-natives.yml` builds every platform.
+See [`athena-arcp/README.md`](athena-arcp/README.md) for the build properties, the incremental behaviour and the
+roboRIO requirements.
 
 For runtime performance work, run the JMH benchmarks with GC allocation profiling:
 
@@ -61,9 +57,10 @@ Publish only to Maven Local when testing Athena from a project that uses `mavenL
 
 Then add `mavenLocal()` to the consuming robot project's repositories while testing local snapshots.
 
-ARCP (`athena-arcp`) is not published to Maven Local unless you add `-ParcpPublish=true`. `athena-wpilib` depends on it, so
-add that flag to any publish that a robot project will consume. To keep a test publish out of your real Maven Local, set
-`-Dmaven.repo.local=<dir>` as well.
+ARCP (`athena-arcp`) is published with the rest of Athena. It needs cargo (Rust) to build the native library, and the
+roboRIO library is built too because robots need it. Pass `-ParcpSkipNative=true` to publish without the native
+library, or `-ParcpPublish=false` to keep ARCP out of Maven Local. To keep a test publish out of your real Maven Local,
+set `-Dmaven.repo.local=<dir>` as well.
 
 To install the local snapshot through WPILib's local vendordep flow, use:
 

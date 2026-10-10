@@ -63,37 +63,85 @@ through `ArcpSink`.
 
 ## Build and packaging
 
-The module is `:athena-arcp` and is part of `./gradlew build`. The native library is built with cargo
-during the normal build:
+The module is `:athena-arcp`. The Rust library is built by Gradle with cargo and packaged into the jar as
+`/native/<os>-<arch>/<library>`. The names are the same in `build.gradle` and in `ArcpNative`:
 
-- `buildArcpNativeHost` runs `cargo build -p arcp-jni` in `rust/` (debug profile; `-ParcpCargoRelease=true`
-  for release). `stageArcpNative` copies the result into the jar as `/native/<os>-<arch>/`.
-- If cargo is missing, the build fails with a message that says how to install Rust or opt out.
-- `-ParcpSkipNative=true` skips cargo and the native library entirely (for CI without Rust). The native
-  tests are excluded and `ArcpMarshalTest` still runs.
-- Other properties: `-ParcpCargo=<path>`, `-ParcpCargoOffline=true`, `-ParcpRoborioNative=true` (cross-build
-  the roboRIO library before staging), `-ParcpRoborioLinker=<path>`.
-- Publishing: ARCP is not published to Maven Local unless `-ParcpPublish=true`. The Athena vendordep does
-  not list it.
+| Platform | Resource directory | Library |
+| --- | --- | --- |
+| Linux x86_64 / aarch64 | `linux-x86_64` / `linux-aarch64` | `libarcp_jni.so` |
+| macOS x86_64 / aarch64 | `macos-x86_64` / `macos-aarch64` | `libarcp_jni.dylib` |
+| Windows x86_64 | `windows-x86_64` | `arcp_jni.dll` |
+| roboRIO (armv7) | `linux-arm32` | `libarcp_jni.so` |
+
+### What each build produces
+
+- `./gradlew build` builds the **host** library only (debug, or release with `-ParcpCargoRelease=true`).
+- Publishing (`publishToMavenLocal`, `publishToLocalWpilib`, `buildAndPublish`, any task name containing
+  `publish`) builds the host library in release **and** the roboRIO library, because robots need it. The
+  publish fails if the roboRIO library cannot be built. Opt out with `-ParcpRoborioNative=false`.
+- `./gradlew :athena-arcp:buildArcpNativeWindowsCross` is optional. It cross-compiles
+  `x86_64-pc-windows-gnu` from Linux and is skipped with a message unless the Rust target and
+  `x86_64-w64-mingw32-gcc` are installed. It is not part of any other task.
+- Windows and macOS libraries are built on those systems. macOS is not cross-compiled; CI covers it.
+
+### Incremental builds
+
+`buildArcpNativeHost` and `buildArcpNativeRoboRio` declare as inputs every `.rs` file and `Cargo.toml` of
+`arcp-core`, `arcp-server` and `arcp-jni`, the workspace `Cargo.toml`, `Cargo.lock`, `.cargo/config.toml`, the
+profile, the target directory and the roboRIO linker. The library is the output. With no change, Gradle reports
+`UP-TO-DATE` and cargo is not started. `stageArcpNative` copies the library files, so the jar is not rebuilt
+when they are unchanged.
+
+### Properties
+
+- `-ParcpSkipNative=true`: no cargo. Only libraries given by `-ParcpNativeDir` are packaged. Native tests are
+  excluded unless a host library is available. `ArcpMarshalTest` still runs.
+- `-ParcpNativeDir=<absolute dir>`: a directory containing `native/<os>-<arch>/<library>`, as produced by the
+  CI workflow `.github/workflows/arcp-natives.yml`. Every library found there is copied into the jar. A library
+  present in the directory is not built locally; a missing one is built as usual. This is how a release jar
+  contains all platforms without one machine building them all.
+- `-ParcpCargoRelease=true`: release profile for the host library (default: debug, release when publishing).
+- `-ParcpCargo=<path>`: cargo executable. Default: `PATH`, then `$CARGO_HOME/bin`, then `~/.cargo/bin`
+  (`%USERPROFILE%\.cargo\bin` on Windows, where `cargo.exe` is used).
+- `-ParcpCargoOffline=true`: pass `--offline` to cargo.
+- `-ParcpRoborioNative=<bool>`: build the roboRIO library in the jar step (default: on when publishing).
+- `-ParcpRoborioLinker=<path>`: roboRIO C linker. Default: `~/wpilib/2026/roborio/bin/arm-frc2025-linux-gnueabi-gcc`
+  on macOS and Linux, `%PUBLIC%\wpilib\2026\roborio\bin\arm-frc2025-linux-gnueabi-gcc.exe` on Windows.
+  The tuple is `arm-frc2025` because the WPILib 2026 toolchain ships it.
+- `-ParcpPublish=false`: keep this module out of Maven Local (published by default; `athena-wpilib` depends on it).
+
+### Target directory
+
+`CARGO_TARGET_DIR` (absolute, or relative to `athena-arcp/rust`) moves the cargo output. Gradle passes the same
+value to cargo and reads the libraries from it. Use it when `/tmp` is a small tmpfs, for example:
+
+```bash
+export CARGO_TARGET_DIR=$HOME/.cache/athena-arcp-target
+```
+
+The default is `athena-arcp/rust/target`, which is git-ignored.
 
 ### roboRIO
 
 `buildArcpNativeRoboRio` cross-compiles `armv7-unknown-linux-gnueabi` in release. Its requirements:
 
-1. The Rust target: `rustup target add armv7-unknown-linux-gnueabi`. The task checks for it and fails
-   with that command when it is missing.
-2. The WPILib 2026 roboRIO toolchain: `~/wpilib/2026/roborio/bin/arm-frc2025-linux-gnueabi-gcc`
-   (`%PUBLIC%\wpilib\2026\roborio\bin` on Windows), or `-ParcpRoborioLinker=<path>`. The task sets the
-   cargo linker through `CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER`.
-3. Then `./gradlew :athena-arcp:buildArcpNativeRoboRio :athena-arcp:build` (or add `-ParcpRoborioNative=true`).
-   The library is packaged as `/native/linux-arm32/libarcp_jni.so`.
+1. The Rust target: `rustup target add armv7-unknown-linux-gnueabi`. The task checks for it and fails with that
+   command when it is missing.
+2. The WPILib 2026 roboRIO toolchain (see the linker default above), or `-ParcpRoborioLinker=<path>`. The task
+   sets the cargo linker through `CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABI_LINKER`.
+3. Then `./gradlew :athena-arcp:buildArcpNativeRoboRio` (or any publish task).
 
 `rust/docker/Dockerfile.cross` (armel/arm64 toolchains and a mingw target) is kept for a containerized
 cross build. It is not wired into Gradle.
 
-Status on the 2027 development machine: the WPILib linker is present, the `armv7-unknown-linux-gnueabi`
-target is **not** installed (only `armv7-unknown-linux-gnueabihf` is), so the roboRIO library has not
-been built or tested on the robot yet.
+### CI
+
+`.github/workflows/arcp-natives.yml` builds and tests the host library on `ubuntu-latest` (linux-x86_64),
+`ubuntu-24.04-arm` (linux-aarch64), `windows-latest` (windows-x86_64), `macos-14` (macos-aarch64) and
+`macos-13` (macos-x86_64). The roboRIO job installs the roboRIO GCC from the WPILib opensdk release named in
+the workflow's `ROBORIO_TOOLCHAIN_*` variables. The assemble job runs `./gradlew build -ParcpNativeDir=...` on
+the downloaded libraries. The publish job is a placeholder that runs only on a manual run with `publish` set;
+no credentials are configured.
 
 ## Tests
 

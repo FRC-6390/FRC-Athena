@@ -1,0 +1,218 @@
+name: ARCP natives
+
+# Builds and tests the ARCP JNI library on every platform, packages the results with the Athena jar, and
+# (optionally, manually) publishes. Only runs when ARCP, its Rust crates or this workflow change, or on demand.
+#
+# Artifacts: native-<platform> holds the library for that platform (see the matrix below). The assemble job
+# arranges them as <dir>/native/<platform>/<lib> and runs ./gradlew build -ParcpNativeDir=<dir>, so the Gradle
+# build packages the prebuilt libraries and does not rebuild them.
+
+on:
+  push:
+    paths:
+      - 'athena-arcp/**'
+      - '.github/workflows/arcp-natives.yml'
+  pull_request:
+    paths:
+      - 'athena-arcp/**'
+      - '.github/workflows/arcp-natives.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Run the publish placeholder job (the team configures the real publishing step)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # roboRIO toolchain: WPILib opensdk release that contains the roboRIO GCC used by buildArcpNativeRoboRio.
+  # Update these together when the robot toolchain changes.
+  ROBORIO_TOOLCHAIN_RELEASE: v2025-2
+  ROBORIO_TOOLCHAIN_ASSET: cortexa9_vfpv3-roborio-academic-2025-x86_64-linux-gnu-Toolchain-12.1.0.tgz
+  ROBORIO_TOOLCHAIN_URL: https://github.com/wpilibsuite/opensdk/releases/download/v2025-2/cortexa9_vfpv3-roborio-academic-2025-x86_64-linux-gnu-Toolchain-12.1.0.tgz
+
+jobs:
+  native:
+    name: "Native - ${{ matrix.platform }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            library: libarcp_jni.so
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
+            library: libarcp_jni.so
+          - os: windows-latest
+            platform: windows-x86_64
+            library: arcp_jni.dll
+          - os: macos-14
+            platform: macos-aarch64
+            library: libarcp_jni.dylib
+          - os: macos-13
+            platform: macos-x86_64
+            library: libarcp_jni.dylib
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            athena-arcp/rust/target
+          key: arcp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('athena-arcp/rust/Cargo.lock') }}
+          restore-keys: |
+            arcp-cargo-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Rust tests
+        working-directory: athena-arcp/rust
+        run: cargo test --locked -p arcp-core -p arcp-server -p arcp-jni
+
+      - name: Build the release library and run the Java native tests
+        run: ./gradlew :athena-arcp:test -ParcpCargoRelease=true --console=plain
+
+      - name: Collect the library
+        run: |
+          mkdir -p "native/${{ matrix.platform }}"
+          cp "athena-arcp/rust/target/release/${{ matrix.library }}" "native/${{ matrix.platform }}/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: native/${{ matrix.platform }}/${{ matrix.library }}
+          if-no-files-found: error
+
+  roborio:
+    name: "Native - roboRIO (linux-arm32)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-unknown-linux-gnueabi
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            athena-arcp/rust/target
+          key: arcp-cargo-roborio-${{ hashFiles('athena-arcp/rust/Cargo.lock') }}
+          restore-keys: |
+            arcp-cargo-roborio-
+
+      - name: Install the WPILib roboRIO toolchain
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/roborio-toolchain"
+          mkdir -p "$dir"
+          curl -fsSL -o "$RUNNER_TEMP/roborio.tgz" "$ROBORIO_TOOLCHAIN_URL"
+          tar -xzf "$RUNNER_TEMP/roborio.tgz" -C "$dir"
+          gcc="$(find "$dir" -type f -name 'arm-frc2025-linux-gnueabi-gcc' | head -n 1)"
+          if [ -z "$gcc" ]; then
+            echo "arm-frc2025-linux-gnueabi-gcc not found in $ROBORIO_TOOLCHAIN_ASSET" >&2
+            exit 1
+          fi
+          chmod +x "$gcc"
+          "$gcc" --version | head -n 1
+          echo "ROBORIO_LINKER=$gcc" >> "$GITHUB_ENV"
+
+      - name: Cross-build the roboRIO library
+        run: ./gradlew :athena-arcp:buildArcpNativeRoboRio -ParcpRoborioLinker="$ROBORIO_LINKER" --console=plain
+
+      - name: Check the artifact is ARM
+        run: |
+          file athena-arcp/rust/target/armv7-unknown-linux-gnueabi/release/libarcp_jni.so | tee /dev/stderr | grep -q 'ARM'
+
+      - name: Collect the library
+        run: |
+          mkdir -p native/linux-arm32
+          cp athena-arcp/rust/target/armv7-unknown-linux-gnueabi/release/libarcp_jni.so native/linux-arm32/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-arm32
+          path: native/linux-arm32/libarcp_jni.so
+          if-no-files-found: error
+
+  assemble:
+    name: Assemble jar
+    needs: [native, roborio]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: downloads
+
+      - name: Arrange the native directory
+        run: |
+          set -euo pipefail
+          for d in downloads/native-*; do
+            platform="${d#downloads/native-}"
+            mkdir -p "natives/native/$platform"
+            cp "$d"/* "natives/native/$platform/"
+          done
+          find natives -type f | sort
+
+      - name: Build and test with the prebuilt libraries
+        run: ./gradlew build -ParcpNativeDir="$GITHUB_WORKSPACE/natives" --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: athena-arcp-jar
+          path: athena-arcp/java/build/libs/
+          if-no-files-found: error
+
+  publish:
+    name: Publish (placeholder)
+    needs: [assemble]
+    # Manual run with the publish input only. No credentials are configured in this repository.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: downloads
+      # TODO(team): configure publishing. Expected shape: download the natives as in the assemble job, then run
+      #   ./gradlew publish -ParcpNativeDir=<natives dir> -PathenaVersion=<version>
+      # with repository URL and credentials supplied through the environment of a protected GitHub environment.
+      - name: Placeholder
+        run: echo "Publishing is not configured yet. Natives were downloaded and assembled by the assemble job."
