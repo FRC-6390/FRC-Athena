@@ -371,3 +371,68 @@ format as fallback (required for sim/tests). Optional NT4 bridge mirroring selec
 | effort | B5, B6 | athena-mechanisms, athena-hardware |
 | power | B7-B9 | athena-hardware, athena-mechanisms, athena-wpilib |
 | sim-testing | C2, examples, docs | athena-simulation, example-projects, docs |
+
+---
+
+## Appendix E1-W. Wire / replay byte format (normative)
+
+All integers little-endian. `varint` = unsigned LEB128. `zigzag` = signed zigzag + varint.
+
+### Record envelope
+Used for ARCP v2 UDP/TCP payloads and replay files alike:
+
+```
+u8  recordType
+varint payloadLength
+u8[payloadLength] payload
+```
+
+| recordType | Name | Payload |
+| --- | --- | --- |
+| 0x01 | DICTIONARY | varint count, then per entry: varint signalId, string path, u8 typeTag, string unit (may be empty), u8 role, u8 flags(bit0 writable, bit1 persisted), string lockGroup (may be empty), varint structSchemaId (0 = none) |
+| 0x02 | FRAME | see Frame |
+| 0x03 | MARKER | zigzag timestampMicros, varint markerKind, string message, varint signalId (0 = none) |
+| 0x04 | METADATA | varint count, then pairs of string key, string value (event, matchType, matchNumber, robot, athenaVersion...) |
+| 0x05 | STRUCT_SCHEMA | varint structSchemaId, string typeName, string wpilibStructSchema |
+| 0x10 | COMPRESSED_BLOCK | varint uncompressedLength, raw DEFLATE (java.util.zip.Deflater nowrap=true / flate2 raw) of a sequence of records |
+
+`string` = varint byteLength + UTF-8 bytes.
+
+### Frame (recordType 0x02)
+```
+u8  version (=2)
+u8  flags        bit0 keyframe (contains every signal), bit1 fragment
+u64 cycleTimestampMicros (FPGA time)
+u32 sequence
+u16 fragmentIndex, u16 fragmentCount   (both 0/1 when not fragmented)
+varint entryCount
+entries: varint signalId, u8 typeTag, value
+```
+
+### typeTag values
+| tag | type | value encoding |
+| --- | --- | --- |
+| 1 | bool | u8 0/1 |
+| 2 | i64 | zigzag |
+| 3 | f64 | 8 bytes IEEE754 LE |
+| 4 | string | string |
+| 5 | bool[] | varint n, n bytes |
+| 6 | i64[] | varint n, n zigzag |
+| 7 | f64[] | varint n, 8n bytes |
+| 8 | string[] | varint n, n strings |
+| 9 | struct | varint structSchemaId, varint byteLength, bytes (WPILib struct layout) |
+
+### Marker kinds
+1 BOOT, 2 MATCH_IDENTIFIED, 3 AUTO_START, 4 TELEOP_START, 5 MATCH_END, 6 DISABLE, 7 FAULT,
+8 STAGE_CHANGE, 9 CHECK, 10 OVERRIDE, 11 PERSISTED_WRITE, 12 RECORD, 13 TEST_START, 100+ user.
+
+### Replay file
+`.athrp` file = ASCII magic `ATHRP\0` + u16 formatVersion(=1) + records. Writers emit METADATA,
+DICTIONARY (and STRUCT_SCHEMA) first, then frames/markers inside COMPRESSED_BLOCKs of about 64 KiB
+uncompressed. A keyframe is emitted at least once per second and at the start of every block, so a
+reader can seek block by block.
+
+The Java implementation of this format lives in `athena-runtime`
+(`ca.frc6390.athena.runtime.wire`) and is the reference; the Rust implementation in
+`athena-arcp/rust/crates/arcp-core` must round-trip byte-identically (shared golden test vectors in
+`docs/wire-vectors/`).
