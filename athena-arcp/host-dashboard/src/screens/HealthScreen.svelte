@@ -29,18 +29,15 @@
     const nodes = flattenMechanisms(buildMechanismTree(session.store.allSignals()));
     return nodes.flatMap((node) =>
       deviceSections(node)
-        .map((device) => {
-          const by = (name: string) => device.signals.find((s) => s.name === name);
-          return {
-            key: device.path,
-            mechanism: node.name,
-            mechanismPath: node.path,
-            device: device.name,
-            current: num(by('current')),
-            temperature: num(by('temperature')),
-            derate: num(by('derate'))
-          };
-        })
+        .map((device) => ({
+          key: device.path,
+          mechanism: node.name,
+          mechanismPath: node.path,
+          device: device.name,
+          current: num(device.current ?? undefined),
+          temperature: num(device.temperature ?? undefined),
+          derate: num(device.derate ?? undefined)
+        }))
         .filter((m) => m.current !== null || m.temperature !== null)
     );
   });

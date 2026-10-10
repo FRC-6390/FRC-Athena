@@ -3,8 +3,7 @@
   import type { MechanismNode } from '../../lib/data/tree';
   import { groupSignals } from '../../lib/data/tree';
   import { actionSignals, controlSections, deviceSections, summarize, valueSignals } from '../../lib/mechanisms/model';
-  import { formatValue } from '../../lib/format';
-  import { reasonTone, stateTone } from './tones';
+  import { reasonTone } from './tones';
   import ControlCard from './ControlCard.svelte';
   import ActionsCard from './ActionsCard.svelte';
   import DevicesCard from './DevicesCard.svelte';
@@ -31,9 +30,15 @@
     void live.current;
     return id === undefined ? undefined : session.store.latestSample(id)?.value;
   };
-  const state = $derived(formatValue(latest(summary.state?.signalId)));
-  const reason = $derived(summary.reason ? String(latest(summary.reason.signalId) ?? '') : '');
-  const stage = $derived(summary.stage ? String(latest(summary.stage.signalId) ?? '') : '');
+  const text = (id: number | undefined) => {
+    const v = latest(id);
+    return v === undefined || v === null ? '' : String(v);
+  };
+  const activeAction = $derived(text(summary.state?.signalId));
+  const running = $derived(latest(summary.running?.signalId) === true);
+  const fault = $derived(text(summary.fault?.signalId));
+  const reason = $derived(text(summary.reason?.signalId));
+  const stage = $derived(text(summary.stage?.signalId));
 </script>
 
 <div class="detail">
@@ -43,11 +48,23 @@
       <span class="path ui-mono">{node.path}</span>
     </div>
     <div class="badges">
-      {#if summary.state}<span class="ui-badge" data-tone={stateTone(state)}>{state}</span>{/if}
+      {#if fault}
+        <span class="ui-badge" data-tone="fault">Fault</span>
+      {:else if running && activeAction}
+        <span class="ui-badge" data-tone="ok">Running {activeAction}</span>
+      {:else}
+        <span class="ui-badge" data-tone="stale">Idle</span>
+      {/if}
       {#if summary.stage && stage}<span class="ui-badge" data-tone={stage === 'NORMAL' ? 'stale' : 'warn'}>stage {stage}</span>{/if}
     </div>
   </header>
 
+  {#if fault}
+    <div class="reason" data-tone="fault">
+      <span class="ui-label">Fault</span>
+      <span class="text">{fault}</span>
+    </div>
+  {/if}
   {#if reason}
     <div class="reason" data-tone={reasonTone(reason)} data-testid="reason">
       <span class="ui-label">Reason</span>

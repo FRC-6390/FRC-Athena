@@ -11,6 +11,7 @@
   };
 
   let { section, session, live }: Props = $props();
+  let showOther = $state(false);
 
   const constraintLabel = (name: string) =>
     name.replace(/^max/, 'max ').replace(/^min/, 'min ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
@@ -43,15 +44,17 @@
         {/each}
       </div>
     {/if}
-    {#if section.other.length > 0}
-      <div class="table">
-        <div class="ui-label head">Other</div>
-        {#each section.other as signal (signal.signalId)}
-          <ValueRow {signal} {session} {live} />
-        {/each}
-      </div>
-    {/if}
   </div>
+  {#if section.other.length > 0}
+    <button type="button" class="more" onclick={() => (showOther = !showOther)}>
+      {showOther ? 'Hide' : 'Show'} {section.other.length} more settings
+    </button>
+    {#if showOther}
+      {#each section.other as signal (signal.signalId)}
+        <ValueRow {signal} {session} {live} label={signal.localPath.split('/').slice(2).join('/') || signal.name} />
+      {/each}
+    {/if}
+  {/if}
 </section>
 
 <style>
@@ -66,6 +69,20 @@
   }
   .table + .table {
     border-left: 1px solid var(--border);
+  }
+  .more {
+    padding: 8px var(--sp-3);
+    border: none;
+    border-top: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-soft);
+    font: inherit;
+    font-size: var(--fs-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+  .more:hover {
+    color: var(--text);
   }
   .head {
     padding: var(--sp-2) var(--sp-3) 6px;

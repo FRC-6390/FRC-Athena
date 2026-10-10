@@ -11,6 +11,10 @@
   };
 
   let { devices, session, live }: Props = $props();
+  let expanded = $state<Record<string, boolean>>({});
+
+  /** Live readings first; Info/Config/Setup/Health details stay behind a toggle. */
+  const isLive = (signal: SignalDescriptor) => /\/State\//.test(signal.localPath) || ['current', 'temperature', 'derate'].includes(signal.name);
 
   function toneOf(signal: SignalDescriptor): 'warn' | 'fault' | null {
     void live.current;
@@ -33,9 +37,14 @@
   {#each devices as device (device.path)}
     <div class="device">
       <div class="device-name">{device.name}</div>
-      {#each device.signals as signal (signal.signalId)}
-        <ValueRow {signal} {session} {live} tone={toneOf(signal)} />
+      {#each device.signals.filter((sig) => expanded[device.path] || isLive(sig)) as signal (signal.signalId)}
+        <ValueRow {signal} {session} {live} tone={toneOf(signal)} label={signal.localPath.split('/').slice(2).join('/') || signal.name} />
       {/each}
+      {#if device.signals.some((sig) => !isLive(sig))}
+        <button type="button" class="more" onclick={() => (expanded[device.path] = !expanded[device.path])}>
+          {expanded[device.path] ? 'Hide details' : `Show ${device.signals.filter((sig) => !isLive(sig)).length} more`}
+        </button>
+      {/if}
     </div>
   {/each}
 </section>
@@ -49,6 +58,22 @@
     font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--text-strong);
+  }
+  .more {
+    width: 100%;
+    padding: 6px var(--sp-3);
+    border: none;
+    border-top: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-soft);
+    font: inherit;
+    font-size: var(--fs-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+  .more:hover {
+    color: var(--text);
+    background: var(--surface-2);
   }
   .count {
     font-size: var(--fs-xs);
