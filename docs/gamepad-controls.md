@@ -153,6 +153,52 @@ ControlSignal mayShoot = operator.rightTrigger()
 Signals support `and`, `or`, `xor`, `negate`, `onlyIf`, and `unless`. `ControlSignals.allOf`,
 `anyOf`, and `noneOf` combine larger groups.
 
+## Binding sets
+
+`in(condition, bindings)` creates a set of bindings that is active only while a condition is true.
+It exists on `Gamepad`, `PlayStationGamepad`, and `GenericController`. The consumer receives a view of
+the same controller; every signal created on that view is gated.
+
+```java
+operator.in(() -> climber.isDeployed(), pad -> {
+    pad.rightBumper().whileHeld(climber.raise).onRelease(climber.stop);
+    pad.a().onPress(climber.lock);
+});
+
+operator.in(() -> climber.isDeployed(), pad ->
+        pad.in(() -> !arm.isStowed(), inner -> inner.b().onPress(arm.stow)));
+```
+
+On a PlayStation controller, `inPlayStation(condition, pad -> ...)` passes a `PlayStationGamepad` view, so
+`touchpad()` and `ps()` are available inside the set.
+
+- **Gating applies to every derived signal.** Toggles, clicks, `repeated`, `pressed`, `negate`, `unless`,
+  `onlyIf`, `debounce`, and axis thresholds created on the view all stop while the condition is false.
+- **The condition is a release for held bindings.** `whileHeld` actions end and `onRelease` fires when the
+  condition turns false. Re-entering the set while the button is still held counts as a new press, so
+  `onPress` fires again.
+- **Toggle state is kept while the set is inactive.** A gated toggle hides its output and keeps its latched
+  value, and resumes showing it when the set is active again. Presses while the set is inactive do not
+  toggle.
+- **Click sequences emit nothing while the set is inactive.** A pending click sequence whose window ends
+  while the set is inactive is dropped.
+- **Nesting ANDs conditions.** `in` inside a set creates a gate that is active only while every enclosing
+  condition is true.
+- **Bindings on the original controller are unaffected.** `gamepad.a()` remains ungated even when the same
+  button has gated bindings.
+- **Conditions are any `BooleanSupplier`, `ControlSignal`, or toggle.** A `ControlSignal` condition is
+  evaluated once per runtime tick no matter how many bindings share it.
+
+### Conflict warnings
+
+When two gated bindings on the same physical input fire the same edge in the same runtime cycle, Athena
+reports a Driver Station warning naming both signals. Only one warning per input and edge is reported
+every five seconds. The check covers direct button bindings (`onPress`, `whileHeld`, `onRelease` on a
+view's button, or a raw `button(id)` on a view). Derived signals and axis thresholds are not checked.
+Detection is best effort because it observes the edges the runtime samples.
+
+Make the conditions mutually exclusive, or move one binding out of its set, to remove the warning.
+
 ## Debounce and axis thresholds
 
 ```java

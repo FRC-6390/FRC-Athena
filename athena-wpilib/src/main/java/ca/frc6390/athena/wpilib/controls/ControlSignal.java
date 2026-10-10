@@ -26,6 +26,7 @@ public class ControlSignal implements BooleanSupplier {
     private final String name;
     private final Evaluator evaluator;
     private final EventBinding event;
+    private final BindingGate gate;
     private HookBinding binding;
     private EventContext lastContext;
     private boolean cachedValue;
@@ -35,11 +36,26 @@ public class ControlSignal implements BooleanSupplier {
     }
 
     ControlSignal(ControlOwner owner, String name, Evaluator evaluator, boolean pulse) {
+        this(owner, name, evaluator, pulse, null, null);
+    }
+
+    /**
+     * Creates a signal that is true only while {@code gate} allows it. A {@code null} gate creates an
+     * ungated signal; a non-null conflict key enables same-cycle conflict detection for edges.
+     */
+    ControlSignal(ControlOwner owner, String name, Evaluator evaluator, boolean pulse,
+            BindingGate gate, BindingConflicts.Key conflictKey) {
         this.owner = owner;
         this.name = sanitizeName(name);
-        this.evaluator = Objects.requireNonNull(evaluator, "evaluator");
+        Objects.requireNonNull(evaluator, "evaluator");
+        this.gate = gate;
+        BindingGate.Gated gated = gate == null ? null : new BindingGate.Gated(gate, conflictKey, evaluator);
+        this.evaluator = gated == null ? evaluator : gated;
         this.event = new ControlEvent(this, pulse);
         this.binding = new HookBinding(event);
+        if (gated != null) {
+            gated.bind(this);
+        }
         if (owner != null) {
             owner.register(this);
         }
@@ -195,7 +211,10 @@ public class ControlSignal implements BooleanSupplier {
         return derive("debounce", state::evaluate);
     }
 
-    /** Creates a false-initialized state that flips on each rising edge. */
+    /**
+     * Creates a false-initialized state that flips on each rising edge. The toggle output is gated
+     * like its source, so a toggle inside a binding set only fires while the set is active.
+     */
     public ToggleSignal toggle() {
         return toggle(false);
     }
@@ -234,12 +253,17 @@ public class ControlSignal implements BooleanSupplier {
         return owner;
     }
 
+    /** The binding-set gate this signal was created under, or {@code null} when ungated. */
+    final BindingGate gate() {
+        return gate;
+    }
+
     final ControlSignal derive(String suffix, Evaluator derivedEvaluator) {
-        return new ControlSignal(owner, name + "." + suffix, derivedEvaluator);
+        return new ControlSignal(owner, name + "." + suffix, derivedEvaluator, false, gate, null);
     }
 
     final ControlSignal pulse(String suffix, Evaluator derivedEvaluator) {
-        return new ControlSignal(owner, name + "." + suffix, derivedEvaluator, true);
+        return new ControlSignal(owner, name + "." + suffix, derivedEvaluator, true, gate, null);
     }
 
     static boolean value(BooleanSupplier supplier, EventContext context) {

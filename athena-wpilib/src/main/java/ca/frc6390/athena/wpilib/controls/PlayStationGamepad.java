@@ -3,6 +3,8 @@ package ca.frc6390.athena.wpilib.controls;
 import edu.wpi.first.wpilibj.PS4Controller;
 import edu.wpi.first.wpilibj.RobotBase;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * A PlayStation gamepad with native button names and the standard {@link Gamepad} aliases.
@@ -51,6 +53,35 @@ public final class PlayStationGamepad extends Gamepad {
         r2 = button("r2", PS4Controller.Button.kR2.value);
         ps = button("ps", PS4Controller.Button.kPS.value);
         touchpad = button("touchpad", PS4Controller.Button.kTouchpad.value);
+    }
+
+    private PlayStationGamepad(Input input, BindingGate gate, Gamepad root, BindingConflicts conflicts) {
+        super(input, PLAYSTATION, root, gate, conflicts);
+        l2 = button("l2", PS4Controller.Button.kL2.value);
+        r2 = button("r2", PS4Controller.Button.kR2.value);
+        ps = button("ps", PS4Controller.Button.kPS.value);
+        touchpad = button("touchpad", PS4Controller.Button.kTouchpad.value);
+    }
+
+    /**
+     * PlayStation variant of {@link #in(BooleanSupplier, Consumer)} whose consumer receives a
+     * {@link PlayStationGamepad} view, so PlayStation-only inputs such as {@code touchpad()} and
+     * {@code ps()} can be bound inside the set.
+     *
+     * @param condition condition gating the bindings
+     * @param bindings consumer that creates the gated bindings on the view
+     * @return this controller, for chaining
+     */
+    public PlayStationGamepad inPlayStation(BooleanSupplier condition, Consumer<PlayStationGamepad> bindings) {
+        Objects.requireNonNull(bindings, "bindings");
+        bindings.accept((PlayStationGamepad) createView(
+                BindingGate.of(gate(), Objects.requireNonNull(condition, "condition"))));
+        return this;
+    }
+
+    @Override
+    Gamepad createView(BindingGate viewGate) {
+        return new PlayStationGamepad(input(), viewGate, root(), conflicts());
     }
 
     @Override
