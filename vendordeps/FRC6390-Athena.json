@@ -66,6 +66,11 @@
         },
         {
             "groupId": "ca.frc6390.athena",
+            "artifactId": "athena-arcp",
+            "version": "2027.0.0-SNAPSHOT"
+        },
+        {
+            "groupId": "ca.frc6390.athena",
             "artifactId": "athena-wpilib",
             "version": "2027.0.0-SNAPSHOT"
         },
@@ -105,10 +110,6 @@
             "version": "2027.0.0-SNAPSHOT"
         }
     ],
-    "jniDependencies": [
-        
-    ],
-    "cppDependencies": [
-        
-    ]
+    "jniDependencies": [],
+    "cppDependencies": []
 }

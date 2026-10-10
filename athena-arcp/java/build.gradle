@@ -7,12 +7,13 @@ import org.gradle.internal.os.OperatingSystem
 //
 // Properties:
 //   -ParcpSkipNative=true        no cargo, no native library (CI without Rust). Native tests are excluded.
-//   -ParcpCargoRelease=true      build the host library with --release (default: debug, faster)
+//   -ParcpCargoRelease=true      build the host library with --release (default: debug, faster; release when publishing)
 //   -ParcpCargo=<path>           cargo executable (default: PATH, then ~/.cargo/bin)
 //   -ParcpCargoOffline=true      pass --offline to cargo
-//   -ParcpRoborioNative=true     make the jar step cross-build the roboRIO library first
+//   -ParcpRoborioNative=true     make the jar step cross-build the roboRIO library first (default: on when publishing,
+//                                and publishing fails if it cannot be built — robots need it)
 //   -ParcpRoborioLinker=<path>   roboRIO C linker (default: WPILib 2026 roborio toolchain)
-//   -ParcpPublish=true           allow publishing this module to Maven Local (off by default)
+//   -ParcpPublish=false          keep this module out of Maven Local (published by default; athena-wpilib depends on it)
 
 dependencies {
     // Tests decode the ARCP control and frame bytes with athena-runtime's reference reader.
@@ -27,10 +28,13 @@ def rustDir = rootProject.file('athena-arcp/rust')
 def targetRoot = new File(rustDir, 'target')
 
 boolean skipNative = ((findProperty('arcpSkipNative') ?: 'false') as String).trim().toBoolean()
-boolean cargoRelease = ((findProperty('arcpCargoRelease') ?: 'false') as String).trim().toBoolean()
+// Any publish task on the command line (publishToMavenLocal, publishToLocalWpilib, buildAndPublish...) ships the
+// optimized host library and the roboRIO library by default.
+boolean publishing = gradle.startParameter.taskNames.any { it.toLowerCase(Locale.ROOT).contains('publish') }
+boolean cargoRelease = ((findProperty('arcpCargoRelease') ?: publishing.toString()) as String).trim().toBoolean()
 boolean cargoOffline = ((findProperty('arcpCargoOffline') ?: 'false') as String).trim().toBoolean()
-boolean roborioInBuild = ((findProperty('arcpRoborioNative') ?: 'false') as String).trim().toBoolean()
-boolean arcpPublishEnabled = ((findProperty('arcpPublish') ?: 'false') as String).trim().toBoolean()
+boolean roborioInBuild = ((findProperty('arcpRoborioNative') ?: publishing.toString()) as String).trim().toBoolean()
+boolean arcpPublishEnabled = ((findProperty('arcpPublish') ?: 'true') as String).trim().toBoolean()
 
 def profileDir = cargoRelease ? 'release' : 'debug'
 
@@ -149,6 +153,7 @@ tasks.register('stageArcpNative') {
     }
     inputs.files(hostLibrary, roborioLibrary).optional()
     inputs.property('skipNative', skipNative)
+    inputs.property('roborioInBuild', roborioInBuild)
     outputs.dir(nativeResourceRoot)
     doLast {
         def root = nativeResourceRoot.get().asFile
@@ -171,6 +176,8 @@ tasks.register('stageArcpNative') {
                 into new File(root, "native/${ROBORIO_RESOURCE_DIR}")
             }
             logger.lifecycle("ARCP roboRIO library staged for ${ROBORIO_RESOURCE_DIR}")
+        } else if (roborioInBuild) {
+            throw new GradleException("ARCP roboRIO library missing at ${roborioLibrary}; buildArcpNativeRoboRio did not produce it.")
         } else {
             logger.lifecycle("ARCP roboRIO library not built; run :athena-arcp:buildArcpNativeRoboRio to include it.")
         }
@@ -199,7 +206,7 @@ test {
     }
 }
 
-// ARCP stays out of Maven Local unless explicitly requested (see the root publishing tasks).
+// ARCP is published with the rest of Athena unless -ParcpPublish=false.
 tasks.matching { it.name.startsWith('publish') && it.name.endsWith('ToMavenLocal') }.configureEach {
     enabled = arcpPublishEnabled
 }
