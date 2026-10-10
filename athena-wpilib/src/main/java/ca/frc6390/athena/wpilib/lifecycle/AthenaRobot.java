@@ -12,6 +12,7 @@ import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ActionRequests;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.wpilib.commands.WpilibCommands;
+import ca.frc6390.athena.wpilib.arcp.ArcpBridge;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.mechanism.persist.Locks;
@@ -64,6 +65,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
     private boolean reportedJvmConfiguration;
     private ReplayBridge replay;
+    private ArcpBridge arcp;
+    private PersistentStore persistentStore;
     private boolean closed;
     private final TuningLocks tuningLocks = new TuningLocks()
             .define(Locks.InMatch.class, DriverStation::isFMSAttached);
@@ -154,10 +157,13 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         });
         ActionRequests.bind(runtime::request);
         runtime.tuningLocks(tuningLocks);
-        runtime.persistentStore(openPersistentStore(), DriverStation::getMatchTime);
+        persistentStore = openPersistentStore();
+        runtime.persistentStore(persistentStore, DriverStation::getMatchTime);
         runtime.register(this);
         replay = ReplayBridge.attach(runtime, ReplayBridge.discoverPolicy(this), RobotBase.isSimulation());
         mechanismTelemetrySchema = runtime.mechanismTelemetrySchema();
+        arcp = ArcpBridge.attach(this, runtime, replay.recorder(), tuningLocks::isLocked, persistentStore,
+                RobotBase.isSimulation());
         configureAutoChoosers();
         tracePublisher = new MechanismTracePublisher().profile(
                 RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
@@ -180,6 +186,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     public final void robotPeriodic() {
         CommandScheduler.getInstance().run();
         replay.periodic();
+        arcp.periodic(timestampSeconds());
     }
 
     @Override
@@ -386,10 +393,13 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     private PersistentStore openPersistentStore() {
         Path directory = persistenceDirectory != null ? persistenceDirectory
-                : RobotBase.isReal() ? Path.of("/home/lvuser/athena/store")
-                : Path.of(System.getProperty("java.io.tmpdir"), "athena-sim-store");
+                : ArcpBridge.discoverPolicy(this).storeDirectory().orElse(RobotBase.isReal()
+                ? Path.of("/home/lvuser/athena/store")
+                : Path.of(System.getProperty("java.io.tmpdir"), "athena-sim-store"));
         try {
-            return PersistentStore.open(directory);
+            PersistentStore store = PersistentStore.open(directory);
+            ArcpBridge.installDeployedTuning(store, ArcpBridge.discoverPolicy(this), RobotBase.isSimulation());
+            return store;
         } catch (RuntimeException exception) {
             DriverStation.reportWarning("Athena persistent telemetry is disabled: " + exception.getMessage(), false);
             return null;
@@ -413,6 +423,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         RobotRuntime closingRuntime = runtime;
         runtime = null;
         RuntimeException failure = null;
+        failure = closeResource(failure, arcp, "ARCP bridge");
+        arcp = null;
         try {
             closeRuntime(closingRuntime);
         } catch (RuntimeException exception) {

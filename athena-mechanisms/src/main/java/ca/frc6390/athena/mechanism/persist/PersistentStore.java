@@ -15,6 +15,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -45,6 +46,8 @@ public final class PersistentStore {
     private final Path directory;
     private final Path file;
     private final TreeMap<String, Object> entries = new TreeMap<>();
+    /** Read-only lower layer (the deployed tuning file). Entries here are never written to the store file. */
+    private Map<String, Object> fallback = Map.of();
     private boolean dirty;
     private double lastFlushSeconds = Double.NaN;
     private String lastError = "";
@@ -100,6 +103,21 @@ public final class PersistentStore {
         return dirty;
     }
 
+    /**
+     * Installs a read-only lower layer. Keys found here are returned by {@link #get} when the store has no
+     * entry of its own, so the robot store always wins over the layer. Layer entries are not written to the file.
+     *
+     * @param layer entries, for example read with {@link #readTuning}; copied
+     */
+    public synchronized void fallback(Map<String, Object> layer) {
+        fallback = Map.copyOf(Objects.requireNonNull(layer, "layer"));
+    }
+
+    /** Returns the read-only lower layer as installed by {@link #fallback}. */
+    public synchronized Map<String, Object> fallback() {
+        return fallback;
+    }
+
     /** Returns the number of stored entries. */
     public synchronized int size() {
         return entries.size();
@@ -118,7 +136,7 @@ public final class PersistentStore {
      * @return stored value, or empty when absent
      */
     public synchronized Optional<Object> get(String key) {
-        Object value = entries.get(requireKey(key));
+        Object value = lookup(requireKey(key));
         if (value instanceof double[] array) {
             return Optional.of(array.clone());
         }
@@ -127,7 +145,7 @@ public final class PersistentStore {
 
     /** Returns the stored {@code double} value, or empty when absent or of another type. */
     public synchronized OptionalDouble getDouble(String key) {
-        Object value = entries.get(requireKey(key));
+        Object value = lookup(requireKey(key));
         return value instanceof Double number ? OptionalDouble.of(number) : OptionalDouble.empty();
     }
 
@@ -275,6 +293,11 @@ public final class PersistentStore {
     }
 
     private void parseLine(String line) {
+        var parsed = parseEntry(line);
+        entries.put(parsed.getKey(), parsed.getValue());
+    }
+
+    private static Map.Entry<String, Object> parseEntry(String line) {
         String[] parts = line.split("\t", -1);
         if (parts.length != 3) {
             throw new IllegalArgumentException("expected three fields");
@@ -293,7 +316,7 @@ public final class PersistentStore {
             default -> throw new IllegalArgumentException("unknown type tag");
         };
         requireKey(key);
-        entries.put(key, value);
+        return Map.entry(key, value);
     }
 
     private static double[] parseArray(String text) {
@@ -309,6 +332,56 @@ public final class PersistentStore {
     }
 
     private String render() {
+        return renderEntries(entries);
+    }
+
+    private Object lookup(String key) {
+        Object value = entries.get(key);
+        return value != null ? value : fallback.get(key);
+    }
+
+    /**
+     * Reads a file written in the store format (for example a deployed tuning file). Missing files give an empty
+     * map; malformed lines are skipped.
+     *
+     * @param file file to read
+     * @return entries in key order
+     */
+    public static Map<String, Object> readTuning(Path file) {
+        TreeMap<String, Object> out = new TreeMap<>();
+        if (file == null || !Files.isRegularFile(file)) {
+            return out;
+        }
+        try {
+            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+                if (line.isBlank() || line.startsWith("#")) {
+                    continue;
+                }
+                try {
+                    var entry = parseEntry(line);
+                    out.put(entry.getKey(), entry.getValue());
+                } catch (RuntimeException malformed) {
+                    // Skipped, like the store loader does.
+                }
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to read tuning file " + file, exception);
+        }
+        return out;
+    }
+
+    /**
+     * Renders entries in the store file format, with the store header. Used for tuning exports.
+     *
+     * @param entries entries to render, with values of the types the store supports
+     * @return file contents
+     */
+    public static String renderTuning(Map<String, Object> entries) {
+        TreeMap<String, Object> sorted = new TreeMap<>(entries);
+        return renderEntries(sorted);
+    }
+
+    private static String renderEntries(Map<String, Object> entries) {
         StringBuilder builder = new StringBuilder(HEADER).append('\n');
         for (var entry : entries.entrySet()) {
             builder.append(escape(entry.getKey())).append('\t');

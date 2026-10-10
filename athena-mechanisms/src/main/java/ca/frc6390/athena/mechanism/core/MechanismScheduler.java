@@ -1117,6 +1117,11 @@ public final class MechanismScheduler {
      * @param matchTimeSeconds supplier of the FMS match time reported with writes (may be null)
      * @return this scheduler
      */
+    /** Returns the persistence context that binds persisted telemetry values, or the disabled context. */
+    public TelemetryPersistence telemetryPersistence() {
+        return resolver.overrides().persistence();
+    }
+
     public MechanismScheduler persistentStore(PersistentStore store, DoubleSupplier matchTimeSeconds) {
         resolver.overrides().persistence(new TelemetryPersistence(store, matchTimeSeconds));
         telemetrySchema = null;

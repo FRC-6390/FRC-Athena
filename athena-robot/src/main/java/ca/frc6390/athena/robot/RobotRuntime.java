@@ -723,6 +723,14 @@ public final class RobotRuntime implements AutoCloseable {
         return mechanisms.drainStageChanges();
     }
 
+    /**
+     * Returns the persistence context of persisted telemetry values. Its {@code codeDefaults()} are the values the
+     * declarations set before stored or deployed values replaced them.
+     */
+    public ca.frc6390.athena.mechanism.persist.TelemetryPersistence telemetryPersistence() {
+        return mechanisms.telemetryPersistence();
+    }
+
     public ca.frc6390.athena.mechanism.core.TelemetrySchema mechanismTelemetrySchema() {
         return mechanisms.telemetrySchema();
     }

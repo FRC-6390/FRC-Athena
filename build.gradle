@@ -376,6 +376,7 @@ project(':athena-wpilib') {
         api project(':athena-drivetrain')
         api project(':athena-localization')
         api project(':athena-runtime')
+        api project(':athena-arcp')
         compileOnly "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
         compileOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
