@@ -9,6 +9,7 @@
     "check": "bunx tsc --noEmit && vite build",
     "build": "vite build",
     "preview": "vite preview --port 1420 --strictPort",
+    "test": "bun test src",
     "tauri": "node ./scripts/tauri-launch.mjs",
     "tauri:dev": "node ./scripts/tauri-launch.mjs dev",
     "tauri:build:bin": "bunx tauri build --no-bundle",
@@ -39,6 +40,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.0.0",
     "@tauri-apps/cli": "2.10.0",
+    "bun-types": "1.2.9",
     "svelte": "5.53.3",
     "typescript": "5.9.3",
     "vite": "7.3.1"
