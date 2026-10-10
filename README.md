@@ -9,6 +9,8 @@ This branch is the 2027 rebuild. The API is not a 1:1 port of older Athena inter
 - JDK 17
 - Gradle wrapper from this repository
 - WPILib/FRC vendor repositories from `settings.gradle`
+- A Rust toolchain with `cargo` for the ARCP native library (`athena-arcp`). Without Rust, pass
+  `-ParcpSkipNative=true`; the build then skips the native library and ARCP is disabled at runtime with a warning.
 
 Use the wrapper from the repo root:
 
@@ -27,6 +29,15 @@ On macOS/Linux:
 ```
 
 `test` runs unit tests. `check` runs verification and tests. `build` compiles, checks, and packages every module.
+
+The ARCP native library is built for the host platform by `:athena-arcp:buildArcpNativeHost`. The roboRIO library is
+cross-compiled separately with the WPILib 2026 roboRIO toolchain:
+
+```bash
+./gradlew :athena-arcp:buildArcpNativeRoboRio :athena-arcp:build
+```
+
+See [`athena-arcp/README.md`](athena-arcp/README.md) for the linker settings and the other native build properties.
 
 For runtime performance work, run the JMH benchmarks with GC allocation profiling:
 
@@ -49,6 +60,10 @@ Publish only to Maven Local when testing Athena from a project that uses `mavenL
 ```
 
 Then add `mavenLocal()` to the consuming robot project's repositories while testing local snapshots.
+
+ARCP (`athena-arcp`) is not published to Maven Local unless you add `-ParcpPublish=true`. `athena-wpilib` depends on it, so
+add that flag to any publish that a robot project will consume. To keep a test publish out of your real Maven Local, set
+`-Dmaven.repo.local=<dir>` as well.
 
 To install the local snapshot through WPILib's local vendordep flow, use:
 
@@ -286,9 +301,27 @@ The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN b
 - `athena-vision`: camera declarations, pose/target signals, and camera adapter runtime.
 - `athena-localization`: localization pipelines, filters, and estimators.
 - `athena-simulation`: simulation session, in-memory simulated hardware handles, and model stepping.
-- `athena-robot`: root Athena robot runtime.
-- `athena-wpilib`: WPILib `TimedRobot` lifecycle bridge.
+- `athena-robot`: root Athena robot runtime, replay recording and replay in simulation (`ReplaySimulation`), and seeded
+  simulation exploration (`SimExplorer`).
+- `athena-wpilib`: WPILib `TimedRobot` lifecycle bridge, the ARCP bridge, and the replay driver station sink.
+- `athena-arcp`: ARCP v2 realtime telemetry, writes, and file service. The protocol is Rust (`athena-arcp/rust`); the
+  Java module is a thin JNI binding. `athena-arcp/host-dashboard` is the desktop dashboard application.
 - `athena-vendor-*`: optional vendor backends/adapters.
+
+## Feature Overview
+
+The off-season features are documented in [`docs/2027-offseason-overview.md`](docs/2027-offseason-overview.md), which links to
+each feature guide. In short:
+
+- **Typed units**, [`docs/typed-units.md`](docs/typed-units.md): WPILib units for encoders, bindings, constraints, and interpolation.
+- **Gamepad binding sets**, [`docs/gamepad-controls.md`](docs/gamepad-controls.md): `in(condition, ...)` gates a group of bindings.
+- **Telemetry, persistence, and lock groups**, [`docs/telemetry-and-simulation.md`](docs/telemetry-and-simulation.md): persisted values, `tuningLock(...)`, interpolation recording, and "why is this not moving".
+- **Characterization and models**, [`docs/characterization-and-models.md`](docs/characterization-and-models.md): identified plants, checks, and drift history.
+- **Motion policies**, [`docs/motion-policies.md`](docs/motion-policies.md) and [`docs/action-runtime-contract.md`](docs/action-runtime-contract.md).
+- **Power, thermal, and staging**, [`docs/power-thermal-staging.md`](docs/power-thermal-staging.md).
+- **Replay and simulation exploration**, [`docs/replay.md`](docs/replay.md) and [`docs/sim-exploration.md`](docs/sim-exploration.md).
+- **ARCP and the dashboard**, [`docs/arcp.md`](docs/arcp.md) and [`athena-arcp/README.md`](athena-arcp/README.md).
+- **Alliance transforms**, [`example-projects/localization-setups`](example-projects/localization-setups) and [`example-projects/auto-following`](example-projects/auto-following).
 
 ## Current Architecture Notes
 

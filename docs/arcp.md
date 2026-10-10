@@ -15,7 +15,7 @@ field the defaults apply.
 
 ```java
 public final ArcpPolicy arcp = ArcpPolicy.of()
-        .controlPort(5810)                          // TCP control port; 0 (default) picks a free port
+        .controlPort(5810)                          // TCP control port; 5810 is the default (0 picks a free port)
         .bandwidthBudgetBytesPerSecond(400_000)     // 0 (default) = no budget
         .mtu(1200)                                  // largest UDP datagram
         .keyframeInterval(Duration.ofSeconds(1))
