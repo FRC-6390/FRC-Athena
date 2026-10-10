@@ -180,5 +180,5 @@ directly.
 - Thermal constants are nominal, not characterized (see the caveat above).
 - Closed-loop outputs that the device computes on the controller (offloaded control) do not receive
   the staging effort cap. Use `limitSpeed`/`limitAccel` for those.
-- Stage transitions are not yet replay markers (C1) or A5 reasons. They are available through
-  `drainStageChanges()`.
+- Stage transitions are not yet replay markers (C1). They are available through `drainStageChanges()`. An applied
+  output that a stage caps is explained by `State/Reason` as `Stage <CONSTANT>` (A5).

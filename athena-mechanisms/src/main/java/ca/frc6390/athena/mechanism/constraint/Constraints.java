@@ -148,30 +148,50 @@ public final class Constraints {
 
     public static Constraint<Double> lower(BooleanSupplier blocked) {
         Objects.requireNonNull(blocked, "blocked");
-        return context -> blocked.getAsBoolean() && context.requested() < context.current()
+        return named("lower", context -> blocked.getAsBoolean() && context.requested() < context.current()
                 ? new ConstraintResult.Rejected<>(context.requested())
-                : new ConstraintResult.Allowed<>(context.requested());
+                : new ConstraintResult.Allowed<>(context.requested()));
     }
 
     public static Constraint<Double> upper(BooleanSupplier blocked) {
         Objects.requireNonNull(blocked, "blocked");
-        return context -> blocked.getAsBoolean() && context.requested() > context.current()
+        return named("upper", context -> blocked.getAsBoolean() && context.requested() > context.current()
                 ? new ConstraintResult.Rejected<>(context.requested())
-                : new ConstraintResult.Allowed<>(context.requested());
+                : new ConstraintResult.Allowed<>(context.requested()));
     }
 
     public static Constraint<Double> require(BooleanSupplier allowed) {
         Objects.requireNonNull(allowed, "allowed");
-        return context -> allowed.getAsBoolean()
+        return named("require", context -> allowed.getAsBoolean()
                 ? new ConstraintResult.Allowed<>(context.requested())
-                : new ConstraintResult.Rejected<>(context.requested());
+                : new ConstraintResult.Rejected<>(context.requested()));
     }
 
     public static <T> Constraint<T> require(Predicate<ConstraintContext<T>> allowed) {
         Objects.requireNonNull(allowed, "allowed");
-        return context -> allowed.test(context)
+        return named("require", context -> allowed.test(context)
                 ? new ConstraintResult.Allowed<>(context.requested())
-                : new ConstraintResult.Rejected<>(context.requested());
+                : new ConstraintResult.Rejected<>(context.requested()));
+    }
+
+    /** Names a constraint for rejection reporting. Results are unchanged apart from the rejection's kind. */
+    private static <T> Constraint<T> named(String kind, Constraint<T> delegate) {
+        return new NamedConstraint<>(kind, delegate);
+    }
+
+    private record NamedConstraint<T>(String kind, Constraint<T> delegate) implements Constraint<T> {
+        @Override
+        public ConstraintResult<T> evaluate(ConstraintContext<T> context) {
+            ConstraintResult<T> result = delegate.evaluate(context);
+            return result instanceof ConstraintResult.Rejected<T> rejected
+                    ? new ConstraintResult.Rejected<>(rejected.requested(), kind)
+                    : result;
+        }
+
+        @Override
+        public ConstraintStage stage() {
+            return delegate.stage();
+        }
     }
 
     public static <T> Constraint<T> correct(
@@ -307,7 +327,7 @@ public final class Constraints {
                         constraint.evaluate(context.requested(requested)),
                         "constraint result");
                 if (!result.accepted()) {
-                    return new ConstraintResult.Rejected<>(context.requested());
+                    return new ConstraintResult.Rejected<>(context.requested(), constraint.kind());
                 }
                 corrected |= result instanceof ConstraintResult.Corrected<?>;
                 requested = result.value();

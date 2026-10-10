@@ -54,6 +54,10 @@ final class OutputApplier {
     private final Set<MotorDevice> motorsDrivenThisCycle = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean captureTrace;
     private Map<ControlBinding<?>, StageCaps> stageCaps = java.util.Collections.emptyMap();
+    private Map<ControlBinding<?>, Enum<?>> stageNames = java.util.Collections.emptyMap();
+    private String blockedBy = "";
+    private String guardEdge = "";
+    private Enum<?> activeStage;
     private boolean applyingHold;
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
@@ -262,13 +266,38 @@ final class OutputApplier {
         }
     }
 
-    /** Installs the staging caps that apply in the coming cycle. */
-    void stageCaps(Map<ControlBinding<?>, StageCaps> caps) {
+    /**
+     * Installs the staging caps that apply in the coming cycle, and the stage that set each capped binding
+     * (used for the {@code State/Reason} explanation).
+     */
+    void stageCaps(Map<ControlBinding<?>, StageCaps> caps, Map<ControlBinding<?>, Enum<?>> stages) {
         stageCaps = caps == null ? java.util.Collections.emptyMap() : caps;
+        stageNames = stages == null ? java.util.Collections.emptyMap() : stages;
+    }
+
+    /** Constraint kind that refused this cycle's request, or empty when none did. */
+    String blockedBy() {
+        return blockedBy;
+    }
+
+    /** Range edge ({@code max} or {@code min}) that clipped this cycle's output, or empty. */
+    String guardEdge() {
+        return guardEdge;
+    }
+
+    /** Stage constant that capped an applied output this cycle, or null. */
+    Enum<?> activeStage() {
+        return activeStage;
     }
 
     private StageCaps stageCapsFor(ControlBinding<?> control) {
-        return stageCaps.isEmpty() ? StageCaps.NONE : stageCaps.getOrDefault(control, StageCaps.NONE);
+        if (stageCaps.isEmpty()) return StageCaps.NONE;
+        StageCaps caps = stageCaps.getOrDefault(control, StageCaps.NONE);
+        if (!caps.equals(StageCaps.NONE)) {
+            Enum<?> stage = stageNames.get(control);
+            if (stage != null) activeStage = stage;
+        }
+        return caps;
     }
 
     /** Motors driven by held (released with HOLD or DECELERATE) controls in the last ended cycle. */
@@ -277,6 +306,9 @@ final class OutputApplier {
     }
 
     void beginCycle() {
+        blockedBy = "";
+        guardEdge = "";
+        activeStage = null;
         heldMotors.clear();
         motorsDrivenThisCycle.clear();
         controlsAppliedThisCycle.clear();
@@ -632,6 +664,7 @@ final class OutputApplier {
                     ? Constraints.evaluate(control.constraints(), constraintContext)
                     : control.planner().plan(constraintContext, control.constraints());
             if (!result.accepted()) {
+                blockedBy = result.rejectedBy();
                 return null;
             }
             double goal = result.value();
@@ -679,6 +712,7 @@ final class OutputApplier {
                     control.constraints(),
                     new ConstraintContext<>(velocity, target.velocity(), mechanismContext));
             if (!result.accepted()) {
+                blockedBy = result.rejectedBy();
                 return null;
             }
             double requestedVelocity = result.value();
@@ -715,7 +749,7 @@ final class OutputApplier {
             if (hasTargetConstraints(control) && !Double.isFinite(feedback)) {
                 return null;
             }
-            return allowsDirection(control, feedback, Math.signum(target.percent()), mechanismContext)
+            return allowsEdge(control, feedback, Math.signum(target.percent()), mechanismContext)
                     ? new StagedRequest(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
@@ -728,7 +762,7 @@ final class OutputApplier {
             if (hasTargetConstraints(control) && !Double.isFinite(feedback)) {
                 return null;
             }
-            return allowsDirection(control, feedback, Math.signum(target.volts()), mechanismContext)
+            return allowsEdge(control, feedback, Math.signum(target.volts()), mechanismContext)
                     ? new StagedRequest(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
@@ -793,6 +827,17 @@ final class OutputApplier {
         return Double.isFinite(value) ? value : 0.0;
     }
 
+    /** Like {@link #allowsDirection}, and records the range edge that clipped the output when it does not allow it. */
+    private boolean allowsEdge(
+            ControlBinding<?> control,
+            double current,
+            double direction,
+            MechanismContext context) {
+        if (allowsDirection(control, current, direction, context)) return true;
+        guardEdge = direction > 0.0 ? "max" : "min";
+        return false;
+    }
+
     private boolean allowsDirection(
             ControlBinding<?> control,
             double current,
@@ -817,6 +862,7 @@ final class OutputApplier {
                 control.constraints(),
                 new ConstraintContext<>(current, probe, context));
         if (!result.accepted()) {
+            blockedBy = result.rejectedBy();
             return false;
         }
         return direction > 0.0 ? result.value() > current : result.value() < current;
@@ -837,7 +883,7 @@ final class OutputApplier {
             return output;
         }
         double feedback = constraintFeedback(control, position, velocity);
-        if (!allowsDirection(control, feedback, direction, context)) {
+        if (!allowsEdge(control, feedback, direction, context)) {
             return Outputs.neutral();
         }
         return output;
@@ -874,7 +920,7 @@ final class OutputApplier {
         return Constraints.hasStage(control.constraints(), ConstraintStage.TARGET);
     }
 
-    private static Output applyOutputConstraints(
+    private Output applyOutputConstraints(
             ControlBinding<?> control,
             Output output,
             MechanismContext context) {
@@ -883,7 +929,10 @@ final class OutputApplier {
         ConstraintResult<Double> result = Constraints.evaluateOutput(
                 control.constraints(),
                 new ConstraintContext<>(requested, requested, context));
-        if (!result.accepted()) return Outputs.neutral();
+        if (!result.accepted()) {
+            blockedBy = result.rejectedBy();
+            return Outputs.neutral();
+        }
         double value = result.value();
         if (output instanceof Output.Percent) return Outputs.percent(value);
         if (output instanceof Output.Voltage) return Outputs.voltage(value);

@@ -116,6 +116,34 @@ final class PowerRuntime {
                 predictedVolts, budgetAmps, demandAmps, shedding, motors);
     }
 
+    /**
+     * Returns the thermal derate of a motor from the latest cycle as a whole percent of its limit, or -1 when
+     * the motor is not derated (or was not part of the cycle).
+     */
+    int thermalDeratePercent(MotorDevice motor) {
+        MotorState state = activeState(motor);
+        if (state == null || !(state.derate < 1.0)) return -1;
+        return (int) Math.round(Math.max(0.0, state.derate) * 100.0);
+    }
+
+    /**
+     * Returns the budget or profile cap on a motor from the latest cycle, in whole amps, or -1 when the motor
+     * is not power limited.
+     */
+    int powerCapAmps(MotorDevice motor) {
+        MotorState state = activeState(motor);
+        if (state == null || !(state.status.equals("Power capped") || state.status.equals("Power shed"))) return -1;
+        return toAmps(state.channel.capAmps());
+    }
+
+    private MotorState activeState(MotorDevice motor) {
+        for (int index = 0; index < active.size(); index++) {
+            MotorState state = active.get(index);
+            if (state.device == motor) return state;
+        }
+        return null;
+    }
+
     void cycle(Collection<MotorDevice> motors, ActionContext context, RuntimeOverrides overrides, double nowSeconds) {
         double dt = Double.isNaN(lastNowSeconds) ? 0.0 : Math.max(0.0, Math.min(MAX_DT_SECONDS, nowSeconds - lastNowSeconds));
         lastNowSeconds = nowSeconds;
