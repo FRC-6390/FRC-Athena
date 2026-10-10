@@ -1,18 +1,31 @@
 <script lang="ts">
-  import type { Session } from '../lib/data/session';
-  import { buildMechanismTree, flattenMechanisms } from '../lib/data/tree';
-  import { summarize } from '../lib/mechanisms/model';
-  import { formatClock, type DriverState } from '../lib/driver/driver-state';
-  import { reasonTone } from './mechanisms/tones';
-  import { classicCommands, toClassicRows } from '../lib/canvas-bridge';
+  import { onMount } from 'svelte';
+  import { FontAwesomeIcon } from '@fortawesome/svelte-fontawesome';
   import {
-    browserLayoutStorage,
-    cleanLayoutName,
-    createLayoutStore
-  } from '../lib/canvas-layouts';
-  import { downloadJsonFile, pickJsonFileText } from '../lib/browser-io';
-  import type { DashboardLayoutState } from '../lib/dashboard';
-  import CanvasDashboards from './canvas/CanvasDashboards.svelte';
+    faPlus,
+    faPen,
+    faCheck,
+    faRotateLeft,
+    faRotateRight,
+    faEllipsis,
+    faLock,
+    faLockOpen
+  } from '@fortawesome/free-solid-svg-icons';
+  import type { Session } from '../lib/data/session';
+  import type { DriverState } from '../lib/driver/driver-state';
+  import type { BoardDoc, WidgetDef, WidgetInstance } from '../lib/board/types';
+  import { createWidget, newId, suggestWidgets, widgetDef } from '../lib/board/registry';
+  import { exportBoards, importBoards, loadBoards, saveBoards } from '../lib/board/storage';
+  import { History } from '../lib/board/history';
+  import { downloadJsonFile, pickJsonFileText, shouldIgnoreGlobalHotkeys } from '../lib/browser-io';
+  import { registerAllWidgets } from '../board/widgets';
+  import Board, { type DragPayload } from '../board/Board.svelte';
+  import SignalDrawer from '../board/SignalDrawer.svelte';
+  import SettingsDrawer from '../board/SettingsDrawer.svelte';
+  import WidgetPicker from '../board/WidgetPicker.svelte';
+  import OverviewBoard from './OverviewBoard.svelte';
+
+  registerAllWidgets();
 
   type Props = {
     session: Session;
@@ -23,369 +36,415 @@
 
   let { session, live, driver, onmechanism }: Props = $props();
 
-  const OVERVIEW = 'overview';
-  const store = createLayoutStore(browserLayoutStorage());
-
-  let names = $state<string[]>(store.list());
-  let active = $state(OVERVIEW);
-  let layoutDraft = $state<DashboardLayoutState | null>(null);
+  const OVERVIEW = '__overview__';
+  let boards = $state<BoardDoc[]>(loadBoards());
+  let activeId = $state<string>(OVERVIEW);
   let editing = $state(false);
-
-  let creating = $state(false);
-  let newName = $state('');
-  let renaming = $state(false);
-  let renameTo = $state('');
+  let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
-  let confirmDelete = $state(false);
-  let message = $state('');
-  let messageTone = $state<'ok' | 'fault'>('ok');
+  let renaming = $state(false);
+  let nameDraft = $state('');
+  let notice = $state<string | null>(null);
+  let picker = $state<{ path: string; options: WidgetDef[]; at: { left: number; top: number }; cell: { x: number; y: number } } | null>(null);
+  const history = new History<BoardDoc[]>();
+  let historyTick = $state(0);
+  let lastPointer = { left: 0, top: 0 };
 
-  // Canvas rows and commands only exist while a dashboard tab is open.
-  const rows = $derived.by(() => {
-    void live.current;
-    return active === OVERVIEW ? [] : toClassicRows(session.store);
-  });
-  const commands = $derived(classicCommands(session.store, session.commands));
+  const active = $derived(boards.find((b) => b.id === activeId) ?? null);
+  const selected = $derived(active?.widgets.find((w) => w.id === selectedId) ?? null);
 
-  const mechanisms = $derived.by(() => {
-    void live.current;
-    const roots = buildMechanismTree(session.store.allSignals());
-    const robot = roots.find((r) => r.name === 'robot');
-    return flattenMechanisms(robot ? robot.children : roots).map((node) => {
-      const summary = summarize(node);
-      const reason = summary.reason ? String(session.store.latestSample(summary.reason.signalId)?.value ?? '') : '';
-      return { node, reason };
+  function say(text: string) {
+    notice = text;
+    setTimeout(() => {
+      if (notice === text) notice = null;
+    }, 3000);
+  }
+
+  /** Every edit goes through here: snapshot for undo, apply, persist. */
+  function change(mutate: (draft: BoardDoc[]) => void) {
+    const before = $state.snapshot(boards) as BoardDoc[];
+    history.push(before);
+    const next = structuredClone(before);
+    mutate(next);
+    boards = next;
+    saveBoards(next);
+    historyTick++;
+  }
+
+  function changeActive(mutate: (board: BoardDoc) => void) {
+    change((all) => {
+      const board = all.find((b) => b.id === activeId);
+      if (board) mutate(board);
     });
-  });
-
-  const phaseLabel = $derived(
-    { idle: 'Pre-match', auto: 'Autonomous', teleop: 'Teleop', ended: 'Match over' }[driver.match.phase]
-  );
-  const clock = $derived(
-    driver.match.remainingSeconds !== null ? driver.match.remainingSeconds : driver.match.elapsedSeconds
-  );
-  const voltsPct = $derived(
-    driver.battery.volts === null ? 0 : Math.max(0, Math.min(1, (driver.battery.volts - 10) / 3)) * 100
-  );
-  const batteryTone = $derived(
-    driver.battery.volts === null ? 'stale' : driver.battery.volts < 11 ? 'fault' : driver.battery.volts < 12 ? 'warn' : 'ok'
-  );
-
-  function say(text: string, tone: 'ok' | 'fault' = 'ok') {
-    message = text;
-    messageTone = tone;
   }
 
-  function resetTransient() {
-    menuOpen = false;
-    confirmDelete = false;
-    renaming = false;
-    message = '';
+  function restore(state: BoardDoc[] | null) {
+    if (!state) return;
+    if (!state.some((b) => b.id === activeId)) activeId = state.at(-1)?.id ?? OVERVIEW;
+    boards = state;
+    saveBoards(state);
+    historyTick++;
   }
+  const undo = () => restore(history.undo($state.snapshot(boards) as BoardDoc[]));
+  const redo = () => restore(history.redo($state.snapshot(boards) as BoardDoc[]));
 
-  function select(key: string) {
-    resetTransient();
-    if (key === OVERVIEW) {
-      active = OVERVIEW;
-      layoutDraft = null;
-      editing = false;
-      return;
-    }
-    const loaded = store.load(key);
-    if (!loaded) {
-      say(`"${key}" could not be loaded`, 'fault');
-      names = store.list();
-      active = OVERVIEW;
-      layoutDraft = null;
-      return;
-    }
-    active = key;
-    layoutDraft = loaded;
-    editing = false;
-  }
-
-  function saveActive(next: DashboardLayoutState) {
-    if (active !== OVERVIEW) store.save(active, next);
-  }
-
-  function startCreate() {
-    resetTransient();
-    creating = true;
-    newName = '';
-  }
-
-  function cancelCreate() {
-    creating = false;
-    newName = '';
-  }
-
-  function createLayout(event: SubmitEvent) {
-    event.preventDefault();
-    const clean = cleanLayoutName(newName);
-    if (!clean) return;
-    if (store.list().includes(clean)) {
-      say(`A dashboard named "${clean}" already exists`, 'fault');
-      return;
-    }
-    const stored = store.create(clean);
-    names = store.list();
-    creating = false;
-    newName = '';
-    select(stored);
+  function newBoard() {
+    const board: BoardDoc = { id: newId('b'), name: `Board ${boards.length + 1}`, columns: 24, widgets: [] };
+    change((all) => {
+      all.push(board);
+    });
+    activeId = board.id;
     editing = true;
-  }
-
-  function startRename() {
     renaming = true;
-    renameTo = active;
-    menuOpen = false;
-    message = '';
+    nameDraft = board.name;
   }
 
-  function commitRename(event: SubmitEvent) {
-    event.preventDefault();
-    const clean = cleanLayoutName(renameTo);
-    if (!clean) return;
-    if (!store.rename(active, clean)) {
-      say(clean === active ? '' : `"${clean}" is taken`, 'fault');
+  function nextFreeRow(board: BoardDoc): number {
+    return board.widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0);
+  }
+
+  function addWidget(def: WidgetDef, cell: { x: number; y: number }, path?: string) {
+    const signal = path ? session.store.descriptorByPath(path) : undefined;
+    const instance = createWidget(def, cell, signal);
+    instance.x = Math.min(cell.x, Math.max(0, (active?.columns ?? 24) - instance.w));
+    changeActive((b) => {
+      b.widgets.push(instance);
+    });
+    selectedId = instance.id;
+  }
+
+  function handleDrop(payload: DragPayload, cell: { x: number; y: number }, at?: { left: number; top: number }) {
+    if (!active) return;
+    if (payload.kind === 'widget') {
+      const def = widgetDef(payload.type);
+      if (def) addWidget(def, cell);
       return;
     }
-    names = store.list();
-    renaming = false;
-    active = clean;
-    say(`renamed to "${clean}"`);
+    const signal = session.store.descriptorByPath(payload.path);
+    if (!signal) return;
+    const options = suggestWidgets(signal);
+    if (options.length === 1) {
+      addWidget(options[0], cell, payload.path);
+      return;
+    }
+    picker = {
+      path: payload.path,
+      options,
+      cell,
+      at: at ?? { left: window.innerWidth / 2 - 140, top: window.innerHeight / 3 }
+    };
   }
 
-  function duplicate() {
-    const copy = store.duplicate(active);
+  function updateWidget(next: WidgetInstance) {
+    changeActive((b) => {
+      const i = b.widgets.findIndex((w) => w.id === next.id);
+      if (i >= 0) b.widgets[i] = next;
+    });
+  }
+
+  function removeWidget(id: string) {
+    changeActive((b) => {
+      b.widgets = b.widgets.filter((w) => w.id !== id);
+    });
+    if (selectedId === id) selectedId = null;
+  }
+
+  function duplicateWidget(id: string) {
+    const source = active?.widgets.find((w) => w.id === id);
+    if (!source || !active) return;
+    const copy = { ...(structuredClone($state.snapshot(source)) as WidgetInstance), id: newId(), y: nextFreeRow(active) };
+    changeActive((b) => {
+      b.widgets.push(copy);
+    });
+    selectedId = copy.id;
+  }
+
+  function applyLayout(changes: Array<{ id: string; x: number; y: number; w: number; h: number }>) {
+    const current = active?.widgets ?? [];
+    const differs = changes.some((c) => {
+      const w = current.find((x) => x.id === c.id);
+      return w && (w.x !== c.x || w.y !== c.y || w.w !== c.w || w.h !== c.h);
+    });
+    if (!differs) return;
+    changeActive((b) => {
+      for (const c of changes) {
+        const w = b.widgets.find((x) => x.id === c.id);
+        if (w) Object.assign(w, { x: c.x, y: c.y, w: c.w, h: c.h });
+      }
+    });
+  }
+
+  function commitRename() {
+    const name = nameDraft.trim();
+    if (renaming && name && name !== active?.name) {
+      changeActive((b) => {
+        b.name = name;
+      });
+    }
+    renaming = false;
+  }
+
+  function duplicateBoard() {
+    if (!active) return;
+    const copy = { ...(structuredClone($state.snapshot(active)) as BoardDoc), id: newId('b'), name: `${active.name} copy`, locked: false };
+    change((all) => {
+      all.push(copy);
+    });
+    activeId = copy.id;
     menuOpen = false;
-    if (!copy) return;
-    names = store.list();
-    select(copy);
-    say(`duplicated as "${copy}"`);
+  }
+
+  function deleteBoard() {
+    if (!active) return;
+    const name = active.name;
+    change((all) => {
+      all.splice(all.findIndex((b) => b.id === activeId), 1);
+    });
+    activeId = OVERVIEW;
+    editing = false;
+    menuOpen = false;
+    say(`Deleted “${name}” (Ctrl+Z to restore)`);
   }
 
   function exportActive() {
-    const text = store.exportText(active);
+    if (!active) return;
+    downloadJsonFile(`${active.name.replace(/[^\w-]+/g, '_')}.athena-board.json`, exportBoards([$state.snapshot(active) as BoardDoc]));
     menuOpen = false;
+  }
+
+  async function importFile() {
+    menuOpen = false;
+    const text = await pickJsonFileText();
     if (!text) return;
-    const slug = active.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'dashboard';
-    downloadJsonFile(`arcp-dashboard-${slug}.json`, text);
-    say(`exported "${active}"`);
-  }
-
-  async function importLayout() {
-    menuOpen = false;
     try {
-      const text = await pickJsonFileText();
-      if (!text) return;
-      const stored = store.importText(text, 'Imported dashboard');
-      names = store.list();
-      select(stored);
-      say(`imported as "${stored}"`);
-    } catch (err) {
-      say(`import failed: ${err instanceof Error ? err.message : String(err)}`, 'fault');
+      const imported = importBoards(text).map((b) => ({ ...b, id: newId('b') }));
+      change((all) => {
+        all.push(...imported);
+      });
+      activeId = imported[0].id;
+      say(`Imported ${imported.length} board${imported.length === 1 ? '' : 's'}`);
+    } catch (error) {
+      say(error instanceof Error ? error.message : String(error));
     }
   }
 
-  function askDelete() {
-    confirmDelete = true;
-  }
-
-  function deleteActive() {
-    const removed = active;
-    store.remove(removed);
-    names = store.list();
-    select(OVERVIEW);
-    say(`deleted "${removed}"`);
-  }
-
-  function onWindowPointerDown(event: PointerEvent) {
-    if (!menuOpen) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('.menu-wrap')) return;
+  function toggleLock() {
+    const locking = !active?.locked;
+    changeActive((b) => {
+      b.locked = locking;
+    });
+    if (locking) editing = false;
     menuOpen = false;
-    confirmDelete = false;
   }
 
-  function onWindowKeyDown(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
-    if (menuOpen) {
-      menuOpen = false;
-      confirmDelete = false;
-    }
-    if (renaming) renaming = false;
-    if (creating) cancelCreate();
-  }
-
-  function focusOnMount(node: HTMLInputElement) {
-    node.focus();
-    node.select();
-  }
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (shouldIgnoreGlobalHotkeys(event.target)) return;
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (mod && key === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+      } else if (mod && key === 'y') {
+        event.preventDefault();
+        redo();
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && editing && selectedId) {
+        event.preventDefault();
+        removeWidget(selectedId);
+      } else if (event.key === 'Escape') {
+        selectedId = null;
+      } else if (key === 'e' && !mod && active && !active.locked) {
+        editing = !editing;
+        selectedId = null;
+      }
+    };
+    const onPointer = (event: PointerEvent | DragEvent) => {
+      lastPointer = { left: event.clientX, top: event.clientY };
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointermove', onPointer);
+    window.addEventListener('dragover', onPointer);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointermove', onPointer);
+      window.removeEventListener('dragover', onPointer);
+    };
+  });
 </script>
 
-<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeyDown} />
-
 <div class="screen">
-  <div class="strip">
+  <div class="bar">
     <div class="tabs" role="tablist">
-      <button type="button" role="tab" class:active={active === OVERVIEW} aria-selected={active === OVERVIEW} onclick={() => select(OVERVIEW)}>
-        Overview
-      </button>
-      {#each names as name (name)}
-        <button type="button" role="tab" class:active={active === name} aria-selected={active === name} onclick={() => select(name)}>
-          {name}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeId === OVERVIEW}
+        class:active={activeId === OVERVIEW}
+        onclick={() => {
+          activeId = OVERVIEW;
+          editing = false;
+        }}>Overview</button
+      >
+      {#each boards as board (board.id)}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeId === board.id}
+          class:active={activeId === board.id}
+          onclick={() => {
+            if (activeId !== board.id) {
+              activeId = board.id;
+              selectedId = null;
+              editing = false;
+            }
+          }}
+          ondblclick={() => {
+            if (!board.locked) {
+              activeId = board.id;
+              renaming = true;
+              nameDraft = board.name;
+            }
+          }}
+        >
+          {#if board.locked}<FontAwesomeIcon icon={faLock} />{/if}
+          {#if renaming && activeId === board.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="rename"
+              autofocus
+              bind:value={nameDraft}
+              onclick={(e) => e.stopPropagation()}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') renaming = false;
+              }}
+              onblur={commitRename}
+            />
+          {:else}
+            {board.name}
+          {/if}
         </button>
       {/each}
-
-      {#if creating}
-        <form class="inline" onsubmit={createLayout}>
-          <input
-            class="ui-input"
-            bind:value={newName}
-            placeholder="Dashboard name"
-            aria-label="New dashboard name"
-            maxlength="40"
-            use:focusOnMount
-          />
-          <button class="ui-btn" data-variant="primary" data-size="sm" type="submit" disabled={!cleanLayoutName(newName)}>Create</button>
-          <button class="ui-btn" data-variant="ghost" data-size="sm" type="button" onclick={cancelCreate}>Cancel</button>
-        </form>
-      {:else}
-        <button class="ui-btn new" data-variant="ghost" data-size="sm" type="button" onclick={startCreate}>+ New dashboard</button>
-      {/if}
-
-      <span class="ui-spacer"></span>
-
-      {#if active !== OVERVIEW && layoutDraft}
-        <button
-          class="ui-btn"
-          data-variant={editing ? 'primary' : 'ghost'}
-          data-size="sm"
-          type="button"
-          aria-pressed={editing}
-          onclick={() => (editing = !editing)}
-        >
-          {editing ? 'Done' : 'Edit'}
-        </button>
-
-        <div class="menu-wrap">
-          <button
-            class="ui-btn"
-            data-variant="ghost"
-            data-size="sm"
-            type="button"
-            aria-label="Dashboard actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onclick={() => {
-              menuOpen = !menuOpen;
-              confirmDelete = false;
-            }}
-          >
-            &hellip;
-          </button>
-          {#if menuOpen}
-            <div class="menu" role="menu">
-              <button type="button" role="menuitem" onclick={startRename}>Rename</button>
-              <button type="button" role="menuitem" onclick={duplicate}>Duplicate</button>
-              <button type="button" role="menuitem" onclick={exportActive}>Export JSON</button>
-              <button type="button" role="menuitem" onclick={importLayout}>Import JSON</button>
-              {#if confirmDelete}
-                <button type="button" role="menuitem" class="danger" onclick={deleteActive}>Confirm delete</button>
-              {:else}
-                <button type="button" role="menuitem" class="danger" onclick={askDelete}>Delete</button>
-              {/if}
-            </div>
-          {/if}
-        </div>
-      {/if}
+      <button type="button" class="new" title="New board" onclick={newBoard}><FontAwesomeIcon icon={faPlus} /></button>
     </div>
 
-    {#if renaming}
-      <form class="rename" onsubmit={commitRename}>
-        <label class="ui-label" for="rename-dashboard">Rename dashboard</label>
-        <input id="rename-dashboard" class="ui-input" bind:value={renameTo} maxlength="40" use:focusOnMount />
-        <button class="ui-btn" data-variant="primary" data-size="sm" type="submit">Save</button>
-        <button class="ui-btn" data-variant="ghost" data-size="sm" type="button" onclick={() => (renaming = false)}>Cancel</button>
-      </form>
-    {/if}
+    <span class="ui-spacer"></span>
+    {#if notice}<span class="notice">{notice}</span>{/if}
 
-    {#if message}
-      <p class="message" data-tone={messageTone} role="status">{message}</p>
+    {#if active}
+      {#if editing}
+        {#key historyTick}
+          <button type="button" class="ui-btn" data-variant="ghost" data-size="sm" title="Undo (Ctrl+Z)" disabled={!history.canUndo} onclick={undo}>
+            <FontAwesomeIcon icon={faRotateLeft} />
+          </button>
+          <button type="button" class="ui-btn" data-variant="ghost" data-size="sm" title="Redo (Ctrl+Shift+Z)" disabled={!history.canRedo} onclick={redo}>
+            <FontAwesomeIcon icon={faRotateRight} />
+          </button>
+        {/key}
+      {/if}
+      {#if !active.locked}
+        <button
+          type="button"
+          class="ui-btn"
+          data-variant={editing ? 'primary' : undefined}
+          data-size="sm"
+          title="Edit (E)"
+          onclick={() => {
+            editing = !editing;
+            selectedId = null;
+          }}
+        >
+          <FontAwesomeIcon icon={editing ? faCheck : faPen} />
+          {editing ? 'Done' : 'Edit'}
+        </button>
+      {/if}
+      <div class="menu-wrap">
+        <button type="button" class="ui-btn" data-variant="ghost" data-size="sm" title="Board options" onclick={() => (menuOpen = !menuOpen)}>
+          <FontAwesomeIcon icon={faEllipsis} />
+        </button>
+        {#if menuOpen}
+          <div class="scrim" role="presentation" onpointerdown={() => (menuOpen = false)}></div>
+          <div class="menu ui-panel" role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onclick={() => {
+                renaming = true;
+                nameDraft = active.name;
+                menuOpen = false;
+              }}>Rename</button
+            >
+            <button type="button" role="menuitem" onclick={duplicateBoard}>Duplicate</button>
+            <button type="button" role="menuitem" onclick={toggleLock}>
+              <FontAwesomeIcon icon={active.locked ? faLockOpen : faLock} />
+              {active.locked ? 'Unlock board' : 'Lock for driving'}
+            </button>
+            <hr />
+            <button type="button" role="menuitem" onclick={exportActive}>Export…</button>
+            <button type="button" role="menuitem" onclick={importFile}>Import…</button>
+            <hr />
+            <button type="button" role="menuitem" class="danger" onclick={deleteBoard}>Delete board</button>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <button type="button" class="ui-btn" data-size="sm" onclick={importFile}>Import…</button>
     {/if}
   </div>
 
-  {#if active !== OVERVIEW && layoutDraft}
-    <div class="canvas-host">
-      {#key active}
-        <CanvasDashboards bind:layout={layoutDraft} {rows} {commands} bind:editing onLayoutChange={saveActive} />
-      {/key}
-    </div>
+  {#if activeId === OVERVIEW || !active}
+    <OverviewBoard {session} {live} {driver} {onmechanism} />
   {:else}
-    <div class="grid">
-      <section class="ui-panel tile match">
-        <header class="ui-panel-head"><h3 class="ui-panel-title">Match</h3></header>
-        <div class="ui-panel-body match-body">
-          <div class="clock">{formatClock(clock)}</div>
-          <div class="phase">{phaseLabel}</div>
-          <div class="mode ui-badge">{driver.mode ?? 'No mode'}</div>
-        </div>
-      </section>
-
-      <section class="ui-panel tile">
-        <header class="ui-panel-head"><h3 class="ui-panel-title">Battery</h3></header>
-        <div class="ui-panel-body battery">
-          <div class="big ui-mono" data-tone={batteryTone}>
-            {driver.battery.volts === null ? '--.-' : driver.battery.volts.toFixed(2)}<span>V</span>
-          </div>
-          <div class="meter"><i style="width:{voltsPct}%" data-tone={batteryTone}></i></div>
-          <div class="ui-label split-head">Current · {driver.power.totalAmps.toFixed(1)} A</div>
-          <div class="split">
-            {#each driver.power.consumers as c, i (c.name)}
-              <i style="flex:{Math.max(c.share, 0.02)}" class="seg s{i % 5}" title="{c.name} {c.amps.toFixed(1)} A"></i>
-            {/each}
-          </div>
-          <ul class="consumers">
-            {#each driver.power.consumers as c, i (c.name)}
-              <li><i class="seg s{i % 5}"></i><span>{c.name}</span><b class="ui-mono">{c.amps.toFixed(1)} A</b></li>
-            {/each}
-          </ul>
-        </div>
-      </section>
-
-      <section class="ui-panel tile alerts">
-        <header class="ui-panel-head">
-          <h3 class="ui-panel-title">Alerts</h3>
-          <span class="ui-spacer"></span>
-          {#if driver.alerts.length === 0}<span class="ui-badge" data-tone="ok">All clear</span>{/if}
-        </header>
-        {#if driver.alerts.length === 0}
-          <p class="quiet">No faults or active stages.</p>
-        {:else}
-          <ul class="alert-list">
-            {#each driver.alerts as alert (alert.key)}
-              <li><span class="ui-dot" data-tone={alert.level}></span>{alert.text}</li>
-            {/each}
-          </ul>
-        {/if}
-      </section>
-
-      <section class="ui-panel tile mechs">
-        <header class="ui-panel-head"><h3 class="ui-panel-title">Mechanisms</h3></header>
-        <div class="mech-grid">
-          {#each mechanisms as m (m.node.path)}
-            <button type="button" class="mech" onclick={() => onmechanism(m.node.path)}>
-              <span class="ui-dot" data-tone={m.reason ? reasonTone(m.reason) : 'stale'}></span>
-              <span class="mname">{m.node.name}</span>
-              <span class="mreason">{m.reason || '—'}</span>
-            </button>
-          {/each}
-        </div>
-      </section>
+    <div class="workspace" class:editing class:with-settings={editing && selected}>
+      {#if editing}
+        <SignalDrawer {session} {live} onadd={(payload) => active && handleDrop(payload, { x: 0, y: nextFreeRow(active) })} />
+      {/if}
+      <div class="board-scroll">
+        {#key active.id}
+          <Board
+            board={active}
+            {session}
+            {live}
+            {editing}
+            {selectedId}
+            onselect={(id) => (selectedId = id)}
+            onlayout={applyLayout}
+            onremove={removeWidget}
+            onduplicate={duplicateWidget}
+            ondrop={(payload, cell) => handleDrop(payload, cell, lastPointer)}
+          />
+        {/key}
+      </div>
+      {#if editing && selected}
+        <SettingsDrawer
+          instance={selected}
+          {session}
+          {live}
+          onchange={updateWidget}
+          onclose={() => (selectedId = null)}
+          onremove={() => removeWidget(selected.id)}
+        />
+      {/if}
     </div>
   {/if}
 </div>
+
+{#if picker}
+  {@const signal = session.store.descriptorByPath(picker.path)}
+  {#if signal}
+    <WidgetPicker
+      {signal}
+      options={picker.options}
+      at={picker.at}
+      onpick={(def) => {
+        if (picker) addWidget(def, picker.cell, picker.path);
+        picker = null;
+      }}
+      oncancel={() => (picker = null)}
+    />
+  {/if}
+{/if}
 
 <style>
   .screen {
@@ -395,35 +454,36 @@
     height: 100%;
     min-height: 0;
   }
-  .strip {
-    display: grid;
+  .bar {
+    display: flex;
+    align-items: center;
     gap: var(--sp-2);
     border-bottom: 1px solid var(--border);
     min-width: 0;
   }
   .tabs {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     gap: 2px;
     min-width: 0;
+    overflow-x: auto;
   }
   .tabs [role='tab'] {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     height: 34px;
     padding: 0 var(--sp-3);
     border: none;
     border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
     background: transparent;
     color: var(--text-soft);
     font: inherit;
     font-size: var(--fs-sm);
     font-weight: 500;
-    cursor: pointer;
-    margin-bottom: -1px;
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
   }
   .tabs [role='tab']:hover {
     color: var(--text);
@@ -432,244 +492,98 @@
     color: var(--text-strong);
     border-bottom-color: var(--brand);
   }
-  .tabs .new {
-    margin-left: var(--sp-2);
-  }
-  .tabs .ui-spacer {
-    flex: 1 1 auto;
-  }
-  .inline,
-  .rename {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--sp-2);
-    margin-left: var(--sp-2);
+  .tabs [role='tab'] :global(svg) {
+    font-size: 10px;
+    color: var(--locked);
   }
   .rename {
-    margin: 0;
-    padding: var(--sp-2) 0;
+    width: 140px;
+    height: 24px;
+    border: 1px solid var(--info);
+    border-radius: var(--radius-sm);
+    background: var(--bg-1);
+    color: var(--text-strong);
+    font: inherit;
+    padding: 0 6px;
   }
-  .inline .ui-input,
-  .rename .ui-input {
-    width: 200px;
+  .new {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+  .new:hover {
+    background: var(--surface-3);
+    color: var(--text);
+  }
+  .notice {
+    font-size: var(--fs-xs);
+    color: var(--text-soft);
   }
   .menu-wrap {
     position: relative;
-    margin-left: var(--sp-2);
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
   }
   .menu {
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
-    z-index: 20;
-    min-width: 180px;
+    z-index: 31;
     display: grid;
-    padding: var(--sp-1);
-    background: var(--surface-2);
-    border: 1px solid var(--border-emphasis);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+    min-width: 190px;
+    padding: 4px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   }
   .menu button {
-    height: 30px;
-    padding: 0 var(--sp-3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
     border: none;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text);
     font: inherit;
     font-size: var(--fs-sm);
     text-align: left;
-    border-radius: var(--radius);
     cursor: pointer;
   }
   .menu button:hover {
-    background: var(--surface-hover);
-    color: var(--text-strong);
-  }
-  .menu button.danger {
-    color: var(--fault);
-  }
-  .message {
-    margin: 0 0 var(--sp-2);
-    font-size: var(--fs-sm);
-    color: var(--ok);
-  }
-  .message[data-tone='fault'] {
-    color: var(--fault);
-  }
-  .canvas-host {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    min-width: 0;
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-auto-rows: min-content;
-    gap: var(--sp-3);
-    overflow: auto;
-    align-content: start;
-  }
-  .tile {
-    grid-column: span 4;
-  }
-  .mechs {
-    grid-column: span 12;
-  }
-  .match-body {
-    display: grid;
-    justify-items: start;
-    gap: 6px;
-  }
-  .clock {
-    font-variant-numeric: tabular-nums;
-    font-size: 44px;
-    font-weight: 600;
-    line-height: 1;
-    color: var(--text-strong);
-    letter-spacing: -0.02em;
-  }
-  .phase {
-    color: var(--text-soft);
-    font-size: var(--fs-sm);
-  }
-  .battery {
-    display: grid;
-    gap: var(--sp-2);
-  }
-  .big {
-    font-size: 32px;
-    font-weight: 600;
-    color: var(--text-strong);
-    line-height: 1;
-  }
-  .big span {
-    margin-left: 4px;
-    font-size: var(--fs-md);
-    color: var(--text-faint);
-  }
-  .big[data-tone='warn'] { color: var(--warn); }
-  .big[data-tone='fault'] { color: var(--fault); }
-  .meter {
-    height: 6px;
-    border-radius: 3px;
     background: var(--surface-3);
-    overflow: hidden;
   }
-  .meter i {
-    display: block;
-    height: 100%;
-    background: var(--ok);
+  .menu .danger {
+    color: var(--fault);
   }
-  .meter i[data-tone='warn'] { background: var(--warn); }
-  .meter i[data-tone='fault'] { background: var(--fault); }
-  .split-head {
-    margin-top: var(--sp-2);
-  }
-  .split {
-    display: flex;
-    gap: 2px;
-    height: 8px;
-    border-radius: 3px;
-    overflow: hidden;
-  }
-  .seg {
-    display: block;
-  }
-  .s0 { background: var(--series-reference); }
-  .s1 { background: var(--series-measured); }
-  .s2 { background: var(--series-target); }
-  .s3 { background: var(--series-4); }
-  .s4 { background: var(--series-5); }
-  .consumers {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 4px;
-    font-size: var(--fs-sm);
-  }
-  .consumers li {
-    display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--sp-2);
-    color: var(--text-soft);
-  }
-  .consumers li i {
-    width: 8px;
-    height: 8px;
-    border-radius: 2px;
-  }
-  .consumers b {
-    color: var(--text-strong);
-    font-weight: 500;
-  }
-  .quiet {
-    margin: 0;
-    padding: var(--sp-3);
-    color: var(--text-faint);
-    font-size: var(--fs-sm);
-  }
-  .alert-list {
-    list-style: none;
-    margin: 0;
-    padding: var(--sp-2) var(--sp-3);
-    display: grid;
-    gap: var(--sp-2);
-    font-size: var(--fs-sm);
-  }
-  .alert-list li {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-  }
-  .mech-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  }
-  .mech {
-    display: grid;
-    grid-template-columns: 8px minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    column-gap: var(--sp-2);
-    align-items: center;
-    padding: var(--sp-3);
+  .menu hr {
+    width: 100%;
+    margin: 4px 0;
     border: none;
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
+    border-top: 1px solid var(--border);
   }
-  .mech:hover {
-    background: var(--surface-2);
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-3);
+    min-height: 0;
   }
-  .mname {
-    font-weight: 600;
-    color: var(--text-strong);
-    text-transform: capitalize;
+  .workspace.editing {
+    grid-template-columns: 260px minmax(0, 1fr);
   }
-  .mreason {
-    grid-column: 2;
-    font-size: var(--fs-xs);
-    color: var(--text-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .workspace.editing.with-settings {
+    grid-template-columns: 260px minmax(0, 1fr) 300px;
   }
-  @media (max-width: 1100px) {
-    .tile {
-      grid-column: span 6;
-    }
-  }
-  @media (max-width: 720px) {
-    .tile {
-      grid-column: span 12;
-    }
+  .board-scroll {
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: var(--sp-5);
   }
 </style>
