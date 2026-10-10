@@ -26,10 +26,10 @@
  * | Devices/<dev>/Config/{NeutralMode,Inverted,StatorCurrentLimit,SupplyCurrentLimit,Disabled,Restore} | writable / control | Motor config |
  * | Devices/<dev>/Info/{Type,Kind,Id,Bus,Follower,...}, Devices/<dev>/Setup/*, Devices/<dev>/Health/* | misc | Identity, setup, IMU health |
  *
- * Not on ARCP today: motor temperature and thermal derate (they reach NetworkTables only, under
- * `/Athena/Power/Motors/<name>/`). There is no `stage` signal either: stage changes arrive as STAGE_CHANGE
- * markers. The helpers still read `TemperatureCelsius` and `Derate` device signals, the names the NT publisher uses,
- * so they light up when a publisher adds them.
+ * Setpoints and health (telemetry2):
+ * - `Controls/<name>/State/{Target, Reference, ReferenceVelocity, Error, Output}` (Output is NaN when the loop runs on the motor)
+ * - `Devices/<dev>/State/{TemperatureCelsius, Derate, PowerCapAmps}`, `<mech>/State/Stage`
+ * - `athena/power/<motor>/{current, capAmps}` (robot level)
  *
  * Robot-level signals (outside the mechanism tree, see `ROBOT_PATHS` in data/types.ts):
  * - `athena/robot/mode`, `athena/robot/matchTime`, `athena/robot/alliance` (system; added by ArcpSystemSignals)
@@ -41,8 +41,8 @@ import type { MechanismNode } from '../data/tree';
 import { groupSignals, withinGroup } from '../data/tree';
 import type { SignalDescriptor } from '../data/types';
 
-/** Feedback traces drawn on a control page, in display order. Setpoints are not published over ARCP. */
-export const PLOT_NAMES = ['FeedbackPosition', 'FeedbackVelocity'] as const;
+/** Traces drawn on a control page, in display order: goal, profiled reference, measurement, error, output. */
+export const PLOT_NAMES = ['Target', 'Reference', 'FeedbackPosition', 'ReferenceVelocity', 'FeedbackVelocity', 'Error', 'Output'] as const;
 
 /** PID and feedforward leaves under `Controls/<name>/Config`, as the dashboard names them (kP, kS, ...). */
 export const GAIN_NAMES: Readonly<Record<string, string>> = {
@@ -70,7 +70,7 @@ export function isGainName(name: string): boolean {
 
 /** Motor current names, in preference order. Supply current is the battery-side draw used for the power split. */
 export const CURRENT_NAMES = ['SupplyCurrentAmps', 'StatorCurrentAmps'] as const;
-/** Device temperature (degrees C) and thermal derate (1 = full output). Not published over ARCP yet. */
+/** Device temperature (degrees C) and thermal derate (1 = full output). */
 export const TEMPERATURE_NAME = 'TemperatureCelsius';
 export const DERATE_NAME = 'Derate';
 
@@ -107,7 +107,7 @@ export type MechanismSummary = {
   fault: SignalDescriptor | null;
   /** `State/ActionRunning`. */
   running: SignalDescriptor | null;
-  /** Always null: the robot publishes no stage signal. Stage changes arrive as STAGE_CHANGE markers. */
+  /** `State/Stage`: the mechanism's current power stage. */
   stage: SignalDescriptor | null;
   /** Count of signals that are writable (for the page header). */
   writableCount: number;
@@ -203,7 +203,7 @@ export function summarize(node: MechanismNode): MechanismSummary {
     reason: find('State/Reason'),
     fault: find('State/Fault'),
     running: find('State/ActionRunning'),
-    stage: null,
+    stage: find('State/Stage'),
     writableCount
   };
 }

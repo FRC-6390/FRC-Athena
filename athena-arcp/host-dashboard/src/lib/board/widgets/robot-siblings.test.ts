@@ -108,3 +108,33 @@ describe('power breakdown', () => {
     expect(powerBreakdown([{ label: 'x', amps: 0 }]).shares[0].fraction).toBe(0);
   });
 });
+
+describe('Athena layout', () => {
+  const real = [
+    sig('robot/arm/Devices/shoulderMotor/State/SupplyCurrentAmps'),
+    sig('robot/arm/Devices/shoulderMotor/State/TemperatureCelsius'),
+    sig('robot/arm/Devices/shoulderMotor/State/Derate'),
+    sig('robot/arm/Devices/shoulderMotor/Config/Inverted', { type: 'bool' }),
+    sig('robot/arm/Controls/shoulder/State/Target'),
+    sig('robot/arm/Controls/shoulder/State/Reference'),
+    sig('robot/arm/Controls/shoulder/State/FeedbackPosition'),
+    sig('robot/arm/State/Reason', { type: 'string' }),
+    sig('robot/arm/State/ActiveAction', { type: 'string' }),
+    sig('robot/arm/State/Stage', { type: 'string' })
+  ];
+
+  test('device readings under State/ are found by their Athena names', () => {
+    const d = deviceSiblings(real, 'robot/arm/Devices/shoulderMotor/State/SupplyCurrentAmps')!;
+    expect(d.current?.name).toBe('SupplyCurrentAmps');
+    expect(d.temperature?.name).toBe('TemperatureCelsius');
+    expect(d.derate?.name).toBe('Derate');
+    expect(d.children.some((s) => s.name === 'Inverted')).toBe(false);
+  });
+
+  test('control setpoints and mechanism state use the published paths', () => {
+    const c = controlSiblings(real, 'robot/arm/Controls/shoulder/State/FeedbackPosition')!;
+    expect([c.target?.name, c.reference?.name, c.measured?.name]).toEqual(['Target', 'Reference', 'FeedbackPosition']);
+    const m = mechanismSiblings(real, 'robot/arm');
+    expect([m.state?.name, m.reason?.name, m.stage?.name]).toEqual(['ActiveAction', 'Reason', 'Stage']);
+  });
+});

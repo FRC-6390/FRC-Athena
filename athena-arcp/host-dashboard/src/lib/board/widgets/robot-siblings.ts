@@ -32,10 +32,10 @@ export type DeviceSiblings = {
 };
 
 const DEVICE_NAMES = {
-  current: ['current', 'statorcurrent', 'supplycurrent', 'amps'],
-  temperature: ['temperature', 'temp', 'tempc'],
+  current: ['supplycurrentamps', 'statorcurrentamps', 'current', 'statorcurrent', 'supplycurrent', 'amps'],
+  temperature: ['temperaturecelsius', 'temperature', 'temp', 'tempc'],
   derate: ['derate', 'derating'],
-  voltage: ['appliedvoltage', 'voltage', 'volts'],
+  voltage: ['appliedvoltagevolts', 'appliedvoltage', 'voltage', 'volts'],
   connected: ['connected', 'isconnected', 'online']
 } as const;
 
@@ -43,8 +43,13 @@ const DEVICE_NAMES = {
 export function deviceSiblings(all: readonly SignalDescriptor[], anchorPath: string): DeviceSiblings | null {
   const prefix = devicePrefix(anchorPath);
   if (prefix === null) return null;
+  // Readings sit directly under the device or under its `State/` group (Athena's layout).
   const children = all
-    .filter((s) => s.path.startsWith(prefix + '/') && !s.path.slice(prefix.length + 1).includes('/'))
+    .filter((s) => {
+      if (!s.path.startsWith(prefix + '/')) return false;
+      const rest = s.path.slice(prefix.length + 1);
+      return !rest.includes('/') || (rest.startsWith('State/') && !rest.slice(6).includes('/'));
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
   const pick = (candidates: readonly string[]) =>
     candidates.map((c) => children.find((s) => normalizeName(s.name) === c)).find((s) => s !== undefined) ?? null;
@@ -77,9 +82,9 @@ export function mechanismSiblings(all: readonly SignalDescriptor[], mechanismPat
   const local = (name: string) => own.find((s) => s.localPath === name) ?? null;
   return {
     mechanismPath,
-    state: local('State/state'),
-    reason: local('State/reason'),
-    stage: local('State/stage'),
+    state: local('State/ActiveAction') ?? local('State/state'),
+    reason: local('State/Reason') ?? local('State/reason'),
+    stage: local('State/Stage') ?? local('State/stage'),
     faults: own.filter((s) => s.localPath.startsWith('State/') && /fault/i.test(s.name)),
     actions: own.filter((s) => s.localPath.startsWith('Actions/') && s.type === 'bool')
   };
@@ -104,8 +109,8 @@ export function controlRoot(path: string): string | null {
   return parts.slice(0, at + 2).join('/');
 }
 
-const TARGET_LOCAL = ['target', 'Target', 'setpoint', 'Setpoint'];
-const REFERENCE_LOCAL = ['reference', 'Reference'];
+const TARGET_LOCAL = ['State/Target', 'target', 'Target', 'setpoint', 'Setpoint'];
+const REFERENCE_LOCAL = ['State/Reference', 'reference', 'Reference'];
 const MEASURED_LOCAL = ['measured', 'Measured', 'State/FeedbackPosition'];
 const VELOCITY_LOCAL = ['State/FeedbackVelocity', 'measuredVelocity'];
 
