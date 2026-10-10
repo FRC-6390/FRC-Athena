@@ -64,6 +64,25 @@ export const ROLE_BY_CODE: readonly SignalRole[] = [
 export const LOCK_PATH_PREFIX = 'athena/locks/';
 
 /**
+ * Robot-level system signals (role `system`). Mechanism signals are described in `mechanisms/model.ts`.
+ * `athena/robot/*` and `athena/power/*` are published by the robot's ARCP bridge (athena-wpilib, ArcpSystemSignals).
+ */
+export const ROBOT_PATHS = {
+  /** DriverStation mode: `Disabled`, `Autonomous`, `Teleop` or `Test`. */
+  mode: 'athena/robot/mode',
+  /** Seconds left in the current match period, -1 when no period is running. */
+  matchTime: 'athena/robot/matchTime',
+  /** `Red`, `Blue`, or an empty string when unknown. */
+  alliance: 'athena/robot/alliance',
+  /** Measured battery (bus) voltage, volts. */
+  batteryVolts: 'athena/power/battery/voltage',
+  /** Total requested current from the power pass, amps. */
+  busDemandAmps: 'athena/power/bus/demandAmps',
+  /** True while the power budget is shedding current. */
+  busShedding: 'athena/power/bus/shedding'
+} as const;
+
+/**
  * Lock state of a writable signal, derived by the store from the role-7 signal at
  * `athena/locks/<lockGroup>`. `unknown` when that signal has not been seen. Clients display it but never
  * use it to block writes (E5).

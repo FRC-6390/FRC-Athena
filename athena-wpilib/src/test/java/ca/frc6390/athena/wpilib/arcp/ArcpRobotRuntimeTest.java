@@ -100,6 +100,22 @@ class ArcpRobotRuntimeTest {
     }
 
     @Test
+    void robotSystemSignalsArePublishedUnderTheDashboardPaths() throws Exception {
+        start(ArcpPolicy.of().controlPort(0).realtimePort(0), null, null);
+        for (String path : List.of("athena/robot/mode", "athena/robot/matchTime", "athena/robot/alliance",
+                "athena/power/battery/voltage", "athena/power/bus/demandAmps", "athena/power/bus/shedding")) {
+            ArcpTestClient.Dict dict = client.signal(path);
+            assertEquals(ArcpDictEntry.ROLE_SYSTEM, dict.role(), path);
+            assertEquals(0, dict.flags() & ArcpDictEntry.FLAG_WRITABLE, path);
+        }
+        subscribeAll();
+        cycles(3);
+        Map<Long, Object> values = merged(ArcpTestClient.receiveFrames(udp, 500));
+        assertEquals("Disabled", values.get(client.signal("athena/robot/mode").id()));
+        assertTrue((Double) values.get(client.signal("athena/power/battery/voltage").id()) > 0.0);
+    }
+
+    @Test
     void writesGoThroughTelemetryAndFmsLocksRejectThem() throws Exception {
         start(ArcpPolicy.of().controlPort(0).realtimePort(0), null, null);
         long gain = client.signal(GAIN).id();

@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { ValueStore } from '../data/store';
-import { deriveDriverState, formatClock, matchPhase } from './driver-state';
+import { deriveDriverState, formatClock, matchPhase, phaseFromMode } from './driver-state';
 import { describePath } from '../data/path';
-import { MARKER_KIND, TYPE_TAG, type DecodedRecord, type SignalDescriptor } from '../data/types';
+import { MARKER_KIND, ROBOT_PATHS, TYPE_TAG, type DecodedRecord, type SignalDescriptor } from '../data/types';
+import { descriptorFor, realDictionary } from '../data/fixtures/real-dictionary';
 
 function desc(id: number, path: string, extra: Partial<SignalDescriptor> = {}): SignalDescriptor {
   return {
@@ -40,6 +41,24 @@ function marker(ts: number, kind: number, message = '') {
   return { kind: 'marker' as const, marker: { timestampMicros: ts, kind, label: '', message, signalId: null } };
 }
 
+/** A store holding the real dictionary, with the given values written as one frame at `ts`. */
+function storeWithReal(values: Record<string, number | string>, ts = 1_000_000): ValueStore {
+  const store = new ValueStore();
+  const dictionary = realDictionary();
+  const extra = Object.keys(values)
+    .filter((path) => !dictionary.some((d) => d.path === path))
+    .map((path, index) =>
+      descriptorFor(10_000 + index, path, typeof values[path] === 'string' ? 'string' : 'f64', 'system')
+    );
+  store.apply({ kind: 'dictionary', entries: [...dictionary, ...extra] });
+  const entries = Object.entries(values).map(([path, value]) => {
+    const signal = store.descriptorByPath(path)!;
+    return { signalId: signal.signalId, typeTag: (typeof value === 'string' ? TYPE_TAG.string : TYPE_TAG.f64) as 3 | 4, value };
+  });
+  store.apply(frame(ts, entries));
+  return store;
+}
+
 describe('driver state', () => {
   test('match phase follows the latest match marker', () => {
     const store = new ValueStore();
@@ -65,49 +84,97 @@ describe('driver state', () => {
     expect(formatClock(state.match.remainingSeconds)).toBe('1:45');
   });
 
-  test('faults and non-normal stages raise alerts; normal stages do not', () => {
+  test('the robot match clock wins over the marker countdown when it is published', () => {
+    const store = storeWithReal({ [ROBOT_PATHS.mode]: 'Teleop', [ROBOT_PATHS.matchTime]: 97 }, 50_000_000);
+    store.apply(marker(20_000_000, MARKER_KIND.TELEOP_START));
+    const state = deriveDriverState(store);
+    expect(state.match.phase).toBe('teleop');
+    expect(state.match.remainingSeconds).toBe(97);
+  });
+
+  test('without match markers the DriverStation mode gives the phase; Disabled is idle', () => {
+    expect(phaseFromMode('Autonomous')).toBe('auto');
+    expect(phaseFromMode('Teleop')).toBe('teleop');
+    expect(phaseFromMode('Disabled')).toBe('idle');
+    expect(phaseFromMode(null)).toBe('idle');
+    const store = storeWithReal({ [ROBOT_PATHS.mode]: 'Autonomous', [ROBOT_PATHS.matchTime]: 11 });
+    expect(deriveDriverState(store).match.phase).toBe('auto');
+    expect(deriveDriverState(store).match.remainingSeconds).toBe(11);
+  });
+
+  test('mechanism faults and stage-change markers raise alerts; empty fault text does not', () => {
     const store = new ValueStore();
     store.apply({
       kind: 'dictionary',
       entries: [
-        desc(1, 'robot/turret/State/stage', { type: 'string', typeTag: TYPE_TAG.string, role: 'state', name: 'stage' }),
-        desc(2, 'robot/shooter/State/stage', { type: 'string', typeTag: TYPE_TAG.string, role: 'state' })
+        desc(1, 'robot/turret/State/Fault', { type: 'string', typeTag: TYPE_TAG.string, role: 'state' }),
+        desc(2, 'robot/shooter/State/Fault', { type: 'string', typeTag: TYPE_TAG.string, role: 'state' })
       ]
     });
-    store.apply(frame(30_000_000, [{ signalId: 1, typeTag: TYPE_TAG.string, value: 'HOT' }, { signalId: 2, typeTag: TYPE_TAG.string, value: 'NORMAL' }]));
+    store.apply(frame(30_000_000, [{ signalId: 1, typeTag: TYPE_TAG.string, value: 'motor over temperature' }, { signalId: 2, typeTag: TYPE_TAG.string, value: '' }]));
     store.apply(marker(25_000_000, MARKER_KIND.FAULT, 'brownout'));
+    store.apply(marker(26_000_000, MARKER_KIND.STAGE_CHANGE, 'turret: stage 2'));
     store.apply(marker(1_000_000, MARKER_KIND.FAULT, 'old fault'));
     const state = deriveDriverState(store);
-    expect(state.alerts.map((a) => a.text)).toEqual(['brownout', 'robot/turret: HOT']);
+    expect(state.alerts.map((a) => [a.level, a.text])).toEqual([
+      ['fault', 'brownout'],
+      ['warn', 'turret: stage 2'],
+      ['fault', 'robot/turret: motor over temperature']
+    ]);
   });
 
-  test('power split and mode come from the athena/power and athena/mode signals', () => {
-    const store = new ValueStore();
-    store.apply({
+  test('power split uses published athena/power currents, else each motor supply current', () => {
+    const real = storeWithReal({
+      [ROBOT_PATHS.batteryVolts]: 12.1,
+      'robot/turret/Devices/motor/State/SupplyCurrentAmps': 10,
+      'robot/shooter/Devices/motor/State/SupplyCurrentAmps': 30,
+      'robot/shooter/Devices/motor/State/StatorCurrentAmps': 99
+    });
+    const fromMechanisms = deriveDriverState(real);
+    expect(fromMechanisms.battery.volts).toBe(12.1);
+    expect(fromMechanisms.power.totalAmps).toBe(40);
+    // Every motor in the real dictionary is a consumer; the idle ones have zero amps.
+    expect(fromMechanisms.power.consumers.length).toBeGreaterThan(2);
+    const active = fromMechanisms.power.consumers.filter((c) => c.amps > 0);
+    expect(active.map((c) => [c.name, c.share])).toEqual([
+      ['shooter/motor', 0.75],
+      ['turret/motor', 0.25]
+    ]);
+
+    const published = new ValueStore();
+    published.apply({
       kind: 'dictionary',
       entries: [
         desc(1, 'athena/power/battery/voltage'),
         desc(2, 'athena/power/turret/current'),
         desc(3, 'athena/power/drive/current'),
-        desc(4, 'athena/mode/operator', { type: 'string', typeTag: TYPE_TAG.string })
+        desc(4, 'robot/turret/Devices/motor/State/SupplyCurrentAmps')
       ]
     });
-    store.apply(
+    published.apply(
       frame(1_000_000, [
         { signalId: 1, typeTag: TYPE_TAG.f64, value: 12.1 },
         { signalId: 2, typeTag: TYPE_TAG.f64, value: 10 },
         { signalId: 3, typeTag: TYPE_TAG.f64, value: 30 },
-        { signalId: 4, typeTag: TYPE_TAG.string, value: 'Teleop' }
+        { signalId: 4, typeTag: TYPE_TAG.f64, value: 99 }
       ])
     );
-    const state = deriveDriverState(store);
-    expect(state.battery.volts).toBe(12.1);
+    const state = deriveDriverState(published);
+    expect(state.power.consumers.map((c) => c.name)).toEqual(['drive', 'turret']);
     expect(state.power.totalAmps).toBe(40);
-    expect(state.power.consumers.map((c) => [c.name, c.share])).toEqual([
-      ['drive', 0.75],
-      ['turret', 0.25]
-    ]);
+  });
+
+  test('mode and alliance come from the robot system signals and are null before they arrive', () => {
+    expect(deriveDriverState(new ValueStore()).mode).toBeNull();
+    const state = deriveDriverState(storeWithReal({ [ROBOT_PATHS.mode]: 'Teleop', [ROBOT_PATHS.alliance]: 'Red' }));
     expect(state.mode).toBe('Teleop');
+    expect(state.alliance).toBe('Red');
+    expect(state.battery.volts).toBeNull();
+  });
+
+  test('the real dictionary has no stage signal, so stage text never raises an alert', () => {
+    expect(realDictionary().some((s) => s.localPath.endsWith('State/stage'))).toBe(false);
+    expect(deriveDriverState(storeWithReal({})).alerts).toEqual([]);
   });
 
   test('formatClock pads seconds and handles idle', () => {
