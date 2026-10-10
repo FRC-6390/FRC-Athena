@@ -1,4 +1,4 @@
-package ca.frc6390.athena.arcp.v2;
+package ca.frc6390.athena.arcp;
 
 /**
  * WPILib struct schema announced in a STRUCT_SCHEMA record.

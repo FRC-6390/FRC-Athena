@@ -8,126 +8,120 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
+/**
+ * JNI declarations for the Rust ARCP server (crate {@code athena-arcp/rust/crates/arcp-jni}).
+ * Nothing here encodes the ARCP protocol; see {@link ArcpMarshal} for the buffer layout.
+ *
+ * <p>Loading order: the {@code athena.arcp.nativePath} system property (absolute path to the
+ * library), then the bundled {@code /native/<os>-<arch>/<library>} resource, then
+ * {@link System#loadLibrary(String)}.</p>
+ */
 final class ArcpNative {
+
+    static final String LIBRARY_BASE = "arcp_jni";
+
+    private static Throwable lastBundleFailure;
+
     static {
-        loadNativeLibrary();
+        load();
     }
 
     private ArcpNative() {
     }
 
-    private static synchronized void loadNativeLibrary() {
-        String resourcePath = resolveBundledNativePath();
-        if (resourcePath != null) {
+    private static void load() {
+        String override = System.getProperty("athena.arcp.nativePath");
+        if (override != null && !override.isBlank()) {
+            System.load(override);
+            return;
+        }
+        String resource = bundledResourcePath();
+        if (resource != null) {
             try {
-                loadBundled(resourcePath);
+                System.load(extract(resource));
                 return;
-            } catch (IOException | RuntimeException ex) {
-                // Fallback below: system library path.
+            } catch (IOException | UnsatisfiedLinkError ex) {
+                // Fall through to the system library path, keep the reason for the error message.
+                lastBundleFailure = ex;
             }
         }
-        System.loadLibrary("arcp_jni");
+        try {
+            System.loadLibrary(LIBRARY_BASE);
+        } catch (UnsatisfiedLinkError ex) {
+            UnsatisfiedLinkError error = new UnsatisfiedLinkError("ARCP native library not available: resource="
+                    + resource + ", bundleFailure=" + lastBundleFailure + ", systemLibrary=" + ex.getMessage());
+            throw error;
+        }
     }
 
-    private static String resolveBundledNativePath() {
+    static String bundledResourcePath() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = normalizeArch(System.getProperty("os.arch", ""));
         if (arch == null) {
             return null;
         }
-
         if (os.contains("linux")) {
-            return "/native/linux-" + arch + "/libarcp_jni.so";
+            return "/native/linux-" + arch + "/lib" + LIBRARY_BASE + ".so";
         }
-        if (os.contains("mac") || os.contains("darwin")) {
-            return "/native/macos-" + arch + "/libarcp_jni.dylib";
+        if (os.contains("mac")) {
+            return "/native/macos-" + arch + "/lib" + LIBRARY_BASE + ".dylib";
         }
-        if (os.contains("win")) {
-            return "/native/windows-" + arch + "/arcp_jni.dll";
+        if (os.contains("windows")) {
+            return "/native/windows-" + arch + "/" + LIBRARY_BASE + ".dll";
         }
         return null;
     }
 
-    private static String normalizeArch(String rawArch) {
-        String arch = rawArch == null ? "" : rawArch.toLowerCase(Locale.ROOT).trim();
-        if (arch.equals("amd64") || arch.equals("x86_64")) {
+    static String normalizeArch(String raw) {
+        String arch = raw == null ? "" : raw.toLowerCase(Locale.ROOT);
+        if (arch.equals("x86_64") || arch.equals("amd64")) {
             return "x86_64";
         }
         if (arch.equals("aarch64") || arch.equals("arm64")) {
             return "aarch64";
         }
-        if (arch.equals("arm")
-                || arch.startsWith("armv7")
-                || arch.startsWith("armeabi")) {
+        if (arch.startsWith("armv7") || arch.equals("arm")) {
             return "arm32";
         }
         return null;
     }
 
-    private static void loadBundled(String resourcePath) throws IOException {
-        try (InputStream input = ArcpNative.class.getResourceAsStream(resourcePath)) {
-            if (input == null) {
-                throw new IOException("Missing bundled ARCP JNI binary: " + resourcePath);
+    private static String extract(String resource) throws IOException {
+        try (InputStream in = ArcpNative.class.getResourceAsStream(resource)) {
+            if (in == null) {
+                throw new IOException("missing resource " + resource);
             }
-
-            String fileName = resourcePath.substring(resourcePath.lastIndexOf('/') + 1);
-            String suffix = fileName.contains(".")
-                    ? fileName.substring(fileName.lastIndexOf('.'))
-                    : ".bin";
-
-            Path tempDir = Path.of(System.getProperty("java.io.tmpdir"), "athena-arcp-native");
-            Files.createDirectories(tempDir);
-
-            Path extracted = Files.createTempFile(tempDir, "arcp_jni-", suffix);
-            Files.copy(input, extracted, StandardCopyOption.REPLACE_EXISTING);
-            extracted.toFile().deleteOnExit();
-            System.load(extracted.toAbsolutePath().toString());
+            String fileName = resource.substring(resource.lastIndexOf('/') + 1);
+            Path dir = Files.createTempDirectory("athena-arcp-native");
+            Path target = dir.resolve(fileName);
+            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            target.toFile().deleteOnExit();
+            dir.toFile().deleteOnExit();
+            return target.toAbsolutePath().toString();
         }
     }
 
-    static native long runtimeCreate();
+    static native long create(int controlPort, String fileRoot, long budgetBytesPerSecond, int mtu,
+            long keyframeIntervalMicros);
 
-    static native void runtimeDestroy(long handle);
-
-    static native int runtimeStart(long handle);
-
-    static native int runtimeStop(long handle);
+    static native void destroy(long handle);
 
     static native int controlPort(long handle);
 
-    static native int realtimePort(long handle);
+    static native void publishDictionary(long handle, ByteBuffer buffer, int length);
 
-    static native int registerSignal(
-            long handle,
-            int signalId,
-            int signalType,
-            int signalKind,
-            int signalAccess,
-            int signalPolicy,
-            int signalDurability,
-            String path);
+    static native void publishCycle(long handle, long timestampMicros, ByteBuffer buffer, int length);
 
-    static native int publishBoolean(long handle, int signalId, boolean value);
+    static native void marker(long handle, long timestampMicros, int kind, long signalId, String message);
 
-    static native int publishI64(long handle, int signalId, long value);
+    /** Returns bytes written, or the negative size needed when the buffer is too small. */
+    static native int poll(long handle, ByteBuffer buffer, int capacity);
 
-    static native int publishF64(long handle, int signalId, double value);
+    static native void reply(long handle, ByteBuffer buffer, int length);
 
-    static native int publishString(long handle, int signalId, String value);
+    /** {@code [sessions, subscriptions, bytesLastWindow, throttledCount]}. */
+    static native long[] status(long handle);
 
-    static native int publishBooleanArray(long handle, int signalId, boolean[] values);
-
-    static native int publishI64Array(long handle, int signalId, long[] values);
-
-    static native int publishF64Array(long handle, int signalId, double[] values);
-
-    static native int publishStringArray(long handle, int signalId, String[] values);
-
-    static native int pollEvents(long handle, ByteBuffer outBuffer, int outCapacity);
-
-    static native int saveLayout(long handle, String name, String layoutJson);
-
-    static native String loadLayout(long handle, String name);
-
-    static native String[] listLayouts(long handle);
+    /** Throttled subscriptions, one per line. */
+    static native String throttled(long handle);
 }
