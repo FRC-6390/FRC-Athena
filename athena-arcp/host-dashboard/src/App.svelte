@@ -52,7 +52,6 @@
     saveLayout,
     serializeLayoutExport,
     sparklinePath,
-    widgetKindsFor,
     widgetKindLabel,
     type DashboardLayoutState,
     type DashboardWidget,
@@ -72,6 +71,7 @@
   import GlobalRail from './components/GlobalRail.svelte';
   import WorkspaceTabs from './components/WorkspaceTabs.svelte';
   import SignalBrowser from './components/SignalBrowser.svelte';
+  import { classicKindsFor } from './lib/widgets/registry';
   import LayoutToolPalette from './components/LayoutToolPalette.svelte';
   import WidgetCanvas from './components/WidgetCanvas.svelte';
   import InspectorPanel from './components/InspectorPanel.svelte';
@@ -3302,7 +3302,7 @@
                 {signalById}
                 {selectedSignal}
                 {selectedWidget}
-                widgetKinds={widgetKindsFor(selectedSignal)}
+                widgetKinds={classicKindsFor(selectedSignal)}
                 {widgetKindLabel}
                 onShowAsKind={showAsWidgetKind}
                 onTriggerAction={sendAction}
@@ -3560,7 +3560,7 @@
                 {signalById}
                 {selectedSignal}
                 {selectedWidget}
-                widgetKinds={widgetKindsFor(selectedSignal)}
+                widgetKinds={classicKindsFor(selectedSignal)}
                 {widgetKindLabel}
                 showHeader={false}
                 onShowAsKind={showAsWidgetKind}

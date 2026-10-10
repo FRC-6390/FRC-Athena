@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import paletteGolden from '../canvas/fixtures/palette-golden.json';
-import { widgetKindsFor, type SignalRow } from '../dashboard';
+import { classicKindsFor as widgetKindsFor } from './registry';
 import type { SignalRow as ArcpSignalRow } from '../arcp';
 
 // Golden palette data recorded from the pre-split `widgetKindsFor`. The registry must keep offering the
@@ -31,7 +31,7 @@ describe('classic palette golden (pre-split widgetKindsFor)', () => {
 
   test('every recorded signal shape offers the same widgets', () => {
     for (const entry of paletteGolden.perSignal) {
-      expect(sorted(widgetKindsFor(entry.row as SignalRow))).toEqual(sorted(entry.kinds));
+      expect(sorted(widgetKindsFor(entry.row as ArcpSignalRow))).toEqual(sorted(entry.kinds));
     }
   });
 
@@ -39,7 +39,7 @@ describe('classic palette golden (pre-split widgetKindsFor)', () => {
     const rows = matrixRows();
     expect(rows.length).toBe(paletteGolden.matrix.length);
     rows.forEach((row, index) => {
-      expect(sorted(widgetKindsFor(row as SignalRow))).toEqual(paletteGolden.matrix[index]);
+      expect(sorted(widgetKindsFor(row as ArcpSignalRow))).toEqual(paletteGolden.matrix[index]);
     });
   });
 });
