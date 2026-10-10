@@ -92,7 +92,7 @@ impl Recorder {
 
 /// Signal value in the webview's JSON form. `kind` names the wire type.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum WireValue {
     Bool(bool),
     I64(i64),
