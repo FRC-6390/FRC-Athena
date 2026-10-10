@@ -28,6 +28,9 @@ public final class SimMotorHandle implements MotorHandle {
     private double commandValue;
     private double percentOutput;
     private double positionRotations;
+    private Double injectedAppliedVoltage;
+    private Double injectedSupplyAmps;
+    private Double injectedStatorAmps;
     private double velocityRotationsPerSecond;
     private MotorClosedLoopRequest closedLoopRequest;
     private SimMotorHandle leader;
@@ -195,6 +198,30 @@ public final class SimMotorHandle implements MotorHandle {
         return this;
     }
 
+    /**
+     * Replaces the derived voltage and current readings until the next {@link #step(double)} or
+     * {@link #clearInjected()}. Replay uses this to feed recorded inputs instead of simulated physics.
+     *
+     * @param appliedVoltage applied voltage
+     * @param supplyCurrentAmps supply current
+     * @param statorCurrentAmps stator current
+     * @return this handle
+     */
+    public SimMotorHandle injectElectrical(double appliedVoltage, double supplyCurrentAmps, double statorCurrentAmps) {
+        injectedAppliedVoltage = finiteOrZero(appliedVoltage);
+        injectedSupplyAmps = finiteOrZero(supplyCurrentAmps);
+        injectedStatorAmps = finiteOrZero(statorCurrentAmps);
+        return this;
+    }
+
+    /** Removes readings set by {@link #injectElectrical(double, double, double)}. */
+    public SimMotorHandle clearInjected() {
+        injectedAppliedVoltage = null;
+        injectedSupplyAmps = null;
+        injectedStatorAmps = null;
+        return this;
+    }
+
     /** Locks or unlocks the simulated shaft. */
     public SimMotorHandle locked(boolean locked) {
         this.locked = locked;
@@ -206,17 +233,20 @@ public final class SimMotorHandle implements MotorHandle {
 
     @Override
     public double appliedVoltage() {
+        if (injectedAppliedVoltage != null) return injectedAppliedVoltage;
         return percentOutput * 12.0;
     }
 
     @Override
     public double supplyCurrentAmps() {
+        if (injectedSupplyAmps != null) return injectedSupplyAmps;
         int limit = runtimeConfiguration.supplyCurrentLimitAmps();
         return locked && Math.abs(percentOutput) > 0.01 ? limit : Math.abs(percentOutput) * Math.min(limit, 10.0);
     }
 
     @Override
     public double statorCurrentAmps() {
+        if (injectedStatorAmps != null) return injectedStatorAmps;
         int limit = runtimeConfiguration.statorCurrentLimitAmps();
         if (limit <= 0) {
             return supplyCurrentAmps();
@@ -230,6 +260,7 @@ public final class SimMotorHandle implements MotorHandle {
      * @param seconds timestep in seconds
      */
     public void step(double seconds) {
+        clearInjected();
         if (Double.isFinite(seconds) && seconds > 0.0) {
             positionRotations += velocityRotationsPerSecond * seconds;
         }
