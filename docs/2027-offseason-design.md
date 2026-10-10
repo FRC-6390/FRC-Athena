@@ -465,3 +465,10 @@ display it but never block writes (E5).
 ### Write replies
 A write reply carries `{requestId, accepted (bool), reason (string, empty when accepted),
 actualValue}` so the client can restore the displayed value on rejection.
+
+### Server status on the wire
+The ARCP server publishes its own status as role-8 (system) signals, updated at least once per
+second and included in every session's dictionary regardless of subscription patterns:
+`athena/arcp/status/clients` (i64), `athena/arcp/status/bytesPerSecond` (f64),
+`athena/arcp/status/budgetBytesPerSecond` (f64), `athena/arcp/status/throttled` (bool),
+`athena/arcp/status/throttledPatterns` (string[]), `athena/arcp/status/droppedFrames` (i64).
