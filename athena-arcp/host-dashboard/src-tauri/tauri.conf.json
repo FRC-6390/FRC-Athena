@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "ARCP Host Dashboard",
-  "version": "0.1.0",
-  "identifier": "ca.frc6390.athena.arcp.hostdashboard",
+  "productName": "Athena Dashboard",
+  "version": "../package.json",
+  "identifier": "ca.frc6390.athena.dashboard",
   "build": {
     "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ARCP Host Dashboard",
+        "title": "Athena Dashboard",
         "width": 1520,
         "height": 920,
         "minWidth": 1040,
@@ -25,8 +25,13 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
+    "publisher": "FRC 6390",
+    "category": "DeveloperTool",
+    "shortDescription": "Athena robot host dashboard",
+    "longDescription": "Athena Dashboard is the host-side control and monitoring dashboard for the FRC 6390 Athena robot runtime. It connects to the robot over ARCP and NetworkTables to show live telemetry, subscriptions and controls.",
+    "copyright": "Copyright (c) FRC 6390 Athena",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
