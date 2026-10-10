@@ -24,11 +24,13 @@ import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
+import ca.frc6390.athena.mechanism.core.RuntimeMarkers;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.robot.replay.ReplayMarkers;
+import ca.frc6390.athena.robot.replay.ReplayRuntimeMarkers;
 import ca.frc6390.athena.robot.replay.ReplayPolicy;
 import ca.frc6390.athena.robot.replay.ReplayRecorder;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
@@ -919,6 +921,7 @@ public final class RobotRuntime implements AutoCloseable {
     private void reportMechanismFaults() {
         for (MechanismScheduler.RuntimeFault fault : mechanisms.drainRuntimeFaults()) {
             failureReporter.error(fault.message(), fault.exception());
+            RuntimeMarkers.current().mark(RuntimeMarkers.FAULT, fault.message());
         }
         for (String warning : mechanisms.drainRuntimeWarnings()) {
             failureReporter.warning("Athena runtime value: " + warning, null);
@@ -1130,6 +1133,10 @@ public final class RobotRuntime implements AutoCloseable {
         if (replayRecorder != null) {
             replayRecorder.close();
             ReplayMarkers.activate(null);
+            if (RuntimeMarkers.current() instanceof ReplayRuntimeMarkers markers
+                    && markers.recorder() == replayRecorder) {
+                RuntimeMarkers.install(null);
+            }
         }
         if (failure != null) throw failure;
     }
@@ -1183,6 +1190,9 @@ public final class RobotRuntime implements AutoCloseable {
                     }
                 });
         ReplayMarkers.activate(replayRecorder);
+        // Mechanism code (persisted writes, rejected writes, staging transitions, faults, records) plants its
+        // markers through RuntimeMarkers; with replay enabled they go to this recorder.
+        RuntimeMarkers.install(new ReplayRuntimeMarkers(replayRecorder));
         return this;
     }
 
