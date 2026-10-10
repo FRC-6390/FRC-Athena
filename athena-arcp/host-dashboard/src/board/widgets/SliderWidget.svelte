@@ -10,14 +10,22 @@
     const v = ctx.latest(signal);
     return typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : 0;
   });
-  const min = $derived(ctx.setting<number>('min'));
-  const max = $derived(ctx.setting<number>('max'));
-  const step = $derived(ctx.setting<number>('step'));
+  const finite = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  // Without explicit bounds the range follows the robot value so a gain can't be flung to 100 by accident.
+  let anchor = $state<number | null>(null);
+  $effect(() => {
+    if (anchor === null && signal && ctx.latest(signal) !== undefined) anchor = Math.abs(robotValue);
+  });
+  const autoMax = $derived(Math.max(1, (anchor ?? 0) * 4));
+  const min = $derived(finite(ctx.setting<number>('min')) ?? (robotValue < 0 ? -autoMax : 0));
+  const max = $derived(finite(ctx.setting<number>('max')) ?? autoMax);
+  const step = $derived(finite(ctx.setting<number>('step')) ?? (max - min) / 200);
+  let pending = $state<number | null>(null);
   const live = $derived(ctx.setting<boolean>('sendWhileDragging'));
 
   let dragging = $state<number | null>(null);
   let lastSent = 0;
-  const shown = $derived(dragging ?? robotValue);
+  const shown = $derived(dragging ?? pending ?? robotValue);
   const reply = $derived.by(() => {
     void ctx.live.current;
     const r = signal ? ctx.reply(signal) : undefined;
@@ -34,20 +42,35 @@
     }
   }
   function change() {
-    if (signal && dragging !== null) void ctx.write(signal, dragging);
+    if (signal && dragging !== null) {
+      const big = Math.abs(dragging - robotValue) > Math.max(Math.abs(robotValue) * 0.5, step);
+      if (big && !live) pending = dragging;
+      else void ctx.write(signal, dragging);
+    }
     dragging = null;
+  }
+  function confirm() {
+    if (signal && pending !== null) void ctx.write(signal, pending);
+    pending = null;
   }
 </script>
 
 <div class="slider">
   <div class="top">
     <span class="v ui-mono">{formatNumber(shown)}{#if signal?.unit}<small>{signal.unit}</small>{/if}</span>
-    {#if dragging !== null && Math.abs(dragging - robotValue) > step / 2}
+    {#if (dragging ?? pending) !== null && Math.abs((dragging ?? pending ?? 0) - robotValue) > step / 2}
       <span class="robot ui-mono">robot {formatNumber(robotValue)}</span>
     {/if}
   </div>
   <input type="range" {min} {max} {step} value={shown} disabled={ctx.editing || !signal} oninput={input} onchange={change} />
-  <div class="bounds ui-mono"><span>{min}</span>{#if reply && !reply.accepted}<span class="rejected">{reply.reason}</span>{/if}<span>{max}</span></div>
+  {#if pending !== null}
+    <div class="confirm">
+      <span>Send {formatNumber(pending)}? (robot {formatNumber(robotValue)})</span>
+      <button type="button" class="ui-btn" data-size="sm" data-variant="primary" onclick={confirm}>Send</button>
+      <button type="button" class="ui-btn" data-size="sm" onclick={() => (pending = null)}>Cancel</button>
+    </div>
+  {/if}
+  <div class="bounds ui-mono"><span>{formatNumber(min)}</span>{#if reply && !reply.accepted}<span class="rejected">{reply.reason}</span>{/if}<span>{formatNumber(max)}</span></div>
 </div>
 
 <style>
@@ -89,5 +112,15 @@
   }
   .rejected {
     color: var(--fault);
+  }
+  .confirm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--fs-xs);
+    color: var(--warn);
+  }
+  .confirm span {
+    flex: 1;
   }
 </style>

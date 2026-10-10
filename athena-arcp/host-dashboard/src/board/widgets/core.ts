@@ -124,9 +124,9 @@ export function registerCoreWidgets(): void {
     description: 'Drag to set a writable number; shows the robot value while dragging.',
     slots: [{ key: 'value', label: 'Signal', matcher: { types: NUMBER, writable: true }, required: true }],
     settings: [
-      { key: 'min', label: 'Min', kind: 'number', default: 0 },
-      { key: 'max', label: 'Max', kind: 'number', default: 100 },
-      { key: 'step', label: 'Step', kind: 'number', default: 1 },
+      { key: 'min', label: 'Min (blank = from value)', kind: 'number', default: Number.NaN },
+      { key: 'max', label: 'Max (blank = 4× value)', kind: 'number', default: Number.NaN },
+      { key: 'step', label: 'Step (blank = auto)', kind: 'number', default: Number.NaN },
       { key: 'sendWhileDragging', label: 'Send while dragging', kind: 'bool', default: false }
     ],
     defaultSize: { w: 6, h: 2 },
