@@ -9,6 +9,8 @@ import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.power.PowerPolicy;
+import ca.frc6390.athena.hardware.power.PowerProfile;
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -92,24 +94,40 @@ class PowerCapOutputTest {
     }
 
     @Test
-    void stalledMotorPercentOutputIsCappedToItsCurrentLimit() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 90).currentLimit(20);
+    void noClampWhenTheCapEqualsTheDeclaredLimit() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 89).currentLimit(20);
         Rig rig = new Rig(motor);
         rig.cycle(0.0);
-        assertEquals(20.0, rig.power.capAmps(motor), 1e-9);
+        assertEquals(Double.POSITIVE_INFINITY, rig.power.capAmps(motor), 0.0);
+
+        rig.apply(motor, Outputs.percent(1.0));
+
+        Motor handle = rig.hardware.motor(motor);
+        assertEquals(1.0, handle.percent, 1e-9, "percent command unchanged");
+        assertTrue(Double.isNaN(handle.volts), "no voltage clamp applied");
+    }
+
+    @Test
+    void stalledMotorPercentOutputIsCappedBelowItsDeclaredLimit() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 90).currentLimit(20)
+                .power(PowerProfile.of().sustained(Units.Amps.of(5)));
+        Rig rig = new Rig(motor);
+        rig.cycle(0.0);
+        assertEquals(5.0, rig.power.capAmps(motor), 1e-9);
 
         rig.apply(motor, Outputs.percent(1.0));
 
         Motor handle = rig.hardware.motor(motor);
         assertTrue(Double.isNaN(handle.percent), "a capped percent command is sent as voltage");
-        assertEquals(20.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
-        assertTrue(currentAt(handle.volts, 0.0) <= 20.0 + 1e-9, "stalled current within the cap");
+        assertEquals(5.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
+        assertTrue(currentAt(handle.volts, 0.0) <= 5.0 + 1e-9, "stalled current within the cap");
         assertTrue(handle.writes.isEmpty(), "no configuration write");
     }
 
     @Test
     void movingMotorVoltageIsClampedAroundItsBackEmf() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 91).currentLimit(20);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 91).currentLimit(20)
+                .power(PowerProfile.of().sustained(Units.Amps.of(5)));
         Rig rig = new Rig(motor);
         Motor handle = rig.hardware.motor(motor);
         // Back-EMF of 6 V: the command of 12 V would drive about (12 - 6) / R amps, far above the cap.
@@ -118,13 +136,14 @@ class PowerCapOutputTest {
 
         rig.apply(motor, Outputs.voltage(12.0));
 
-        assertEquals(6.0 + 20.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
-        assertTrue(currentAt(handle.volts, handle.rotationsPerSecond) <= 20.0 + 1e-9, "moving current within the cap");
+        assertEquals(6.0 + 5.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
+        assertTrue(currentAt(handle.volts, handle.rotationsPerSecond) <= 5.0 + 1e-9, "moving current within the cap");
     }
 
     @Test
     void motorWithoutConstantsIsScaledByItsMeasuredSupplyCurrent() {
-        MotorDevice minion = MotorDevice.of(MotorKinds.MINION, 92).currentLimit(20);
+        MotorDevice minion = MotorDevice.of(MotorKinds.MINION, 92).currentLimit(20)
+                .power(PowerProfile.of().sustained(Units.Amps.of(10)));
         Rig rig = new Rig(minion);
         Motor handle = rig.hardware.motor(minion);
         handle.supplyAmps = 40.0;
@@ -132,14 +151,15 @@ class PowerCapOutputTest {
 
         rig.apply(minion, Outputs.voltage(12.0));
 
-        assertEquals(6.0, handle.volts, 1e-9);
+        assertEquals(3.0, handle.volts, 1e-9, "cap 10 A against 40 A measured: command scaled by 0.25");
         assertTrue(handle.writes.isEmpty(), "no configuration write");
     }
 
     @Test
     void softwareFollowerCapBoundsTheSharedCommand() {
         MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 93).currentLimit(400);
-        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 94).currentLimit(5);
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 94).currentLimit(20)
+                .power(PowerProfile.of().sustained(Units.Amps.of(5)));
         Rig rig = new Rig(leader, follower);
         rig.hardware.leader = leader;
         rig.hardware.follower = follower;

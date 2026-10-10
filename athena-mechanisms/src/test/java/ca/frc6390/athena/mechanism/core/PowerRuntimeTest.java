@@ -85,7 +85,7 @@ class PowerRuntimeTest {
         handle.supplyAmps = 30.0;
         handle.appliedVolts = 1.0;
         power.cycle(motors, hardware, overrides, 0.3);
-        assertEquals(400.0, power.capAmps(motor), 1e-9);
+        assertEquals(Double.POSITIVE_INFINITY, power.capAmps(motor), 0.0, "back at the declared limit: no clamp");
         assertTrue(handle.writes.isEmpty(), "no configuration write on recovery");
     }
 
@@ -98,11 +98,13 @@ class PowerRuntimeTest {
         PowerRuntime power = runtime(12.5, PowerPolicy.defaults());
         List<MotorDevice> motors = List.of(motor);
         power.cycle(motors, hardware, overrides, 0.0);
-        assertEquals(60.0, power.capAmps(motor), 1e-9);
+        assertEquals(Double.POSITIVE_INFINITY, power.capAmps(motor), 0.0, "cap at the declared limit is not clamped");
 
         overrides.supplyLimit(motor, 80);
         power.cycle(motors, hardware, overrides, DT);
-        assertEquals(80.0, power.capAmps(motor), 1e-9, "the user's 80 A is the cap on the next cycle");
+        assertEquals(Double.POSITIVE_INFINITY, power.capAmps(motor), 0.0, "the user's 80 A is the new declared limit");
+        assertTrue(handle.writes.isEmpty());
+
         assertTrue(handle.writes.isEmpty());
     }
 

@@ -143,6 +143,9 @@ final class PowerRuntime {
     double capAmps(MotorDevice motor) {
         MotorState state = activeState(motor);
         if (state == null || !Double.isFinite(state.channel.capAmps())) return Double.POSITIVE_INFINITY;
+        // Only a cap below the declared limit reaches the clamp. At or above it the controller's own limit
+        // already applies, so the output is left unchanged (model error would otherwise under-drive a motor).
+        if (state.channel.capAmps() >= state.configuredLimitAmps) return Double.POSITIVE_INFINITY;
         return Math.max(0.0, state.channel.capAmps());
     }
 
@@ -189,6 +192,7 @@ final class PowerRuntime {
                     ? Math.max(MIN_ACTIVE_CAP_AMPS, declaredLimit * state.derate)
                     : Double.POSITIVE_INFINITY;
             state.declaredCapAmps = declaredCap;
+            state.configuredLimitAmps = declaredLimit;
             state.channel.inputs(motor.power(), state.demandAmps, declaredCap);
             active.add(state);
             channels.add(state.channel);
@@ -262,6 +266,8 @@ final class PowerRuntime {
         double statorAmps = Double.NaN;
         double derate = 1.0;
         double declaredCapAmps = Double.POSITIVE_INFINITY;
+        /** Declared supply/stator limit before the derate; infinite when none is declared. */
+        double configuredLimitAmps = Double.POSITIVE_INFINITY;
         double temperatureCelsius = Double.NaN;
         String status = "Declared";
 

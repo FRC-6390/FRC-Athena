@@ -63,8 +63,11 @@ produced its outputs and before any motor command is applied:
    the two, scaled by the derate, never below 1 A) combined with the budget, profile and ramp limits. It is
    published through `PowerRuntime.capAmps(motor)`. Nothing is written to a controller.
 8. **Enforce.** The output path reads each motor's cap while it applies the command and folds it into the
-   effort voltage clamp (see `docs/effort-and-contact.md`, "Enforcement"). Every motor command is bounded:
-   control bindings, open-loop percent and voltage motor outputs, and software followers.
+   effort voltage clamp (see `docs/effort-and-contact.md`, "Enforcement"). The cap is passed to the clamp only
+   when it is below the motor's declared limit (the supply/stator limit before the derate). Otherwise the
+   motor gets no software clamp: its command and the controller's hardware limit are unchanged from before.
+   A cap that binds is applied to control bindings (software loops), open-loop percent and voltage motor
+   outputs, and software followers. Device-offloaded closed loops are the exception (see below).
 
 ### Why the cap is a voltage clamp, not a configuration write
 
@@ -82,9 +85,10 @@ Athena does not write them again while the robot runs.
 
 Consequences:
 
-- The cap takes effect in the same cycle, with no rate limit and no deadband.
-- Limits are enforced in software for every motor with known constants (a `MotorSpec` row). The hardware limit
-  set at configuration remains in place as a backstop, but it is no longer the mechanism that tracks the cap.
+- A cap that binds takes effect in the same cycle, with no rate limit and no deadband.
+- Only a cap below the declared limit is enforced in software. A declared limit alone is not re-enforced in software:
+  the controller enforces it in hardware, and a model error (for example a hot winding's resistance) would
+  otherwise under-drive a healthy mechanism. Thermal derate and power shed/profile caps are the cases that enter.
 - Motors without a `MotorSpec` row use a proportional fallback (see below).
 
 ### Motors without known constants
@@ -98,6 +102,13 @@ voltage clamp cannot invert its current. For these motors:
 - Nothing is written to the controller.
 
 Add a `MotorSpec` row to get a model-based bound.
+
+### Device-offloaded closed loops
+
+A position or velocity binding that the device runs in its own firmware loop is not clamped and is not moved to
+the software loop. A dynamic cap therefore does not reach its current. When such a binding has an active cap that
+is not applied, State/Reason reports `Power cap NN A not applied (device loop)` (NN is the cap in whole amps).
+Use a software loop (for example, declare an effort ceiling on the binding) if the cap must bound it.
 
 ### Open-loop and follower outputs
 
@@ -198,7 +209,8 @@ directly.
 `Status` is one of `Declared`, `Power capped`, `Power shed`, `Thermal derate`, or `Unavailable`.
 
 `State/Reason` (the mechanism's explanation of an applied output) shows `Power cap NN A` when the cap binds on
-the motor of the selected output, and `Thermal derate NN%` when the thermal derate applies. These values are read
+the motor of the selected output, `Power cap NN A not applied (device loop)` for a device-offloaded binding (see
+above), and `Thermal derate NN%` when the thermal derate applies. These values are read
 from the same cycle's power pass, so they describe the cap that the output path enforced.
 
 ## Current-limit writes per vendor (I9): decided

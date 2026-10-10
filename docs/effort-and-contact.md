@@ -81,9 +81,10 @@ Every motor command is clamped, not only control bindings:
 
 | Command path | Clamp |
 | --- | --- |
-| Control binding (position, velocity, percent, voltage) | binding ceiling, Action effort and the power cap of each binding motor |
-| Open-loop motor output (percent or voltage, no binding) | Action effort and the power cap of the motor |
-| Software follower (receives its leader's command) | the follower's own power cap joins the intersection, so it bounds the shared command |
+| Control binding (position, velocity, percent, voltage) | binding ceiling, Action effort and the power cap of each binding motor (the cap only when below the declared limit) |
+| Open-loop motor output (percent or voltage, no binding) | Action effort and the power cap of the motor (only when below the declared limit) |
+| Software follower (receives its leader's command) | the follower's own power cap joins the intersection, so it bounds the shared command (only when below its declared limit) |
+| Device-offloaded position or velocity loop | not clamped; an active cap is reported as `Power cap NN A not applied (device loop)` |
 | Hardware follower (mirrors the leader in firmware) | not clamped separately. The leader's command is clamped by the leader's limits |
 
 Percent commands are clamped at the nominal 12 V and sent as voltage when the clamp changes them.

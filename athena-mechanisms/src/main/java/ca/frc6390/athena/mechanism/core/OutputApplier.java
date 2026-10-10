@@ -492,6 +492,7 @@ final class OutputApplier {
                     .withoutTrace();
         }
         ControlRuntimeState state = controlRuntimes(control);
+        state.unappliedCapAmps = -1;
         double position = firstFeedbackPosition(control);
         double velocity = firstFeedbackVelocity(control);
         if (state.reseedPending) {
@@ -545,6 +546,8 @@ final class OutputApplier {
         }
         AppliedOutput offloaded = resolveDeviceControl(control, staged.output(), loopContext, state);
         if (offloaded != null) {
+            // The device loop is not clamped, so an active power cap is reported as not applied.
+            state.unappliedCapAmps = deviceUnappliedCapAmps(control);
             return offloaded.withTrace(
                     output.output(), transformed, staged, position, velocity, staged.constrained(), false, false);
         }
@@ -1080,6 +1083,25 @@ final class OutputApplier {
         static final Limits NONE = new Limits(List.of(), new double[0]);
     }
 
+    /**
+     * Returns the power cap of a device-offloaded binding that is not applied, in whole amps, or -1 when none.
+     * Used by State/Reason. Device closed loops are not clamped, so only the cap (already below the declared limit)
+     * is reported.
+     */
+    int deviceLoopUnappliedCapAmps(ControlBinding<?> control) {
+        if (control == null) return -1;
+        ControlRuntimeState state = controlRuntimes.get(control);
+        return state == null ? -1 : state.unappliedCapAmps;
+    }
+
+    private int deviceUnappliedCapAmps(ControlBinding<?> control) {
+        double min = Double.POSITIVE_INFINITY;
+        for (MotorDevice motor : control.motors()) {
+            min = Math.min(min, powerCapAmps(motor));
+        }
+        return Double.isFinite(min) ? (int) Math.max(1L, Math.round(min)) : -1;
+    }
+
     /** Power/thermal cap of a motor from this cycle's power pass, infinite when uncapped or unknown. */
     private double powerCapAmps(MotorDevice motor) {
         return electricalPass == null ? Double.POSITIVE_INFINITY : electricalPass.capAmps(motor);
@@ -1481,6 +1503,8 @@ final class OutputApplier {
         private final EffortRuntime effort;
         /** Per-motor power/thermal caps of this cycle, in the binding's motor order. */
         private final double[] powerCaps;
+        /** Power cap not applied this cycle because the binding is device-offloaded; -1 when none. */
+        private int unappliedCapAmps = -1;
         private MotionProfileRuntime profileRuntime;
         private MotionProfile activeProfile;
         private double velocityReference;
