@@ -15,6 +15,15 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.model.AccelerationEstimator;
+import ca.frc6390.athena.mechanism.model.BindingCheck;
+import ca.frc6390.athena.mechanism.model.Characterization;
+import ca.frc6390.athena.mechanism.model.Identification;
+import ca.frc6390.athena.mechanism.model.MechanismModel;
+import ca.frc6390.athena.mechanism.model.ModelFeedforward;
+import ca.frc6390.athena.mechanism.model.MonotonicClock;
+import ca.frc6390.athena.mechanism.model.SlipCheck;
+import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
@@ -57,6 +66,9 @@ public record ControlBinding<U extends Unit>(
         Range continuousRange,
         U unit,
         Class<?> persistGroup) {
+    /** Speed below which a mechanism counts as not moving for the checks. */
+    private static final double STOPPED_SPEED = 0.01;
+
     public ControlBinding {
         Objects.requireNonNull(mode, "mode");
         slot = Math.max(0, slot);
@@ -429,6 +441,165 @@ public record ControlBinding<U extends Unit>(
     }
 
     /**
+     * Creates the characterization declaration for this binding. Declare it as a field to expose its
+     * test Actions, and pass it to {@link #model(Characterization)} to drive feedforward from it.
+     */
+    public Characterization characterization() {
+        return Characterization.of(this);
+    }
+
+    /**
+     * Uses a fixed identified model for feedforward. Replaces {@code ff(...)} and any previous model.
+     * {@code ff(...)} called later replaces the model again.
+     */
+    public ControlBinding<U> model(MechanismModel model) {
+        return replaceModelLoop(new ModelFeedforward(() -> Objects.requireNonNull(model, "model"), null));
+    }
+
+    /**
+     * Uses the characterization's active model for feedforward. The loop follows later fits, adopted
+     * estimates and rebaselines. When the characterization learns continuously, the loop also feeds
+     * normal operation to it.
+     */
+    public ControlBinding<U> model(Characterization characterization) {
+        Objects.requireNonNull(characterization, "characterization");
+        return replaceModelLoop(new ModelFeedforward(characterization::model, characterization));
+    }
+
+    private ControlBinding<U> replaceModelLoop(ModelFeedforward model) {
+        List<ControlLoop> updated = new ArrayList<>(loops.size() + 1);
+        for (ControlLoop existing : loops) {
+            if (!(existing instanceof FeedforwardGains) && !(existing instanceof ModelFeedforward)) {
+                updated.add(existing);
+            }
+        }
+        updated.add(model);
+        return copy(output, slot, followers, feedback, dependencies, updated, constraints, profile, planner);
+    }
+
+    /**
+     * Estimated external load on the mechanism. The load is the applied voltage minus the model's
+     * prediction (gravity, friction, velocity term) minus {@code kA} times the measured acceleration.
+     * It is in N m at the mechanism when the motor constants are known, and in volts otherwise.
+     * Requires a model ({@link #model(MechanismModel)} or {@link #model(Characterization)}).
+     */
+    public DoubleSupplier load() {
+        ModelFeedforward model = requireModelLoop("load()");
+        MotorDevice motor = requireOutput("load()");
+        FeedbackBinding feedback = requireFeedback();
+        double factor = Identification.baseFactor(unit);
+        AccelerationEstimator acceleration = new AccelerationEstimator(MonotonicClock.SYSTEM);
+        return () -> {
+            MechanismModel current = model.currentModel();
+            double velocity = feedback.velocity().velocity() * factor;
+            double accel = acceleration.update(velocity);
+            double applied = appliedVoltage(motor);
+            double predicted = current.feedforwardVolts(feedback.position().position() * factor, velocity, 0.0, 0.0);
+            double loadVolts = (applied - predicted) - current.kA() * accel;
+            if (current.motorTorqueConstant() <= 0.0 || current.motorResistance() <= 0.0) {
+                return loadVolts;
+            }
+            double motors = Math.max(1, current.motorCount()) * current.gearRatio();
+            return loadVolts * motors * current.motorTorqueConstant() / current.motorResistance();
+        };
+    }
+
+    /**
+     * True while the output is commanded to move but is not moving, with the drive voltage applied
+     * (default threshold 1 V for 0.2 s). Requires a model.
+     */
+    public BindingCheck blocked() {
+        ModelFeedforward model = requireModelLoop("blocked()");
+        MotorDevice motor = requireOutput("blocked()");
+        FeedbackBinding feedback = requireFeedback();
+        double factor = Identification.baseFactor(unit);
+        return new BindingCheck(() -> {
+            double velocity = feedback.velocity().velocity() * factor;
+            return Math.abs(velocity) < STOPPED_SPEED ? Math.abs(appliedVoltage(motor)) : 0.0;
+        }, 1.0, true, 0.2, MonotonicClock.SYSTEM);
+    }
+
+    /**
+     * True while the mechanism moves against the drive direction (default threshold 0.05 units per
+     * second for 0.1 s). Requires a model.
+     */
+    public BindingCheck backdriven() {
+        ModelFeedforward model = requireModelLoop("backdriven()");
+        MotorDevice motor = requireOutput("backdriven()");
+        FeedbackBinding feedback = requireFeedback();
+        return new BindingCheck(() -> {
+            double applied = appliedVoltage(motor);
+            if (applied == 0.0 || !Double.isFinite(applied)) {
+                return 0.0;
+            }
+            return -feedback.velocity().velocity() * Math.signum(applied);
+        }, 0.05, true, 0.1, MonotonicClock.SYSTEM);
+    }
+
+    /**
+     * True while the output draws current and the feedback does not move (default threshold 2 A for
+     * 0.1 s). Needs no model.
+     */
+    public BindingCheck feedbackStalled() {
+        MotorDevice motor = requireOutput("feedbackStalled()");
+        FeedbackBinding feedback = requireFeedback();
+        return new BindingCheck(() -> {
+            double applied = appliedVoltage(motor);
+            if (!(Math.abs(applied) > 0.5) || Math.abs(feedback.velocity().velocity()) >= STOPPED_SPEED) {
+                return 0.0;
+            }
+            try {
+                return Math.abs(motor.statorCurrentAmps());
+            } catch (RuntimeException unavailable) {
+                return Double.NaN;
+            }
+        }, 2.0, true, 0.1, MonotonicClock.SYSTEM);
+    }
+
+    /**
+     * Compares this binding's feedback with a second encoder on the same mechanism. The second
+     * encoder's reading is multiplied by {@code ratio} (sensor to mechanism). Both must be in this
+     * binding's unit. Requires a unit-typed binding.
+     */
+    public SlipCheck slipCheck(EncoderDevice second, GearRatio ratio, Measure<?> tolerance) {
+        requireUnit("Typed slip tolerance");
+        return slipCheck(second, ratio, UnitConversions.value(tolerance, unit));
+    }
+
+    /** Raw form of {@link #slipCheck(EncoderDevice, GearRatio, Measure)}; the tolerance is in binding units. */
+    public SlipCheck slipCheck(EncoderDevice second, GearRatio ratio, double tolerance) {
+        Objects.requireNonNull(second, "second");
+        Objects.requireNonNull(ratio, "ratio");
+        FeedbackBinding feedback = requireFeedback();
+        return new SlipCheck(() -> feedback.position().position(),
+                () -> second.position() * ratio.ratio(), tolerance);
+    }
+
+    private ModelFeedforward requireModelLoop(String feature) {
+        for (ControlLoop loop : loops) {
+            if (loop instanceof ModelFeedforward model) {
+                return model;
+            }
+        }
+        throw new IllegalStateException(feature + " requires a model: call model(...) first.");
+    }
+
+    private MotorDevice requireOutput(String feature) {
+        if (output == null) {
+            throw new IllegalStateException(feature + " requires a motor output.");
+        }
+        return output;
+    }
+
+    private static double appliedVoltage(MotorDevice motor) {
+        try {
+            return motor.appliedVoltage();
+        } catch (RuntimeException unavailable) {
+            return Double.NaN;
+        }
+    }
+
+    /**
      * Rejects a typed binding whose encoder feedback does not measure the binding's unit. Checked on
      * every construction, so it fires when the robot declares the mechanism, not in the robot loop.
      */
@@ -521,7 +692,8 @@ public record ControlBinding<U extends Unit>(
     private ControlBinding<U> replaceLoop(Class<? extends ControlLoop> type, ControlLoop replacement) {
         List<ControlLoop> updated = new ArrayList<>(loops.size() + 1);
         for (ControlLoop existing : loops) {
-            if (!type.isInstance(existing)) {
+            boolean replacedByGains = type == FeedforwardGains.class && existing instanceof ModelFeedforward;
+            if (!type.isInstance(existing) && !replacedByGains) {
                 updated.add(existing);
             }
         }

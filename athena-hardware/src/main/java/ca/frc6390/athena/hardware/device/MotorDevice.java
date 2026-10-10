@@ -282,6 +282,10 @@ public record MotorDevice(
 
     /** Creates a stall detector derived from this motor's configured current limits. */
     public MotorStallSignal stall() {
+        var constants = MotorConstants.forKind(kind);
+        if (constants.isPresent() && currentLimits().supportsStallDetection()) {
+            return MotorStallSignal.modelBased(this, constants.get());
+        }
         return new MotorStallSignal(this, 0.9, 1.0, 2.0, 0.15, 0.25);
     }
 

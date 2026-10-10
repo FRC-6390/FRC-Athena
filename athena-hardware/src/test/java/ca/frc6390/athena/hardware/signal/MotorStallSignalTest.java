@@ -67,7 +67,8 @@ class MotorStallSignalTest {
         FakeMotorHandle handle = new FakeMotorHandle(motor);
         AutoCloseable binding = motor.bindRuntime(new RuntimeScope("stall-predicates"), handle);
         try {
-            MotorStallSignal stall = motor.stall();
+            // Fixed-threshold predicates: the default detector is model-based for known motors.
+            MotorStallSignal stall = motor.stall().atCurrentLimit(0.9);
             motor.recordCommand(new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VOLTAGE, 8.0));
 
             handle.supplyCurrent = 20.0;

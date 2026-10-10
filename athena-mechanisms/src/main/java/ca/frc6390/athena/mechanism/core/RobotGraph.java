@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.function.DoubleSupplier;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import ca.frc6390.athena.mechanism.model.Characterization;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.persist.Locks;
 
@@ -142,6 +143,26 @@ final class RobotGraph {
         Class<?> type = mechanism.getClass();
         while (type != null && type != Object.class) {
             for (Field field : type.getDeclaredFields()) {
+                if (Characterization.class.isAssignableFrom(field.getType())) {
+                    try {
+                        if (!field.canAccess(Modifier.isStatic(field.getModifiers()) ? null : mechanism)) {
+                            field.setAccessible(true);
+                        }
+                        Object value = field.get(Modifier.isStatic(field.getModifiers()) ? null : mechanism);
+                        if (value instanceof Characterization characterization
+                                && characterization.actions().containsValue(action)) {
+                            Telemetry annotation = field.getAnnotation(Telemetry.class);
+                            String prefix = annotation == null
+                                    ? field.getName() : AnnotatedTelemetry.name(field.getName(), annotation);
+                            return name.startsWith(prefix + "/")
+                                    && (Modifier.isPublic(field.getModifiers()) || annotation != null);
+                        }
+                        continue;
+                    } catch (IllegalAccessException exception) {
+                        throw new IllegalStateException("Unable to inspect characterization field "
+                                + field.getName(), exception);
+                    }
+                }
                 if (ControlSysId.class.isAssignableFrom(field.getType())
                         && action instanceof Actions.ControlSysIdAction sysIdAction) {
                     try {
