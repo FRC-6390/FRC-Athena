@@ -138,7 +138,8 @@ public final class ArcpBridge implements AutoCloseable {
             }
         }
 
-        ArcpSignals signals = new ArcpSignals(runtime.mechanismTelemetrySchema(), locked);
+        ArcpSignals signals = new ArcpSignals(runtime.mechanismTelemetrySchema(), locked,
+                ArcpSystemSignals.Source.wpilib(runtime::powerSnapshot));
         NativeArcpServer server = startServer(policy, categories, signals, simulation);
         if (server == null) {
             return disabled();

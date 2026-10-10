@@ -5,7 +5,7 @@ import { buildMechanismTree, flattenMechanisms, groupSignals } from './tree';
 import { describePath, parsePath } from './path';
 import { createSession } from './session';
 import { createMockSource } from './mock';
-import { MockRobot, derate } from './mock-robot';
+import { MockRobot } from './mock-robot';
 import { encodeFrame, encodeDictionary, encodeMarker } from './encoder';
 import { decodeRecords } from './decoder';
 import { TYPE_TAG, type DecodedRecord, type SignalDescriptor, type SignalValue } from './types';
@@ -234,9 +234,9 @@ describe('mock robot', () => {
       reason: 'rejected: locked (InMatch)'
     });
     robot.step(0);
-    expect(robot.value('athena/locks/ca.frc6390.athena.mock.InMatch')).toBe(true);
-    // Constraints use the Never group and stay writable during a match.
-    expect(robot.write('robot/turret/Controls/position/Constraints/maxVelocity', 90)).toEqual({
+    expect(robot.value('athena/locks/ca.frc6390.athena.mechanism.persist.Locks$InMatch')).toBe(true);
+    // Constraints use the calibration lock and stay writable during a match.
+    expect(robot.write('robot/turret/Controls/position/Config/Constraints/MaximumVelocity', 90)).toEqual({
       accepted: true,
       reason: null
     });
@@ -250,17 +250,11 @@ describe('mock robot', () => {
     });
   });
 
-  test('thermal derate is full below 60 C and halves by 100 C', () => {
-    expect(derate(40)).toBe(1);
-    expect(derate(100)).toBeCloseTo(0.5);
-    expect(derate(150)).toBe(0.5);
-  });
-
   test('the turret tracks its target', () => {
     const robot = new MockRobot();
     robot.write('robot/turret/Values/target', 30);
     for (let i = 0; i < 500; i++) robot.step(0.02);
-    expect(Math.abs((robot.value('robot/turret/Values/position') as number) - 30)).toBeLessThan(1);
+    expect(Math.abs((robot.value('robot/turret/Controls/position/State/FeedbackPosition') as number) - 30)).toBeLessThan(1);
   });
 });
 

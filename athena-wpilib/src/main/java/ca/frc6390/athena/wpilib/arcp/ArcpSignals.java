@@ -25,7 +25,8 @@ import java.util.function.Predicate;
  *   <li>every published {@link TelemetryValue} under its telemetry path (numbers, booleans, strings and
  *       number arrays; points and geometry are not sent over ARCP);</li>
  *   <li>every {@link TelemetryAction} under its path, carrying its running state, role 5;</li>
- *   <li>one lock-state boolean per lock group in use, at {@code athena/locks/<group class name>}, role 7.</li>
+ *   <li>one lock-state boolean per lock group in use, at {@code athena/locks/<group class name>}, role 7;</li>
+ *   <li>the robot-level system signals of {@link ArcpSystemSignals}, role 8.</li>
  * </ul>
  *
  * <p>Writes go through {@link TelemetryValue#tryWrite}, so the robot's lock rules and value ranges decide.
@@ -91,6 +92,7 @@ final class ArcpSignals {
     private final Map<Long, ValueChannel> valuesById = new HashMap<>();
     private final Map<Long, ActionChannel> actionsById = new HashMap<>();
     private final Predicate<Class<?>> locked;
+    private final ArcpSystemSignals system;
     private long nextId = 1;
 
     /**
@@ -98,8 +100,9 @@ final class ArcpSignals {
      *
      * @param schema mechanism telemetry schema
      * @param locked lock-group condition, true while writes to the group are rejected
+     * @param system source of the robot-level system signals
      */
-    ArcpSignals(TelemetrySchema schema, Predicate<Class<?>> locked) {
+    ArcpSignals(TelemetrySchema schema, Predicate<Class<?>> locked, ArcpSystemSignals.Source system) {
         this.locked = locked;
         Map<Class<?>, Boolean> groups = new LinkedHashMap<>();
         walk(schema.root(), "", groups);
@@ -109,6 +112,9 @@ final class ArcpSignals {
             dictionary.add(new ArcpDictEntry(id, "athena/locks/" + group.getName(), TYPE_BOOL, "",
                     ArcpDictEntry.ROLE_LOCK, 0, "", 0));
         }
+        this.system = new ArcpSystemSignals(nextId, system);
+        nextId = this.system.nextId();
+        dictionary.addAll(this.system.dictionary());
     }
 
     /** The dictionary entries, in signal id order. */
@@ -148,6 +154,7 @@ final class ArcpSignals {
                 channel.published = true;
             }
         }
+        system.sample(cycle);
     }
 
     private void sampleValue(ValueChannel channel, ArcpCycle cycle) {
