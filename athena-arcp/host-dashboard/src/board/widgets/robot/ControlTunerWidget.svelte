@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { gainLabel } from '../../../lib/mechanisms/model';
   import type { WidgetContext } from '../../../lib/board/types';
   import type { SignalDescriptor } from '../../../lib/data/types';
   import { parseInput, formatNumber } from '../../../lib/format';
@@ -16,6 +17,7 @@
 
   const anchor = $derived(ctx.bindings.signal?.[0]);
   const windowSeconds = $derived(Math.max(1, ctx.setting<number>('window')));
+  const showGains = $derived(ctx.setting<boolean>('showGains') !== false);
 
   const ctrl = $derived.by(() => {
     void ctx.live.current;
@@ -125,7 +127,7 @@
     return r && r.op === 'write' && !r.accepted ? r.reason : null;
   }
 
-  const fmt = (v: unknown) => (typeof v === 'number' ? formatNumber(v) : '--');
+  const fmt = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? formatNumber(v) : '--');
 </script>
 
 {#if !anchor}
@@ -134,10 +136,9 @@
   <div class="problem">{anchor.path} is not under a Controls/ group</div>
 {:else}
   <div class="tuner">
-    <header>
-      <span class="name" title={ctrl.root}>{ctrl.name}</span>
-      {#if velocity !== null}<span class="vel ui-mono">vel {formatNumber(velocity)}</span>{/if}
-    </header>
+    {#if velocity !== null}
+      <header><span class="vel ui-mono">vel {formatNumber(velocity)}</span></header>
+    {/if}
 
     <div class="plot" class:empty={!hasTraces}>
       <canvas bind:this={canvas}></canvas>
@@ -149,13 +150,13 @@
       {/each}
     </div>
 
-    {#if ctrl.gains.length > 0}
+    {#if showGains && ctrl.gains.length > 0}
       <div class="gains">
         {#each ctrl.gains as gain (gain.path)}
           {@const err = rejected(gain)}
           {@const locked = ctx.locked(gain)}
           <div class="gain">
-            <span class="gname ui-mono" title={gain.path}>{gain.name}</span>
+            <span class="gname ui-mono" title={gain.path}>{gainLabel(gain)}</span>
             {#if editingPath === gain.path}
               <!-- svelte-ignore a11y_autofocus -->
               <input
@@ -204,14 +205,6 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-  }
-  .name {
-    font-size: var(--fs-md);
-    font-weight: 600;
-    color: var(--text-strong);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .vel {
     font-size: var(--fs-xs);

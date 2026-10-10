@@ -89,13 +89,19 @@ export function tuningBoard(signals: readonly SignalDescriptor[], mechanismPath:
   pack.newRow();
   for (const control of controlSections(node)) {
     const traces = control.plot.length > 0 ? control.plot : control.gains;
-    if (traces[0]) pack.add('controlTuner', { signal: [traces[0].path] }, { w: 14, h: 7 });
-    if (control.gains.length > 0) pack.add('pid-tuner', { gains: control.gains.map((g) => g.path) }, { w: 10, h: 7 });
+    const gains = control.gains.length > 0;
+    if (traces[0]) pack.add('controlTuner', { signal: [traces[0].path] }, { w: gains ? 16 : 24, h: 7 }, { showGains: !gains });
+    if (gains) pack.add('pid-tuner', { gains: control.gains.map((g) => g.path) }, { w: 8, h: 7 });
     pack.newRow();
   }
+  // Motors (they report current) get a motor card; encoders and IMUs get their readings as a list.
   for (const device of deviceSections(node)) {
-    const anchorSignal = device.current ?? device.signals[0];
-    if (anchorSignal) pack.add('motorCard', { signal: [anchorSignal.path] }, { w: 6, h: 4 });
+    if (device.current) {
+      pack.add('motorCard', { signal: [device.current.path] }, { w: 6, h: 4 });
+      continue;
+    }
+    const readings = device.signals.filter((s) => s.localPath.split('/')[2] === 'State' && (s.type === 'f64' || s.type === 'i64' || s.type === 'bool'));
+    if (readings.length > 0) pack.add('status-list', { rows: readings.slice(0, 8).map((r) => r.path) }, { w: 6, h: Math.min(6, 2 + readings.length) }, {}, `${device.name}`);
   }
   pack.newRow();
   const values = node.signals.filter((s) => s.localPath.startsWith('Values/') && (s.type === 'f64' || s.type === 'i64' || s.type === 'bool'));

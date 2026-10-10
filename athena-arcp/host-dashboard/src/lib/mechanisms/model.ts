@@ -56,6 +56,12 @@ export const GAIN_NAMES: Readonly<Record<string, string>> = {
   'Feedforward/gravity': 'kG'
 };
 
+/** Display label for a gain signal (`.../Config/PID/p` -> `kP`); other names pass through. */
+export function gainLabel(signal: { path: string; name: string }): string {
+  const key = Object.keys(GAIN_NAMES).find((k) => signal.path.endsWith(`/Config/${k}`));
+  return key ? GAIN_NAMES[key] : signal.name;
+}
+
 const SHORT_GAIN_NAMES = new Set(['p', 'i', 'd', 'izone', 'kp', 'ki', 'kd', 'kizone', 'ks', 'kv', 'ka', 'kg']);
 
 /**

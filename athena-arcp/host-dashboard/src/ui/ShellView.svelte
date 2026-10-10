@@ -63,11 +63,28 @@
   });
 
 
+  let popover = $state<HTMLDivElement | null>(null);
+
+  /** Escape or a press outside the popover (other than its toggle button) closes it. */
+  function closeOnOutside(event: PointerEvent) {
+    if (!connectionOpen || !popover) return;
+    const target = event.target as Node;
+    if (popover.contains(target) || (target as Element).closest?.('[data-connection-toggle]')) return;
+    connectionOpen = false;
+  }
+
   function openMechanism(path: string) {
     mechanism = path;
     section = 'mechanisms';
   }
 </script>
+
+<svelte:window
+  onpointerdown={closeOnOutside}
+  onkeydown={(e) => {
+    if (e.key === 'Escape') connectionOpen = false;
+  }}
+/>
 
 <div class="app">
   <Rail {section} onselect={(next) => (section = next)} {attention} />
@@ -80,7 +97,7 @@
       onconnection={() => (connectionOpen = !connectionOpen)}
     />
     {#if connectionOpen}
-      <div class="connection-popover ui-panel">
+      <div class="connection-popover ui-panel" bind:this={popover}>
         <ConnectionPanel {connector} />
       </div>
     {/if}

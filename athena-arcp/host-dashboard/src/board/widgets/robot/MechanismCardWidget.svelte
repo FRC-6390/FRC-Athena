@@ -2,7 +2,7 @@
   import type { WidgetContext } from '../../../lib/board/types';
   import { mechanismSiblings } from '../../../lib/board/widgets/robot-siblings';
   import type { SignalDescriptor } from '../../../lib/data/types';
-  import { reasonTone, stateTone, type Tone } from '../../../screens/mechanisms/tones';
+  import { reasonTone, type Tone } from '../../../screens/mechanisms/tones';
 
   let { ctx }: { ctx: WidgetContext } = $props();
 
@@ -24,10 +24,16 @@
   const reason = $derived(sib ? text(sib.reason) : '');
   const stage = $derived(sib ? text(sib.stage) : '');
 
-  const faulted = $derived.by(() => {
+  /** Fault labels: boolean fault flags that are set, and non-empty fault text (Athena's `State/Fault`). */
+  const faulted = $derived.by((): { key: number; label: string }[] => {
     void ctx.live.current;
     if (!sib) return [];
-    return sib.faults.filter((s) => ctx.latest(s) === true);
+    return sib.faults.flatMap((s) => {
+      const v = ctx.latest(s);
+      if (v === true) return [{ key: s.signalId, label: s.name }];
+      if (typeof v === 'string' && v.trim() !== '') return [{ key: s.signalId, label: v }];
+      return [];
+    });
   });
   const activeActions = $derived.by(() => {
     void ctx.live.current;
@@ -37,11 +43,10 @@
 
   const tone: Tone = $derived.by(() => {
     if (faulted.length > 0) return 'fault';
+    if (state) return 'info';
     if (reason) return reasonTone(reason);
-    if (state) return stateTone(state);
     return 'stale';
   });
-  const title = $derived(sib ? (sib.mechanismPath.split('/').pop() ?? sib.mechanismPath) : '');
 </script>
 
 {#if !anchor}
@@ -51,30 +56,21 @@
 {:else}
   <div class="card">
     <header>
-      <span class="name" title={sib.mechanismPath}>{title}</span>
-      <span class="ui-badge" data-tone={tone}>{state || 'no state'}</span>
+      <span class="ui-badge" data-tone={tone}>{faulted.length > 0 ? 'Fault' : state ? 'Running' : 'Idle'}</span>
+      <span class="reason-text" title={reason}>{reason || '--'}</span>
     </header>
 
-    <div class="reason" data-tone={tone}>
-      <span class="dot ui-dot" data-tone={tone}></span>
-      <span class="reason-text" title={reason}>{reason || (state ? '' : 'No State or Reason signal')}</span>
-    </div>
-
     <dl>
-      <dt>Stage</dt>
-      <dd class="ui-mono">{stage || '--'}</dd>
       <dt>Action</dt>
-      <dd class="ui-mono">
-        {#if activeActions.length > 0}
-          {activeActions.map((s) => s.name).join(', ')}
-        {:else}
-          idle
-        {/if}
-      </dd>
+      <dd class="ui-mono">{state || (activeActions.length > 0 ? activeActions.map((s) => s.name).join(', ') : 'none')}</dd>
+      {#if sib.stage}
+        <dt>Stage</dt>
+        <dd class="ui-mono">{stage || '--'}</dd>
+      {/if}
       <dt>Faults</dt>
       <dd>
         {#if faulted.length > 0}
-          {#each faulted as f (f.signalId)}<span class="ui-badge" data-tone="fault">{f.name}</span>{/each}
+          {#each faulted as f (f.key)}<span class="ui-badge" data-tone="fault" title={f.label}>{f.label}</span>{/each}
         {:else}
           <span class="none">none</span>
         {/if}
@@ -96,47 +92,14 @@
   header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
     min-width: 0;
-  }
-  .name {
-    font-size: var(--fs-md);
-    font-weight: 600;
-    color: var(--text-strong);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .reason {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 28px;
-    padding: 6px 10px;
-    border-radius: var(--radius);
-    background: var(--surface-3);
-    color: var(--text);
-    font-size: var(--fs-sm);
-  }
-  .reason[data-tone='ok'] {
-    background: var(--ok-soft);
-    color: var(--ok);
-  }
-  .reason[data-tone='warn'] {
-    background: var(--warn-soft);
-    color: var(--warn);
-  }
-  .reason[data-tone='fault'] {
-    background: var(--fault-soft);
-    color: var(--fault);
-  }
-  .reason[data-tone='info'] {
-    background: var(--info-soft);
-    color: var(--info);
   }
   .reason-text {
+    flex: 1;
     min-width: 0;
+    color: var(--text);
+    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

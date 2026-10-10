@@ -90,7 +90,7 @@ describe('control siblings', () => {
     const c = controlSiblings(ALL, 'robot/turret/Controls/fieldHeading/Config/PID/p');
     expect(c!.measured?.path).toBe('robot/turret/Controls/fieldHeading/State/FeedbackPosition');
     expect(c!.target).toBeNull();
-    expect(c!.gains.map((s) => s.name)).toEqual(['i', 'p']);
+    expect(c!.gains.map((s) => s.name)).toEqual(['p', 'i']);
   });
 });
 

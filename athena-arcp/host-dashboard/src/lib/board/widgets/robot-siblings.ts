@@ -3,7 +3,7 @@
  * State and actions, or the control loop's traces and gains. Pure lookups over the store's dictionary.
  */
 import type { SignalDescriptor } from '../../data/types';
-import { isGainName } from '../../mechanisms/model';
+import { GAIN_NAMES, isGainName } from '../../mechanisms/model';
 
 /** Lower-case letters only, so `Applied Voltage`, `appliedVoltage` and `applied_voltage` compare equal. */
 export function normalizeName(name: string): string {
@@ -116,10 +116,15 @@ const VELOCITY_LOCAL = ['State/FeedbackVelocity', 'measuredVelocity'];
 
 function isGain(within: string): boolean {
   if (within.includes('/')) {
-    const parts = within.split('/');
-    return parts.length === 3 && parts[0] === 'Config' && parts[1] === 'PID' && /^[pidPID]$/.test(parts[2]);
+    return within.startsWith('Config/') && within.slice('Config/'.length) in GAIN_NAMES;
   }
   return isGainName(within);
+}
+
+/** kP, kI, kD, kIZone, kS, kV, kA, kG order; other gain names after. */
+function gainRank(within: string): number {
+  const i = Object.keys(GAIN_NAMES).indexOf(within.slice('Config/'.length));
+  return i < 0 ? 99 : i;
 }
 
 /** Control loop siblings of a control signal. Null when the path is not under `Controls/`. */
@@ -137,6 +142,6 @@ export function controlSiblings(all: readonly SignalDescriptor[], anchorPath: st
     reference: pick(REFERENCE_LOCAL),
     measured: pick(MEASURED_LOCAL),
     velocity: pick(VELOCITY_LOCAL),
-    gains: under.filter((s) => isGain(within(s))).sort((a, b) => a.name.localeCompare(b.name))
+    gains: under.filter((s) => isGain(within(s))).sort((a, b) => gainRank(within(a)) - gainRank(within(b)) || a.name.localeCompare(b.name))
   };
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { gainLabel } from '../../../lib/mechanisms/model';
   import type { WidgetContext } from '../../../lib/board/types';
   import type { SignalDescriptor } from '../../../lib/data/types';
   import { formatNumber } from '../../../lib/format';
@@ -107,7 +108,7 @@
       {@const reply = writeReply(gain)}
       {@const locked = ctx.locked(gain)}
       <div class="row" role="row" title={gain.path}>
-        <span class="name" role="cell">{gain.name}</span>
+        <span class="name" role="cell">{gainLabel(gain)}</span>
         <span class="num ui-mono robot" role="cell">{robotValue(gain) === null ? '--' : formatNumber(robotValue(gain) ?? 0)}</span>
         <span class="cell-edit" role="cell">
           {#if editPath === gain.path}

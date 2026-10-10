@@ -57,7 +57,7 @@
       <span class="unit">V</span>
     </span>
     {#if actions}{@render actions()}{/if}
-    <button type="button" class="connection" onclick={onconnection} title="Robot connection">
+    <button type="button" class="connection" data-connection-toggle onclick={onconnection} title="Robot connection">
       <span class="ui-dot" data-tone={connection.tone}></span>
       <span class="conn-label">{connection.label}</span>
       <span class="conn-detail ui-mono">{connection.detail}</span>

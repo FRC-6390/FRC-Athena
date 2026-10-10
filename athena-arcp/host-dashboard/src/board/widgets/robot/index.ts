@@ -205,7 +205,7 @@ export function registerRobotWidgets(): void {
       category: 'Robot',
       description: 'A control loop from any of its signals: target, reference and measured traces with the gains editable inline.',
       slots: [{ key: 'signal', label: 'Control signal', matcher: { test: (s) => controlRoot(s.path) !== null }, required: true }],
-      settings: [windowField(10)],
+      settings: [windowField(10), { key: 'showGains', label: 'Show gains', kind: 'bool', default: true }],
       defaultSize: { w: 6, h: 5 },
       minSize: { w: 4, h: 4 },
       score: (s) => (controlRoot(s.path) === null ? 0 : /target|reference|measured|feedback|^k[A-Z]/i.test(s.name) ? 55 : 35),

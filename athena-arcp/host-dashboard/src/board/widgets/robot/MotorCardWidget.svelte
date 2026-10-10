@@ -49,23 +49,20 @@
   <div class="problem">{anchor.path} is not under a Devices/ group</div>
 {:else}
   <div class="card">
-    <header>
-      <span class="name" title={device.prefix}>{device.name}</span>
-      {#if connected === null}
-        <span class="ui-badge" data-tone="stale">no link</span>
-      {:else}
+    {#if connected !== null}
+      <header>
         <span class="ui-badge" data-tone={connected ? 'ok' : 'fault'}>{connected ? 'connected' : 'disconnected'}</span>
-      {/if}
-    </header>
+      </header>
+    {/if}
 
     <div class="grid">
       <div class="stat">
         <span class="label">Current</span>
-        <span class="value ui-mono">{current === null ? '--' : formatNumber(current)}<small>{device.current?.unit ?? 'A'}</small></span>
+        <span class="value ui-mono">{current === null ? '--' : formatNumber(current)}<small>{device.current?.unit || 'A'}</small></span>
       </div>
       <div class="stat">
         <span class="label">Voltage</span>
-        <span class="value ui-mono">{voltage === null ? '--' : formatNumber(voltage)}<small>{device.voltage?.unit ?? 'V'}</small></span>
+        <span class="value ui-mono">{voltage === null ? '--' : formatNumber(voltage)}<small>{device.voltage?.unit || 'V'}</small></span>
       </div>
     </div>
 
@@ -105,14 +102,6 @@
     justify-content: space-between;
     gap: 8px;
     min-width: 0;
-  }
-  .name {
-    font-size: var(--fs-md);
-    font-weight: 600;
-    color: var(--text-strong);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .grid {
     display: grid;
