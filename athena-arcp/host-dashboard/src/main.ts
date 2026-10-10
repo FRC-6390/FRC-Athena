@@ -8,8 +8,8 @@ if (!target) {
   throw new Error('Missing #app root element');
 }
 
-// `?ui=next` opens the workspace shell (driver/pit/tuning/analysis) on the data layer.
-// The classic dashboard stays the default until the workspaces cover it.
+// The workspace shell (driver/pit/tuning/analysis) is the default route. `?ui=classic` keeps the
+// classic dashboard reachable until the workspaces cover it.
 const ui = new URLSearchParams(window.location.search).get('ui');
 
-mount(ui === 'next' ? NextShell : App, { target });
+mount(ui === 'classic' ? App : NextShell, { target });
