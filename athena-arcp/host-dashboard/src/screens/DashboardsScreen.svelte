@@ -49,6 +49,14 @@
     }
   }
   let activeId = $state<string>(rememberedActive());
+  /** The add-widgets palette floats over the board in edit mode and can be tucked away. */
+  let paletteOpen = $state(true);
+  /** Board width outside edit mode; editing keeps it so widgets never change size while you arrange them. */
+  let scrollWidth = $state(0);
+  let viewWidth = $state(0);
+  $effect(() => {
+    if (!editing && scrollWidth > 0) viewWidth = scrollWidth;
+  });
   $effect(() => {
     const id = activeId;
     try {
@@ -508,10 +516,16 @@
     <OverviewBoard {session} {live} {driver} {onmechanism} />
   {:else}
     <div class="workspace" class:editing class:with-settings={editing && selected}>
-      {#if editing}
-        <SignalDrawer {session} {live} onadd={(payload) => active && handleDrop(payload, { x: 0, y: nextFreeRow(active) })} />
+      {#if editing && paletteOpen}
+        <div class="float left">
+          <SignalDrawer {session} {live} onadd={(payload) => active && handleDrop(payload, { x: 0, y: nextFreeRow(active) })} />
+          <button type="button" class="collapse ui-btn" data-size="sm" title="Hide the palette; the board moves back to the left" onclick={() => (paletteOpen = false)}>‹ Hide palette</button>
+        </div>
+      {:else if editing}
+        <button type="button" class="reopen ui-btn" data-variant="primary" data-size="sm" onclick={() => (paletteOpen = true)}>+ Add widgets</button>
       {/if}
-      <div class="board-scroll">
+      <div class="board-scroll" class:palette={editing && paletteOpen} bind:clientWidth={scrollWidth}>
+        <div class="board-sizer" style={editing && viewWidth > 0 ? `width:${viewWidth}px` : ''}>
         {#key active.id}
           <Board
             board={active}
@@ -526,8 +540,10 @@
             ondrop={(payload, cell) => handleDrop(payload, cell, lastPointer)}
           />
         {/key}
+        </div>
       </div>
       {#if editing && selected}
+        <div class="float right">
         <SettingsDrawer
           instance={selected}
           {session}
@@ -536,6 +552,7 @@
           onclose={() => (selectedId = null)}
           onremove={() => removeWidget(selected.id)}
         />
+        </div>
       {/if}
     </div>
   {/if}
@@ -717,21 +734,52 @@
     border: none;
     border-top: 1px solid var(--border);
   }
+  /* The palette and settings float over the board, so editing never changes the layout being edited. */
   .workspace {
+    position: relative;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-3);
     min-height: 0;
   }
-  .workspace.editing {
-    grid-template-columns: 260px minmax(0, 1fr);
+  .float {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-shadow: 0 12px 40px rgb(0 0 0 / 0.45);
+    border-radius: var(--radius-lg);
   }
-  .workspace.editing.with-settings {
-    grid-template-columns: 260px minmax(0, 1fr) 300px;
+  .float > :global(aside) {
+    flex: 1;
+    min-height: 0;
+  }
+  .float.left {
+    left: 0;
+    width: 260px;
+  }
+  .float.right {
+    right: 0;
+    width: 300px;
+  }
+  .collapse {
+    margin-top: 6px;
+    align-self: stretch;
+  }
+  .reopen {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 30;
   }
   .board-scroll {
     min-height: 0;
     overflow: auto;
     padding-bottom: var(--sp-5);
+  }
+  .board-scroll.palette {
+    padding-left: 268px;
   }
 </style>
