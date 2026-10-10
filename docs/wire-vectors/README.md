@@ -5,13 +5,14 @@ ARCP v2 / replay format from appendix E1-W of `docs/2027-offseason-design.md`. T
 the two implementations:
 
 - **Java reference**: `athena-runtime` `ca.frc6390.athena.runtime.wire` (`WireWriter`, `WireReader`,
-  `Wire`). The generator is `athena-arcp/java/src/test/java/ca/frc6390/athena/arcp/v2/GoldenVectorsTest.java`.
-  It builds every vector with the reference codec and fails if a committed file differs.
-  Regenerate with `ATHENA_REGEN_VECTORS=1 ./gradlew :athena-arcp:test`.
+  `Wire`). The Java generator that built these files lived in `athena-arcp` and was removed with the
+  pure-Java ARCP server (E7). A format change must update the reference codec, the Rust codec and
+  these files together.
 - **Rust**: `athena-arcp/rust/crates/arcp-core/tests/golden_vectors.rs` decodes each file and
   re-encodes it byte for byte.
 
-The Java `athena-arcp` codec (`ArcpCodec`) is also checked against these files.
+The Rust ARCP server is the only ARCP implementation in `athena-arcp`; it encodes frames and control replies
+that the Java tests decode with `athena-runtime`.
 
 | File | Contents |
 | --- | --- |
