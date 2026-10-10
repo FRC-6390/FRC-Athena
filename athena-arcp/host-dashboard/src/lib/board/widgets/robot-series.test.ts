@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Sample } from '../../data/types';
-import { alignPairs, decimateStride, minMaxColumns, paddedDomain, rollingStats, windowedNumeric, xyDomain } from './robot-series';
+import { niceTicks, alignPairs, decimateStride, minMaxColumns, paddedDomain, rollingStats, windowedNumeric, xyDomain } from './robot-series';
 
 const S = (seconds: number, value: number | string | boolean): Sample => ({ timestampMicros: Math.round(seconds * 1e6), value: value as Sample['value'] });
 
@@ -83,5 +83,13 @@ describe('rolling stats', () => {
     const flat = rollingStats([S(0, 2), S(1, 2)], 1e6, 5, 8);
     expect(flat!.histogram).toEqual([]);
     expect(flat!.rateHz).toBeCloseTo(1);
+  });
+});
+
+describe('niceTicks', () => {
+  test('round steps inside the domain', () => {
+    expect(niceTicks({ min: -3, max: 97 }, 4)).toEqual([0, 25, 50, 75]);
+    expect(niceTicks({ min: 0.1, max: 0.9 }, 4)).toEqual([0.2, 0.4, 0.6, 0.8]);
+    expect(niceTicks({ min: 5, max: 5 }, 4)).toEqual([]);
   });
 });

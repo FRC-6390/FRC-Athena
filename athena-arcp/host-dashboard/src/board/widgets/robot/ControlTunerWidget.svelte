@@ -7,6 +7,7 @@
   import {
     decimateStride,
     newestTimestamp,
+    niceTicks,
     paddedDomain,
     windowedNumeric,
     type TimedValue
@@ -67,15 +68,34 @@
     const g = prepareCanvas(el, width, height);
     if (!g) return;
     const palette = readPalette();
-    const PAD = { l: 6, r: 6, t: 6, b: 16 };
-    const plotW = width - PAD.l - PAD.r;
-    const plotH = height - PAD.t - PAD.b;
     const values = data.flatMap((t) => t.points.map((p) => p.v));
     const domain = values.length
       ? paddedDomain(Math.min(...values), Math.max(...values), { minSpan: 0.5 })
       : { min: -1, max: 1 };
+    const ticks = niceTicks(domain, Math.max(2, Math.floor(height / 45)));
+    g.font = '10px ui-monospace, monospace';
+    const gutter = Math.ceil(Math.max(0, ...ticks.map((v) => g.measureText(formatNumber(v)).width))) + 8;
+    const PAD = { l: gutter, r: 6, t: 6, b: 16 };
+    const plotW = width - PAD.l - PAD.r;
+    const plotH = height - PAD.t - PAD.b;
     const sx = (t: number) => PAD.l + ((t + seconds) / seconds) * plotW;
     const sy = (v: number) => PAD.t + (1 - (v - domain.min) / (domain.max - domain.min || 1)) * plotH;
+
+    // Horizontal gridlines with their values in the left gutter.
+    g.textAlign = 'right';
+    g.textBaseline = 'middle';
+    for (const v of ticks) {
+      const y = Math.round(sy(v)) + 0.5;
+      g.strokeStyle = palette.border;
+      g.globalAlpha = 0.5;
+      g.beginPath();
+      g.moveTo(PAD.l, y);
+      g.lineTo(PAD.l + plotW, y);
+      g.stroke();
+      g.globalAlpha = 1;
+      g.fillStyle = palette.textFaint;
+      g.fillText(formatNumber(v), PAD.l - 4, y);
+    }
 
     g.strokeStyle = palette.border;
     g.lineWidth = 1;

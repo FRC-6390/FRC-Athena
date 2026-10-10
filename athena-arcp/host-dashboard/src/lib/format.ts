@@ -33,13 +33,15 @@ export function formatSignalValue(type: string, value: SignalValue | undefined):
   return formatValue(value);
 }
 
+/** NaN means "no value" on Athena signals (for example a control with no target), so it shows as `--`. */
 export function formatNumber(value: number): string {
-  if (!Number.isFinite(value)) return String(value);
-  if (Number.isInteger(value)) return value.toString();
+  if (Number.isNaN(value)) return '--';
+  if (!Number.isFinite(value)) return value > 0 ? '∞' : '-∞';
+  if (Number.isInteger(value)) return Object.is(value, -0) ? '0' : value.toString();
   const abs = Math.abs(value);
-  if (abs >= 1000) return value.toFixed(0);
-  if (abs >= 10) return value.toFixed(1);
-  return value.toFixed(3);
+  const text = abs >= 1000 ? value.toFixed(0) : abs >= 10 ? value.toFixed(1) : value.toFixed(3);
+  // Tiny negatives round to "-0.000"; show them as zero.
+  return /^-0(\.0+)?$/.test(text) ? text.slice(1) : text;
 }
 
 /** Seconds since the newest sample, e.g. `+12.4 s`. */

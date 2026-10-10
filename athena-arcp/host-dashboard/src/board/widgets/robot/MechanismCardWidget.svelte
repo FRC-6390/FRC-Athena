@@ -41,6 +41,13 @@
     return sib.actions.filter((s) => ctx.latest(s) === true);
   });
 
+  const badge = $derived(faulted.length > 0 ? 'Fault' : state ? 'Running' : 'Idle');
+  /** The reason without what the badge already says (`Running: WithinTolerance` -> `WithinTolerance`). */
+  const reasonDetail = $derived.by(() => {
+    const prefix = new RegExp(`^${badge}\\s*:?\\s*`, 'i');
+    return reason.replace(prefix, '');
+  });
+
   const tone: Tone = $derived.by(() => {
     if (faulted.length > 0) return 'fault';
     if (state) return 'info';
@@ -56,8 +63,8 @@
 {:else}
   <div class="card">
     <header>
-      <span class="ui-badge" data-tone={tone}>{faulted.length > 0 ? 'Fault' : state ? 'Running' : 'Idle'}</span>
-      <span class="reason-text" title={reason}>{reason || '--'}</span>
+      <span class="ui-badge" data-tone={tone}>{badge}</span>
+      <span class="reason-text" title={reason}>{reasonDetail}</span>
     </header>
 
     <dl>

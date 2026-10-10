@@ -63,6 +63,9 @@
     border-radius: 50%;
     background: var(--surface-3);
   }
+  .dot[data-tone='none'] {
+    visibility: hidden;
+  }
   .dot[data-tone='ok'] {
     background: var(--ok);
   }

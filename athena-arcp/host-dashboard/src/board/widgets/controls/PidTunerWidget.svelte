@@ -137,9 +137,11 @@
             >{pendingPath === gain.path ? 'sending' : 'edit'}</button>
           {/if}
         </span>
-        <span class="meta">
-          <Feedback {reply} {locked} pending={pendingPath === gain.path} {now} />
-        </span>
+        {#if reply || locked || pendingPath === gain.path}
+          <span class="meta">
+            <Feedback {reply} {locked} pending={pendingPath === gain.path} {now} />
+          </span>
+        {/if}
         {#if editPath === gain.path}
           <span class="edit-actions">
             <button type="button" class="ui-btn" data-variant="primary" data-size="sm" disabled={ctx.editing} onclick={() => commit(gain)}>Send</button>
@@ -244,7 +246,7 @@
     text-align: right;
   }
   .meta {
-    grid-column: 1 / 2;
+    grid-column: 1 / -1;
     min-width: 0;
   }
   .edit-actions {

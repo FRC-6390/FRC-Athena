@@ -101,7 +101,7 @@ export type ToneRules = {
 
 /**
  * Row tone for a status list. Missing data is `stale`, strings are neutral (null), and numbers use the
- * above / below thresholds (fault wins over warn).
+ * above / below thresholds (fault wins over warn); numbers with no thresholds are neutral too.
  */
 export function rowTone(value: SignalValue | undefined, rules: ToneRules): string | null {
   if (value === undefined) return 'stale';
@@ -112,6 +112,8 @@ export function rowTone(value: SignalValue | undefined, rules: ToneRules): strin
   const wa = finiteSetting(rules.warnAbove);
   const fb = finiteSetting(rules.faultBelow);
   const wb = finiteSetting(rules.warnBelow);
+  // Without thresholds a number carries no status, so it gets no light.
+  if (fa === null && wa === null && fb === null && wb === null) return null;
   if ((fa !== null && n >= fa) || (fb !== null && n <= fb)) return 'fault';
   if ((wa !== null && n >= wa) || (wb !== null && n <= wb)) return 'warn';
   return 'ok';
