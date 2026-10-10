@@ -1,4 +1,5 @@
 import type { SignalRow } from './arcp';
+import type { SignalWidgetKind } from './widgets/kinds';
 
 const LEGACY_WIDGET_STORAGE_KEY = 'arcp.host.widgets.v1';
 const LAYOUT_STORAGE_KEY = 'arcp.host.layout.v2';
@@ -31,38 +32,7 @@ export const LAYOUT_TOOL_KINDS = [
 ] as const;
 
 export type LayoutToolKind = (typeof LAYOUT_TOOL_KINDS)[number];
-export type SignalWidgetKind =
-  | 'metric'
-  | 'state'
-  | 'text'
-  | 'trend'
-  | 'action'
-  | 'tunable'
-  | 'state_machine'
-  | 'dio'
-  | 'motor'
-  | 'encoder'
-  | 'imu'
-  | 'toggle'
-  | 'button_group'
-  | 'radio'
-  | 'input'
-  | 'textarea'
-  | 'graph'
-  | 'controller'
-  | 'bar'
-  | 'dial'
-  | 'compass'
-  | 'timer'
-  | 'dropdown'
-  | 'field'
-  | 'imu_3d'
-  | 'mech2d'
-  | 'swerve_module'
-  | 'swerve_drive'
-  | 'differential_drive'
-  | 'status_matrix'
-  | 'camera_overlay';
+export type { SignalWidgetKind } from './widgets/kinds';
 export type WidgetKind = SignalWidgetKind | LayoutToolKind;
 export type HardwareWidgetKind = 'state_machine' | 'dio' | 'motor' | 'encoder' | 'imu';
 export type WidgetConfigRecord = Record<string, unknown>;
@@ -121,133 +91,6 @@ export function isActionSignal(signal: SignalRow): boolean {
 
 export function isWritableSignal(signal: SignalRow): boolean {
   return signal.access === 'write' || signalRole(signal) === 'tunable';
-}
-
-export function widgetKindsFor(signal: SignalRow | null): WidgetKind[] {
-  if (!signal) {
-    return [
-      'metric',
-      'state',
-      'text',
-      'trend',
-      'state_machine',
-      'dio',
-      'motor',
-      'encoder',
-      'imu',
-      'graph',
-      'bar',
-      'dial',
-      'compass',
-      'timer',
-      'field',
-      'imu_3d',
-      'mech2d',
-      'swerve_module',
-      'swerve_drive',
-      'differential_drive',
-      'dropdown',
-      'status_matrix',
-      'input',
-      'textarea',
-      'radio',
-      'button_group',
-      'toggle'
-    ];
-  }
-  const hardwareKinds: WidgetKind[] = [];
-  if (looksLikeStateMachinePath(signal.path)) hardwareKinds.push('state_machine');
-  if (looksLikeDioPath(signal.path)) hardwareKinds.push('dio');
-  if (looksLikeMotorPath(signal.path)) hardwareKinds.push('motor');
-  if (looksLikeEncoderPath(signal.path)) hardwareKinds.push('encoder');
-  if (looksLikeImuPath(signal.path)) hardwareKinds.push('imu');
-
-  if (isActionSignal(signal)) return ['action', 'state', 'text'];
-  if (signal.signal_type === 'bool') {
-    if (isWritableSignal(signal)) {
-      return [
-        ...hardwareKinds,
-        'toggle',
-        'button_group',
-        'radio',
-        'dropdown',
-        'tunable',
-        'status_matrix',
-        'state',
-        'text',
-        'metric'
-      ];
-    }
-    return [...hardwareKinds, 'status_matrix', 'state', 'metric', 'text'];
-  }
-  if (signal.signal_type === 'string' || signal.signal_type === 'string[]') {
-    if (isWritableSignal(signal)) {
-      return [
-        ...hardwareKinds,
-        'input',
-        'textarea',
-        'button_group',
-        'radio',
-        'dropdown',
-        'mech2d',
-        'camera_overlay',
-        'tunable',
-        'text',
-        'state'
-      ];
-    }
-    return [...hardwareKinds, 'mech2d', 'camera_overlay', 'text', 'state'];
-  }
-  if (signal.signal_type === 'f64' || signal.signal_type === 'i64') {
-    if (isWritableSignal(signal)) {
-      return [
-        ...hardwareKinds,
-        'input',
-        'tunable',
-        'controller',
-        'graph',
-        'bar',
-        'dial',
-        'compass',
-        'timer',
-        'swerve_module',
-        'swerve_drive',
-        'differential_drive',
-        'dropdown',
-        'field',
-        'imu_3d',
-        'camera_overlay',
-        'metric',
-        'trend',
-        'text'
-      ];
-    }
-    return [
-      ...hardwareKinds,
-      'metric',
-      'graph',
-      'trend',
-      'bar',
-      'dial',
-      'compass',
-      'timer',
-      'controller',
-      'swerve_module',
-      'swerve_drive',
-      'differential_drive',
-      'field',
-      'imu_3d',
-      'camera_overlay',
-      'text'
-    ];
-  }
-  if (signal.signal_type === 'f64[]' || signal.signal_type === 'i64[]') {
-    return [...hardwareKinds, 'imu_3d', 'swerve_drive', 'swerve_module', 'differential_drive', 'field', 'text', 'state'];
-  }
-  if (isWritableSignal(signal)) {
-    return [...hardwareKinds, 'tunable', 'dropdown', 'text', 'state'];
-  }
-  return [...hardwareKinds, 'text', 'state'];
 }
 
 export function isLayoutWidgetKind(kind: WidgetKind | string): kind is LayoutToolKind {
