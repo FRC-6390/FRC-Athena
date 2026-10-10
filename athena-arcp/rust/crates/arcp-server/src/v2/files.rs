@@ -1,7 +1,10 @@
-//! File service (E6): list, download and delete named files in one configured directory.
+//! File service (E6): list, download and delete named files.
 //!
-//! Names are plain file names. Separators, `.`/`..`, NUL, drive prefixes and symlinks are
-//! rejected, so requests cannot leave the configured root.
+//! A name is either a plain file in the root directory (`name.json`) or a file inside a named
+//! category (`category/name.json`). Categories are fixed by the robot when the server starts
+//! (replays, persistent store, models, tuning exports, status). Each name part is a plain file
+//! name: separators, `.`/`..`, NUL, drive prefixes and symlinks are rejected, so requests cannot
+//! leave the configured directories.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
@@ -9,6 +12,67 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use arcp_core::v2::control::{FileInfo, MAX_FILE_CHUNK};
+
+/// The directories the file service exposes.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Roots {
+    /// Plain names in this directory. `None` disables plain names.
+    pub root: Option<PathBuf>,
+    /// `(category, directory)` pairs; names are `category/file`.
+    pub categories: Vec<(String, PathBuf)>,
+}
+
+impl Roots {
+    pub fn enabled(&self) -> bool {
+        self.root.is_some() || !self.categories.is_empty()
+    }
+
+    /// Resolves a request name to a directory and plain file name.
+    fn locate(&self, name: &str) -> Result<(PathBuf, String), &'static str> {
+        match name.split_once('/') {
+            None => {
+                let root = self.root.clone().ok_or("file service not configured")?;
+                checked_path(&root, name)?;
+                Ok((root, name.to_owned()))
+            }
+            Some((category, file)) => {
+                let dir = self
+                    .categories
+                    .iter()
+                    .find(|(c, _)| c == category)
+                    .map(|(_, d)| d.clone())
+                    .ok_or("no such category")?;
+                checked_path(&dir, file)?;
+                Ok((dir, file.to_owned()))
+            }
+        }
+    }
+
+    pub fn list(&self) -> Result<Vec<FileInfo>, &'static str> {
+        let mut out = Vec::new();
+        if let Some(root) = &self.root {
+            out.extend(list(root)?);
+        }
+        for (category, dir) in &self.categories {
+            // A category directory that does not exist yet is empty.
+            for mut info in list(dir).unwrap_or_default() {
+                info.name = format!("{category}/{}", info.name);
+                out.push(info);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn download(&self, name: &str, offset: u64, max_len: u32) -> Result<(bool, Vec<u8>), &'static str> {
+        let (dir, file) = self.locate(name)?;
+        download(&dir, &file, offset, max_len)
+    }
+
+    pub fn delete(&self, name: &str) -> Result<(), &'static str> {
+        let (dir, file) = self.locate(name)?;
+        delete(&dir, &file)
+    }
+}
 
 /// Validates a file name and returns its path under `root`.
 pub(crate) fn checked_path(root: &Path, name: &str) -> Result<PathBuf, &'static str> {

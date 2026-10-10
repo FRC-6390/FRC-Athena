@@ -33,6 +33,9 @@ impl RobotHandler for RecordingHandler {
         self.actions.lock().unwrap().push((signal_id, run));
         Ok(())
     }
+    fn backfill(&self, from: u64, to: u64) -> Result<Vec<u8>, String> {
+        Ok(vec![from as u8, to as u8])
+    }
 }
 
 const ANGLE: u64 = 1;
@@ -516,4 +519,68 @@ fn server_rejects_hello_with_wrong_protocol_version() {
     let (status, reason, _) = client.reply(ClientMessage::Hello { client_name: "old".into(), protocol_version: 1, udp_port: 1 });
     assert_eq!(status, Status::Error);
     assert_eq!(reason, "unsupported protocol version");
+}
+
+#[test]
+fn replay_records_reach_only_opted_in_sessions_and_backfill_is_answered() {
+    let (server, _) = server();
+    let (udp_a, port_a) = udp_pair();
+    let (udp_b, port_b) = udp_pair();
+    let mut a = Client::connect(server.control_addr());
+    a.hello(port_a);
+    let mut b = Client::connect(server.control_addr());
+    b.hello(port_b);
+    let (status, _, _) = a.reply(ClientMessage::ReplaySubscribe);
+    assert_eq!(status, Status::Ok);
+
+    let mut w = arcp_core::v2::Writer::new();
+    Record::Marker(Marker { timestamp_micros: 42, kind: 12, message: "record".into(), signal_id: 0 }).encode(&mut w);
+    server.publish_records(w.as_slice());
+
+    let got = drain_udp(&udp_a);
+    assert!(got.iter().any(|r| matches!(r, Record::Marker(m) if m.message == "record")), "{got:?}");
+    assert!(drain_udp(&udp_b).is_empty(), "session without ReplaySubscribe received replay records");
+
+    match a.reply(ClientMessage::Backfill { from: 3, to: 9 }) {
+        (Status::Ok, _, ReplyData::Records(data)) => assert_eq!(data, vec![3, 9]),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn file_categories_are_listed_downloaded_and_deleted() {
+    let base: PathBuf = std::env::temp_dir().join(format!("arcp-v2-categories-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let replays = base.join("replays");
+    std::fs::create_dir_all(&replays).unwrap();
+    std::fs::write(replays.join("m1.athrp"), b"abc").unwrap();
+    let handler = Arc::new(RecordingHandler::default());
+    let config = ServerConfig {
+        file_categories: vec![("replays".into(), replays.clone()), ("models".into(), base.join("missing"))],
+        ..ServerConfig::default()
+    };
+    let server = ArcpServerV2::start(config, handler).unwrap();
+    let (_udp, port) = udp_pair();
+    let mut client = Client::connect(server.control_addr());
+    client.hello(port);
+
+    match client.reply(ClientMessage::FileList) {
+        (Status::Ok, _, ReplyData::Files(files)) => {
+            let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+            assert_eq!(names, vec!["replays/m1.athrp"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    match client.reply(ClientMessage::FileDownload { name: "replays/m1.athrp".into(), offset: 0, max_len: 10 }) {
+        (Status::Ok, _, ReplyData::Chunk { data, .. }) => assert_eq!(data, b"abc"),
+        other => panic!("{other:?}"),
+    }
+    for bad in ["nope/m1.athrp", "replays/../m1.athrp", "replays/a/b"] {
+        let (status, _, _) = client.reply(ClientMessage::FileDownload { name: bad.into(), offset: 0, max_len: 10 });
+        assert_eq!(status, Status::Error, "{bad}");
+    }
+    let (status, _, _) = client.reply(ClientMessage::FileDelete { name: "replays/m1.athrp".into() });
+    assert_eq!(status, Status::Ok);
+    assert!(!replays.join("m1.athrp").exists());
+    let _ = std::fs::remove_dir_all(&base);
 }

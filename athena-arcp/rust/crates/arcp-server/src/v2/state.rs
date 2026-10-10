@@ -68,6 +68,8 @@ pub(crate) struct Session {
     pub sent: HashMap<u64, Sent>,
     pub seq: u32,
     pub last_keyframe: Option<u64>,
+    /// Opted in to raw replay records.
+    pub replay: bool,
     pub dead: bool,
 }
 
@@ -117,6 +119,7 @@ impl State {
             sent: HashMap::new(),
             seq: 0,
             last_keyframe: None,
+            replay: false,
             dead: false,
         });
         id
@@ -247,6 +250,45 @@ impl State {
         let seq = next_seq(session);
         let bytes = send_frames(udp, session.udp, false, ts, seq, &entries, mtu);
         self.window_bytes += bytes;
+    }
+
+    /// Packs complete replay record envelopes into datagrams and sends them to replay subscribers.
+    pub fn publish_records(&mut self, records: &[u8], udp: &UdpSocket) {
+        let mut sent = 0u64;
+        let mut reader = arcp_core::v2::Reader::new(records);
+        let mut datagram: Vec<u8> = Vec::new();
+        let mtu = self.mtu;
+        // Split the buffer into envelopes; a malformed tail is dropped.
+        let mut envelopes: Vec<&[u8]> = Vec::new();
+        while reader.has_remaining() {
+            let before = reader.position();
+            if reader.record().is_err() {
+                break;
+            }
+            envelopes.push(&records[before..reader.position()]);
+        }
+        let mut batches: Vec<Vec<u8>> = Vec::new();
+        for record in envelopes {
+            if !datagram.is_empty() && datagram.len() + record.len() > mtu {
+                batches.push(std::mem::take(&mut datagram));
+            }
+            datagram.extend_from_slice(record);
+        }
+        if !datagram.is_empty() {
+            batches.push(datagram);
+        }
+        for session in &self.sessions {
+            if !session.replay {
+                continue;
+            }
+            let Some(addr) = session.udp else { continue };
+            for batch in &batches {
+                if udp.send_to(batch, addr).is_ok() {
+                    sent += batch.len() as u64;
+                }
+            }
+        }
+        self.window_bytes += sent;
     }
 
     pub fn send_marker(&self, marker: Marker, udp: &UdpSocket) {

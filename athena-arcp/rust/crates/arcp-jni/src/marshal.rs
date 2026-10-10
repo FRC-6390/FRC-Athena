@@ -83,6 +83,11 @@ impl<'a> Reader<'a> {
         Ok(n)
     }
 
+    /// Reads `n` raw bytes.
+    pub fn bytes(&mut self, n: usize) -> Result<&'a [u8], String> {
+        self.take(n)
+    }
+
     pub fn string(&mut self) -> Result<String, String> {
         let n = self.u32()? as usize;
         let bytes = self.take(n)?;

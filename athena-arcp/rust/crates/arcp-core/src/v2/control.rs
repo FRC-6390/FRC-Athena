@@ -29,6 +29,10 @@ pub mod kind {
     pub const FILE_LIST: u8 = 0x50;
     pub const FILE_DOWNLOAD: u8 = 0x51;
     pub const FILE_DELETE: u8 = 0x52;
+    /// Opts the session into raw replay records (`publish_records`). No payload.
+    pub const REPLAY_SUBSCRIBE: u8 = 0x12;
+    /// Asks for buffered replay record groups covering a frame sequence range.
+    pub const BACKFILL: u8 = 0x60;
 
     pub const REPLY: u8 = 0x80;
     pub const SCHEMA: u8 = 0x81;
@@ -90,6 +94,10 @@ pub enum ClientMessage {
     FileList,
     FileDownload { name: String, offset: u64, max_len: u32 },
     FileDelete { name: String },
+    /// Opts the session into raw replay records (dictionary, frames, markers).
+    ReplaySubscribe,
+    /// Requests buffered replay record groups for frame sequences `from..=to`.
+    Backfill { from: u64, to: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +124,9 @@ pub enum ReplyData {
     Session { session_id: u32 },
     Files(Vec<FileInfo>),
     Chunk { eof: bool, data: Vec<u8> },
+    /// Backfill payload: `varint groupLength, group bytes` repeated. Each group is a sequence of replay
+    /// records that decodes on its own (dictionary first, then a keyframe).
+    Records(Vec<u8>),
 }
 
 /// Reply to a `Write` request: `{accepted, reason, actualValue}`. `actual_value` is the value the
@@ -191,6 +202,11 @@ pub fn encode_client(request_id: u32, message: &ClientMessage) -> Vec<u8> {
             header(&mut w, kind::FILE_DELETE, request_id);
             w.string(name);
         }
+        ClientMessage::ReplaySubscribe => header(&mut w, kind::REPLAY_SUBSCRIBE, request_id),
+        ClientMessage::Backfill { from, to } => {
+            header(&mut w, kind::BACKFILL, request_id);
+            w.u64(*from).u64(*to);
+        }
     }
     w.into_vec()
 }
@@ -224,6 +240,8 @@ pub fn decode_client(body: &[u8]) -> WireResult<(u32, ClientMessage)> {
             max_len: r.u32()?,
         },
         kind::FILE_DELETE => ClientMessage::FileDelete { name: r.string()? },
+        kind::REPLAY_SUBSCRIBE => ClientMessage::ReplaySubscribe,
+        kind::BACKFILL => ClientMessage::Backfill { from: r.u64()?, to: r.u64()? },
         _ => return Err(WireError::Invalid("unknown client message kind")),
     };
     expect_end(&r)?;
@@ -365,6 +383,9 @@ fn encode_reply_data(w: &mut Writer, data: &ReplyData) {
         ReplyData::Chunk { eof, data } => {
             w.u8(4).u8(u8::from(*eof)).varint(data.len() as u64).bytes(data);
         }
+        ReplyData::Records(data) => {
+            w.u8(5).varint(data.len() as u64).bytes(data);
+        }
     }
 }
 
@@ -394,6 +415,10 @@ fn decode_reply_data(r: &mut Reader<'_>) -> WireResult<ReplyData> {
             let len = r.length()?;
             ReplyData::Chunk { eof, data: r.bytes(len)?.to_vec() }
         }
+        5 => {
+            let len = r.length()?;
+            ReplyData::Records(r.bytes(len)?.to_vec())
+        }
         _ => return Err(WireError::Invalid("reply data kind")),
     })
 }
@@ -418,6 +443,8 @@ mod tests {
             ClientMessage::FileList,
             ClientMessage::FileDownload { name: "a.athrp".into(), offset: 10, max_len: 4096 },
             ClientMessage::FileDelete { name: "b.json".into() },
+            ClientMessage::ReplaySubscribe,
+            ClientMessage::Backfill { from: 10, to: 20 },
         ];
         for (i, msg) in messages.into_iter().enumerate() {
             let body = encode_client(i as u32 + 1, &msg);
@@ -456,6 +483,7 @@ mod tests {
                 data: ReplyData::Files(vec![FileInfo { name: "x.athrp".into(), size: 99, modified_unix_secs: 5 }]),
             },
             ServerMessage::Reply { status: Status::Ok, reason: String::new(), data: ReplyData::Chunk { eof: true, data: vec![1, 2, 3] } },
+            ServerMessage::Reply { status: Status::Ok, reason: String::new(), data: ReplyData::Records(vec![2, 0xAA, 0xBB]) },
             ServerMessage::Schema { dictionary, schemas },
             ServerMessage::TimePong { client_micros: 1, server_micros: 2 },
             ServerMessage::WriteReply(WriteReply::rejected("rejected: locked (InMatch)", Value::F64(1.5))),

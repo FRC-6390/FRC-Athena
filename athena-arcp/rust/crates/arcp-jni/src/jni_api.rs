@@ -90,6 +90,7 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
     budget_bytes_per_second: jlong,
     mtu: jint,
     keyframe_interval_micros: jlong,
+    file_categories: JString<'local>,
 ) -> jlong {
     run(&mut env, 0, |env| {
         if !(0..=65_535).contains(&control_port) {
@@ -105,9 +106,15 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
                 file_root.try_to_string(env).map_err(|e| e.to_string())?,
             ))
         };
+        let file_categories = if file_categories.is_null() {
+            Vec::new()
+        } else {
+            parse_categories(&file_categories.try_to_string(env).map_err(|e| e.to_string())?)?
+        };
         let config = ServerConfig {
             control_bind: SocketAddr::from(([0, 0, 0, 0], control_port as u16)),
             file_root,
+            file_categories,
             bandwidth_budget_bytes_per_sec: budget_bytes_per_second.max(0) as u64,
             mtu: mtu as usize,
             keyframe_interval: std::time::Duration::from_micros(
@@ -120,6 +127,25 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
             .map_err(|e| format!("cannot start ARCP server: {e}"))?;
         Ok(Box::into_raw(Box::new(NativeServer { server, bridge })) as jlong)
     })
+}
+
+/// Parses `name<TAB>directory` lines. Names must be plain; directories must be absolute.
+fn parse_categories(text: &str) -> Result<Vec<(String, PathBuf)>, String> {
+    let mut out = Vec::new();
+    for line in text.lines().filter(|l| !l.is_empty()) {
+        let (name, dir) = line
+            .split_once('\t')
+            .ok_or_else(|| format!("bad file category line: {line}"))?;
+        if name.is_empty() || name.contains(['/', '\\', ':']) || name == "." || name == ".." {
+            return Err(format!("bad file category name: {name}"));
+        }
+        let dir = PathBuf::from(dir);
+        if !dir.is_absolute() {
+            return Err(format!("file category directory must be absolute: {dir:?}"));
+        }
+        out.push((name.to_owned(), dir));
+    }
+    Ok(out)
 }
 
 #[no_mangle]
@@ -184,6 +210,23 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_publishCycle<'loca
         native
             .server
             .publish_cycle(timestamp_micros.max(0) as u64, &entries);
+        Ok(())
+    });
+}
+
+/// Sends raw replay record envelopes (dictionary, frames, markers) to replay subscribers.
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_publishRecords<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    buf: JByteBuffer<'local>,
+    len: jint,
+) {
+    run(&mut env, (), |env| {
+        let native = server(handle)?;
+        let bytes = buffer(env, &buf, len)?;
+        native.server.publish_records(bytes);
         Ok(())
     });
 }
