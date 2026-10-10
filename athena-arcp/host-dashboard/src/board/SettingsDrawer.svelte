@@ -128,6 +128,8 @@
                   </select>
                 {:else if field.kind === 'number'}
                   <input class="ui-input" type="number" step={field.step ?? 'any'} min={field.min} max={field.max} value={numberText(value)} onchange={(e) => setSetting(field, e.currentTarget.value)} />
+                {:else if field.kind === 'textarea'}
+                  <textarea class="ui-input area" rows={field.rows ?? 5} placeholder={field.placeholder} value={String(value ?? '')} oninput={(e) => setSetting(field, e.currentTarget.value)}></textarea>
                 {:else if field.kind === 'color'}
                   <input class="ui-input" type="color" value={String(value)} onchange={(e) => setSetting(field, e.currentTarget.value)} />
                 {:else}
@@ -174,6 +176,13 @@
   }
   .text {
     font-family: var(--font-body);
+  }
+  .area {
+    height: auto;
+    padding: 6px 8px;
+    font-family: var(--font-body);
+    line-height: 1.4;
+    resize: vertical;
   }
   .check {
     display: flex;

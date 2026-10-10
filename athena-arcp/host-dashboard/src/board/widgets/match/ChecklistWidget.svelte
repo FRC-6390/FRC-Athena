@@ -6,7 +6,7 @@
   let { ctx }: { ctx: WidgetContext } = $props();
 
   const items = $derived(parseItems(ctx.setting<string>('items')));
-  const storageKey = $derived(checklistKey(ctx.setting<string>('storageKey'), items));
+  const storageKey = $derived(checklistKey(ctx.setting<string>('storageKey') || ctx.widgetId, items));
 
   let checked = $state<string[]>([]);
   let loadedKey = $state<string | null>(null);

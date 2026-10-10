@@ -254,14 +254,15 @@ export function registerMatchWidgets(): void {
     type: 'layout-note',
     name: 'Note',
     category: 'Layout',
-    description: 'Multi-line notes with headings (#), bullet lists (-) and **bold**. Use \\n for line breaks in the text box.',
+    description: 'Multi-line notes with headings (#), bullet lists (-) and **bold**.',
     slots: [],
     settings: [
       {
         key: 'text',
-        label: 'Text (use \\n for new lines)',
-        kind: 'text',
-        default: '## Pit notes\\n- Check bumpers before queueing\\n- **Battery:** swap below 12.5 V'
+        label: 'Text',
+        kind: 'textarea',
+        rows: 8,
+        default: '## Pit notes\n- Check bumpers before queueing\n- **Battery:** swap below 12.5 V'
       },
       {
         key: 'size',
@@ -312,8 +313,8 @@ export function registerMatchWidgets(): void {
     description: 'Pit checklist. Items are separated by |; ticks are remembered on this dashboard and cleared with Reset.',
     slots: [],
     settings: [
-      { key: 'items', label: 'Items (separate with |)', kind: 'text', default: 'Bumpers on | Battery above 12.5 V | Radio linked | Mechanisms home | Photos taken' },
-      { key: 'storageKey', label: 'Memory key (blank = from items)', kind: 'text', default: '', placeholder: 'e.g. pit-check' }
+      { key: 'items', label: 'Items (one per line)', kind: 'textarea', rows: 8, default: 'Bumpers on\nBattery above 12.5 V\nRadio linked\nMechanisms home\nPhotos taken' },
+      { key: 'storageKey', label: 'Share ticks with (blank = this widget only)', kind: 'text', default: '', placeholder: 'e.g. pit-check' }
     ],
     defaultSize: { w: 4, h: 6 },
     minSize: { w: 3, h: 3 },

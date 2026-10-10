@@ -53,6 +53,7 @@ export type BindingSlot = {
 export type SettingField =
   | { key: string; label: string; kind: 'number'; default: number; min?: number; max?: number; step?: number; unit?: string }
   | { key: string; label: string; kind: 'text'; default: string; placeholder?: string }
+  | { key: string; label: string; kind: 'textarea'; default: string; placeholder?: string; rows?: number }
   | { key: string; label: string; kind: 'bool'; default: boolean }
   | { key: string; label: string; kind: 'enum'; default: string; options: { value: string; label: string }[] }
   | { key: string; label: string; kind: 'color'; default: string };
@@ -61,6 +62,8 @@ export type WidgetCategory = 'Values' | 'Controls' | 'Charts' | 'Robot' | 'Match
 
 /** Everything a widget component receives. Helpers keep widgets free of store plumbing. */
 export type WidgetContext = {
+  /** Stable id of this widget instance (for per-widget local state such as checklist ticks). */
+  widgetId: string;
   session: Session;
   live: { readonly current: number };
   /** Slot key -> resolved descriptors (missing signals are left out). */

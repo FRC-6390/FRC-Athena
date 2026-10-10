@@ -26,6 +26,7 @@ export function createContext(options: {
   const store = session.store;
   const defaults = new Map(def.settings.map((f) => [f.key, f.default]));
   return {
+    widgetId: instance.id,
     session,
     live,
     bindings,
