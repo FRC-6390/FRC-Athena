@@ -15,6 +15,7 @@ mod model;
 mod reassembly;
 mod timesync;
 mod udp;
+pub mod ws_bridge;
 
 pub use arcp_core::v2::control::{FileInfo, Rate, Status, WriteReply, MAX_FILE_CHUNK};
 pub use arcp_core::v2::record::{DictEntry, Dictionary, Frame, Marker, Record, StructSchema};
