@@ -21,6 +21,7 @@ public final class ControlSysId {
     private static final double DEFAULT_RAMP_RATE = 1.0;
     private static final double DEFAULT_STEP_VOLTAGE = 7.0;
     private static final double DEFAULT_TIMEOUT = 10.0;
+    private static final double DEFAULT_MAX_VOLTAGE = 12.0;
 
     private final ControlBinding<?> control;
     private final String name;
@@ -28,6 +29,7 @@ public final class ControlSysId {
     private final double rampRateVoltsPerSecond;
     private final double stepVoltage;
     private final double timeoutSeconds;
+    private final double maxVoltage;
     private final SysIdLog configuredLog;
     private SysIdLog activeLog;
     private boolean active;
@@ -39,6 +41,7 @@ public final class ControlSysId {
             double rampRateVoltsPerSecond,
             double stepVoltage,
             double timeoutSeconds,
+            double maxVoltage,
             SysIdLog configuredLog) {
         this.control = Objects.requireNonNull(control, "control");
         this.name = requireName(name);
@@ -46,6 +49,7 @@ public final class ControlSysId {
         this.rampRateVoltsPerSecond = requirePositive(rampRateVoltsPerSecond, "SysId ramp rate");
         this.stepVoltage = requirePositive(stepVoltage, "SysId step voltage");
         this.timeoutSeconds = requirePositive(timeoutSeconds, "SysId timeout");
+        this.maxVoltage = requirePositive(maxVoltage, "SysId max voltage");
         this.configuredLog = configuredLog;
     }
 
@@ -64,12 +68,13 @@ public final class ControlSysId {
                 DEFAULT_RAMP_RATE,
                 DEFAULT_STEP_VOLTAGE,
                 DEFAULT_TIMEOUT,
+                DEFAULT_MAX_VOLTAGE,
                 null);
     }
 
     /** Sets the WPILog routine name. The output motor name is used by default. */
     public ControlSysId name(String name) {
-        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, timeoutSeconds, configuredLog);
+        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, timeoutSeconds, maxVoltage, configuredLog);
     }
 
     /** Declares the units returned by this binding's feedback signals. */
@@ -81,27 +86,35 @@ public final class ControlSysId {
      */
     public ControlSysId feedbackUnit(SysIdUnit unit) {
         return copy(name, Objects.requireNonNull(unit, "unit"), rampRateVoltsPerSecond,
-                stepVoltage, timeoutSeconds, configuredLog);
+                stepVoltage, timeoutSeconds, maxVoltage, configuredLog);
     }
 
     /** Sets the positive quasistatic ramp magnitude in volts per second. */
     public ControlSysId rampRate(double voltsPerSecond) {
-        return copy(name, unit, voltsPerSecond, stepVoltage, timeoutSeconds, configuredLog);
+        return copy(name, unit, voltsPerSecond, stepVoltage, timeoutSeconds, maxVoltage, configuredLog);
+    }
+
+    /**
+     * Caps the voltage any test applies. Quasistatic ramps stop at this value and dynamic steps are
+     * limited to it. The default is 12 V.
+     */
+    public ControlSysId maxVoltage(double volts) {
+        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, timeoutSeconds, volts, configuredLog);
     }
 
     /** Sets the positive dynamic-test step magnitude in volts. */
     public ControlSysId stepVoltage(double volts) {
-        return copy(name, unit, rampRateVoltsPerSecond, volts, timeoutSeconds, configuredLog);
+        return copy(name, unit, rampRateVoltsPerSecond, volts, timeoutSeconds, maxVoltage, configuredLog);
     }
 
     /** Sets the safety timeout shared by all four tests. */
     public ControlSysId timeout(double seconds) {
-        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, seconds, configuredLog);
+        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, seconds, maxVoltage, configuredLog);
     }
 
     /** Supplies an explicit logger, primarily for custom logging systems and tests. */
     public ControlSysId logger(SysIdLog log) {
-        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, timeoutSeconds,
+        return copy(name, unit, rampRateVoltsPerSecond, stepVoltage, timeoutSeconds, maxVoltage,
                 Objects.requireNonNull(log, "log"));
     }
 
@@ -142,8 +155,8 @@ public final class ControlSysId {
         };
         double magnitude = switch (state) {
             case QUASISTATIC_FORWARD, QUASISTATIC_REVERSE ->
-                    Math.min(12.0, Math.max(0.0, elapsedSeconds) * rampRateVoltsPerSecond);
-            case DYNAMIC_FORWARD, DYNAMIC_REVERSE -> stepVoltage;
+                    Math.min(maxVoltage, Math.max(0.0, elapsedSeconds) * rampRateVoltsPerSecond);
+            case DYNAMIC_FORWARD, DYNAMIC_REVERSE -> Math.min(maxVoltage, stepVoltage);
             case NONE -> 0.0;
         };
         return direction * magnitude;
@@ -208,8 +221,9 @@ public final class ControlSysId {
             double rampRate,
             double stepVoltage,
             double timeout,
+            double maxVoltage,
             SysIdLog log) {
-        return new ControlSysId(control, name, unit, rampRate, stepVoltage, timeout, log);
+        return new ControlSysId(control, name, unit, rampRate, stepVoltage, timeout, maxVoltage, log);
     }
 
     private static SysIdUnit inferUnit(ControlBinding<?> control) {

@@ -139,6 +139,16 @@ public final class SimModel {
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);
     }
 
+    /**
+     * Applies plant parameters from a source, such as an identified mechanism model. Only the
+     * parameters the source provides are changed; the rest of the declaration is kept.
+     */
+    public SimModel model(SimDynamicsSource source) {
+        Objects.requireNonNull(source, "source");
+        OptionalDouble inertia = source.momentOfInertia();
+        return inertia.isPresent() ? momentOfInertia(inertia.getAsDouble()) : this;
+    }
+
     public SimModel lengthMeters(double value) {
         return copy(momentOfInertia, OptionalDouble.of(value), gearRatio, simulatesGravity,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);

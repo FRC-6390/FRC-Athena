@@ -9,6 +9,7 @@ import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.model.Characterization;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -50,6 +51,17 @@ final class MechanismIntrospector {
             }
             String fieldName = field.getName();
             Telemetry telemetry = field.getAnnotation(Telemetry.class);
+            if (Characterization.class.isAssignableFrom(field.getType())) {
+                Object value = read(field, mechanism);
+                if (value instanceof Characterization characterization) {
+                    String prefix = telemetry == null
+                            ? fieldName : AnnotatedTelemetry.name(fieldName, telemetry);
+                    characterization.actions().forEach((actionName, action) ->
+                            putAction(actions, prefix + "/" + actionName, action));
+                    putDeclaration(declarations, prefix, characterization);
+                }
+                continue;
+            }
             if (ControlSysId.class.isAssignableFrom(field.getType())) {
                 Object value = read(field, mechanism);
                 if (value instanceof ControlSysId sysId) {
