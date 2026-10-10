@@ -42,7 +42,9 @@
         cellHeight: CELL_HEIGHT,
         margin: CELL_MARGIN,
         float: true,
-        animate: true,
+        // Animate only user moves: animating the first layout leaves widgets one column wide if the
+        // window is hidden (background tabs don't run CSS transitions).
+        animate: false,
         staticGrid: !editing,
         handle: '.drag-handle',
         minRow: 8,
@@ -50,6 +52,9 @@
       },
       host
     );
+    const enableAnimation = () => grid?.setAnimation(true);
+    if (document.visibilityState === 'visible') setTimeout(enableAnimation, 300);
+    else document.addEventListener('visibilitychange', () => setTimeout(enableAnimation, 300), { once: true });
     grid.on('change', (_event: Event, nodes: GridStackNode[]) => {
       const changes = nodes
         .filter((n) => typeof n.id === 'string')
