@@ -40,7 +40,8 @@ export type LiveStatus = {
 export type LiveEvent =
   | { kind: 'gap'; from: number; to: number; lost: number }
   | { kind: 'backfill'; from: number; to: number; records?: number; error?: string }
-  | { kind: 'disconnected'; reason: string }
+  | { kind: 'disconnected'; reason: string; reconnecting?: boolean }
+  | { kind: 'reconnected'; sessionId: number }
   | { kind: 'recordingFailed' };
 
 export type ConnectOptions = { host: string; controlPort?: number; replay?: boolean };

@@ -9,7 +9,9 @@
 //!   `timeSync {samples?}`, `schemaRequest`, `fileList`, `fileDownload {name, maxBytes?}` (base64
 //!   result), `fileDelete {name}`.
 //! * **Events** (bridge to client, text, no id): `{"event": "status" | "gap" | "backfill" |
-//!   "disconnected", ...}`.
+//!   "disconnected" | "reconnected", ...}`. A link that drops on its own reports `disconnected` with
+//!   `reconnecting: true`, is retried every second with the same settings, and reports `reconnected`
+//!   (the new dictionary follows as records).
 //! * **Records** (bridge to client, binary): E1-W record stream, the same bytes the Tauri bridge
 //!   emits as `live://records`. Batched about every 16 ms. A new client first receives the current
 //!   dictionary and struct schemas.
@@ -42,6 +44,7 @@ use crate::{Client, ClientConfig, ClientError, Event, LinkStatus, Rate, ServerSt
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:5811";
 const BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const STATUS_INTERVAL: Duration = Duration::from_millis(500);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 const READ_POLL: Duration = Duration::from_millis(5);
 const DEFAULT_MAX_DOWNLOAD: usize = 16 * 1024 * 1024;
 
@@ -64,6 +67,8 @@ struct Bridge {
 struct Session {
     generation: u64,
     client: Client,
+    /// Kept so a dropped link (robot reboot, code redeploy) reconnects with the same settings.
+    config: ClientConfig,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -241,7 +246,7 @@ fn dispatch(bridge: &Arc<Bridge>, request: &Json) -> Result<Json, String> {
                 })?;
             let mut config = ClientConfig::new(host, port);
             config.replay = request.get("replay").and_then(Json::as_bool).unwrap_or(false);
-            let (client, rx) = Client::connect(config).map_err(|e| e.to_string())?;
+            let (client, rx) = Client::connect(config.clone()).map_err(|e| e.to_string())?;
             let generation = bridge.generation.fetch_add(1, Ordering::SeqCst) + 1;
             let info = json!({
                 "sessionId": client.status().session_id,
@@ -251,6 +256,7 @@ fn dispatch(bridge: &Arc<Bridge>, request: &Json) -> Result<Json, String> {
             let previous = lock(&bridge.session).replace(Session {
                 generation,
                 client: client.clone(),
+                config,
             });
             if let Some(previous) = previous {
                 previous.client.close();
@@ -366,13 +372,15 @@ fn dispatch(bridge: &Arc<Bridge>, request: &Json) -> Result<Json, String> {
 fn spawn_pump(bridge: Arc<Bridge>, generation: u64, rx: Receiver<Event>, client: Client) -> Result<(), String> {
     thread::Builder::new()
         .name("ws-bridge-pump".into())
-        .spawn(move || run_pump(&bridge, generation, &rx, &client))
+        .spawn(move || run_pump(&bridge, generation, rx, client))
         .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
 /// Drains the client's events: records are batched into binary messages, status is pushed as text.
-fn run_pump(bridge: &Bridge, generation: u64, rx: &Receiver<Event>, client: &Client) {
+/// When the link drops on its own the pump keeps retrying with the same settings until it reconnects
+/// or the session is replaced or closed by a client.
+fn run_pump(bridge: &Bridge, generation: u64, mut rx: Receiver<Event>, mut client: Client) {
     let mut batch: Vec<Record> = Vec::new();
     let mut last_flush = Instant::now();
     let mut last_status = Instant::now() - STATUS_INTERVAL;
@@ -394,10 +402,37 @@ fn run_pump(bridge: &Bridge, generation: u64, rx: &Receiver<Event>, client: &Cli
         }
         if let Some(reason) = ended {
             // A replaced or closed-by-us session must not report a disconnect for the new one.
-            if bridge.is_current(generation) {
-                bridge.event(json!({ "event": "disconnected", "reason": reason }));
+            if !bridge.is_current(generation) {
+                return;
             }
-            return;
+            bridge.event(json!({ "event": "disconnected", "reason": reason, "reconnecting": true }));
+            let Some((next_client, next_rx)) = reconnect(bridge, generation) else { return };
+            client = next_client;
+            rx = next_rx;
+            bridge.event(json!({ "event": "reconnected", "sessionId": client.status().session_id }));
+        }
+    }
+}
+
+/// Retries the session's connection once per [`RECONNECT_INTERVAL`] while it is still the current one.
+fn reconnect(bridge: &Bridge, generation: u64) -> Option<(Client, Receiver<Event>)> {
+    loop {
+        thread::sleep(RECONNECT_INTERVAL);
+        let config = match bridge.current() {
+            Some(s) if s.generation == generation => s.config,
+            _ => return None,
+        };
+        let Ok((client, rx)) = Client::connect(config) else { continue };
+        let mut current = lock(&bridge.session);
+        match current.as_mut() {
+            Some(s) if s.generation == generation => {
+                s.client = client.clone();
+                return Some((client, rx));
+            }
+            _ => {
+                client.close();
+                return None;
+            }
         }
     }
 }

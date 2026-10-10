@@ -258,7 +258,7 @@ export class WsBridgeSource implements DataSource {
       return;
     }
     const { event, ...rest } = message;
-    if (event === 'gap' || event === 'backfill' || event === 'disconnected') {
+    if (event === 'gap' || event === 'backfill' || event === 'disconnected' || event === 'reconnected') {
       const liveEvent = { kind: event, ...rest } as unknown as LiveEvent;
       this.eventListeners.forEach((listener) => listener(liveEvent));
     }

@@ -8,7 +8,8 @@
   import SettingsScreen from '../screens/SettingsScreen.svelte';
   import PitFiles from '../components/pit/PitFiles.svelte';
   import AnalysisView from '../components/analysis/AnalysisView.svelte';
-  import ConnectionPanel, { type Connector } from './ConnectionPanel.svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import ConnectionPanel, { LAST_HOST_STORAGE_KEY, type Connector } from './ConnectionPanel.svelte';
   import { useLiveStore } from '../lib/data/live.svelte';
   import type { Session } from '../lib/data/session';
   import type { LiveSource } from '../lib/data/live-source';
@@ -36,15 +37,45 @@
     return deriveDriverState(session.store);
   });
 
+  /** Robot link as the source reports it; `unknown` until the first status arrives. */
+  let link = $state<'unknown' | 'connected' | 'reconnecting' | 'disconnected'>('unknown');
+  const offs: Array<() => void> = [];
+
+  onMount(() => {
+    if (!connector) return;
+    offs.push(connector.onStatus((status) => {
+      if (status.connected) link = 'connected';
+      else if (link !== 'reconnecting') link = 'disconnected';
+    }));
+    if (connector.onEvent) {
+      offs.push(connector.onEvent((event) => {
+        if (event.kind === 'disconnected') link = event.reconnecting ? 'reconnecting' : 'disconnected';
+        if (event.kind === 'reconnected') link = 'connected';
+      }));
+    }
+    // Reconnect to the last robot on launch, unless the source already has a live session.
+    let host = '';
+    try {
+      host = localStorage.getItem(LAST_HOST_STORAGE_KEY) ?? '';
+    } catch {
+      /* storage unavailable */
+    }
+    if (host) {
+      const timer = setTimeout(() => {
+        if (link !== 'connected') void connector.connect({ host }).then(() => (link = 'connected')).catch(() => undefined);
+      }, 800);
+      offs.push(() => clearTimeout(timer));
+    }
+  });
+  onDestroy(() => offs.forEach((off) => off()));
+
   const connection = $derived.by(() => {
     void live.current;
     if (useMock) return { label: 'Mock robot', detail: 'demo data', tone: 'info' as const };
-    if (sourceName === 'Bridge' && session.store.allSignals().length === 0)
-      return { label: 'Bridge', detail: 'choose a robot', tone: 'stale' as const };
     const signals = session.store.allSignals().length;
-    return signals > 0
-      ? { label: 'Connected', detail: `${signals} signals`, tone: 'ok' as const }
-      : { label: 'Not connected', detail: 'choose a robot', tone: 'stale' as const };
+    if (link === 'reconnecting') return { label: 'Reconnecting', detail: 'robot link lost', tone: 'warn' as const };
+    if (link === 'connected') return { label: 'Connected', detail: `${signals} signals`, tone: 'ok' as const };
+    return { label: 'Not connected', detail: 'choose a robot', tone: 'stale' as const };
   });
 
   const titles: Record<Section, string> = {

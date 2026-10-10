@@ -27,6 +27,7 @@ pub const DEFAULT_CONTROL_PORT: u16 = arcp_client::DEFAULT_CONTROL_PORT;
 /// UI batch period (about 60 Hz).
 const BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const STATUS_INTERVAL: Duration = Duration::from_millis(500);
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(1);
 /// Recorded records are compressed in blocks of about this many uncompressed bytes.
 const RECORDING_BLOCK_BYTES: usize = 64 * 1024;
 /// Largest file the webview may download in one request.
@@ -41,11 +42,15 @@ const PULL_FILE_NAME: &str = "tuning";
 #[derive(Default)]
 pub struct LiveRuntime {
     session: Mutex<Option<LiveSession>>,
+    generation: std::sync::atomic::AtomicU64,
 }
 
 struct LiveSession {
     client: Client,
     recorder: Arc<Mutex<Option<Recorder>>>,
+    /// Kept so a dropped link (robot reboot, code redeploy) reconnects with the same settings.
+    config: ClientConfig,
+    generation: u64,
 }
 
 /// Writes records to a `.athrp` file: magic and version, then COMPRESSED_BLOCK records (appendix E1-W).
@@ -192,7 +197,8 @@ pub async fn live_connect(
     close_session(&runtime);
     let mut config = ClientConfig::new(options.host, options.control_port.unwrap_or(DEFAULT_CONTROL_PORT));
     config.replay = options.replay;
-    let (client, rx) = Client::connect(config).map_err(err)?;
+    let (client, rx) = Client::connect(config.clone()).map_err(err)?;
+    let generation = runtime.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let info = ConnectInfo {
         session_id: client.status().session_id,
         udp_port: client.udp_port(),
@@ -205,9 +211,9 @@ pub async fn live_connect(
     let pump_app = app.clone();
     thread::Builder::new()
         .name("live-pump".into())
-        .spawn(move || run_pump(pump_app, rx, pump_client, pump_recorder))
+        .spawn(move || run_pump(pump_app, generation, rx, pump_client, pump_recorder))
         .map_err(|e| e.to_string())?;
-    *runtime.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(LiveSession { client, recorder });
+    *runtime.session.lock().unwrap_or_else(|p| p.into_inner()) = Some(LiveSession { client, recorder, config, generation });
     Ok(info)
 }
 
@@ -414,7 +420,9 @@ pub async fn live_status(runtime: State<'_, LiveRuntime>) -> Result<serde_json::
 
 /// Drains the client's events on its own thread. Records are batched; status and link events are
 /// emitted directly. Ends after the client reports disconnection.
-fn run_pump(app: AppHandle, rx: Receiver<Event>, client: Client, recorder: Arc<Mutex<Option<Recorder>>>) {
+/// Forwards the client's events to the window. When the link drops on its own the pump retries with
+/// the same settings every [`RECONNECT_INTERVAL`] until it reconnects or the session is closed or replaced.
+fn run_pump(app: AppHandle, generation: u64, mut rx: Receiver<Event>, mut client: Client, recorder: Arc<Mutex<Option<Recorder>>>) {
     let mut batch: Vec<Record> = Vec::new();
     let mut frames = 0u64;
     let mut last_flush = Instant::now();
@@ -437,8 +445,47 @@ fn run_pump(app: AppHandle, rx: Receiver<Event>, client: Client, recorder: Arc<M
             last_status = Instant::now();
         }
         if let Some(reason) = disconnected {
-            let _ = app.emit("live://event", json!({ "kind": "disconnected", "reason": reason }));
-            break;
+            if !is_current(&app, generation) {
+                break;
+            }
+            let _ = app.emit("live://event", json!({ "kind": "disconnected", "reason": reason, "reconnecting": true }));
+            let Some((next_client, next_rx)) = reconnect(&app, generation) else { break };
+            client = next_client;
+            rx = next_rx;
+            let _ = app.emit("live://event", json!({ "kind": "reconnected", "sessionId": client.status().session_id }));
+        }
+    }
+}
+
+fn is_current(app: &AppHandle, generation: u64) -> bool {
+    let runtime = app.state::<LiveRuntime>();
+    let session = runtime.session.lock().unwrap_or_else(|p| p.into_inner());
+    session.as_ref().is_some_and(|s| s.generation == generation)
+}
+
+fn reconnect(app: &AppHandle, generation: u64) -> Option<(Client, Receiver<Event>)> {
+    loop {
+        thread::sleep(RECONNECT_INTERVAL);
+        let config = {
+            let runtime = app.state::<LiveRuntime>();
+            let session = runtime.session.lock().unwrap_or_else(|p| p.into_inner());
+            match session.as_ref() {
+                Some(s) if s.generation == generation => s.config.clone(),
+                _ => return None,
+            }
+        };
+        let Ok((client, rx)) = Client::connect(config) else { continue };
+        let runtime = app.state::<LiveRuntime>();
+        let mut session = runtime.session.lock().unwrap_or_else(|p| p.into_inner());
+        match session.as_mut() {
+            Some(s) if s.generation == generation => {
+                s.client = client.clone();
+                return Some((client, rx));
+            }
+            _ => {
+                client.close();
+                return None;
+            }
         }
     }
 }

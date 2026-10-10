@@ -8,6 +8,8 @@
     timeSync?(samples?: number): Promise<unknown>;
     recordStart?(): Promise<string>;
   };
+
+  export const LAST_HOST_STORAGE_KEY = 'athena.dashboard.lastHost';
 </script>
 
 <script lang="ts">
@@ -21,6 +23,8 @@
   const TARGET_KEY = 'athena.dashboard.target';
   const TEAM_KEY = 'athena.dashboard.team';
   const HOST_KEY = 'athena.dashboard.host';
+  /** Host of the last successful connect; the shell reconnects to it on launch. */
+  const LAST_HOST_KEY = LAST_HOST_STORAGE_KEY;
 
   function remembered(key: string, fallback: string): string {
     try {
@@ -70,7 +74,8 @@
     if (connector.onEvent) {
       offs.push(
         connector.onEvent((event) => {
-          if (event.kind === 'disconnected') error = `Disconnected: ${event.reason}`;
+          if (event.kind === 'disconnected') error = event.reconnecting ? `Link lost (${event.reason}), reconnecting…` : `Disconnected: ${event.reason}`;
+          if (event.kind === 'reconnected') error = null;
         })
       );
     }
@@ -87,6 +92,7 @@
     const host = selected.key === 'custom' ? custom.trim() : selected.host;
     try {
       await connector.connect({ host, replay: record });
+      remember(LAST_HOST_KEY, host);
       await connector.timeSync?.(8).catch(() => undefined);
       if (record) await connector.recordStart?.().catch((e) => (error = `Not recording: ${String(e)}`));
     } catch (e) {
@@ -101,6 +107,8 @@
     busy = true;
     try {
       await connector.disconnect();
+      // An explicit disconnect also stops the automatic connect on the next launch.
+      remember(LAST_HOST_KEY, '');
     } finally {
       busy = false;
     }
