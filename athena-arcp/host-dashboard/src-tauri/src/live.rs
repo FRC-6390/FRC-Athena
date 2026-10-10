@@ -21,7 +21,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub const DEFAULT_CONTROL_PORT: u16 = 5810;
+/// Robot TCP control port (FRC team range; NT4 owns 5810).
+pub const DEFAULT_CONTROL_PORT: u16 = arcp_client::DEFAULT_CONTROL_PORT;
+/// Local UDP port for realtime frames; falls back to an ephemeral port when taken (`udpFallback`).
 /// UI batch period (about 60 Hz).
 const BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const STATUS_INTERVAL: Duration = Duration::from_millis(500);
@@ -177,6 +179,7 @@ pub struct ConnectOptions {
 pub struct ConnectInfo {
     pub session_id: u32,
     pub udp_port: u16,
+    pub udp_fallback: bool,
     pub control_addr: String,
 }
 
@@ -193,6 +196,7 @@ pub async fn live_connect(
     let info = ConnectInfo {
         session_id: client.status().session_id,
         udp_port: client.udp_port(),
+        udp_fallback: client.udp_fallback(),
         control_addr: client.control_addr().to_string(),
     };
     let recorder = Arc::new(Mutex::new(None));

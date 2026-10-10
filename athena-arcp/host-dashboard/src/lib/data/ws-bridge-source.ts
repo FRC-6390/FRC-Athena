@@ -11,6 +11,7 @@ import type { DataSource, SourceSink } from './source';
 import type { LiveEvent, LiveStatus } from './live-source';
 import type { SignalValue, StructValue } from './types';
 import { decodeBase64 } from './base64';
+import { ARCP_CONTROL_PORT } from './arcp-ports';
 
 const OPEN = 1;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
@@ -36,7 +37,7 @@ export type WsBridgeOptions = {
 };
 
 export type BridgeConnectOptions = { host: string; controlPort?: number; replay?: boolean };
-export type BridgeConnectInfo = { sessionId: number; udpPort: number; controlAddr: string };
+export type BridgeConnectInfo = { sessionId: number; udpPort: number; udpFallback?: boolean; controlAddr: string };
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 
@@ -150,7 +151,7 @@ export class WsBridgeSource implements DataSource {
   connect(options: BridgeConnectOptions): Promise<BridgeConnectInfo> {
     return this.request('connect', {
       host: options.host,
-      port: options.controlPort,
+      port: options.controlPort ?? ARCP_CONTROL_PORT,
       replay: options.replay ?? false
     }) as Promise<BridgeConnectInfo>;
   }

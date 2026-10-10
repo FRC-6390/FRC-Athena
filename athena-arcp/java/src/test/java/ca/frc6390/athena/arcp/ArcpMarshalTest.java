@@ -65,12 +65,15 @@ class ArcpMarshalTest {
     @Test
     void configRejectsOutOfRangeValues() {
         assertThrows(IllegalArgumentException.class,
-                () -> new NativeArcpServer.Config(70_000, null, 0L, 1200, 1_000_000L));
+                () -> new NativeArcpServer.Config(70_000, 0, null, 0L, 1200, 1_000_000L));
         assertThrows(IllegalArgumentException.class,
-                () -> new NativeArcpServer.Config(0, null, 0L, 64, 1_000_000L));
+                () -> new NativeArcpServer.Config(0, 70_000, null, 0L, 1200, 1_000_000L));
         assertThrows(IllegalArgumentException.class,
-                () -> new NativeArcpServer.Config(0, Path.of("x"), -1L, 1200, 1_000_000L));
+                () -> new NativeArcpServer.Config(0, 0, null, 0L, 64, 1_000_000L));
+        assertThrows(IllegalArgumentException.class,
+                () -> new NativeArcpServer.Config(0, 0, Path.of("x"), -1L, 1200, 1_000_000L));
         assertEquals(0, NativeArcpServer.Config.defaults().controlPort());
+        assertEquals(0, NativeArcpServer.Config.defaults().realtimePort());
     }
 
     @Test

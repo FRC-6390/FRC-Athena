@@ -139,17 +139,8 @@ public final class ArcpBridge implements AutoCloseable {
         }
 
         ArcpSignals signals = new ArcpSignals(runtime.mechanismTelemetrySchema(), locked);
-        NativeArcpServer server;
-        try {
-            server = new NativeArcpServer(
-                    new NativeArcpServer.Config(policy.controlPort(), null, policy.bandwidthBudgetBytesPerSecond(),
-                            policy.mtu(), Math.max(1L, policy.keyframeInterval().toNanos() / 1_000L)),
-                    categories,
-                    signals::write,
-                    signals::action,
-                    Nt4Bridge.DISABLED);
-        } catch (RuntimeException | UnsatisfiedLinkError failure) {
-            DriverStation.reportWarning("Athena ARCP is disabled: " + failure.getMessage(), false);
+        NativeArcpServer server = startServer(policy, categories, signals, simulation);
+        if (server == null) {
             return disabled();
         }
         ArcpTuning tuning = new ArcpTuning(ArcpTuning.readDeployed(deployed), tuningExports);
@@ -166,6 +157,56 @@ public final class ArcpBridge implements AutoCloseable {
             recorder.streamSink(new ArcpReplaySink(server));
         }
         return bridge;
+    }
+
+    /**
+     * Starts the native server on the policy's ports. If they are taken, a real robot fails ARCP loudly with a
+     * DriverStation error naming the ports; simulation logs a warning and falls back to ephemeral ports so ARCP still
+     * runs (the bound ports are printed at startup).
+     *
+     * @return the running server, or null when ARCP could not start
+     */
+    private static NativeArcpServer startServer(ArcpPolicy policy, Map<String, Path> categories, ArcpSignals signals,
+            boolean simulation) {
+        int control = policy.controlPort();
+        int realtime = policy.realtimePort();
+        NativeArcpServer server;
+        try {
+            server = open(control, realtime, policy, categories, signals);
+        } catch (UnsatisfiedLinkError failure) {
+            DriverStation.reportWarning("Athena ARCP is disabled: " + failure.getMessage(), false);
+            return null;
+        } catch (RuntimeException failure) {
+            String reason = failure.getMessage();
+            if (!simulation) {
+                DriverStation.reportError("Athena ARCP is disabled: could not bind TCP " + control + " or UDP "
+                        + realtime + " (" + reason + "). Another program is using these ports; NT4 uses 5810. "
+                        + "Stop it or change ArcpPolicy.controlPort/realtimePort.", false);
+                return null;
+            }
+            try {
+                server = open(0, 0, policy, categories, signals);
+            } catch (RuntimeException | UnsatisfiedLinkError retry) {
+                DriverStation.reportError("Athena ARCP is disabled: TCP " + control + " / UDP " + realtime
+                        + " in use (" + reason + ") and ephemeral fallback failed (" + retry.getMessage() + ").", false);
+                return null;
+            }
+            DriverStation.reportWarning("Athena ARCP: TCP " + control + " / UDP " + realtime + " in use (" + reason
+                    + "); simulation fell back to ephemeral ports.", false);
+        }
+        System.out.println("ARCP listening on TCP " + server.controlPort() + " / UDP " + server.realtimePort());
+        return server;
+    }
+
+    private static NativeArcpServer open(int control, int realtime, ArcpPolicy policy,
+            Map<String, Path> categories, ArcpSignals signals) {
+        return new NativeArcpServer(
+                new NativeArcpServer.Config(control, realtime, null, policy.bandwidthBudgetBytesPerSecond(),
+                        policy.mtu(), Math.max(1L, policy.keyframeInterval().toNanos() / 1_000L)),
+                categories,
+                signals::write,
+                signals::action,
+                Nt4Bridge.DISABLED);
     }
 
     /**

@@ -22,6 +22,11 @@ use crate::model::Model;
 use crate::timesync::{estimate, TimeEstimate, TimeSample};
 
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+/// Default TCP control port of the robot (inside the FRC team range 5800-5810; NT4 uses 5810).
+pub const DEFAULT_CONTROL_PORT: u16 = 5808;
+/// Default local UDP port for realtime frames. If it is taken, the client falls back to an
+/// ephemeral port and reports it through [`Client::udp_fallback`].
+pub const DEFAULT_UDP_PORT: u16 = 5807;
 
 /// Connection settings.
 #[derive(Debug, Clone)]
@@ -31,7 +36,8 @@ pub struct ClientConfig {
     pub control_port: u16,
     pub client_name: String,
     pub request_timeout: Duration,
-    /// Local UDP address for realtime frames. Port 0 picks one.
+    /// Local UDP address for realtime frames (default port 5807). If this port cannot be bound
+    /// the client binds an ephemeral port instead and sets [`Client::udp_fallback`]. Port 0 picks one.
     pub udp_bind: SocketAddr,
     /// Port advertised to the robot in `Hello`. `None` advertises the bound port. Set this when
     /// the path to the client is port-forwarded or proxied.
@@ -49,7 +55,7 @@ impl ClientConfig {
             control_port,
             client_name: "athena-dashboard".into(),
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            udp_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
+            udp_bind: SocketAddr::from(([0, 0, 0, 0], DEFAULT_UDP_PORT)),
             udp_advertise: None,
             replay: false,
             auto_backfill: true,
@@ -119,6 +125,8 @@ pub struct LinkStatus {
     pub backfills: u64,
     pub restarts: u64,
     pub malformed_datagrams: u64,
+    /// The configured realtime UDP port was taken; an ephemeral port is receiving frames.
+    pub udp_fallback: bool,
 }
 
 #[derive(Default)]
@@ -173,6 +181,7 @@ impl Shared {
 pub struct Client {
     shared: Arc<Shared>,
     udp_port: u16,
+    udp_fallback: bool,
     control_addr: SocketAddr,
 }
 
@@ -191,7 +200,16 @@ impl Client {
         let _ = stream.set_write_timeout(Some(config.request_timeout));
         let reader = stream.try_clone().map_err(|e| ClientError::Io(e.to_string()))?;
 
-        let udp = UdpSocket::bind(config.udp_bind).map_err(|e| ClientError::Io(format!("udp bind: {e}")))?;
+        let (udp, udp_fallback) = match UdpSocket::bind(config.udp_bind) {
+            Ok(socket) => (socket, false),
+            Err(_) if config.udp_bind.port() != 0 => {
+                let fallback = SocketAddr::new(config.udp_bind.ip(), 0);
+                let socket = UdpSocket::bind(fallback)
+                    .map_err(|e| ClientError::Io(format!("udp bind: {e}")))?;
+                (socket, true)
+            }
+            Err(e) => return Err(ClientError::Io(format!("udp bind: {e}"))),
+        };
         udp.set_read_timeout(Some(Duration::from_millis(200)))
             .map_err(|e| ClientError::Io(e.to_string()))?;
         let udp_port = udp.local_addr().map_err(|e| ClientError::Io(e.to_string()))?.port();
@@ -224,7 +242,7 @@ impl Client {
             .spawn(move || crate::udp::run(udp_shared, udp))
             .map_err(|e| ClientError::Io(e.to_string()))?;
 
-        let client = Client { shared, udp_port, control_addr: addr };
+        let client = Client { shared, udp_port, udp_fallback, control_addr: addr };
         let advertised = config.udp_advertise.unwrap_or(udp_port);
         let hello = ClientMessage::Hello {
             client_name: config.client_name.clone(),
@@ -265,6 +283,11 @@ impl Client {
 
     pub fn udp_port(&self) -> u16 {
         self.udp_port
+    }
+
+    /// True when the configured realtime UDP port was taken and an ephemeral port is in use.
+    pub fn udp_fallback(&self) -> bool {
+        self.udp_fallback
     }
 
     pub fn is_connected(&self) -> bool {
@@ -430,6 +453,7 @@ impl Client {
             backfills: c.backfills.load(Ordering::Relaxed),
             restarts: c.restarts.load(Ordering::Relaxed),
             malformed_datagrams: c.malformed.load(Ordering::Relaxed),
+            udp_fallback: self.udp_fallback,
         }
     }
 

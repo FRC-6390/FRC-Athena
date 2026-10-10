@@ -86,6 +86,7 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     control_port: jint,
+    realtime_port: jint,
     file_root: JString<'local>,
     budget_bytes_per_second: jlong,
     mtu: jint,
@@ -95,6 +96,9 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
     run(&mut env, 0, |env| {
         if !(0..=65_535).contains(&control_port) {
             return Err(format!("control port {control_port} out of range"));
+        }
+        if !(0..=65_535).contains(&realtime_port) {
+            return Err(format!("realtime port {realtime_port} out of range"));
         }
         if !(MTU_MIN..=MTU_MAX).contains(&mtu) {
             return Err(format!("mtu {mtu} out of range"));
@@ -113,6 +117,7 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_create<'local>(
         };
         let config = ServerConfig {
             control_bind: SocketAddr::from(([0, 0, 0, 0], control_port as u16)),
+            realtime_port: realtime_port as u16,
             file_root,
             file_categories,
             bandwidth_budget_bytes_per_sec: budget_bytes_per_second.max(0) as u64,
@@ -172,6 +177,17 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_controlPort<'local
 ) -> jint {
     run(&mut env, -1, |_| {
         Ok(i32::from(server(handle)?.server.control_addr().port()))
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_realtimePort<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jint {
+    run(&mut env, -1, |_| {
+        Ok(i32::from(server(handle)?.server.realtime_addr().port()))
     })
 }
 

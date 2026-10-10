@@ -11,10 +11,13 @@ import org.junit.jupiter.api.Test;
 
 class ArcpPolicyTest {
     @Test
-    void defaultsEnableArcpWithEphemeralPortAndNoBudget() {
+    void defaultsEnableArcpOnFieldLegalPortsWithNoBudget() {
         ArcpPolicy policy = ArcpPolicy.of();
         assertTrue(policy.enabled());
+        assertEquals(5808, ArcpPolicy.DEFAULT_CONTROL_PORT);
+        assertEquals(5809, ArcpPolicy.DEFAULT_REALTIME_PORT);
         assertEquals(ArcpPolicy.DEFAULT_CONTROL_PORT, policy.controlPort());
+        assertEquals(ArcpPolicy.DEFAULT_REALTIME_PORT, policy.realtimePort());
         assertEquals(0L, policy.bandwidthBudgetBytesPerSecond());
         assertEquals(ArcpPolicy.DEFAULT_MTU, policy.mtu());
         assertEquals(Duration.ofSeconds(1), policy.keyframeInterval());
@@ -24,16 +27,19 @@ class ArcpPolicyTest {
     @Test
     void settersReturnNewImmutablePoliciesWithValidation() {
         ArcpPolicy base = ArcpPolicy.of();
-        ArcpPolicy tuned = base.controlPort(5805).bandwidthBudgetBytesPerSecond(400_000).mtu(1400)
+        ArcpPolicy tuned = base.controlPort(5805).realtimePort(5806).bandwidthBudgetBytesPerSecond(400_000).mtu(1400)
                 .storeDirectory(Path.of("/tmp/store")).modelDirectory(Path.of("/tmp/models"));
         assertEquals(ArcpPolicy.DEFAULT_CONTROL_PORT, base.controlPort());
         assertEquals(5805, tuned.controlPort());
+        assertEquals(5806, tuned.realtimePort());
+        assertEquals(ArcpPolicy.DEFAULT_REALTIME_PORT, base.realtimePort());
         assertEquals(400_000L, tuned.bandwidthBudgetBytesPerSecond());
         assertEquals(1400, tuned.mtu());
         assertEquals(Path.of("/tmp/store"), tuned.storeDirectory().orElseThrow());
         assertEquals(Path.of("/tmp/models"), tuned.modelDirectory().orElseThrow());
 
         assertThrows(IllegalArgumentException.class, () -> base.controlPort(70_000));
+        assertThrows(IllegalArgumentException.class, () -> base.realtimePort(-1));
         assertThrows(IllegalArgumentException.class, () -> base.mtu(64));
         assertThrows(IllegalArgumentException.class, () -> base.bandwidthBudgetBytesPerSecond(-1));
         assertThrows(IllegalArgumentException.class, () -> base.keyframeInterval(Duration.ZERO));

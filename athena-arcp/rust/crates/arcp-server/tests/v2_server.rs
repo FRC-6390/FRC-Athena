@@ -194,7 +194,7 @@ fn server_with(config: ServerConfig) -> (ArcpServerV2, Arc<RecordingHandler>) {
 }
 
 fn server() -> (ArcpServerV2, Arc<RecordingHandler>) {
-    server_with(ServerConfig::default())
+    server_with(ServerConfig::ephemeral())
 }
 
 /// Drops the server status signals (`athena/arcp/status/*`) the server adds to every dictionary.
@@ -333,7 +333,7 @@ fn one_cycle_produces_one_batched_datagram() {
 fn keyframe_contains_every_subscribed_signal() {
     let (server, _) = server_with(ServerConfig {
         keyframe_interval: Duration::from_millis(100),
-        ..ServerConfig::default()
+        ..ServerConfig::ephemeral()
     });
     let (udp, port) = udp_pair();
     let mut client = Client::connect(server.control_addr());
@@ -350,7 +350,7 @@ fn keyframe_contains_every_subscribed_signal() {
 
 #[test]
 fn large_cycles_are_fragmented_and_recoverable() {
-    let (server, _) = server_with(ServerConfig { mtu: 256, ..ServerConfig::default() });
+    let (server, _) = server_with(ServerConfig { mtu: 256, ..ServerConfig::ephemeral() });
     let (udp, port) = udp_pair();
     let mut client = Client::connect(server.control_addr());
     client.hello(port);
@@ -460,7 +460,7 @@ fn file_service_lists_downloads_and_deletes_within_root() {
     std::fs::write(root.join("tuning.json"), b"{}").unwrap();
 
     let handler = Arc::new(RecordingHandler::default());
-    let server = ArcpServerV2::start(ServerConfig { file_root: Some(root.clone()), ..ServerConfig::default() }, handler).unwrap();
+    let server = ArcpServerV2::start(ServerConfig { file_root: Some(root.clone()), ..ServerConfig::ephemeral() }, handler).unwrap();
     let (_udp, port) = udp_pair();
     let mut client = Client::connect(server.control_addr());
     client.hello(port);
@@ -504,7 +504,7 @@ fn file_service_lists_downloads_and_deletes_within_root() {
 
 #[test]
 fn bandwidth_budget_lowers_lowest_priority_rate_and_reports_it() {
-    let (server, _) = server_with(ServerConfig { bandwidth_budget_bytes_per_sec: 200, ..ServerConfig::default() });
+    let (server, _) = server_with(ServerConfig { bandwidth_budget_bytes_per_sec: 200, ..ServerConfig::ephemeral() });
     let (udp, port) = udp_pair();
     let mut client = Client::connect(server.control_addr());
     client.hello(port);
@@ -569,7 +569,7 @@ fn file_categories_are_listed_downloaded_and_deleted() {
     let handler = Arc::new(RecordingHandler::default());
     let config = ServerConfig {
         file_categories: vec![("replays".into(), replays.clone()), ("models".into(), base.join("missing"))],
-        ..ServerConfig::default()
+        ..ServerConfig::ephemeral()
     };
     let server = ArcpServerV2::start(config, handler).unwrap();
     let (_udp, port) = udp_pair();

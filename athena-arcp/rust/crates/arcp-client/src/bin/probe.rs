@@ -4,6 +4,8 @@
 //! arcp-probe [HOST] [PORT] [--write PATH=VALUE] [--seconds N]
 //! ```
 //!
+//! PORT defaults to 5808 (the robot control port); the UDP realtime receive port defaults to 5807.
+//!
 //! Prints the connection, the dictionary size, the server status signals, live values sampled over
 //! the given window (default 3 s), and one write with the robot's reply. Without `--write` the probe
 //! writes the first writable signal back with its current value, which changes nothing.
@@ -12,6 +14,7 @@ use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
+use arcp_client::DEFAULT_CONTROL_PORT;
 use arcp_client::{Client, ClientConfig, DictEntry, Event, Rate, Value};
 use arcp_core::v2::value::{TYPE_BOOL, TYPE_F64, TYPE_I64, TYPE_STRING};
 
@@ -29,7 +32,7 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         host: "127.0.0.1".into(),
-        port: 5810,
+        port: DEFAULT_CONTROL_PORT,
         write: None,
         seconds: 3.0,
     };
@@ -104,10 +107,11 @@ fn run() -> Result<(), String> {
         .map_err(|e| format!("connect {target}: {e}"))?;
     let link = client.status();
     println!(
-        "connected {} session={} udp={}",
+        "connected {} session={} udp={}{}",
         client.control_addr(),
         link.session_id,
-        client.udp_port()
+        client.udp_port(),
+        if link.udp_fallback { " (fallback: configured UDP port in use)" } else { "" }
     );
 
     // The dictionary arrives right after Hello. Wait for it before subscribing.

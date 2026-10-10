@@ -77,7 +77,7 @@ fn dictionary() -> Dictionary {
 
 fn start_server(file_root: Option<PathBuf>) -> (ArcpServerV2, Arc<TestRobot>) {
     let robot = Arc::new(TestRobot { locked: AtomicBool::new(true), actions: Mutex::new(Vec::new()) });
-    let config = ServerConfig { file_root, ..ServerConfig::default() };
+    let config = ServerConfig { file_root, ..ServerConfig::ephemeral() };
     let server = ArcpServerV2::start(config, robot.clone()).expect("server starts");
     server.publish_dictionary(dictionary(), vec![StructSchema { id: 1, type_name: "Pose2d".into(), schema: "x".into() }]);
     (server, robot)
