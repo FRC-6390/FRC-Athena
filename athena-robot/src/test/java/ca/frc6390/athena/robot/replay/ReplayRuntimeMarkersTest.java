@@ -87,4 +87,40 @@ class ReplayRuntimeMarkersTest {
         runtime.close();
         assertFalse(RuntimeMarkers.current() instanceof ReplayRuntimeMarkers, "markers uninstalled on close");
     }
+
+    /** Stage transitions and faults arrive as RuntimeEvents and become replay markers without consuming them. */
+    @Test
+    void stageAndFaultEventsBecomeMarkers() throws IOException {
+        SimulationSession session = SimulationSession.create();
+        RobotRuntime runtime = RobotRuntime.simulated(session);
+        runtime.replay(ReplayPolicy.of(), directory);
+        ReplayRecorder recorder = runtime.replayRecorder().orElseThrow();
+        for (int cycle = 0; cycle < 4; cycle++) {
+            double now = cycle * 0.02;
+            if (cycle == 2) {
+                ca.frc6390.athena.mechanism.core.RuntimeEvents.emit(
+                        ca.frc6390.athena.mechanism.core.RuntimeEvents.STAGE_CHANGE, "NORMAL -> HOT");
+                ca.frc6390.athena.mechanism.core.RuntimeEvents.emit(
+                        ca.frc6390.athena.mechanism.core.RuntimeEvents.FAULT, "motor stuck");
+            }
+            runtime.periodic(
+                    new MechanismContext(now, 0.0, 0.02, true, false, true),
+                    new EventContext(now, 0.02, LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, true));
+            runtime.simulationPeriodic(now, 0.02);
+        }
+        Path file = ReplayRecorderTest.flushed(recorder);
+        List<String> markers = new ArrayList<>();
+        try (ReplayReader reader = ReplayReader.open(file)) {
+            ReplayReader.Cursor cursor = reader.cursor();
+            while (cursor.next()) {
+                if (!cursor.isFrame()) {
+                    markers.add(cursor.markerKind() + ":" + cursor.markerMessage());
+                }
+            }
+        }
+        assertTrue(markers.stream().anyMatch(m -> m.startsWith(ReplayMarkers.STAGE_CHANGE + ":NORMAL -> HOT")),
+                "stage marker: " + markers);
+        assertTrue(markers.stream().anyMatch(m -> m.equals(ReplayMarkers.FAULT + ":motor stuck")), "fault: " + markers);
+        runtime.close();
+    }
 }

@@ -1079,6 +1079,7 @@ public final class MechanismScheduler {
     public List<RuntimeFault> drainRuntimeFaults() {
         for (String message : FaultIsolation.drainReports()) {
             pendingFaults.add(new RuntimeFault("Actions.fault", new IllegalStateException(message), 1));
+            RuntimeEvents.emit(RuntimeEvents.FAULT, message);
         }
         if (pendingFaults.isEmpty()) return List.of();
         List<RuntimeFault> drained = List.copyOf(pendingFaults);
@@ -1243,6 +1244,8 @@ public final class MechanismScheduler {
         history.reported = true;
         history.lastReportSeconds = cycleSeconds;
         pendingFaults.add(new RuntimeFault(location, exception, history.occurrences));
+        RuntimeEvents.emit(RuntimeEvents.FAULT, location + ": " + exception.getClass().getSimpleName()
+                + " " + exception.getMessage());
         if (pendingFaults.size() > COMPLETION_HISTORY_LIMIT) pendingFaults.remove(0);
     }
 
