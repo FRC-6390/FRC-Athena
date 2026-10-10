@@ -4,11 +4,13 @@ members = [
   "crates/arcp-server",
   "crates/arcp-jni",
   "crates/arcp-dashboard",
+  "crates/arcp-client",
 ]
 default-members = [
   "crates/arcp-core",
   "crates/arcp-server",
   "crates/arcp-jni",
+  "crates/arcp-client",
 ]
 resolver = "2"
 
