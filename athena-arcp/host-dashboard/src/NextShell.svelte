@@ -2,7 +2,8 @@
   import { onDestroy, onMount } from 'svelte';
   import MechanismsView from './components/mechanisms/MechanismsView.svelte';
   import PitView from './components/mechanisms/PitView.svelte';
-  import MarkerTimeline from './components/analysis/MarkerTimeline.svelte';
+  import AnalysisView from './components/analysis/AnalysisView.svelte';
+  import DriverView from './components/driver/DriverView.svelte';
   import WorkspaceSwitcher, { type Workspace } from './components/workspaces/WorkspaceSwitcher.svelte';
   import { useLiveStore } from './lib/data/live.svelte';
   import { createMockSource } from './lib/data/mock';
@@ -15,7 +16,7 @@
   const session = createSession(createMockSource());
   const live = useLiveStore(session.store);
 
-  let workspace = $state<Workspace>('tuning');
+  let workspace = $state<Workspace>('driver');
 
   onMount(() => session.start());
   onDestroy(() => session.stop());
@@ -49,10 +50,7 @@
 
   <main>
     {#if workspace === 'driver'}
-      <section class="panel">
-        <h2>Driver</h2>
-        <p>The driver view is still the classic canvas. Open the classic dashboard to use it.</p>
-      </section>
+      <DriverView {session} {live} />
     {:else if workspace === 'pit'}
       <section class="panel">
         <h2>Pit</h2>
@@ -66,8 +64,7 @@
     {:else}
       <section class="panel">
         <h2>Analysis</h2>
-        <p class="note">Replay files are not loaded yet. Markers from the live stream are listed here.</p>
-        <MarkerTimeline {session} {live} />
+        <AnalysisView />
       </section>
     {/if}
   </main>
@@ -129,11 +126,6 @@
     font-family: var(--font-display);
     font-size: 18px;
     color: var(--text-strong);
-  }
-  .note {
-    margin: 0;
-    color: var(--text-soft);
-    font-size: 13px;
   }
   @media (max-width: 720px) {
     main {

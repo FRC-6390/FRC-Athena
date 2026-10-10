@@ -94,8 +94,32 @@ export const MOCK_SPECS: MockSpec[] = [
   gain('robot/shooter/Controls/velocity/kP'),
   gain('robot/shooter/Controls/velocity/kV'),
   limit('robot/shooter/Controls/velocity/Constraints/maxAcceleration', 'rpm/s'),
-  flag('robot/shooter/Hooks/readyToShoot', 'hook')
+  flag('robot/shooter/Hooks/readyToShoot', 'hook'),
+  struct('robot/drive/Values/pose', 'struct:Pose2d', 'value'),
+  text('athena/mode/operator', 'system'),
+  num('athena/power/battery/voltage', 'V', 'system'),
+  num('athena/power/turret/current', 'A', 'system'),
+  num('athena/power/shooter/current', 'A', 'system'),
+  num('athena/power/drive/current', 'A', 'system')
 ];
+
+/** Pose2d struct type name and WPILib layout: x, y (metres), rotation (radians), 24 bytes. */
+export const POSE2D_SCHEMA_ID = 1;
+export const POSE2D_SCHEMA_TEXT = 'double x;double y;double rot';
+
+/** Struct-typed mock signal (E1-W typeTag 9). */
+function struct(path: string, type: `struct:${string}`, role: SignalRole): MockSpec {
+  return { path, type, typeTag: TYPE_TAG.struct, unit: '', role, writable: false, persisted: false, lockGroup: '' };
+}
+
+/** Encodes a Pose2d in WPILib struct layout. */
+export function encodePose2d(x: number, y: number, rotation: number): Uint8Array {
+  const view = new DataView(new ArrayBuffer(24));
+  view.setFloat64(0, x, true);
+  view.setFloat64(8, y, true);
+  view.setFloat64(16, rotation, true);
+  return new Uint8Array(view.buffer);
+}
 
 /** Lock-state signal for a group: boolean, role `lock`, read-only (E1-W). */
 export function lockSpecFor(group: string): MockSpec {
@@ -127,6 +151,7 @@ export class MockRobot {
   private shooterTemp = TEMP_AMBIENT;
   private nextMatchToggle = MATCH_PERIOD_SECONDS;
   private seed = 7;
+  private pose = { x: 1.5, y: 2.0, rotation: 0 };
 
   readonly specList: readonly MockSpec[];
 
@@ -185,7 +210,34 @@ export class MockRobot {
     this.stepTurret(dt);
     this.stepShooter(dt);
     for (const [path, group] of this.lockPaths) this.values.set(path, this.isLocked(group));
+    this.stepPower();
+    this.stepDrive();
+    this.values.set('athena/mode/operator', this.matchActive ? 'Teleop' : 'Disabled');
     return events;
+  }
+
+  /** Battery sags with total current; per-consumer currents come from the mechanism models. */
+  private stepPower(): void {
+    const turret = this.values.get('robot/turret/Devices/motor/current') as number;
+    const shooter = this.values.get('robot/shooter/Devices/motor/current') as number;
+    const drive = this.matchActive ? 22 + Math.sin(this.time * 2) * 6 : 1.5;
+    const total = turret + shooter + drive;
+    this.values.set('athena/power/turret/current', turret);
+    this.values.set('athena/power/shooter/current', shooter);
+    this.values.set('athena/power/drive/current', drive);
+    this.values.set('athena/power/battery/voltage', 12.8 - total * 0.012 + this.noise() * 0.2);
+  }
+
+  /** Drive pose circles the field centre during a match and holds still otherwise. */
+  private stepDrive(): void {
+    if (this.matchActive) {
+      const angle = this.time * 0.35;
+      this.pose = { x: 8.775 + Math.cos(angle) * 3.2, y: 4.03 + Math.sin(angle) * 1.8, rotation: angle + Math.PI / 2 };
+    }
+    this.values.set('robot/drive/Values/pose', {
+      schemaId: POSE2D_SCHEMA_ID,
+      bytes: encodePose2d(this.pose.x, this.pose.y, this.pose.rotation)
+    });
   }
 
   private noise(): number {
@@ -326,6 +378,7 @@ function defaultValue(spec: MockSpec): SignalValue {
     case 'f64':
       return 0;
     default:
+      if (spec.type.startsWith('struct:')) return { schemaId: POSE2D_SCHEMA_ID, bytes: encodePose2d(0, 0, 0) };
       return 0;
   }
 }

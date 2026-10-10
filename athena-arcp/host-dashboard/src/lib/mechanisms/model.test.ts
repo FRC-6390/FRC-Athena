@@ -77,6 +77,7 @@ describe('live session smoke test', () => {
     const roots = buildMechanismTree(session.store.allSignals());
     expect(flattenMechanisms(roots).map((n) => n.path)).toEqual([
       'robot',
+      'robot/drive',
       'robot/shooter',
       'robot/turret',
       'robot/turret/hood'

@@ -34,8 +34,9 @@ export function formatSeconds(micros: number): string {
  * Parses user-entered text for a given signal type. Returns null when the text is not valid for that type.
  * Number inputs bound with `bind:value` deliver numbers, so both forms are accepted.
  */
-export function parseInput(type: string, input: string | number): SignalValue | null {
-  const text = typeof input === 'number' ? String(input) : input;
+export function parseInput(type: string, input: string | number | null | undefined): SignalValue | null {
+  // An empty number input binds as null in Svelte; treat it as empty text so validation reports it.
+  const text = input === null || input === undefined ? '' : String(input);
   const trimmed = text.trim();
   switch (type) {
     case 'bool':

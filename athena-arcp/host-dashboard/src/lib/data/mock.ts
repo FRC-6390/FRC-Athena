@@ -2,10 +2,18 @@
  * Mock data source: a simulated turret and shooter that runs without a robot. Frames are encoded with
  * the E1-W encoder and decoded again, so the mock exercises the same byte path as a real stream.
  */
-import { encodeDictionary, encodeFrame, encodeMarker, encodeMetadata, concat, type FrameInput } from './encoder';
+import {
+  concat,
+  encodeDictionary,
+  encodeFrame,
+  encodeMarker,
+  encodeMetadata,
+  encodeStructSchema,
+  type FrameInput
+} from './encoder';
 import { decodeRecords } from './decoder';
-import { MARKER_KIND, type SignalValue } from './types';
-import { MOCK_SPECS, MockRobot, type MockSpec } from './mock-robot';
+import { MARKER_KIND, TYPE_TAG, type SignalValue } from './types';
+import { MOCK_SPECS, MockRobot, POSE2D_SCHEMA_ID, POSE2D_SCHEMA_TEXT, type MockSpec } from './mock-robot';
 import type { CommandReply, RobotCommands } from './commands';
 import type { DataSource, SourceSink } from './source';
 import { MECHANISM_GROUPS } from './path';
@@ -79,11 +87,13 @@ export function createMockSource(options: MockSourceOptions = {}): DataSource {
       role: spec.role,
       writable: spec.writable,
       persisted: spec.persisted,
-      lockGroup: spec.lockGroup
+      lockGroup: spec.lockGroup,
+      structSchemaId: spec.typeTag === TYPE_TAG.struct ? POSE2D_SCHEMA_ID : 0
     }));
     return concat([
       encodeMetadata({ robot: 'Mock robot', event: 'Simulation', athenaVersion: 'mock', groups: MECHANISM_GROUPS.join(',') }),
       encodeDictionary(entries),
+      encodeStructSchema(POSE2D_SCHEMA_ID, 'Pose2d', POSE2D_SCHEMA_TEXT),
       encodeMarker(0, MARKER_KIND.BOOT, 'mock robot started')
     ]);
   }
