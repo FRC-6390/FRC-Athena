@@ -39,6 +39,7 @@ public final class Wire {
     public static final int MARKER_PERSISTED_WRITE = 11;
     public static final int MARKER_RECORD = 12;
     public static final int MARKER_TEST_START = 13;
+    public static final int MARKER_BROWNOUT = 14;
     public static final int MARKER_USER_BASE = 100;
 
     private Wire() {

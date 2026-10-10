@@ -424,7 +424,8 @@ entries: varint signalId, u8 typeTag, value
 
 ### Marker kinds
 1 BOOT, 2 MATCH_IDENTIFIED, 3 AUTO_START, 4 TELEOP_START, 5 MATCH_END, 6 DISABLE, 7 FAULT,
-8 STAGE_CHANGE, 9 CHECK, 10 OVERRIDE, 11 PERSISTED_WRITE, 12 RECORD, 13 TEST_START, 100+ user.
+8 STAGE_CHANGE, 9 CHECK, 10 OVERRIDE, 11 PERSISTED_WRITE, 12 RECORD, 13 TEST_START, 14 BROWNOUT,
+100+ user.
 
 ### Replay file
 `.athrp` file = ASCII magic `ATHRP\0` + u16 formatVersion(=1) + records. Writers emit METADATA,
