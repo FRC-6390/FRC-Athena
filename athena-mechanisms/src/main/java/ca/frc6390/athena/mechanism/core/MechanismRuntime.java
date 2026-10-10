@@ -376,6 +376,7 @@ final class MechanismRuntime {
     /** Installs the power pass whose per-motor thermal and budget caps explain this mechanism's outputs. */
     void electrical(PowerRuntime power) {
         electrical = power;
+        applier.electrical(power);
     }
 
     Set<MotorDevice> applyCandidates(List<ResolvedOutput> outputs, Map<Object, Long> reservations) {

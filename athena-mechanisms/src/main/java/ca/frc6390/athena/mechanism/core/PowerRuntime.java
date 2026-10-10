@@ -2,9 +2,9 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
+import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.power.BatteryResistanceEstimator;
-import ca.frc6390.athena.hardware.power.MotorThermalSpec;
 import ca.frc6390.athena.hardware.power.PowerBudget;
 import ca.frc6390.athena.hardware.power.PowerPlanner;
 import ca.frc6390.athena.hardware.power.PowerPolicy;
@@ -18,6 +18,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.function.DoubleSupplier;
 
@@ -32,18 +33,16 @@ import java.util.function.DoubleSupplier;
  *   <li>Updates the battery resistance estimate from bus voltage and total supply current.</li>
  *   <li>Plans per-motor caps ({@link PowerPlanner}). The thermal derate fraction scales the declared
  *       limit before planning.</li>
- *   <li>Writes the effective current limits through {@link MotorHandle#applyRuntimeConfiguration}. Writes
- *       are rate limited: at least {@link #MIN_WRITE_INTERVAL_SECONDS} apart, and only when the change is
- *       at least {@link #WRITE_DEADBAND_AMPS}. A user configuration change is written at once.</li>
+ *   <li>Publishes each motor's cap through {@link #capAmps(MotorDevice)}. The output path reads it and
+ *       folds it into the effort voltage clamp ({@code EffortRuntime}), so the cap applies to every motor
+ *       command. Nothing is written to the controllers, so the cycle never blocks on CAN configuration.</li>
  *   <li>Advances each motor's lumped thermal model (I^2 R heating, first-order cooling, vendor fusion).</li>
  * </ol>
  */
 final class PowerRuntime {
-    /** Minimum time between two current-limit configuration writes for one motor. */
-    static final double MIN_WRITE_INTERVAL_SECONDS = 0.25;
-    /** Minimum change in amps that justifies a configuration write when the base config is unchanged. */
-    static final double WRITE_DEADBAND_AMPS = 2.0;
     private static final double MAX_DT_SECONDS = 0.5;
+    /** Smallest active cap. A cap of zero would be read as "no limit", so an active cap stays at or above 1 A. */
+    static final double MIN_ACTIVE_CAP_AMPS = 1.0;
     private static final double REGEN_EPSILON_VOLTS = 1e-6;
     /** Store key of the rolling battery internal-resistance estimate. */
     static final String BATTERY_OHMS_KEY = "power/battery/internalResistanceOhms";
@@ -136,6 +135,17 @@ final class PowerRuntime {
         return toAmps(state.channel.capAmps());
     }
 
+    /**
+     * Returns the effective current cap of a motor from the latest cycle, in amps: the planner cap, already
+     * combined with the declared limit and thermal derate. Positive infinity when the motor is uncapped or was
+     * not part of the cycle. The output path clamps the motor's voltage to this value.
+     */
+    double capAmps(MotorDevice motor) {
+        MotorState state = activeState(motor);
+        if (state == null || !Double.isFinite(state.channel.capAmps())) return Double.POSITIVE_INFINITY;
+        return Math.max(0.0, state.channel.capAmps());
+    }
+
     private MotorState activeState(MotorDevice motor) {
         for (int index = 0; index < active.size(); index++) {
             MotorState state = active.get(index);
@@ -167,11 +177,16 @@ final class PowerRuntime {
             state.readInputs(handle);
             if (Double.isFinite(state.supplyAmps)) totalSupply += state.supplyAmps;
             MotorRuntimeConfig config = overrides.config(motor);
-            state.config = config;
             state.derate = state.curve.derateFraction(motor.temperatureCelsius());
             state.temperatureCelsius = motor.temperatureCelsius();
-            double declaredCap = config.supplyCurrentLimitAmps() > 0
-                    ? config.supplyCurrentLimitAmps() * state.derate
+            // The declared limits (applied once at configuration) bound the cap too, scaled by the derate.
+            // The tighter of supply and stator wins, because the cap is applied to the motor's voltage.
+            double declaredLimit = Math.min(
+                    config.supplyCurrentLimitAmps() > 0 ? config.supplyCurrentLimitAmps() : Double.POSITIVE_INFINITY,
+                    config.statorCurrentLimitAmps() > 0 ? config.statorCurrentLimitAmps() : Double.POSITIVE_INFINITY);
+            // A derated cap is never below 1 A: zero means "no limit" to the planner.
+            double declaredCap = Double.isFinite(declaredLimit)
+                    ? Math.max(MIN_ACTIVE_CAP_AMPS, declaredLimit * state.derate)
                     : Double.POSITIVE_INFINITY;
             state.declaredCapAmps = declaredCap;
             state.channel.inputs(motor.power(), state.demandAmps, declaredCap);
@@ -200,7 +215,7 @@ final class PowerRuntime {
 
         for (MotorState state : active) {
             state.thermalStep(dt);
-            writeLimits(state, nowSeconds);
+            state.status = status(state, state.channel.capAmps());
         }
     }
 
@@ -216,51 +231,6 @@ final class PowerRuntime {
             return Double.isFinite(volts) && volts > 0.0 ? volts : Double.NaN;
         } catch (RuntimeException exception) {
             return Double.NaN;
-        }
-    }
-
-    private void writeLimits(MotorState state, double nowSeconds) {
-        MotorHandle handle = state.handle;
-        MotorRuntimeConfig config = state.config;
-        double cap = state.channel.capAmps();
-        double supplyEffective = config.supplyCurrentLimitAmps() > 0
-                ? config.supplyCurrentLimitAmps() * state.derate
-                : 0.0;
-        if (Double.isFinite(cap)) {
-            // Zero means "no limit" to the controllers, so an active cap is never written below 1 A.
-            supplyEffective = Math.max(1.0, supplyEffective > 0.0 ? Math.min(supplyEffective, cap) : cap);
-        }
-        int supply = toAmps(supplyEffective);
-        int stator = config.statorCurrentLimitAmps() > 0 ? toAmps(config.statorCurrentLimitAmps() * state.derate) : 0;
-        MotorRuntimeConfig desired = new MotorRuntimeConfig(config.neutralMode(), config.inverted(), supply, stator);
-        state.status = status(state, cap);
-        if (!handle.supportsRuntimeConfiguration()) {
-            state.status = cap < Double.POSITIVE_INFINITY || state.derate < 1.0 ? "Unsupported" : "Declared";
-            return;
-        }
-        boolean baseChanged = !config.equals(state.lastBase);
-        if (state.lastBase == null) {
-            // First cycle: the declared configuration is already applied by the runtime overrides.
-            state.lastBase = config;
-            state.lastWritten = config;
-        } else if (baseChanged) {
-            state.lastBase = config;
-            state.lastWritten = null;
-        }
-        if (desired.equals(state.lastWritten)) return;
-        if (!baseChanged && state.lastWritten != null) {
-            boolean due = nowSeconds - state.lastWriteSeconds >= MIN_WRITE_INTERVAL_SECONDS;
-            boolean significant = Math.abs(desired.supplyCurrentLimitAmps() - state.lastWritten.supplyCurrentLimitAmps()) >= WRITE_DEADBAND_AMPS
-                    || Math.abs(desired.statorCurrentLimitAmps() - state.lastWritten.statorCurrentLimitAmps()) >= WRITE_DEADBAND_AMPS
-                    || (desired.supplyCurrentLimitAmps() == 0) != (state.lastWritten.supplyCurrentLimitAmps() == 0);
-            if (!due || !significant) return;
-        }
-        try {
-            handle.applyRuntimeConfiguration(desired);
-            state.lastWritten = desired;
-            state.lastWriteSeconds = nowSeconds;
-        } catch (RuntimeException exception) {
-            state.status = "Error: " + exception.getMessage();
         }
     }
 
@@ -283,13 +253,10 @@ final class PowerRuntime {
     private static final class MotorState {
         final MotorDevice device;
         final PowerPlanner.Channel channel = new PowerPlanner.Channel();
-        final MotorThermalSpec spec;
+        /** Nominal constants, or empty for a motor kind without a MotorSpec row (demand then uses supply current). */
+        final Optional<MotorConstants> constants;
         final ca.frc6390.athena.hardware.power.Thermal curve;
         MotorHandle handle;
-        MotorRuntimeConfig config;
-        MotorRuntimeConfig lastBase;
-        MotorRuntimeConfig lastWritten;
-        double lastWriteSeconds = Double.NEGATIVE_INFINITY;
         double demandAmps;
         double supplyAmps = Double.NaN;
         double statorAmps = Double.NaN;
@@ -305,7 +272,7 @@ final class PowerRuntime {
 
         MotorState(MotorDevice device) {
             this.device = device;
-            this.spec = MotorThermalSpec.forKind(device.kind());
+            this.constants = MotorConstants.forKind(device.kind());
             this.curve = device.thermalCurve();
         }
 
@@ -314,13 +281,16 @@ final class PowerRuntime {
             statorAmps = read(handle::statorCurrentAmps);
             double volts = read(handle::appliedVoltage);
             double rotationsPerSecond = read(handle::integratedVelocityRotationsPerSecond);
-            if (Double.isFinite(volts) && Math.abs(volts) > REGEN_EPSILON_VOLTS && Double.isFinite(rotationsPerSecond)) {
+            if (constants.isPresent() && Double.isFinite(volts) && Math.abs(volts) > REGEN_EPSILON_VOLTS
+                    && Double.isFinite(rotationsPerSecond)) {
+                MotorConstants known = constants.get();
                 double omega = rotationsPerSecond * 2.0 * Math.PI;
-                double backEmf = omega / spec.kvRadPerSecondPerVolt();
-                demandAmps = Math.abs(volts - backEmf) / spec.resistanceOhms();
-            } else if (Double.isFinite(volts)) {
+                double backEmf = omega / known.speedConstant();
+                demandAmps = Math.abs(volts - backEmf) / known.resistanceOhms();
+            } else if (constants.isPresent() && Double.isFinite(volts)) {
                 demandAmps = 0.0;
             } else {
+                // Unknown constants: the measured supply current is the demand estimate.
                 demandAmps = Double.isFinite(supplyAmps) ? Math.max(0.0, supplyAmps) : 0.0;
             }
         }

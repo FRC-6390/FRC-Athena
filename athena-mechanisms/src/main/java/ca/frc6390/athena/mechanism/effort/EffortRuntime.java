@@ -12,6 +12,7 @@ import ca.frc6390.athena.mechanism.model.MechanismModel;
 import edu.wpi.first.units.Units;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -25,9 +26,15 @@ import java.util.function.Supplier;
  * current {@code I_i = (V - omega_i / Kv_i) / R_i}. The clamp keeps {@code |I_i| <= limit_i} by bounding
  * {@code V} to {@code [omega_i/Kv_i - limit_i R_i, omega_i/Kv_i + limit_i R_i]}, intersected over the
  * motors. It bounds the voltage the controller is asked to apply, so it works with any controller.
- * Motors without known constants are not clamped and keep the hardware limit only. When no voltage
- * satisfies every motor, the midpoint of the empty interval is used. The velocity sign is assumed to
- * follow the applied voltage.</p>
+ * When no voltage satisfies every motor, the midpoint of the empty interval is used. The velocity sign is
+ * assumed to follow the applied voltage.</p>
+ *
+ * <p>The per-motor limit is the smallest of the binding ceiling, the Action effort and the power/thermal cap
+ * from the power pass ({@code PowerRuntime}). The output path passes the caps in with
+ * {@link #advance(double, double[], double, double, double, double)}, so every voltage command is bounded,
+ * closed-loop or open-loop. A motor without known constants (no {@code MotorSpec} row) has no model to invert.
+ * Its command is scaled instead: when its measured supply current exceeds its limit, the voltage is multiplied by
+ * {@code limit / measured}. That is an estimate, not a bound, and it settles over several cycles.</p>
  *
  * <p><b>Load (B3 formula).</b> The mechanism torque beyond the model's prediction is
  * {@code g * sum_i Kt_i (V - predicted - kA a) / R_i}, with {@code predicted} the model's feedforward
@@ -43,6 +50,7 @@ import java.util.function.Supplier;
  */
 public final class EffortRuntime implements ControlLoopRuntime {
     private static final double TWO_PI = 2.0 * Math.PI;
+    private static final double[] NO_LIMITS = new double[0];
 
     private final EffortLimit declaration;
     private final List<MotorDevice> motors;
@@ -203,6 +211,21 @@ public final class EffortRuntime implements ControlLoopRuntime {
      */
     public void advance(double actionLimitAmps, double dtSeconds, double requestedVolts, double position,
             double velocity) {
+        advance(actionLimitAmps, null, dtSeconds, requestedVolts, position, velocity);
+    }
+
+    /**
+     * Advances load state and computes the active per-motor limits for this cycle, including the power caps.
+     *
+     * @param actionLimitAmps per-motor limit from the running Action (infinite for none)
+     * @param powerCapsAmps per-motor power/thermal caps from the power pass, in the binding's motor order, or null
+     * @param dtSeconds cycle duration in seconds
+     * @param requestedVolts controller voltage before the clamp, NaN when the output is not a voltage
+     * @param position feedback position in the binding's unit
+     * @param velocity feedback velocity in the binding's unit per second
+     */
+    public void advance(double actionLimitAmps, double[] powerCapsAmps, double dtSeconds, double requestedVolts,
+            double position, double velocity) {
         double dt = Double.isFinite(dtSeconds) && dtSeconds > 0.0 ? dtSeconds : 0.0;
         boolean responding = declaration != null && model != null
                 && (yieldDeclared || burstDeclared || slowDeclared);
@@ -233,6 +256,9 @@ public final class EffortRuntime implements ControlLoopRuntime {
                 base = Double.isInfinite(ceiling) ? ceiling : ceiling * fraction;
             }
             double active = Math.min(base, actionLimitAmps);
+            if (powerCapsAmps != null && i < powerCapsAmps.length) {
+                active = Math.min(active, powerCapsAmps[i]);
+            }
             activeAmps[i] = active;
             minimum = Math.min(minimum, active);
             limited |= Double.isFinite(active);
@@ -273,33 +299,107 @@ public final class EffortRuntime implements ControlLoopRuntime {
      * @return the clamped voltage, or {@code volts} itself when no limit applies
      */
     public double clampVolts(ActionContext context, double volts) {
-        if (!anyLimit || !Double.isFinite(volts)) {
+        return clampVolts(context, volts, List.of(), NO_LIMITS);
+    }
+
+    /**
+     * Clamps a commanded voltage to the active limits of this binding and to the limits of extra motors that
+     * receive the same command (software followers). The bound is one intersection, so no motor exceeds its limit.
+     *
+     * @param context hardware access for speed and current reads
+     * @param volts commanded voltage
+     * @param extraMotors additional motors that receive the command, may be empty
+     * @param extraLimitsAmps per-motor limits of {@code extraMotors}, same order
+     * @return the clamped voltage
+     */
+    public double clampVolts(ActionContext context, double volts, List<MotorDevice> extraMotors,
+            double[] extraLimitsAmps) {
+        if (!anyLimit && extraMotors.isEmpty() || !Double.isFinite(volts)) {
             lastAppliedVolts = volts;
             return volts;
         }
-        double lower = Double.NEGATIVE_INFINITY;
-        double upper = Double.POSITIVE_INFINITY;
-        boolean enforced = false;
-        for (int i = 0; i < activeAmps.length; i++) {
-            MotorConstants motor = constants[i];
-            double limit = activeAmps[i];
-            if (motor == null || !Double.isFinite(limit)) {
-                continue;
-            }
-            MotorHandle handle = context.motor(motors.get(i));
-            double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
-            double backEmf = omega / motor.speedConstant();
-            double span = limit * motor.resistanceOhms();
-            lower = Math.max(lower, backEmf - span);
-            upper = Math.min(upper, backEmf + span);
-            enforced = true;
-        }
-        double clamped = volts;
-        if (enforced) {
-            clamped = lower > upper ? 0.5 * (lower + upper) : Math.min(Math.max(volts, lower), upper);
-        }
+        double clamped = clampVolts(context, volts, motors, activeAmps, extraMotors, extraLimitsAmps);
         lastAppliedVolts = clamped;
         return clamped;
+    }
+
+    /**
+     * Clamps a voltage to the per-motor current limits of a set of motors that share the command. Used by
+     * the output path for open-loop motor outputs, which have no binding. Limits are not tied to a binding,
+     * so the caller passes them in.
+     *
+     * @param context hardware access
+     * @param volts commanded voltage
+     * @param motors motors that receive the command
+     * @param limitsAmps per-motor current limits, same order, infinite for none
+     * @return the clamped voltage
+     */
+    public static double clampToLimits(ActionContext context, double volts, List<MotorDevice> motors,
+            double[] limitsAmps) {
+        return clampVolts(context, volts, motors, limitsAmps, List.of(), NO_LIMITS);
+    }
+
+    private static double clampVolts(ActionContext context, double volts, List<MotorDevice> motors,
+            double[] limitsAmps, List<MotorDevice> extraMotors, double[] extraLimitsAmps) {
+        if (!Double.isFinite(volts)) {
+            return volts;
+        }
+        Bounds bounds = new Bounds();
+        for (int i = 0; i < motors.size(); i++) {
+            bounds.add(context, motors.get(i), limitsAmps[i]);
+        }
+        for (int i = 0; i < extraMotors.size(); i++) {
+            bounds.add(context, extraMotors.get(i), extraLimitsAmps[i]);
+        }
+        return bounds.apply(volts);
+    }
+
+    /** Voltage interval (model-based) and scale (estimate-based) accumulated over the motors of one command. */
+    private static final class Bounds {
+        private double lower = Double.NEGATIVE_INFINITY;
+        private double upper = Double.POSITIVE_INFINITY;
+        private double scale = 1.0;
+        private boolean enforced;
+
+        void add(ActionContext context, MotorDevice device, double limitAmps) {
+            if (!Double.isFinite(limitAmps)) {
+                return;
+            }
+            MotorHandle handle = context.motor(device);
+            Optional<MotorConstants> known = EffortUnits.constants(device);
+            if (known.isPresent()) {
+                MotorConstants motor = known.get();
+                double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
+                double backEmf = omega / motor.speedConstant();
+                double span = limitAmps * motor.resistanceOhms();
+                lower = Math.max(lower, backEmf - span);
+                upper = Math.min(upper, backEmf + span);
+            } else {
+                // No constants: scale the command by the limit over the measured supply current.
+                double measured;
+                try {
+                    measured = Math.abs(handle.supplyCurrentAmps());
+                } catch (RuntimeException exception) {
+                    measured = Double.NaN;
+                }
+                if (Double.isFinite(measured) && measured > limitAmps) {
+                    scale = Math.min(scale, Math.max(0.0, limitAmps) / measured);
+                }
+            }
+            enforced = true;
+        }
+
+        double apply(double volts) {
+            double clamped = volts;
+            if (enforced && known()) {
+                clamped = lower > upper ? 0.5 * (lower + upper) : Math.min(Math.max(volts, lower), upper);
+            }
+            return clamped * scale;
+        }
+
+        private boolean known() {
+            return lower != Double.NEGATIVE_INFINITY || upper != Double.POSITIVE_INFINITY;
+        }
     }
 
     private double rampFraction() {

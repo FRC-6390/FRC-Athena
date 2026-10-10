@@ -1,8 +1,10 @@
 package ca.frc6390.athena.robot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
+import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
@@ -29,16 +31,19 @@ class MotorStallIntegrationTest {
         SimulationSession simulation = SimulationSession.create();
         JamClearingIntake intake = new JamClearingIntake();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(intake);
+        // The roller's supply limit (35 A) is enforced as a voltage clamp (power pass, effort path): at standstill
+        // the largest voltage that keeps the stall current within the limit is 35 A times the winding resistance.
+        double stallVolts = MotorConstants.forKind(MotorKinds.KRAKEN_X44).orElseThrow().resistanceOhms() * 35.0;
 
         runtime.teleopPeriodic(0.00, 0.02);
-        assertEquals(0.8, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        assertEquals(stallVolts, simulation.motor(intake.roller).commandValue(), 1.0e-9);
 
         simulation.motor(intake.roller).locked(true);
         runtime.teleopPeriodic(0.02, 0.02);
         runtime.teleopPeriodic(0.04, 0.02);
         runtime.teleopPeriodic(0.06, 0.02);
         runtime.teleopPeriodic(0.08, 0.02);
-        assertEquals(-0.6, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        assertEquals(-stallVolts, simulation.motor(intake.roller).commandValue(), 1.0e-9);
 
         simulation.motor(intake.roller).locked(false);
         runtime.teleopPeriodic(0.18, 0.10);
@@ -46,7 +51,9 @@ class MotorStallIntegrationTest {
         runtime.teleopPeriodic(0.26, 0.02);
         runtime.teleopPeriodic(0.30, 0.04);
         runtime.teleopPeriodic(0.32, 0.02);
-        assertEquals(0.8, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        // The held intake action (0.8 percent, 9.6 V) resumes. The clamp never raises the command above it.
+        double resumed = simulation.motor(intake.roller).commandValue();
+        assertTrue(resumed > 0.0 && resumed <= 0.8 * 12.0 + 1.0e-9, "resumed command " + resumed);
     }
 
     private static final class JamClearingIntake implements Mechanism {

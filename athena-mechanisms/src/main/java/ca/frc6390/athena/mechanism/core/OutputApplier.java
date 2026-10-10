@@ -41,6 +41,8 @@ final class OutputApplier {
     private final ActionContext context;
     private final RuntimeOverrides overrides;
     private final Map<ControlBinding<?>, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
+    /** Power pass of the mechanism; its per-motor caps join the effort clamp. Null before the first cycle. */
+    private PowerRuntime electricalPass;
     private final Set<ControlBinding<?>> controlsAppliedThisCycle =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<MotorHandle> drivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -273,6 +275,11 @@ final class OutputApplier {
      * Installs the staging caps that apply in the coming cycle, and the stage that set each capped binding
      * (used for the {@code State/Reason} explanation).
      */
+    /** Installs the power pass whose per-motor caps bound every voltage this applier commands (B6). */
+    void electrical(PowerRuntime power) {
+        electricalPass = power;
+    }
+
     void stageCaps(Map<ControlBinding<?>, StageCaps> caps, Map<ControlBinding<?>, Enum<?>> stages) {
         stageCaps = caps == null ? java.util.Collections.emptyMap() : caps;
         stageNames = stages == null ? java.util.Collections.emptyMap() : stages;
@@ -481,7 +488,8 @@ final class OutputApplier {
         OutputRequest request = output.request();
         ControlBinding<?> control = request.control();
         if (control == null) {
-            return appliedOutput.set(output.output(), ControlRoute.OPEN_LOOP, null).withoutTrace();
+            return appliedOutput.set(limitOpenLoop(request, output.output()), ControlRoute.OPEN_LOOP, null)
+                    .withoutTrace();
         }
         ControlRuntimeState state = controlRuntimes(control);
         double position = firstFeedbackPosition(control);
@@ -985,22 +993,96 @@ final class OutputApplier {
 
     /**
      * EFFORT HOOK (B5/B6). Advances the binding's effort state once per applied cycle and clamps a
-     * voltage (or percent, at nominal bus voltage) to the current the motors may draw.
+     * voltage (or percent, at nominal bus voltage) to the current the motors may draw. The per-motor limit is
+     * the smallest of the binding ceiling, the Action effort and the power/thermal cap. Software followers
+     * receive the same command, so their caps join the same intersection.
      */
     private Output limitEffort(ControlRuntimeState state, Output requested, Output candidate, double dtSeconds,
             double position, double velocity) {
         double actionLimit = requested instanceof EffortCarrier carrier
                 ? carrier.effort().currentLimitAmps()
                 : Double.POSITIVE_INFINITY;
+        List<MotorDevice> leaders = state.binding.motors();
+        for (int i = 0; i < state.powerCaps.length; i++) {
+            state.powerCaps[i] = powerCapAmps(leaders.get(i));
+        }
         double volts = candidate instanceof Output.Voltage voltage ? voltage.volts()
                 : candidate instanceof Output.Percent percent ? percent.percent() * EffortUnits.NOMINAL_VOLTS
                 : Double.NaN;
-        state.effort.advance(actionLimit, dtSeconds, volts, position, velocity);
+        state.effort.advance(actionLimit, state.powerCaps, dtSeconds, volts, position, velocity);
         if (Double.isNaN(volts)) {
             return candidate;
         }
-        double limited = state.effort.clampVolts(context, volts);
+        Limits followers = softwareFollowerLimits(leaders, actionLimit);
+        double limited = state.effort.clampVolts(context, volts, followers.motors(), followers.amps());
         return limited == volts ? candidate : Outputs.voltage(limited);
+    }
+
+    /**
+     * EFFORT HOOK (B6) for open-loop motor outputs, which have no binding. A percent or voltage command to one
+     * motor is clamped with the motor's power cap and its software followers' caps, as a binding's command is.
+     */
+    private Output limitOpenLoop(OutputRequest request, Output output) {
+        MotorDevice motor = request.motor();
+        if (motor == null || !(output instanceof Output.Percent || output instanceof Output.Voltage)) {
+            return output;
+        }
+        double actionLimit = output instanceof EffortCarrier carrier
+                ? carrier.effort().currentLimitAmps()
+                : Double.POSITIVE_INFINITY;
+        double volts = output instanceof Output.Voltage voltage ? voltage.volts()
+                : ((Output.Percent) output).percent() * EffortUnits.NOMINAL_VOLTS;
+        if (!Double.isFinite(volts)) {
+            return output;
+        }
+        Limits followers = softwareFollowerLimits(List.of(motor), actionLimit);
+        List<MotorDevice> motors = new ArrayList<>(followers.motors().size() + 1);
+        motors.add(motor);
+        motors.addAll(followers.motors());
+        double[] limits = new double[motors.size()];
+        limits[0] = Math.min(actionLimit, powerCapAmps(motor));
+        System.arraycopy(followers.amps(), 0, limits, 1, followers.amps().length);
+        double limited = EffortRuntime.clampToLimits(context, volts, motors, limits);
+        return limited == volts ? output : Outputs.voltage(limited);
+    }
+
+    /**
+     * Returns the per-motor limits of the software followers of the given leaders. A software follower receives its
+     * leader's command, so it is limited by its own power cap and by the Action limit.
+     */
+    private Limits softwareFollowerLimits(List<MotorDevice> leaders, double actionLimit) {
+        List<MotorDevice> devices = null;
+        List<Double> amps = null;
+        for (MotorDevice leader : leaders) {
+            List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(leader);
+            for (int index = 0; index < followers.size(); index++) {
+                if (devices == null) {
+                    devices = new ArrayList<>();
+                    amps = new ArrayList<>();
+                }
+                MotorDevice follower = followers.get(index).device();
+                devices.add(follower);
+                amps.add(Math.min(actionLimit, powerCapAmps(follower)));
+            }
+        }
+        if (devices == null) {
+            return Limits.NONE;
+        }
+        double[] array = new double[amps.size()];
+        for (int i = 0; i < array.length; i++) {
+            array[i] = amps.get(i);
+        }
+        return new Limits(devices, array);
+    }
+
+    /** Per-motor current limits of a set of motors that share one command. */
+    private record Limits(List<MotorDevice> motors, double[] amps) {
+        static final Limits NONE = new Limits(List.of(), new double[0]);
+    }
+
+    /** Power/thermal cap of a motor from this cycle's power pass, infinite when uncapped or unknown. */
+    private double powerCapAmps(MotorDevice motor) {
+        return electricalPass == null ? Double.POSITIVE_INFINITY : electricalPass.capAmps(motor);
     }
 
     /** Speed multiplier from the binding's {@code slow(...)} load response, 1 when none applies. */
@@ -1397,6 +1479,8 @@ final class OutputApplier {
         private final ControlLoopRole[] roles;
         /** Effort state of this binding (B5/B6); a limit-free runtime when the binding has no ceiling. */
         private final EffortRuntime effort;
+        /** Per-motor power/thermal caps of this cycle, in the binding's motor order. */
+        private final double[] powerCaps;
         private MotionProfileRuntime profileRuntime;
         private MotionProfile activeProfile;
         private double velocityReference;
@@ -1440,6 +1524,7 @@ final class OutputApplier {
                 }
             }
             effort = found == null ? EffortRuntime.unlimited(binding.motors()) : found;
+            powerCaps = new double[binding.motors().size()];
             activeProfile = binding.profile();
             profileRuntime = activeProfile == null ? null : new MotionProfileRuntime(activeProfile);
         }
