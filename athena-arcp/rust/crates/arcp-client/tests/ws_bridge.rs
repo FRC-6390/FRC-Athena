@@ -141,7 +141,7 @@ fn start_robot() -> (ArcpServerV2, Arc<Robot>) {
         locked: AtomicBool::new(true),
         actions: Mutex::new(Vec::new()),
     });
-    let server = ArcpServerV2::start(ServerConfig::default(), robot.clone()).expect("robot server starts");
+    let server = ArcpServerV2::start(ServerConfig::ephemeral(), robot.clone()).expect("robot server starts");
     server.publish_dictionary(
         dictionary(),
         vec![StructSchema {

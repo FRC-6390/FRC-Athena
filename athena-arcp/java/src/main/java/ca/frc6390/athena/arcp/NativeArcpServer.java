@@ -28,6 +28,7 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
      * Server configuration.
      *
      * @param controlPort TCP control port, 0 for an ephemeral port
+     * @param realtimePort UDP port realtime frames are sent from, 0 for an ephemeral port
      * @param fileRoot directory exposed by the file service for plain names, or null
      * @param budgetBytesPerSecond realtime bandwidth budget, 0 for none
      * @param mtu largest UDP datagram in bytes (128 to 65507)
@@ -35,19 +36,23 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
      */
     public record Config(
             int controlPort,
+            int realtimePort,
             Path fileRoot,
             long budgetBytesPerSecond,
             int mtu,
             long keyframeIntervalMicros) {
 
-        /** Ephemeral control port, no file service, no budget, 1200-byte datagrams, 1 s keyframes. */
+        /** Ephemeral control and realtime ports, no file service, no budget, 1200-byte datagrams, 1 s keyframes. */
         public static Config defaults() {
-            return new Config(0, null, 0L, 1200, 1_000_000L);
+            return new Config(0, 0, null, 0L, 1200, 1_000_000L);
         }
 
         public Config {
             if (controlPort < 0 || controlPort > 65_535) {
                 throw new IllegalArgumentException("controlPort out of range: " + controlPort);
+            }
+            if (realtimePort < 0 || realtimePort > 65_535) {
+                throw new IllegalArgumentException("realtimePort out of range: " + realtimePort);
             }
             if (mtu < 128 || mtu > 65_507) {
                 throw new IllegalArgumentException("mtu out of range: " + mtu);
@@ -109,7 +114,8 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         this.actionHandler = Objects.requireNonNull(actions, "actions");
         this.nt4 = Objects.requireNonNull(nt4, "nt4");
         String root = config.fileRoot() == null ? null : config.fileRoot().toAbsolutePath().toString();
-        this.handle = ArcpNative.create(config.controlPort(), root, config.budgetBytesPerSecond(), config.mtu(),
+        this.handle = ArcpNative.create(config.controlPort(), config.realtimePort(), root,
+                config.budgetBytesPerSecond(), config.mtu(),
                 config.keyframeIntervalMicros(), categoriesText(fileCategories));
     }
 
@@ -132,6 +138,11 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     /** Port the TCP control listener is bound to. */
     public synchronized int controlPort() {
         return ArcpNative.controlPort(requireOpen());
+    }
+
+    /** Local UDP port the realtime frames are sent from. */
+    public synchronized int realtimePort() {
+        return ArcpNative.realtimePort(requireOpen());
     }
 
     @Override

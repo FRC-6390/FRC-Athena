@@ -16,11 +16,27 @@ through `ArcpSink`.
 | `java` | Gradle module `:athena-arcp` (package `ca.frc6390.athena.arcp`). Public API plus JNI declarations. |
 | `../docs/wire-vectors` | Golden vectors checked by the Rust tests. |
 
+## Ports
+
+| Port | Protocol | Who | Purpose |
+| --- | --- | --- | --- |
+| 5808 | TCP | robot (listens) | ARCP control: hello, dictionary, subscriptions, writes, actions, files |
+| 5809 | UDP | robot (sends from) | Realtime frames to each subscriber's UDP port |
+| 5807 | UDP | dashboard (receives) | Realtime frames. Falls back to an ephemeral port when taken (`udpFallback`) |
+| 5810 | TCP | robot, simulator | WPILib NT4. ARCP never uses it |
+
+All ARCP ports are inside the FRC team-use range 5800-5810, so they are legal on the field network. The robot
+side (`ArcpPolicy`, `ServerConfig`) and the client side (`ClientConfig`, `arcp-probe`, `arcp-ws-bridge`, the
+host dashboard's live bridge) default to these numbers, so a simulated robot and a dashboard on one machine need
+no flags. Simulation falls back to ephemeral robot ports with a DriverStation warning when 5808 or 5809 is taken.
+On the roboRIO a taken port fails ARCP loudly, naming the ports.
+
 ## Java API
 
 - `NativeArcpServer(Config, WriteHandler, ActionHandler[, Nt4Bridge])` starts the Rust server.
-  `Config(controlPort, fileRoot, budgetBytesPerSecond, mtu, keyframeIntervalMicros)`;
-  `Config.defaults()` uses an ephemeral port, no file service, no budget, 1200-byte datagrams.
+  `Config(controlPort, realtimePort, fileRoot, budgetBytesPerSecond, mtu, keyframeIntervalMicros)`;
+  `Config.defaults()` uses ephemeral ports, no file service, no budget, 1200-byte datagrams.
+  `ArcpPolicy` (robot field) defaults to TCP 5808 and UDP 5809 (`controlPort`, `realtimePort`).
   `fileRoot` is the directory the file service lists, downloads and deletes from. Null disables it.
 - `ArcpSink` is what the runtime publishes through:
   - `publishDictionary(entries, schemas)` replaces the dictionary and pushes it to clients.

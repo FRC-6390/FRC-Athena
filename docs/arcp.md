@@ -15,7 +15,8 @@ field the defaults apply.
 
 ```java
 public final ArcpPolicy arcp = ArcpPolicy.of()
-        .controlPort(5810)                          // TCP control port; 5810 is the default (0 picks a free port)
+        .controlPort(5808)                          // TCP control port; 5808 is the default (0 picks a free port)
+        .realtimePort(5809)                         // UDP port realtime frames are sent from; 5809 is the default
         .bandwidthBudgetBytesPerSecond(400_000)     // 0 (default) = no budget
         .mtu(1200)                                  // largest UDP datagram
         .keyframeInterval(Duration.ofSeconds(1))
@@ -26,7 +27,13 @@ public final ArcpPolicy arcp = ArcpPolicy.of()
 public final ArcpPolicy arcp = ArcpPolicy.disabled();
 ```
 
-- The UDP realtime socket is always ephemeral; the control port is the only port a client must reach.
+- Ports: the robot listens on TCP 5808 (control) and sends realtime frames from UDP 5809. Dashboards receive on UDP
+  5807 by default, falling back to an ephemeral port when 5807 is taken (`udpFallback` in the client status). All of
+  these sit inside the FRC team-use range 5800-5810. NT4 uses TCP 5810, so ARCP must never use it. See the port
+  table in [`athena-arcp/README.md`](../athena-arcp/README.md#ports).
+- Port conflicts: on the roboRIO a port already in use stops ARCP and the DriverStation shows an error naming the
+  ports. In simulation ARCP falls back to ephemeral ports with a DriverStation warning. Either way the bound ports are
+  printed at startup as `ARCP listening on TCP <port> / UDP <port>`.
 - Replay files follow the replay policy's directory (`ReplayPolicy.directory`). The `replays/` file category
   always exposes that directory.
 - When the native library cannot start, the bridge reports a warning and the robot runs without ARCP.
@@ -158,11 +165,8 @@ The simulator runs the robot code on this machine and serves ARCP on its control
 dashboard to it: the simulator, the browser bridge (`arcp-ws-bridge`, for a browser dashboard), and the dashboard
 itself (`bun run dev` in a browser, or the desktop app).
 
-**Port.** WPILib's NetworkTables server listens on TCP 5810 (NT4) in simulation and on the roboRIO. The
-`mechanism-examples` robot also asks ARCP for 5810, so ARCP fails with `Address already in use` and is disabled
-(`Athena ARCP is disabled` in the sim log). Until the default moves, give the simulated robot another control
-port: change `controlPort(5810)` to `controlPort(5812)` in that example's `Robot.java` for the sim, and connect to
-5812 everywhere below. Quick-connect targets still use 5810.
+**Ports.** The defaults need no flags: the robot serves TCP 5808 and UDP 5809, and the dashboard receives on UDP
+5807. WPILib's NetworkTables server keeps TCP 5810 (NT4). See [Ports](../athena-arcp/README.md#ports).
 
 1. Publish the Athena artifacts to an isolated Maven repository (never `~/.m2` or `~/wpilib` for this):
 
@@ -179,13 +183,13 @@ port: change `controlPort(5810)` to `controlPort(5812)` in that example's `Robot
    ```
 
    Drop `-PathenaHeadless` to start with the WPILib simulator GUI. The log line `Athena ARCP` with no warning
-   means the control port is listening. Check it with the probe below.
+   prints `ARCP listening on TCP 5808 / UDP 5809`. Check it with the probe below.
 
 3. Check the robot with the probe (prints the dictionary size, server status, live values and one write):
 
    ```bash
    cd athena-arcp/rust
-   cargo run -p arcp-client --bin arcp-probe -- 127.0.0.1 5812 --seconds 3
+   cargo run -p arcp-client --bin arcp-probe -- 127.0.0.1 --seconds 3
    ```
 
 4. Start the browser bridge. It listens on `ws://127.0.0.1:5811` and accepts only loopback origins (plus any

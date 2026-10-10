@@ -170,7 +170,7 @@ wheel speed as a new table point, which tunes the table from the field.
 `Robot` declares three typed policy fields, which `AthenaRobot` discovers like `AutoChooser`:
 
 - `ReplayPolicy`: a 48 MiB buffer, match and disable flushes, and retention limits.
-- `ArcpPolicy`: the ARCP control port (5810) and a bandwidth budget. Use `ArcpPolicy.disabled()` to turn ARCP off.
+- `ArcpPolicy`: the ARCP control port (TCP 5808) and realtime UDP port (5809) and a bandwidth budget. Use `ArcpPolicy.disabled()` to turn ARCP off.
 - `PowerPolicy`: a 7.5 V floor and staggered starts.
 
 `src/test/java/frc/robot/ReplayRecordingTest.java` records a simulated teleop run of the arm, then replays the

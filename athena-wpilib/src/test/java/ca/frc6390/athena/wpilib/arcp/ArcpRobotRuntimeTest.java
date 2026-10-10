@@ -79,7 +79,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void dictionaryAndCycleValuesReachSubscribers() throws Exception {
-        start(ArcpPolicy.of().controlPort(0), null, null);
+        start(ArcpPolicy.of().controlPort(0).realtimePort(0), null, null);
         assertTrue(client.dictionary().containsKey(GAIN));
         ArcpTestClient.Dict gain = client.signal(GAIN);
         assertTrue((gain.flags() & ArcpDictEntry.FLAG_WRITABLE) != 0);
@@ -101,7 +101,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void writesGoThroughTelemetryAndFmsLocksRejectThem() throws Exception {
-        start(ArcpPolicy.of().controlPort(0), null, null);
+        start(ArcpPolicy.of().controlPort(0).realtimePort(0), null, null);
         long gain = client.signal(GAIN).id();
 
         ArcpTestClient.WriteAnswer accepted = write(gain, 3.5);
@@ -133,7 +133,7 @@ class ArcpRobotRuntimeTest {
 
     @Test
     void actionRunAndCancelUseTheMechanismAction() throws Exception {
-        start(ArcpPolicy.of().controlPort(0), null, null);
+        start(ArcpPolicy.of().controlPort(0).realtimePort(0), null, null);
         long run = client.signal(RUN).id();
         TelemetryAction action = schemaAction("run");
         assertFalse(action.running());
@@ -158,7 +158,7 @@ class ArcpRobotRuntimeTest {
         runtime.replay(ReplayPolicy.of().directory(replays), replays);
         PersistentStore store = PersistentStore.open(temp.resolve("store"));
         store.put(GAIN, 3.5);
-        start(runtime, ArcpPolicy.of().controlPort(0), store);
+        start(runtime, ArcpPolicy.of().controlPort(0).realtimePort(0), store);
         cycles(3);
 
         ArcpTestClient.Reply list = client.fileList();
@@ -201,7 +201,7 @@ class ArcpRobotRuntimeTest {
         assertEquals(2.75, schemaGain(), 1e-9, "deployed file overrides the code default");
         assertEquals(2.0, runtime.telemetryPersistence().codeDefaults().get(GAIN));
 
-        bridge = ArcpBridge.attach(ArcpPolicy.of().controlPort(0).deployedTuningFile(deployed), runtime, null, locks::isLocked,
+        bridge = ArcpBridge.attach(ArcpPolicy.of().controlPort(0).realtimePort(0).deployedTuningFile(deployed), runtime, null, locks::isLocked,
                 store, true);
         client = new ArcpTestClient(bridge.controlPort());
         assertEquals(ArcpTestClient.STATUS_OK, client.hello(0).status());
@@ -218,7 +218,7 @@ class ArcpRobotRuntimeTest {
         Path replays = temp.resolve("replays");
         runtime = RobotRuntime.simulated(SimulationSession.create());
         runtime.replay(ReplayPolicy.of().stream(true).directory(replays), replays);
-        start(runtime, ArcpPolicy.of().controlPort(0), null);
+        start(runtime, ArcpPolicy.of().controlPort(0).realtimePort(0), null);
         ReplayRecorder recorder = runtime.replayRecorder().orElseThrow();
         assertTrue(recorder.streaming());
 
@@ -240,6 +240,28 @@ class ArcpRobotRuntimeTest {
         ArcpTestClient.Reply backfill = pump(() -> client.backfill(0, Long.MAX_VALUE));
         assertEquals(ArcpTestClient.STATUS_OK, backfill.status(), backfill.reason());
         assertTrue(((byte[]) backfill.data()).length > 0, "backfill returned nothing");
+    }
+
+    @Test
+    void takenRealtimePortFallsBackInSimulationAndFailsOnRobot() throws Exception {
+        runtime = RobotRuntime.simulated(SimulationSession.create());
+        try (DatagramSocket taken = new DatagramSocket(0)) {
+            ArcpPolicy policy = ArcpPolicy.of().controlPort(0).realtimePort(taken.getLocalPort());
+            ArcpBridge simBridge = ArcpBridge.attach(policy, runtime, null, l -> false, null, true);
+            try {
+                assertTrue(simBridge.enabled(), "simulation falls back to ephemeral ports");
+                assertTrue(simBridge.controlPort() > 0);
+            } finally {
+                simBridge.close();
+            }
+
+            ArcpBridge robotBridge = ArcpBridge.attach(policy, runtime, null, l -> false, null, false);
+            try {
+                assertFalse(robotBridge.enabled(), "a robot with a taken realtime port fails ARCP loudly");
+            } finally {
+                robotBridge.close();
+            }
+        }
     }
 
     @Test

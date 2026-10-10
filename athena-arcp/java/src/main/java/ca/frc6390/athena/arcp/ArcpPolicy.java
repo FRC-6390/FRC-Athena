@@ -8,11 +8,13 @@ import java.util.Optional;
 /**
  * Typed robot-wide ARCP policy. Declare one field of this type on the robot class; the robot runtime
  * discovers it. Without a field the defaults apply: ARCP is enabled on the real robot and in simulation,
- * with TCP control port {@value #DEFAULT_CONTROL_PORT} (FRC team-use range), no bandwidth budget, 1200-byte datagrams and 1 second keyframes.
+ * with TCP control port {@value #DEFAULT_CONTROL_PORT} and realtime UDP port {@value #DEFAULT_REALTIME_PORT} (both
+ * inside the FRC team-use range 5800-5810; NT4 owns 5810), no bandwidth budget, 1200-byte datagrams and 1 second keyframes.
  *
  * <pre>{@code
  * public final ArcpPolicy arcp = ArcpPolicy.of()
- *         .controlPort(5810)
+ *         .controlPort(5808)
+ *         .realtimePort(5809)
  *         .bandwidthBudgetBytesPerSecond(400_000);
  * }</pre>
  *
@@ -27,9 +29,12 @@ public final class ArcpPolicy {
 
     private final boolean enabled;
     /** Default TCP control port; inside the FRC team-use range 5800-5810 and the dashboard's default. */
-    public static final int DEFAULT_CONTROL_PORT = 5810;
+    public static final int DEFAULT_CONTROL_PORT = 5808;
+    /** Default UDP port the realtime frames are sent from; inside the FRC team-use range. */
+    public static final int DEFAULT_REALTIME_PORT = 5809;
 
     private final int controlPort;
+    private final int realtimePort;
     private final long budgetBytesPerSecond;
     private final int mtu;
     private final Duration keyframeInterval;
@@ -37,10 +42,11 @@ public final class ArcpPolicy {
     private final Path modelDirectory;
     private final Path deployedTuningFile;
 
-    private ArcpPolicy(boolean enabled, int controlPort, long budgetBytesPerSecond, int mtu,
+    private ArcpPolicy(boolean enabled, int controlPort, int realtimePort, long budgetBytesPerSecond, int mtu,
             Duration keyframeInterval, Path storeDirectory, Path modelDirectory, Path deployedTuningFile) {
         this.enabled = enabled;
         this.controlPort = controlPort;
+        this.realtimePort = realtimePort;
         this.budgetBytesPerSecond = budgetBytesPerSecond;
         this.mtu = mtu;
         this.keyframeInterval = keyframeInterval;
@@ -51,17 +57,18 @@ public final class ArcpPolicy {
 
     /** The default policy: ARCP enabled with the defaults described on the class. */
     public static ArcpPolicy of() {
-        return new ArcpPolicy(true, DEFAULT_CONTROL_PORT, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL, null, null, null);
+        return new ArcpPolicy(true, DEFAULT_CONTROL_PORT, DEFAULT_REALTIME_PORT, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL,
+                null, null, null);
     }
 
     /** A policy that turns ARCP off. The robot then publishes nothing and serves no files. */
     public static ArcpPolicy disabled() {
-        return new ArcpPolicy(false, 0, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL, null, null, null);
+        return new ArcpPolicy(false, 0, 0, 0L, DEFAULT_MTU, DEFAULT_KEYFRAME_INTERVAL, null, null, null);
     }
 
     /**
      * Sets the TCP control port ({@value #DEFAULT_CONTROL_PORT} by default, which the dashboard connects to; 0 picks a
-     * free port, useful in tests); the UDP realtime socket is always ephemeral.
+     * free port, useful in tests).
      *
      * @param port control port, 0 to 65535
      * @return new policy
@@ -70,7 +77,23 @@ public final class ArcpPolicy {
         if (port < 0 || port > 65_535) {
             throw new IllegalArgumentException("control port out of range: " + port);
         }
-        return new ArcpPolicy(enabled, port, budgetBytesPerSecond, mtu, keyframeInterval, storeDirectory,
+        return new ArcpPolicy(enabled, port, realtimePort, budgetBytesPerSecond, mtu, keyframeInterval, storeDirectory,
+                modelDirectory, deployedTuningFile);
+    }
+
+    /**
+     * Sets the UDP port the realtime frames are sent from ({@value #DEFAULT_REALTIME_PORT} by default; 0 picks a free
+     * port, useful in tests). On a real robot a port that is already in use fails ARCP loudly; in simulation ARCP falls
+     * back to ephemeral ports and reports it.
+     *
+     * @param port realtime UDP port, 0 to 65535
+     * @return new policy
+     */
+    public ArcpPolicy realtimePort(int port) {
+        if (port < 0 || port > 65_535) {
+            throw new IllegalArgumentException("realtime port out of range: " + port);
+        }
+        return new ArcpPolicy(enabled, controlPort, port, budgetBytesPerSecond, mtu, keyframeInterval, storeDirectory,
                 modelDirectory, deployedTuningFile);
     }
 
@@ -85,7 +108,7 @@ public final class ArcpPolicy {
         if (bytesPerSecond < 0) {
             throw new IllegalArgumentException("bandwidth budget must be >= 0");
         }
-        return new ArcpPolicy(enabled, controlPort, bytesPerSecond, mtu, keyframeInterval, storeDirectory,
+        return new ArcpPolicy(enabled, controlPort, realtimePort, bytesPerSecond, mtu, keyframeInterval, storeDirectory,
                 modelDirectory, deployedTuningFile);
     }
 
@@ -99,8 +122,8 @@ public final class ArcpPolicy {
         if (bytes < 128 || bytes > 65_507) {
             throw new IllegalArgumentException("mtu out of range: " + bytes);
         }
-        return new ArcpPolicy(enabled, controlPort, budgetBytesPerSecond, bytes, keyframeInterval, storeDirectory,
-                modelDirectory, deployedTuningFile);
+        return new ArcpPolicy(enabled, controlPort, realtimePort, budgetBytesPerSecond, bytes, keyframeInterval,
+                storeDirectory, modelDirectory, deployedTuningFile);
     }
 
     /**
@@ -114,20 +137,20 @@ public final class ArcpPolicy {
         if (interval.isNegative() || interval.isZero()) {
             throw new IllegalArgumentException("keyframe interval must be positive");
         }
-        return new ArcpPolicy(enabled, controlPort, budgetBytesPerSecond, mtu, interval, storeDirectory,
+        return new ArcpPolicy(enabled, controlPort, realtimePort, budgetBytesPerSecond, mtu, interval, storeDirectory,
                 modelDirectory, deployedTuningFile);
     }
 
     /** Overrides the persistent store directory, which the {@code store/} file category exposes. */
     public ArcpPolicy storeDirectory(Path directory) {
-        return new ArcpPolicy(enabled, controlPort, budgetBytesPerSecond, mtu, keyframeInterval,
+        return new ArcpPolicy(enabled, controlPort, realtimePort, budgetBytesPerSecond, mtu, keyframeInterval,
                 Objects.requireNonNull(directory, "directory"), modelDirectory, deployedTuningFile);
     }
 
     /** Sets the characterization and model directory, which the {@code models/} file category exposes. */
     public ArcpPolicy modelDirectory(Path directory) {
-        return new ArcpPolicy(enabled, controlPort, budgetBytesPerSecond, mtu, keyframeInterval, storeDirectory,
-                Objects.requireNonNull(directory, "directory"), deployedTuningFile);
+        return new ArcpPolicy(enabled, controlPort, realtimePort, budgetBytesPerSecond, mtu, keyframeInterval,
+                storeDirectory, Objects.requireNonNull(directory, "directory"), deployedTuningFile);
     }
 
     /**
@@ -136,8 +159,8 @@ public final class ArcpPolicy {
      * {@code src/main/deploy/athena/tuning} in simulation.
      */
     public ArcpPolicy deployedTuningFile(Path file) {
-        return new ArcpPolicy(enabled, controlPort, budgetBytesPerSecond, mtu, keyframeInterval, storeDirectory,
-                modelDirectory, Objects.requireNonNull(file, "file"));
+        return new ArcpPolicy(enabled, controlPort, realtimePort, budgetBytesPerSecond, mtu, keyframeInterval,
+                storeDirectory, modelDirectory, Objects.requireNonNull(file, "file"));
     }
 
     public boolean enabled() {
@@ -146,6 +169,10 @@ public final class ArcpPolicy {
 
     public int controlPort() {
         return controlPort;
+    }
+
+    public int realtimePort() {
+        return realtimePort;
     }
 
     public long bandwidthBudgetBytesPerSecond() {

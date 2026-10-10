@@ -50,7 +50,7 @@ code for each feature is in [`example-projects`](../example-projects/README.md),
   for a fixed seed, reports starvation, timeouts, faults, and exceptions, shrinks each finding to a minimal input, and can
   save it as a replay. Example: `tank-drive/ExplorationTest`.
 - **ARCP** ([arcp.md](arcp.md)). Realtime telemetry, writes, Action requests, file service, tuning diff and pull, and replay
-  streaming, over UDP and TCP on port 5810. The protocol is in Rust; Java is a thin JNI binding. Declare an `ArcpPolicy`
+  streaming, over TCP 5808 (control) and UDP 5809 (realtime). Ports are listed in [`athena-arcp/README.md`](../athena-arcp/README.md#ports). The protocol is in Rust; Java is a thin JNI binding. Declare an `ArcpPolicy`
   field, or `ArcpPolicy.disabled()` to turn it off. Build notes are in [`athena-arcp/README.md`](../athena-arcp/README.md).
 - **Dashboard.** `athena-arcp/host-dashboard` is the desktop dashboard that connects to ARCP. It is an application and is
   not part of the robot API.
@@ -81,8 +81,8 @@ still change what a robot does on the next deploy.
 4. **CANcoder stored configuration is only reported.** A stored magnet configuration (offset, direction, discontinuity)
    that differs from Athena's baseline logs a warning and is not written. Use `EncoderDevice.applyBaselineConfig()` to
    write the baseline; a write failure then fails activation. Check the warning once after the first deploy.
-5. **ARCP listens on TCP port 5810 by default** (on the roboRIO and in simulation). Set `ArcpPolicy.controlPort(0)` for an
-   ephemeral port, or `ArcpPolicy.disabled()` to turn it off.
+5. **ARCP listens on TCP port 5808 and sends realtime frames from UDP 5809 by default** (on the roboRIO and in simulation).
+   Set `ArcpPolicy.controlPort(0)` and `realtimePort(0)` for ephemeral ports, or `ArcpPolicy.disabled()` to turn it off.
 6. **Characterization sample alignment changed.** Each row now pairs the applied voltage of the previous cycle with the
    measured motion (I5). Fits from runs before this change can differ slightly. Re-run `FitModel` on existing data before
    comparing with an older model.

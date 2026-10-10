@@ -42,9 +42,8 @@ public final class Robot extends AthenaRobot {
                     .keepMatchesOverPractice()
                     .minimumFreeDiskMegabytes(150));
 
-    /** ARCP on the default control port. Use ArcpPolicy.disabled() to turn it off completely. */
+    /** ARCP on the default ports (TCP 5808, UDP 5809). Use ArcpPolicy.disabled() to turn it off completely. */
     public final ArcpPolicy arcp = ArcpPolicy.of()
-            .controlPort(5810)
             .bandwidthBudgetBytesPerSecond(400_000);
 
     /** Battery floor and start staggering. Without this field PowerPolicy.defaults() applies. */

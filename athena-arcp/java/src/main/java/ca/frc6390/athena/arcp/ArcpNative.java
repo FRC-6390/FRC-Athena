@@ -104,12 +104,14 @@ final class ArcpNative {
     /**
      * @param fileCategories {@code name<TAB>absoluteDirectory} lines, one per category, or null
      */
-    static native long create(int controlPort, String fileRoot, long budgetBytesPerSecond, int mtu,
+    static native long create(int controlPort, int realtimePort, String fileRoot, long budgetBytesPerSecond, int mtu,
             long keyframeIntervalMicros, String fileCategories);
 
     static native void destroy(long handle);
 
     static native int controlPort(long handle);
+
+    static native int realtimePort(long handle);
 
     static native void publishDictionary(long handle, ByteBuffer buffer, int length);
 

@@ -36,10 +36,10 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::StatusCode;
 use tungstenite::Message;
 
+use crate::client::DEFAULT_CONTROL_PORT;
 use crate::{Client, ClientConfig, ClientError, Event, LinkStatus, Rate, ServerStatus};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:5811";
-const DEFAULT_CONTROL_PORT: u16 = 5810;
 const BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const STATUS_INTERVAL: Duration = Duration::from_millis(500);
 const READ_POLL: Duration = Duration::from_millis(5);
@@ -446,6 +446,7 @@ fn link_json(link: &LinkStatus, server: Option<&ServerStatus>) -> Json {
     out.insert("backfills".into(), json!(link.backfills));
     out.insert("restarts".into(), json!(link.restarts));
     out.insert("malformedDatagrams".into(), json!(link.malformed_datagrams));
+    out.insert("udpFallback".into(), json!(link.udp_fallback));
     out.insert(
         "server".into(),
         server.map_or(Json::Null, |s| {

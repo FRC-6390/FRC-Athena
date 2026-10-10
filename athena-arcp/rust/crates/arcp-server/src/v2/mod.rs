@@ -48,7 +48,11 @@ pub trait RobotHandler: Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// TCP control listener address. Port 0 picks a free port; see [`ArcpServerV2::control_addr`].
+    /// Default port is [`DEFAULT_CONTROL_PORT`] (5808).
     pub control_bind: SocketAddr,
+    /// UDP port the realtime frames are sent from (bound on all interfaces). Port 0 picks a free
+    /// port; see [`ArcpServerV2::realtime_addr`]. Default is [`DEFAULT_REALTIME_PORT`] (5809).
+    pub realtime_port: u16,
     /// Directory exposed by the file service for plain names. `None` disables plain names.
     pub file_root: Option<PathBuf>,
     /// Named file-service categories (`category/name`), each a directory. Missing directories
@@ -62,10 +66,24 @@ pub struct ServerConfig {
     pub keyframe_interval: Duration,
 }
 
+/// Default TCP control port. Inside the FRC team-use range 5800-5810 (NT4 uses 5810).
+pub const DEFAULT_CONTROL_PORT: u16 = 5808;
+/// Default UDP port for realtime frames, inside the FRC team-use range.
+pub const DEFAULT_REALTIME_PORT: u16 = 5809;
+
+impl ServerConfig {
+    /// The default configuration with both sockets on ephemeral ports (for tests and tools that
+    /// run alongside other servers).
+    pub fn ephemeral() -> Self {
+        Self { control_bind: SocketAddr::from(([0, 0, 0, 0], 0)), realtime_port: 0, ..Self::default() }
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            control_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
+            control_bind: SocketAddr::from(([0, 0, 0, 0], DEFAULT_CONTROL_PORT)),
+            realtime_port: DEFAULT_REALTIME_PORT,
             file_root: None,
             file_categories: Vec::new(),
             bandwidth_budget_bytes_per_sec: 0,
@@ -118,6 +136,7 @@ impl Inner {
 pub struct ArcpServerV2 {
     inner: Arc<Inner>,
     control_addr: SocketAddr,
+    realtime_addr: SocketAddr,
 }
 
 impl ArcpServerV2 {
@@ -126,7 +145,8 @@ impl ArcpServerV2 {
         let listener = TcpListener::bind(config.control_bind)?;
         listener.set_nonblocking(true)?;
         let control_addr = listener.local_addr()?;
-        let udp = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))?;
+        let udp = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], config.realtime_port)))?;
+        let realtime_addr = udp.local_addr()?;
         let keyframe_micros = config.keyframe_interval.as_micros().min(u128::from(u64::MAX)) as u64;
         let inner = Arc::new(Inner {
             state: Mutex::new(State::new(config.bandwidth_budget_bytes_per_sec, config.mtu, keyframe_micros)),
@@ -140,12 +160,17 @@ impl ArcpServerV2 {
         thread::Builder::new()
             .name("arcp-v2-accept".into())
             .spawn(move || accept_loop(accept_inner, listener))?;
-        Ok(Self { inner, control_addr })
+        Ok(Self { inner, control_addr, realtime_addr })
     }
 
     /// Address of the TCP control listener (useful when the configured port was 0).
     pub fn control_addr(&self) -> SocketAddr {
         self.control_addr
+    }
+
+    /// Address the realtime UDP socket is bound to (useful when the configured port was 0).
+    pub fn realtime_addr(&self) -> SocketAddr {
+        self.realtime_addr
     }
 
     /// Replaces the dictionary and struct schemas, pushes them to every connected client, and
