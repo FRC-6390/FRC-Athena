@@ -20,7 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import ca.frc6390.athena.mechanism.persist.PersistentStore;
+import ca.frc6390.athena.mechanism.persist.TelemetryPersistence;
+import ca.frc6390.athena.mechanism.persist.TuningLocks;
 import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
 import java.util.function.Function;
 
 /**
@@ -956,6 +960,52 @@ public final class MechanismScheduler {
         return FaultIsolation.drainWarnings();
     }
 
+    /** Returns the tuning lock conditions that gate dashboard writes. */
+    public TuningLocks tuningLocks() {
+        return resolver.overrides().locks();
+    }
+
+    /**
+     * Replaces the tuning lock conditions. Call before the telemetry schema is read; a schema already
+     * built is rebuilt on the next read.
+     *
+     * @param locks lock conditions
+     * @return this scheduler
+     */
+    public MechanismScheduler tuningLocks(TuningLocks locks) {
+        resolver.overrides().locks(Objects.requireNonNull(locks, "locks"));
+        telemetrySchema = null;
+        return this;
+    }
+
+    /**
+     * Attaches the persistent store used by persisted telemetry values and by interpolation points marked
+     * persisted. Attach before the telemetry schema is read; a schema already built is rebuilt on the next
+     * read.
+     *
+     * @param store store, or null to disable persistence
+     * @param matchTimeSeconds supplier of the FMS match time reported with writes (may be null)
+     * @return this scheduler
+     */
+    public MechanismScheduler persistentStore(PersistentStore store, DoubleSupplier matchTimeSeconds) {
+        resolver.overrides().persistence(new TelemetryPersistence(store, matchTimeSeconds));
+        telemetrySchema = null;
+        return this;
+    }
+
+    /**
+     * Returns a one-line explanation of what the mechanism is doing with its outputs this cycle: running an
+     * action, starved by a newer lease, superseded, faulted, disabled, or idle. Published as {@code State/Reason}.
+     */
+    public String reason(Mechanism mechanism) {
+        MechanismRuntime runtime = runtimes.get(mechanism);
+        if (runtime == null) {
+            RequestTarget target = declarationTargets.get(mechanism);
+            runtime = target == null ? null : runtimes.get(target.root());
+        }
+        return runtime == null ? "Idle" : runtime.reason();
+    }
+
     /** Returns the fault its root mechanism raised this cycle (telemetry), or an empty string when healthy. */
     public String fault(Mechanism mechanism) {
         MechanismRuntime runtime = runtimes.get(mechanism);
@@ -1082,6 +1132,9 @@ public final class MechanismScheduler {
             retireCompletedRequests();
         }
         outputCapacityHint = Math.max(outputCapacityHint, outputs.size());
+        resolver.overrides().persistence().periodic(cycleSeconds,
+                eventContext == null ? LifecycleMode.ROBOT : eventContext.mode(),
+                safeMechanismContext.enabled());
         return outputs;
     }
 

@@ -10,6 +10,8 @@ import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.hardware.device.Range;
+import ca.frc6390.athena.mechanism.persist.TelemetryPersistence;
+import ca.frc6390.athena.mechanism.persist.TuningLocks;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -31,6 +33,20 @@ final class RuntimeOverrides {
     private final Map<EncoderDevice, Double> requestedEncoderPositions = new IdentityHashMap<>();
     private final Map<ImuDevice, Double> requestedImuYaw = new IdentityHashMap<>();
     private ActionContext actionContext = ActionContext.empty();
+    private TuningLocks locks = new TuningLocks();
+    private TelemetryPersistence persistence = TelemetryPersistence.disabled();
+
+    /** Returns the tuning lock conditions consulted by dashboard writes. */
+    TuningLocks locks() { return locks; }
+
+    void locks(TuningLocks locks) { this.locks = java.util.Objects.requireNonNull(locks, "locks"); }
+
+    /** Returns the persistence context that restores and saves tuning values. */
+    TelemetryPersistence persistence() { return persistence; }
+
+    void persistence(TelemetryPersistence persistence) {
+        this.persistence = java.util.Objects.requireNonNull(persistence, "persistence");
+    }
 
     void actionContext(ActionContext actionContext) { this.actionContext = actionContext; }
 

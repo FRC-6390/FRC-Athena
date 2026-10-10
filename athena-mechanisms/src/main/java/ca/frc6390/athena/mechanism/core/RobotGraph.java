@@ -18,6 +18,7 @@ import java.util.function.DoubleSupplier;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.persist.Locks;
 
 final class RobotGraph {
     private final Map<Mechanism, MechanismNode> mechanismNodes = new IdentityHashMap<>();
@@ -83,6 +84,8 @@ final class RobotGraph {
         for (Mechanism mechanism : mechanisms) {
             addMechanismSchema(root, node(mechanism).name(), mechanism, visited, scheduler, overrides);
         }
+        values.replaceAll((path, value) -> governed(path, value, overrides));
+        overrides.persistence().pruneUnbound();
         values.forEach((path, value) -> root.value(path, value));
         return new TelemetrySchema(root.freeze());
     }
@@ -106,6 +109,7 @@ final class RobotGraph {
         state.values.put("ActionRunning", TelemetryValue.bool(() -> anyAction(inspected, scheduler, true)));
         state.values.put("ActionComplete", TelemetryValue.bool(() -> anyAction(inspected, scheduler, false)));
         state.values.put("Fault", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.fault(mechanism)));
+        state.values.put("Reason", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.reason(mechanism)));
         inspected.Actions().forEach((actionName, action) -> {
             if (!isExposedActionField(mechanism, actionName, action)) return;
             ownedNode
@@ -323,7 +327,18 @@ final class RobotGraph {
                             values.put(controlPath + "/Config/" + loopName + "/" + name, value));
                 }
             }
+            if (control.persistGroup() != null) {
+                persistTuning(controlPath, control.persistGroup(), values);
+            }
         } else if (declaration instanceof TelemetrySource source) {
+            if (declaration instanceof InterpolatedControlAction interpolation) {
+                String base = mechanismPath + "/Values/" + valuePath;
+                interpolation.named(base);
+                if (interpolation.persistsPoints()) {
+                    overrides.persistence().bindArray(base + "/Data/Recorded",
+                            interpolation::pointVersion, interpolation::recordedArray, interpolation::restoreRecorded);
+                }
+            }
             source.telemetry().forEach((name, value) -> addTelemetry(
                     mechanismPath, valuePath + "/" + name, value, values, overrides,
                     directDeclarations, publishedDeclarations, true));
@@ -345,6 +360,40 @@ final class RobotGraph {
             Set<Object> publishedDeclarations) {
         if (directDeclarations.contains(motor) || !publishedDeclarations.add(motor)) return;
         addMotorTelemetry(path, motor, values, overrides);
+    }
+
+    /**
+     * Marks a control's tuning values (gains and constraint overrides) as persisted under the group.
+     * Disable, restore, and test controls stay session-only.
+     */
+    private static void persistTuning(String controlPath, Class<?> group, Map<String, TelemetryValue> values) {
+        String prefix = controlPath + "/Config/";
+        values.replaceAll((path, value) -> {
+            if (!path.startsWith(prefix) || !value.writable()
+                    || path.equals(prefix + "Disabled") || path.equals(prefix + "Restore")) {
+                return value;
+            }
+            return value.lock(group).persisted();
+        });
+    }
+
+    /**
+     * Applies the robot-defined lock condition to writable values and restores persisted values. Writable
+     * values under {@code Config}, {@code Test}, and {@code Setup} default to {@link Locks.InMatch}.
+     */
+    private static TelemetryValue governed(String path, TelemetryValue value, RuntimeOverrides overrides) {
+        TelemetryValue result = value;
+        if (result.writable() && result.lockGroup() == null && isTuningPath(path)) {
+            result = result.lock(Locks.InMatch.class);
+        }
+        if (result.writable() && result.lockGroup() != null) {
+            result = result.withLockCondition(overrides.locks().lockCondition(result.lockGroup()));
+        }
+        return overrides.persistence().bind(path, result);
+    }
+
+    private static boolean isTuningPath(String path) {
+        return path.contains("/Config/") || path.contains("/Test/") || path.contains("/Setup/");
     }
 
     private static void addMotorTelemetry(

@@ -55,6 +55,10 @@ final class MechanismRuntime {
     private LeaseResources leaseResources;
     private RuntimeHooks runtimeHooks;
     private MechanismContext evaluatedContext = MechanismContext.empty();
+    private int reasonKind = -1;
+    private Object reasonSubject;
+    private Object reasonDetail;
+    private String reasonText = "Idle";
     private MechanismContext evaluatedTimedContext = MechanismContext.empty();
     private String lastFault = "";
     private boolean faultedThisCycle;
@@ -364,6 +368,7 @@ final class MechanismRuntime {
         Objects.requireNonNull(reservations, "reservations");
         MechanismContext safeMechanismContext = evaluatedContext;
         if (!safeMechanismContext.enabled()) {
+            setReason(REASON_DISABLED, null, null);
             applier.stopAll();
             previouslyDrivenMotors.clear();
             simulationStep.run();
@@ -392,6 +397,7 @@ final class MechanismRuntime {
         MechanismContext timedContext = evaluatedTimedContext;
         List<CandidateOutput> candidates = candidateScratch;
         List<CandidateOutput> selected = arbitrate(candidates, reservations);
+        updateReason(candidates, selected, reservations);
         Set<MotorDevice> drivenNow = drivenScratch;
         drivenNow.clear();
         applier.beginCycle();
@@ -594,6 +600,96 @@ final class MechanismRuntime {
                             + "Add it to the computed action ownership.");
         }
     }
+
+    /** Returns the one-line explanation of this mechanism's output decision for the last applied cycle. */
+    String reason() {
+        return reasonText;
+    }
+
+    /**
+     * Summarises why outputs are or are not applied. Text is rebuilt only when the decision's subjects
+     * change, so an unchanged state allocates nothing.
+     */
+    private void updateReason(
+            List<CandidateOutput> candidates,
+            List<CandidateOutput> selected,
+            Map<Object, Long> reservations) {
+        if (faultedThisCycle) {
+            setReason(REASON_FAULT, null, lastFault);
+            return;
+        }
+        for (int candidateIndex = 0; candidateIndex < candidates.size(); candidateIndex++) {
+            CandidateOutput candidate = candidates.get(candidateIndex);
+            if (selected.contains(candidate)) continue;
+            OutputRequest request = candidate.output().request();
+            for (int motorIndex = 0; motorIndex < motorCount(request); motorIndex++) {
+                MotorDevice motor = motorAt(request, motorIndex);
+                long reserved = reservations.getOrDefault(motor, Long.MIN_VALUE);
+                if (candidate.recency() < reserved && !drivenBy(motor, selected)) {
+                    setReason(REASON_STARVED, leaseWithRecency(reserved), motor);
+                    return;
+                }
+            }
+        }
+        if (!selected.isEmpty()) {
+            CandidateOutput winner = selected.get(0);
+            Object subject = "base".equals(winner.source()) ? action : leaseActionWithRecency(winner.recency());
+            setReason(REASON_RUNNING, subject, null);
+            return;
+        }
+        setReason(candidates.isEmpty() ? REASON_IDLE : REASON_SUPERSEDED, null, null);
+    }
+
+    private static boolean drivenBy(MotorDevice motor, List<CandidateOutput> selected) {
+        for (int candidateIndex = 0; candidateIndex < selected.size(); candidateIndex++) {
+            OutputRequest request = selected.get(candidateIndex).output().request();
+            for (int motorIndex = 0; motorIndex < motorCount(request); motorIndex++) {
+                if (motorAt(request, motorIndex) == motor) return true;
+            }
+        }
+        return false;
+    }
+
+    private ActiveLease leaseWithRecency(long recency) {
+        for (int index = 0; index < leasesByRecency.size(); index++) {
+            ActiveLease lease = leasesByRecency.get(index);
+            if (lease.recency() == recency) return lease;
+        }
+        return null;
+    }
+
+    private Action leaseActionWithRecency(long recency) {
+        ActiveLease lease = leaseWithRecency(recency);
+        return lease == null ? action : lease.action();
+    }
+
+    private void setReason(int kind, Object subject, Object detail) {
+        if (kind == reasonKind && subject == reasonSubject && detail == reasonDetail) return;
+        reasonKind = kind;
+        reasonSubject = subject;
+        reasonDetail = detail;
+        reasonText = describeReason(kind, subject, detail);
+    }
+
+    private String describeReason(int kind, Object subject, Object detail) {
+        return switch (kind) {
+            case REASON_DISABLED -> "Disabled";
+            case REASON_FAULT -> "Fault: " + detail;
+            case REASON_STARVED -> "Starved: newer lease "
+                    + (subject instanceof ActiveLease lease ? actionName(lease.action()) : "unknown")
+                    + " reserves " + outputResourceDescription(detail);
+            case REASON_RUNNING -> "Running: " + (subject instanceof Action running ? actionName(running) : "unknown");
+            case REASON_SUPERSEDED -> "Superseded by newer action on shared resource";
+            default -> "Idle";
+        };
+    }
+
+    private static final int REASON_IDLE = 0;
+    private static final int REASON_DISABLED = 1;
+    private static final int REASON_FAULT = 2;
+    private static final int REASON_STARVED = 3;
+    private static final int REASON_RUNNING = 4;
+    private static final int REASON_SUPERSEDED = 5;
 
     private MechanismTraceSnapshot buildTrace(
             MechanismContext context,

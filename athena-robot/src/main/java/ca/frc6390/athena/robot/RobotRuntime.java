@@ -697,6 +697,31 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     /**
+     * Replaces the tuning lock conditions that gate dashboard writes to persisted and writable telemetry.
+     * Call before the telemetry schema is read.
+     */
+    public RobotRuntime tuningLocks(ca.frc6390.athena.mechanism.persist.TuningLocks locks) {
+        ensureOpen();
+        mechanisms.tuningLocks(locks);
+        return this;
+    }
+
+    /**
+     * Attaches the persistent store for persisted telemetry values and persisted interpolation points.
+     * Call before the telemetry schema is read.
+     *
+     * @param store store, or null to disable persistence
+     * @param matchTimeSeconds supplier of FMS match time reported with writes, or null
+     */
+    public RobotRuntime persistentStore(
+            ca.frc6390.athena.mechanism.persist.PersistentStore store,
+            java.util.function.DoubleSupplier matchTimeSeconds) {
+        ensureOpen();
+        mechanisms.persistentStore(store, matchTimeSeconds);
+        return this;
+    }
+
+    /**
      * Runs teleop periodic.
      *
      * @param nowSeconds timestamp

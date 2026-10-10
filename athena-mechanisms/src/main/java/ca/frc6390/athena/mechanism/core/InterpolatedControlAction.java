@@ -21,11 +21,14 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     private final InterpolationModel model;
     private final DoubleSupplier input;
     private final Unit inputUnit;
-    private final List<Entry> entries;
-    private final RuntimeData runtimeData;
+    private List<Entry> entries;
+    private RuntimeData runtimeData;
     private double lastInput;
     private double lastTarget;
     private boolean sampled;
+    private String name = "interpolation";
+    private boolean persistPoints;
+    private volatile long pointVersion;
 
     InterpolatedControlAction(ControlBinding<?> control, InterpolationModel model, DoubleSupplier input) {
         this(control, model, input, null, List.of());
@@ -79,7 +82,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
                 && Double.compare(entry.fixedPoint(), point) == 0)) {
             throw new IllegalArgumentException("Interpolation points must be unique: " + point);
         }
-        return append(new Entry(() -> point, value, point));
+        return append(new Entry(() -> point, value, point, null));
     }
 
     /** Adds a runtime-sampled interpolation point and fixed target value. */
@@ -92,13 +95,133 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     public InterpolatedControlAction at(DoubleSupplier point, DoubleSupplier value) {
         Objects.requireNonNull(point, "point");
         Objects.requireNonNull(value, "value");
-        return append(new Entry(point, value, null));
+        return append(new Entry(point, value, null, null));
     }
 
     private InterpolatedControlAction append(Entry entry) {
         List<Entry> updated = new ArrayList<>(entries);
         updated.add(entry);
-        return new InterpolatedControlAction(control, model, input, inputUnit, updated);
+        InterpolatedControlAction copy = new InterpolatedControlAction(control, model, input, inputUnit, updated);
+        copy.name = name;
+        copy.persistPoints = persistPoints;
+        return copy;
+    }
+
+    /**
+     * Marks this interpolation's recorded points as persistent. Points added with {@link #record()} are
+     * saved in the telemetry store under the interpolation's path and restored when the robot registers.
+     *
+     * @return this interpolation
+     */
+    public InterpolatedControlAction persisted() {
+        persistPoints = true;
+        return this;
+    }
+
+    /**
+     * Returns an action that inserts a point at the current input and target. The point is kept until
+     * reboot, or across reboots when {@link #persisted()} is set. Recording plants a {@code RECORD}
+     * marker with the interpolation path, input, output, and record metadata, and requests a full
+     * replay capture for the current cycle. Recording the same input again replaces that point.
+     *
+     * @return action that records one point each time it runs
+     */
+    public Action record() {
+        return Actions.run(this::recordCurrent);
+    }
+
+    /** Samples input and target, then inserts or replaces the recorded point. */
+    synchronized void recordCurrent() {
+        double target = target();
+        double point = lastInput;
+        RuntimeMarkers markers = RuntimeMarkers.current();
+        RecordMetadata metadata = markers.recordMetadata();
+        Entry recorded = new Entry(() -> point, () -> target, point, metadata);
+        List<Entry> updated = new ArrayList<>(entries);
+        int existing = -1;
+        for (int index = 0; index < updated.size(); index++) {
+            Double fixed = updated.get(index).fixedPoint();
+            if (fixed != null && Double.compare(fixed, point) == 0) {
+                existing = index;
+                break;
+            }
+        }
+        if (existing >= 0) {
+            updated.set(existing, recorded);
+        } else {
+            updated.add(recorded);
+        }
+        replaceEntries(updated);
+        pointVersion++;
+        markers.mark(RuntimeMarkers.RECORD, "interpolation=" + name + " input=" + point + " output=" + target
+                + " " + metadata.describe());
+        markers.requestFullCapture();
+    }
+
+    /** Replaces the interpolation points and rebuilds the sampling state. */
+    private void replaceEntries(List<Entry> updated) {
+        entries = List.copyOf(updated);
+        runtimeData = new RuntimeData(entries);
+    }
+
+    /** Names this interpolation by its telemetry path. Called by the schema builder. */
+    void named(String path) {
+        name = Objects.requireNonNull(path, "path");
+    }
+
+    /** Returns true when recorded points persist. */
+    boolean persistsPoints() {
+        return persistPoints;
+    }
+
+    /** Returns a counter that changes whenever recorded points change. */
+    long pointVersion() {
+        return pointVersion;
+    }
+
+    /** Returns the recorded points as flattened {input, output, ...} pairs in record order. */
+    synchronized double[] recordedArray() {
+        int count = 0;
+        for (Entry entry : entries) {
+            if (entry.metadata() != null) count++;
+        }
+        double[] values = new double[count * 2];
+        int index = 0;
+        for (Entry entry : entries) {
+            if (entry.metadata() == null) continue;
+            values[index++] = entry.fixedPoint();
+            values[index++] = entry.value().getAsDouble();
+        }
+        return values;
+    }
+
+    /**
+     * Restores recorded points saved by a previous run. Pairs with an input already present are
+     * skipped; restored points carry no match identity.
+     */
+    synchronized void restoreRecorded(double[] flattened) {
+        if (flattened.length % 2 != 0) return;
+        List<Entry> updated = new ArrayList<>(entries);
+        boolean changed = false;
+        for (int index = 0; index < flattened.length; index += 2) {
+            double point = flattened[index];
+            double value = flattened[index + 1];
+            if (!Double.isFinite(point) || !Double.isFinite(value)) continue;
+            boolean present = false;
+            for (Entry entry : updated) {
+                if (entry.fixedPoint() != null && Double.compare(entry.fixedPoint(), point) == 0) {
+                    present = true;
+                    break;
+                }
+            }
+            if (present) continue;
+            updated.add(new Entry(() -> point, () -> value, point, RecordMetadata.at(Double.NaN)));
+            changed = true;
+        }
+        if (changed) {
+            replaceEntries(updated);
+            pointVersion++;
+        }
     }
 
     /** Returns the control binding targeted by this action. */
@@ -153,9 +276,31 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         values.put("Visualization/Points", TelemetryValue.points(this::configuredPoints));
         values.put("Visualization/Curve", TelemetryValue.points(this::curvePoints));
         values.put("Visualization/Current", TelemetryValue.points(this::currentPoint));
+        values.put("Recorded/Count", TelemetryValue.number(this::recordedCount));
+        values.put("Recorded/Log", TelemetryValue.string(this::recordedLog));
         values.put("Config/Model", TelemetryValue.constant(model.type()));
         model.telemetry().forEach((name, value) -> values.put("Config/Curve/" + name, value));
         return Map.copyOf(values);
+    }
+
+    private synchronized double recordedCount() {
+        int count = 0;
+        for (Entry entry : entries) {
+            if (entry.metadata() != null) count++;
+        }
+        return count;
+    }
+
+    private synchronized String recordedLog() {
+        StringBuilder log = new StringBuilder();
+        for (Entry entry : entries) {
+            RecordMetadata metadata = entry.metadata();
+            if (metadata == null) continue;
+            if (log.length() > 0) log.append('\n');
+            log.append("input=").append(entry.fixedPoint()).append(" output=")
+                    .append(entry.value().getAsDouble()).append(' ').append(metadata.describe());
+        }
+        return log.toString();
     }
 
     private synchronized double[] sampledInputs() {
@@ -235,7 +380,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         return value;
     }
 
-    private record Entry(DoubleSupplier point, DoubleSupplier value, Double fixedPoint) {
+    private record Entry(DoubleSupplier point, DoubleSupplier value, Double fixedPoint, RecordMetadata metadata) {
         private Entry {
             Objects.requireNonNull(point, "point");
             Objects.requireNonNull(value, "value");

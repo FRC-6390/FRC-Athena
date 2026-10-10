@@ -214,6 +214,108 @@ Custom values appear at `/Athena/Mechanisms/<mechanism path>/Values/<field path>
 Application-specific setpoints should be writable `@Telemetry` fields, while generated device setup
 operations stay beneath the corresponding device.
 
+### Persisted values and lock groups
+
+A writable value can survive reboots and deploys. Mark it `persist = true`; the stored value replaces
+the code default when the mechanism registers:
+
+```java
+@Telemetry(persist = true, writable = true, min = 0.0, max = 100.0)
+private double launchSpeed = 60.0;
+
+@Telemetry(persist = true, writable = true, publish = false)
+private boolean calibrated;          // stored on the robot, never sent over NetworkTables
+```
+
+- The store key is the value's telemetry path (for example `robot/shooter/Values/launchSpeed`).
+  Persisted values are numbers, booleans, and strings, including enums (written as their name).
+- Storage is `/home/lvuser/athena/store` on the roboRIO and a temporary directory in simulation.
+  Override it in the robot constructor with `persistenceDirectory(Path)`.
+- Writes are batched: changes are flushed at most once per second, and immediately after the robot
+  is disabled. Each file write goes to a temporary file that is then renamed over the store, so an
+  interrupted write keeps the previous contents.
+- Stored keys that no declared field owns are deleted the first time the schema is built, so a removed
+  or renamed field does not linger.
+- `publish = false` keeps a value local. It still persists when `persist = true` is also set.
+- A `TelemetryValue` can request the same behavior with `.persisted()` and `.unpublished()`.
+
+Control tuning is persisted per binding. `persistTuning(...)` saves PID and feedforward edits and
+temporary constraint overrides:
+
+```java
+private final ControlBinding<?> armControl = Controls.position(armMotor)
+        .feedback(armEncoder)
+        .pid(2.0, 0.0, 0.0)
+        .persistTuning(Locks.InMatch.class);
+```
+
+Interpolated controls persist their recorded points when they are marked `persisted()` (see
+[Recording points](#recording-points)).
+
+Lock groups decide when dashboard writes are accepted. A group is any class:
+
+- `Locks.InMatch` (the default) is locked while FMS is attached. A group with no definition behaves
+  the same way.
+- `Locks.Never` is never locked. `Locks.Always` is always locked.
+- A robot-defined group is locked when its condition is true:
+
+```java
+public Robot() {
+    tuningLock(Locks.InMatch.class, DriverStation::isFMSAttached); // the default, shown for clarity
+    tuningLock(Calibration.class, () -> DriverStation.isEnabled());
+}
+```
+
+Enforcement is in the robot runtime, not the dashboard. A rejected write leaves the value unchanged,
+resets the dashboard entry to the actual value, and reports the reason:
+
+- `<path>/WriteStatus`: `ok` or `rejected: locked (InMatch)`.
+- `<path>/Lock`: the group and its state, for example `InMatch (locked)`.
+
+Writable values under `Config`, `Test`, and `Setup` groups default to `Locks.InMatch`. Read-only
+values have no lock.
+
+Persisted writes are reported to the replay stream as `PERSISTED_WRITE` markers with the path, old and
+new values, robot time, lifecycle mode, and match time. The robot installs the marker sink through
+`RuntimeMarkers.install(...)`; the default sink does nothing.
+
+### Recording points
+
+An interpolated control can capture its current input and output as a new point, which is useful for
+tuning a lookup table from the field:
+
+```java
+private final ControlBinding<?> shooter = Controls.velocity(flywheel);
+public final InterpolatedControlAction rpmByDistance = shooter
+        .interpolate(InterpolationKinds.LINEAR, distance::getAsDouble)
+        .at(1.0, 2800.0)
+        .at(4.0, 3600.0)
+        .persisted();
+public final Action recordShot = rpmByDistance.record();
+```
+
+Running `recordShot` inserts `(input, output)` into the interpolation. Recording the same input again
+replaces that point. Each recorded point carries metadata (timestamp, match type and number, event
+name, and optional replay ID and frame index), which is listed in `Recorded/Log`. `Recorded/Count` gives
+the number of recorded points. Recording also plants a `RECORD` marker and requests a full-detail replay
+capture for the cycle. Replay identity comes from the installed `RuntimeMarkers` implementation.
+
+Persisted points are saved as input and output pairs. Their metadata is not stored, so restored points
+show no match identity.
+
+### Why is this mechanism not moving?
+
+Each mechanism publishes `State/Reason`, a one-line summary of its output decision for the last cycle.
+It is updated only when its subject changes:
+
+- `Running: <action>`: the named action owns the outputs.
+- `Starved: newer lease <action> reserves <motor>`: an older request is blocked by a newer lease on a
+  shared motor.
+- `Superseded by newer action on shared resource`: an older candidate lost arbitration without a
+  lease conflict.
+- `Fault: ...`: the mechanism faulted this cycle and its outputs were neutralized.
+- `Disabled`, `Idle`: no action is running, or the robot is disabled.
+
 ## Autonomous preview
 
 Athena inspects the selected autonomous `Action` without running it. Path providers contribute the

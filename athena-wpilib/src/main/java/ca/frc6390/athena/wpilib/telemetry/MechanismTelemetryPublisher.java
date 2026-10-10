@@ -100,6 +100,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 ? parentPath
                 : join(parentPath, node.name());
         node.values().forEach((name, value) -> {
+            if (!value.isPublished()) return;
             String path = join(nodePath, name);
             ValueChannel channel = new ValueChannel(instance, path, value);
             allValues.add(channel);
@@ -215,6 +216,11 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         private final NetworkTableEntry entry;
         private final StructArrayPublisher<Pose2d> geometryPublisher;
         private final StructArrayPublisher<Translation2d> pointsPublisher;
+        private final NetworkTableEntry writeStatus;
+        private final NetworkTableEntry lockStatus;
+        private String lastWriteStatus = "ok";
+        private boolean lastLocked;
+        private boolean lockPublished;
         private long lastEntryChange;
         private double lastNumber;
         private boolean lastBoolean;
@@ -225,6 +231,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             this.path = path;
             this.value = value;
             String topic = topic(path);
+            writeStatus = value.writable() ? nt.getEntry(topic + "/WriteStatus") : null;
+            lockStatus = value.lockGroup() != null ? nt.getEntry(topic + "/Lock") : null;
             if (value.type() == TelemetryValue.Type.GEOMETRY) {
                 entry = null;
                 geometryPublisher = nt.getStructArrayTopic(topic, Pose2d.struct).publish();
@@ -268,6 +276,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             } else if (value.writable()) {
                 applyDashboardValue();
             }
+            if (writeStatus != null) writeStatus.setString(lastWriteStatus);
             lastEntryChange = entry.getLastChange();
             rememberCurrentValue();
         }
@@ -305,6 +314,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 } else if (publishLocal) {
                     publishWritableIfChanged();
                 }
+                publishLockStatus();
                 return;
             }
             switch (value.type()) {
@@ -351,26 +361,61 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 case NUMBER -> {
                     double current = value.number();
                     double requested = entry.getDouble(current);
-                    if (Double.compare(current, requested) != 0) value.set(requested);
+                    if (Double.compare(current, requested) != 0) dashboardWrite(requested);
                 }
                 case BOOLEAN -> {
                     boolean current = value.bool();
                     boolean requested = entry.getBoolean(current);
                     if (value.momentary()) {
-                        if (requested) value.set(true);
+                        if (requested) dashboardWrite(true);
                         if (requested) entry.setBoolean(false);
                     } else if (current != requested) {
-                        value.set(requested);
+                        dashboardWrite(requested);
                     }
                 }
                 case STRING -> {
                     String current = String.valueOf(value.value());
                     String requested = entry.getString(current);
-                    if (!current.equals(requested)) value.set(requested);
+                    if (!current.equals(requested)) dashboardWrite(requested);
                 }
                 case NUMBER_ARRAY -> throw new IllegalArgumentException("Numeric-array telemetry is read-only.");
                 case POINTS -> throw new IllegalArgumentException("Point telemetry is read-only.");
                 case GEOMETRY -> throw new IllegalArgumentException("Geometry telemetry is read-only.");
+            }
+        }
+
+        /**
+         * Applies a dashboard write through the value's lock gate. A rejected write leaves the value
+         * unchanged, resets the published entry to the actual value, and reports the reason in WriteStatus.
+         */
+        private void dashboardWrite(Object requested) {
+            TelemetryValue.WriteResult result = value.tryWrite(requested);
+            String status = result.accepted() ? "ok" : result.reason();
+            if (writeStatus != null && !status.equals(lastWriteStatus)) {
+                writeStatus.setString(status);
+                lastWriteStatus = status;
+            }
+            if (!result.accepted()) {
+                resetEntry();
+            }
+        }
+
+        private void resetEntry() {
+            switch (value.type()) {
+                case NUMBER -> entry.setDouble(value.number());
+                case BOOLEAN -> entry.setBoolean(value.bool());
+                case STRING -> entry.setString(String.valueOf(value.value()));
+                default -> { }
+            }
+        }
+
+        private void publishLockStatus() {
+            if (lockStatus == null) return;
+            boolean locked = value.locked();
+            if (!lockPublished || locked != lastLocked) {
+                lockStatus.setString(value.lockGroup().getSimpleName() + (locked ? " (locked)" : " (unlocked)"));
+                lastLocked = locked;
+                lockPublished = true;
             }
         }
 
@@ -422,6 +467,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             if (geometryPublisher != null) geometryPublisher.close();
             if (pointsPublisher != null) pointsPublisher.close();
             if (entry != null) entry.close();
+            if (writeStatus != null) writeStatus.close();
+            if (lockStatus != null) lockStatus.close();
         }
     }
 
