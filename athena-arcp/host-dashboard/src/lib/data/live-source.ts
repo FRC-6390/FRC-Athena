@@ -10,7 +10,7 @@ import type { CommandReply, RobotCommands } from './commands';
 import type { DataSource, SourceSink } from './source';
 import { fromWireValue, toWireValue, type WireValue } from './live-convert';
 import type { SignalDescriptor, SignalValue } from './types';
-import { ARCP_CONTROL_PORT } from './arcp-ports';
+import { ARCP_CONTROL_PORT, DEFAULT_SUBSCRIPTION, DEFAULT_SUBSCRIPTION_HZ } from './arcp-ports';
 
 export type LiveServerStatus = {
   clients: number;
@@ -161,9 +161,11 @@ export class LiveSource implements DataSource {
   async connect(options: ConnectOptions): Promise<ConnectInfo> {
     this.ctx = createDecodeContext();
     this.descriptors.clear();
-    return invoke<ConnectInfo>('live_connect', {
+    const info = await invoke<ConnectInfo>('live_connect', {
       options: { ...options, controlPort: options.controlPort ?? ARCP_CONTROL_PORT }
     });
+    await this.subscribe(DEFAULT_SUBSCRIPTION, DEFAULT_SUBSCRIPTION_HZ);
+    return info;
   }
 
   disconnect(): Promise<void> {

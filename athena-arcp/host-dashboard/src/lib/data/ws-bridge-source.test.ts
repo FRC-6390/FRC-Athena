@@ -127,6 +127,10 @@ describe('WsBridgeSource commands', () => {
     socket().receive(
       JSON.stringify({ id: 1, ok: true, result: { sessionId: 2, udpPort: 40000, controlAddr: '127.0.0.1:5812' } })
     );
+    // Connecting subscribes to every signal, so the dashboard receives values without replay.
+    await Promise.resolve();
+    expect(socket().lastCommand()).toEqual({ id: 2, cmd: 'subscribe', pattern: '**', hz: 50 });
+    socket().receive(JSON.stringify({ id: 2, ok: true, result: 1 }));
     expect(await pending).toEqual({ sessionId: 2, udpPort: 40000, controlAddr: '127.0.0.1:5812' });
   });
 

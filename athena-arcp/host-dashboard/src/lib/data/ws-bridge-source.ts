@@ -11,7 +11,7 @@ import type { DataSource, SourceSink } from './source';
 import type { LiveEvent, LiveStatus } from './live-source';
 import type { SignalValue, StructValue } from './types';
 import { decodeBase64 } from './base64';
-import { ARCP_CONTROL_PORT } from './arcp-ports';
+import { ARCP_CONTROL_PORT, DEFAULT_SUBSCRIPTION, DEFAULT_SUBSCRIPTION_HZ } from './arcp-ports';
 
 const OPEN = 1;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
@@ -148,12 +148,15 @@ export class WsBridgeSource implements DataSource {
     return () => this.openListeners.delete(listener);
   }
 
-  connect(options: BridgeConnectOptions): Promise<BridgeConnectInfo> {
-    return this.request('connect', {
+  /** Connects the bridge to a robot and subscribes to every signal (the dashboard shows the whole tree). */
+  async connect(options: BridgeConnectOptions): Promise<BridgeConnectInfo> {
+    const info = (await this.request('connect', {
       host: options.host,
       port: options.controlPort ?? ARCP_CONTROL_PORT,
       replay: options.replay ?? false
-    }) as Promise<BridgeConnectInfo>;
+    })) as BridgeConnectInfo;
+    await this.subscribe(DEFAULT_SUBSCRIPTION, DEFAULT_SUBSCRIPTION_HZ);
+    return info;
   }
 
   disconnect(): Promise<void> {
