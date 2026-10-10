@@ -49,9 +49,47 @@ The dictionary is built once from the mechanism telemetry schema when the robot 
 | Published `@Telemetry` values and `TelemetryValue`s | Telemetry path, for example `turret/Values/kP` | `state` for values under `State`, `control` for writable values, `device`, `hook`, otherwise `value` | Types: number (f64), boolean, string, number array. Writable: flag bit0. Persisted: flag bit1. `lockGroup` is the fully qualified group class name, for example `ca.frc6390.athena.mechanism.persist.Locks$InMatch`. |
 | Actions (`TelemetryAction`) | Telemetry path under `Actions`, for example `turret/Actions/aim` | `action` (5) | Boolean running state. Run and cancel are requests (see below). |
 | Lock state | `athena/locks/<fully qualified group class name>` | `lock` (7) | Boolean, true = locked. One per lock group in use. |
+| Robot system signals | `athena/robot/...`, `athena/power/...` (see below) | `system` (8) | Read-only. Per-motor power channels are added later (see Growth). |
 
-Units are empty: `TelemetryValue` does not declare units yet. Points and geometry telemetry are not sent over ARCP;
-use NT4 for those.
+The `State` rule applies wherever the `State` group sits, so `Controls/<c>/State/...` and `Devices/<m>/State/...` are
+role `state`. The first group in the path decides for everything else.
+
+Units come from the path for the values listed below. Everything else is empty: `TelemetryValue` does not declare
+units yet. Points and geometry telemetry are not sent over ARCP; use NT4 for those.
+
+#### Control, motor, power and stage paths
+
+These come from the mechanism schema, so NT4 publishes the same names under `/Athena/Mechanisms`. `<mech>` is the
+mechanism path, `<c>` a control, `<m>` a motor declared on the mechanism. A control's motors sit at
+`Controls/<c>/Devices/<index>` instead of `Devices/<m>`.
+
+| Path | Role | Unit | Meaning |
+| --- | --- | --- | --- |
+| `<mech>/Controls/<c>/State/Target` | state | control units | The requested target, as the caller asked for it. |
+| `<mech>/Controls/<c>/State/Reference` | state | control units | Motion-profile reference position (the goal without a profile). |
+| `<mech>/Controls/<c>/State/ReferenceVelocity` | state | control units | Motion-profile reference velocity. |
+| `<mech>/Controls/<c>/State/Error` | state | control units | Goal minus measurement, the same error as the trace. |
+| `<mech>/Controls/<c>/State/Output` | state | `V` | Applied output in volts. NaN when the controller runs the loop on the device (no software volts) or the control is not driven. |
+| `<mech>/Devices/<m>/State/TemperatureCelsius` | state | `C` | Winding temperature estimate (the thermal model, fused with the vendor reading). |
+| `<mech>/Devices/<m>/State/Derate` | state | none | Thermal derate fraction, 0 to 1; 1 means no derate. |
+| `<mech>/Devices/<m>/State/PowerCapAmps` | state | `A` | Effective current cap of the latest power cycle. 0 when the motor is not capped. |
+| `<mech>/State/Stage` | state | none | Current stage of the mechanism's first `Staging`, by enum constant name. Empty when it declares none. |
+
+The control values are the ones the tuning plot needs: `Target` against `Reference` against the measured
+`FeedbackPosition` or `FeedbackVelocity`. They are NaN until the control is first driven, and go back to NaN when a cycle
+does not drive it.
+
+#### Power channels and growth
+
+| Path | Role | Unit | Meaning |
+| --- | --- | --- | --- |
+| `athena/power/<motor>/current` | system | `A` | The motor's estimated current draw from the power pass (its demand). |
+| `athena/power/<motor>/capAmps` | system | `A` | The planner's cap on the motor. 0 when it is not capped. |
+
+`<motor>` is the motor's default name, as the power pass reports it. These paths do not exist until the power pass has
+cycled and reported the motor. The bridge checks once per second; when a motor is new it adds the two entries and calls
+`publishDictionary` again. The server pushes the new schema to every session. Existing signal ids never change, and
+entries are only added, so a client keeps its subscriptions and can look up the new paths when the schema arrives.
 
 ### Realtime values
 
@@ -155,7 +193,8 @@ Only persisted, writable numbers, booleans and strings take part. Persisted numb
 - Writes and Action requests wait at most 250 ms for the robot. Call `NativeArcpServer.serviceRequests()` every
   cycle; the bridge does it in `AthenaRobot.robotPeriodic`. At most 256 requests queue. A timeout rejects with
   `robot did not answer`.
-- Struct, point and geometry signals are not sent. `TelemetryValue` has no unit yet, so dictionary units are empty.
+- Struct, point and geometry signals are not sent. `TelemetryValue` has no unit yet, so dictionary units are empty
+  except for the paths in the table above.
 - Number-array values allocate when they change. Numbers, booleans and integers do not.
 - The Rust side owns the sockets and frame encoding. Java never encodes ARCP frames.
 

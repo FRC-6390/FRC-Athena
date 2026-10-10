@@ -135,6 +135,7 @@ final class OutputApplier {
             if (captureTrace) {
                 controlTraces.add(applied.trace(control, controlRuntimes.get(control)));
             }
+            recordSample(control, applied);
             if (control.sink() != null) {
                 applySink(control.sink(), applied.output());
             }
@@ -364,6 +365,9 @@ final class OutputApplier {
                 }
             }
             state.active = applied;
+            if (!applied) {
+                overrides.controlSample(control).clear();
+            }
         }
         controlsAppliedThisCycle.clear();
     }
@@ -1150,6 +1154,26 @@ final class OutputApplier {
         if (output instanceof Output.Velocity) return "velocity";
         if (output instanceof Output.Fault) return "fault";
         return "neutral";
+    }
+
+    /**
+     * Stores the control's target, reference, error and applied volts for telemetry. Reads only fields the cycle
+     * already computed, so it allocates nothing. The error is goal minus measurement, as in the trace.
+     */
+    private void recordSample(ControlBinding<?> control, AppliedOutput applied) {
+        ControlSample sample = overrides.controlSample(control);
+        Output requested = applied.requested;
+        if (requested == null) {
+            sample.clear();
+            return;
+        }
+        StagedRequest staged = applied.staged;
+        double measured = requested instanceof Output.Velocity ? applied.measuredVelocity : applied.measuredPosition;
+        double goal = staged == null ? value(applied.transformed) : staged.goal();
+        double referencePosition = staged == null ? applied.measuredPosition : staged.reference().position();
+        double referenceVelocity = staged == null ? 0.0 : staged.reference().velocity();
+        double volts = applied.output() instanceof Output.Voltage voltage ? voltage.volts() : Double.NaN;
+        sample.record(value(requested), referencePosition, referenceVelocity, goal - measured, volts);
     }
 
     private static double value(Output output) {

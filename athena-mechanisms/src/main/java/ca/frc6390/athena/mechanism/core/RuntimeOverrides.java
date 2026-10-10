@@ -32,9 +32,29 @@ final class RuntimeOverrides {
     private final Map<Object, String> setupStatus = new IdentityHashMap<>();
     private final Map<EncoderDevice, Double> requestedEncoderPositions = new IdentityHashMap<>();
     private final Map<ImuDevice, Double> requestedImuYaw = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, ControlSample> controlSamples = new IdentityHashMap<>();
     private ActionContext actionContext = ActionContext.empty();
     private TuningLocks locks = new TuningLocks();
     private TelemetryPersistence persistence = TelemetryPersistence.disabled();
+    private PowerRuntime electrical;
+
+    /**
+     * Returns the latest sample of a control. The output path writes it each cycle and telemetry reads it, so both
+     * get the same object.
+     */
+    ControlSample controlSample(ControlBinding<?> control) {
+        return controlSamples.computeIfAbsent(control, key -> new ControlSample());
+    }
+
+    /** Installs the power pass whose per-motor caps the motor telemetry reports. */
+    void electrical(PowerRuntime power) { this.electrical = power; }
+
+    /** Effective current cap of a motor from the latest power cycle, in amps; 0 when it is not capped. */
+    double powerCapAmps(MotorDevice motor) {
+        if (electrical == null) return 0.0;
+        double cap = electrical.capAmps(motor);
+        return Double.isFinite(cap) ? cap : 0.0;
+    }
 
     /** Returns the tuning lock conditions consulted by dashboard writes. */
     TuningLocks locks() { return locks; }

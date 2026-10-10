@@ -20,6 +20,7 @@ import java.lang.reflect.Modifier;
 import ca.frc6390.athena.mechanism.model.Characterization;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.persist.Locks;
+import ca.frc6390.athena.mechanism.staging.Staging;
 
 final class RobotGraph {
     private final Map<Mechanism, MechanismNode> mechanismNodes = new IdentityHashMap<>();
@@ -111,6 +112,17 @@ final class RobotGraph {
         state.values.put("ActionComplete", TelemetryValue.bool(() -> anyAction(inspected, scheduler, false)));
         state.values.put("Fault", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.fault(mechanism)));
         state.values.put("Reason", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.reason(mechanism)));
+        // The first Staging the mechanism declares; its current stage by enum constant name, or empty.
+        Staging<?> staging = null;
+        for (Object declaration : inspected.declarations().values()) {
+            if (declaration instanceof Staging<?> found) {
+                staging = found;
+                break;
+            }
+        }
+        Staging<?> stagingOwner = staging;
+        state.values.put("Stage", TelemetryValue.string(() -> stagingOwner == null
+                ? "" : ((Enum<?>) stagingOwner.currentStage()).name()));
         inspected.Actions().forEach((actionName, action) -> {
             if (!isExposedActionField(mechanism, actionName, action)) return;
             ownedNode
@@ -337,6 +349,12 @@ final class RobotGraph {
                 values.put(controlPath + "/State/FeedbackVelocity",
                         safeNumber(control.feedback().velocity()::velocity));
             }
+            ControlSample sample = overrides.controlSample(control);
+            values.put(controlPath + "/State/Target", safeNumber(sample::target));
+            values.put(controlPath + "/State/Reference", safeNumber(sample::referencePosition));
+            values.put(controlPath + "/State/ReferenceVelocity", safeNumber(sample::referenceVelocity));
+            values.put(controlPath + "/State/Error", safeNumber(sample::error));
+            values.put(controlPath + "/State/Output", safeNumber(sample::output));
             int customLoop = 0;
             for (ControlLoop loop : control.loops()) {
                 if (directDeclarations.contains(loop) || !publishedDeclarations.add(loop)) continue;
@@ -452,6 +470,11 @@ final class RobotGraph {
         values.put(state + "/StatorCurrentAmps", safeNumber(motor::statorCurrentAmps));
         values.put(state + "/CommandMode", TelemetryValue.string(() -> motor.command().mode().name()));
         values.put(state + "/CommandValue", TelemetryValue.number(() -> motor.command().value()));
+        // Thermal and power state. The temperature is the thermal model's estimate, the derate is the curve applied
+        // to it, and the cap is the effective limit of the latest power cycle (0 when none). No hardware is read.
+        values.put(state + "/TemperatureCelsius", safeNumber(motor::temperatureCelsius));
+        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().derateFraction(motor.temperatureCelsius())));
+        values.put(state + "/PowerCapAmps", safeNumber(() -> overrides.powerCapAmps(motor)));
     }
 
     private static void addEncoderTelemetry(

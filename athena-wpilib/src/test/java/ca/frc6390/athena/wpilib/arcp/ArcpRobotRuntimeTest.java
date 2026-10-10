@@ -5,13 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.arcp.ArcpPolicy;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.ControlBinding;
+import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.TelemetryAction;
 import ca.frc6390.athena.mechanism.core.Telemetry;
+import ca.frc6390.athena.mechanism.staging.Staging;
 import ca.frc6390.athena.mechanism.persist.Locks;
 import ca.frc6390.athena.mechanism.persist.PersistentStore;
 import ca.frc6390.athena.mechanism.persist.TuningLocks;
@@ -45,6 +50,7 @@ class ArcpRobotRuntimeTest {
     private static final String GAIN = "arcpTestMechanism/Values/gain";
     private static final String READY = "arcpTestMechanism/Values/status/ready";
     private static final String RUN = "arcpTestMechanism/Actions/run";
+    private static final String POWERED = "arcpPoweredMechanism";
 
     @TempDir
     Path temp;
@@ -230,6 +236,80 @@ class ArcpRobotRuntimeTest {
     }
 
     @Test
+    void controlSetpointsMotorThermalAndStageAreInTheDictionaryAndCarryValues() throws Exception {
+        runtime = RobotRuntime.simulated(SimulationSession.create());
+        ArcpPoweredMechanism powered = new ArcpPoweredMechanism();
+        runtime.register(powered);
+        bridge = ArcpBridge.attach(ArcpPolicy.of().controlPort(0).realtimePort(0), runtime, null, l -> false, null, true);
+        client = new ArcpTestClient(bridge.controlPort());
+        udp = new DatagramSocket(0);
+        assertEquals(ArcpTestClient.STATUS_OK, client.hello(udp.getLocalPort()).status());
+
+        String control = POWERED + "/Controls/control/State/";
+        String motor = POWERED + "/Devices/motor/State/";
+        for (String path : List.of(control + "Target", control + "Reference", control + "ReferenceVelocity",
+                control + "Error", control + "Output", motor + "TemperatureCelsius", motor + "Derate",
+                motor + "PowerCapAmps", POWERED + "/State/Stage")) {
+            ArcpTestClient.Dict dict = client.signal(path);
+            assertEquals(ArcpDictEntry.ROLE_STATE, dict.role(), path);
+            assertEquals(0, dict.flags() & ArcpDictEntry.FLAG_WRITABLE, path);
+        }
+        assertEquals("V", client.signal(control + "Output").unit());
+        assertEquals("C", client.signal(motor + "TemperatureCelsius").unit());
+        assertEquals("A", client.signal(motor + "PowerCapAmps").unit());
+
+        runtime.request(powered.spin);
+        subscribeAll();
+        for (int i = 0; i < 5; i++) {
+            runtime.teleopPeriodic(now += 0.02, 0.02);
+            bridge.periodic(now);
+        }
+        Map<Long, Object> values = merged(ArcpTestClient.receiveFrames(udp, 500));
+        assertEquals(5.0, (Double) values.get(client.signal(control + "Target").id()), 1e-9);
+        assertTrue(values.containsKey(client.signal(control + "Output").id()), "applied volts are sent");
+        assertEquals("NORMAL", values.get(client.signal(POWERED + "/State/Stage").id()));
+        assertTrue(values.containsKey(client.signal(motor + "TemperatureCelsius").id()));
+    }
+
+    @Test
+    void powerMotorChannelsJoinTheDictionaryAfterTheFirstPowerCycleWithoutRenumbering() throws Exception {
+        runtime = RobotRuntime.simulated(SimulationSession.create());
+        ArcpPoweredMechanism powered = new ArcpPoweredMechanism();
+        runtime.register(powered);
+        bridge = ArcpBridge.attach(ArcpPolicy.of().controlPort(0).realtimePort(0), runtime, null, l -> false, null, true);
+        client = new ArcpTestClient(bridge.controlPort());
+        udp = new DatagramSocket(0);
+        assertEquals(ArcpTestClient.STATUS_OK, client.hello(udp.getLocalPort()).status());
+
+        String current = "athena/power/" + powered.motor.defaultName() + "/current";
+        String cap = "athena/power/" + powered.motor.defaultName() + "/capAmps";
+        assertFalse(client.dictionary().containsKey(current), "no power motors before the first cycle");
+        long targetId = client.signal(POWERED + "/Controls/control/State/Target").id();
+
+        for (int i = 0; i < 60; i++) {
+            runtime.teleopPeriodic(now += 0.02, 0.02);
+            bridge.periodic(now);
+        }
+        // Any request reads the pending schema push, which the republished dictionary arrives in.
+        ArcpTestClient.Reply list = pump(() -> client.fileList());
+        assertEquals(ArcpTestClient.STATUS_OK, list.status(), list.reason());
+        assertTrue(client.dictionary().containsKey(current), "the power channels appear once the motor is known");
+        assertTrue(client.dictionary().containsKey(cap));
+        assertEquals("A", client.signal(current).unit());
+        assertEquals(targetId, client.signal(POWERED + "/Controls/control/State/Target").id(),
+                "existing ids do not change when the dictionary grows");
+
+        subscribeAll();
+        for (int i = 0; i < 3; i++) {
+            runtime.teleopPeriodic(now += 0.02, 0.02);
+            bridge.periodic(now);
+        }
+        Map<Long, Object> values = merged(ArcpTestClient.receiveFrames(udp, 500));
+        assertTrue(values.containsKey(client.signal(current).id()), "the current is sent");
+        assertEquals(0.0, (Double) values.get(client.signal(cap).id()), 1e-9, "an uncapped motor reports 0 A");
+    }
+
+    @Test
     void replayRecordsStreamOnlyToOptedInSessionsMarkersAreForwardedAndBackfillIsServed() throws Exception {
         Path replays = temp.resolve("replays");
         runtime = RobotRuntime.simulated(SimulationSession.create());
@@ -381,6 +461,17 @@ class ArcpRobotRuntimeTest {
 
     private static String text(ArcpTestClient.Reply reply) {
         return new String(((byte[]) ((Object[]) reply.data())[1]), StandardCharsets.UTF_8);
+    }
+
+    /** Test robot mechanism with a velocity loop on one motor and a two-stage staging. */
+    static final class ArcpPoweredMechanism implements Mechanism {
+        final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 21);
+        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+        public final Action spin = control.velocity(5.0);
+        public final Staging<Stage> health = Staging.of(Stage.NORMAL)
+                .stage(Stage.HOT, () -> false, control.limitEffort(0.5));
+
+        enum Stage { NORMAL, HOT }
     }
 
     /** Test robot mechanism: one persisted writable number, a read-only status and one action. */

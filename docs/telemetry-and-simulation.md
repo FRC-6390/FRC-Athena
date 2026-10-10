@@ -61,7 +61,8 @@ This publishes `Actions/sysId/QuasistaticForward`, `QuasistaticReverse`, `Dynami
 
 Device state and setup live with the field that owns the device:
 
-- Motors publish command, position, velocity, voltage, and currents under `State`. Temporary
+- Motors publish command, position, velocity, voltage, currents, temperature, thermal derate, and the power cap
+  under `State` (`TemperatureCelsius`, `Derate`, `PowerCapAmps`). Temporary
   `Disabled`, `NeutralMode`, `Inverted`, supply-current, and stator-current overrides live under
   `Config`, along with support, status, and restore controls.
 - Encoders publish position, absolute position, and velocity under `State`; `Setup` provides a
@@ -70,7 +71,8 @@ Device state and setup live with the field that owns the device:
   publishes connection, calibration, last-update, and 100 ms freshness state. `Setup` provides
   requested yaw, Set, Zero, and status controls.
 - Digital inputs publish raw and active state and expose a latched-edge clear operation.
-- Controls publish mode and feedback under `State`, with disabled, slot, PID, and feedforward values
+- Controls publish mode and feedback under `State`, plus the setpoint trio (`Target`, `Reference`,
+  `ReferenceVelocity`), `Error`, and the applied `Output` in volts, with disabled, slot, PID, and feedforward values
   under `Config`. `Config/Constraints` exposes temporary minimum/maximum position, maximum velocity,
   maximum acceleration, and maximum output (0–1) overrides. `Test/Percent` supplies an output for
   the adjacent `RunPercent` dashboard action. The output remains under normal action ownership,

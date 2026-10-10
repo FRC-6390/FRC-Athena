@@ -139,6 +139,7 @@ public final class MechanismScheduler {
         actionContext = new OverlayActionContext(registeredHandles,
                 hardwareContext == null ? ActionContext.empty() : hardwareContext);
         resolver.overrides().actionContext(actionContext);
+        resolver.overrides().electrical(power);
     }
 
     public static MechanismScheduler create() {
