@@ -64,6 +64,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
     private boolean reportedJvmConfiguration;
     private ReplayBridge replay;
+    /** Start of the current enabled period (autonomous, teleop or test), or NaN while disabled. */
+    private double enabledSinceSeconds = Double.NaN;
     private boolean closed;
     private final TuningLocks tuningLocks = new TuningLocks()
             .define(Locks.InMatch.class, DriverStation::isFMSAttached);
@@ -185,6 +187,10 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void disabledInit() {
         run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, simulationActive());
+        if (!Double.isNaN(enabledSinceSeconds)) {
+            runtime.recordDisable(timestampSeconds() - enabledSinceSeconds);
+            enabledSinceSeconds = Double.NaN;
+        }
         replay.initialized(LifecycleMode.DISABLED);
     }
 
@@ -201,6 +207,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     @Override
     public final void autonomousInit() {
+        enabledSinceSeconds = timestampSeconds();
         run(LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, simulationActive());
         replay.initialized(LifecycleMode.AUTONOMOUS);
     }
@@ -219,6 +226,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     @Override
     public final void teleopInit() {
+        enabledSinceSeconds = timestampSeconds();
         CommandScheduler.getInstance().cancelAll();
         run(LifecycleMode.TELEOP, LifecyclePhase.INIT, true, simulationActive());
         replay.initialized(LifecycleMode.TELEOP);
@@ -233,11 +241,15 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     @Override
     public final void teleopExit() {
         run(LifecycleMode.TELEOP, LifecyclePhase.EXIT, true, simulationActive());
+        if (DriverStation.isFMSAttached()) {
+            runtime.recordMatchEnd();
+        }
         replay.exited(LifecycleMode.TELEOP);
     }
 
     @Override
     public final void testInit() {
+        enabledSinceSeconds = timestampSeconds();
         CommandScheduler.getInstance().cancelAll();
         run(LifecycleMode.TEST, LifecyclePhase.INIT, true, simulationActive());
         replay.initialized(LifecycleMode.TEST);

@@ -720,6 +720,23 @@ public final class RobotRuntime implements AutoCloseable {
         return mechanisms.powerSnapshot();
     }
 
+    /**
+     * Tells persisted characterizations the robot was disabled after an enabled period. Snapshots the running
+     * estimate into the history when the period was longer than 30 seconds.
+     *
+     * @param enabledSeconds length of the enabled period that just ended
+     */
+    public void recordDisable(double enabledSeconds) {
+        ensureOpen();
+        mechanisms.recordDisable(enabledSeconds);
+    }
+
+    /** Tells persisted characterizations that the match ended (FMS). Snapshots the running estimate. */
+    public void recordMatchEnd() {
+        ensureOpen();
+        mechanisms.recordMatchEnd();
+    }
+
     /** Returns and clears stage transitions recorded by declared stagings, oldest first. */
     public List<ca.frc6390.athena.mechanism.staging.Staging.Change<?>> drainStageChanges() {
         return mechanisms.drainStageChanges();

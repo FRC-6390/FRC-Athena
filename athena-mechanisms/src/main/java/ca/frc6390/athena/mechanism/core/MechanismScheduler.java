@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import ca.frc6390.athena.mechanism.model.Characterization;
+import ca.frc6390.athena.mechanism.persist.PersistentModelStorage;
 import ca.frc6390.athena.mechanism.persist.PersistentStore;
 import ca.frc6390.athena.mechanism.persist.TelemetryPersistence;
 import ca.frc6390.athena.mechanism.persist.TuningLocks;
@@ -117,6 +119,7 @@ public final class MechanismScheduler {
     private final OutputResolver resolver;
     private final PowerRuntime power = new PowerRuntime();
     private final List<Staging<?>> stagings = new ArrayList<>();
+    private final List<Characterization> characterizations = new ArrayList<>();
     private List<MotorDevice> powerMotors = List.of();
     private final StageHost stageHost = new StageHost() {
         @Override public void request(Action action) { MechanismScheduler.this.request(action); }
@@ -183,6 +186,7 @@ public final class MechanismScheduler {
                 Collections.newSetFromMap(new IdentityHashMap<>()));
         indexDeclarationTargets(mechanism, mechanism, Collections.newSetFromMap(new IdentityHashMap<>()));
         refreshPowerDeclarations();
+        attachCharacterizations(mechanism);
         rebuildCompiledActions();
         refreshDigitalInputs();
         telemetrySchema = null;
@@ -1118,9 +1122,72 @@ public final class MechanismScheduler {
      * @return this scheduler
      */
     public MechanismScheduler persistentStore(PersistentStore store, DoubleSupplier matchTimeSeconds) {
-        resolver.overrides().persistence(new TelemetryPersistence(store, matchTimeSeconds));
+        TelemetryPersistence persistence = new TelemetryPersistence(store, matchTimeSeconds);
+        persistence.keep(Set.of(PowerRuntime.BATTERY_OHMS_KEY));
+        resolver.overrides().persistence(persistence);
+        power.batteryStore(store);
         telemetrySchema = null;
         return this;
+    }
+
+    /** Returns the characterizations that persist through the store, in registration order. */
+    public List<Characterization> characterizations() {
+        return List.copyOf(characterizations);
+    }
+
+    /**
+     * Forwards a disable to every persisted characterization (history snapshot when enabled more than 30 s).
+     *
+     * @param enabledSeconds how long the robot was enabled in the period that ended
+     */
+    public void recordDisable(double enabledSeconds) {
+        for (Characterization characterization : characterizations) {
+            characterization.recordDisable(enabledSeconds);
+        }
+    }
+
+    /** Forwards a match end to every persisted characterization. */
+    public void recordMatchEnd() {
+        for (Characterization characterization : characterizations) {
+            characterization.recordMatchEnd();
+        }
+    }
+
+    /**
+     * Attaches the persistent store to the characterizations declared by a mechanism tree: each is keyed by its
+     * mechanism path plus declaration name, and its persisted model is restored before the robot runs.
+     */
+    private void attachCharacterizations(Mechanism mechanism) {
+        TelemetryPersistence persistence = resolver.overrides().persistence();
+        if (!persistence.enabled()) {
+            return;
+        }
+        MechanismNode node = graph.node(mechanism);
+        collectCharacterizations(node, node.name(), persistence, new IdentityHashMap<>());
+    }
+
+    private void collectCharacterizations(
+            MechanismNode node,
+            String path,
+            TelemetryPersistence persistence,
+            IdentityHashMap<Object, Boolean> visited) {
+        if (visited.put(node, Boolean.TRUE) != null) {
+            return;
+        }
+        node.declarations().forEach((name, declaration) -> {
+            if (!(declaration instanceof Characterization characterization)) {
+                return;
+            }
+            if (containsIdentity(characterizations, characterization)) {
+                return;
+            }
+            String key = path + "/" + name;
+            persistence.keep(PersistentModelStorage.keys(key));
+            characterization.persistAs(new PersistentModelStorage(persistence.store()), key);
+            characterizations.add(characterization);
+        });
+        node.children().forEach((childName, child) ->
+                collectCharacterizations(graph.node(child), path + "/" + childName, persistence, visited));
     }
 
     /**

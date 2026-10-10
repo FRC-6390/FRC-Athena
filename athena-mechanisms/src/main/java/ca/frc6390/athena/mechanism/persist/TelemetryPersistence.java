@@ -55,6 +55,18 @@ public final class TelemetryPersistence {
         return store != null;
     }
 
+    /**
+     * Keeps store entries owned by declarations that are not bound telemetry values (for example persisted models),
+     * so the boot-time cleanup does not delete them. Call before the first schema build.
+     *
+     * @param keys store keys to keep
+     */
+    public void keep(Set<String> keys) {
+        if (store != null) {
+            boundKeys.addAll(keys);
+        }
+    }
+
     /** Returns the attached store, or null when disabled. */
     public PersistentStore store() {
         return store;

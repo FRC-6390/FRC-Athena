@@ -83,6 +83,7 @@ public final class Characterization implements TelemetrySource {
         MechanismModel active;
         MechanismModel baseline;
         ModelStorage storage = new InMemoryModelStorage();
+        String storageKey;
         DoubleSupplier clock = MonotonicClock.SYSTEM;
         final Deque<CharacterizationSample> runs = new ArrayDeque<>();
         final Deque<CharacterizationSample> holds = new ArrayDeque<>();
@@ -221,6 +222,29 @@ public final class Characterization implements TelemetrySource {
     /** Sets where {@link #save(String)} writes models. The default is in memory. */
     public Characterization storage(ModelStorage storage) {
         state.storage = Objects.requireNonNull(storage, "storage");
+        return this;
+    }
+
+    /**
+     * Keeps the active model, the continuous-learning estimate and the snapshot history in {@code storage} under
+     * {@code key} (the characterization's field path). Restores whatever is stored there now: the active model
+     * becomes the active model and drift baseline, the stored estimate seeds the running estimate, and the history is
+     * reloaded. From then on fits, adopts, rebaselines and history snapshots are written through.
+     *
+     * @param storage destination, such as a persistent store
+     * @param key stable key, for example {@code "turret/angle"}
+     * @return this declaration
+     */
+    public Characterization persistAs(ModelStorage storage, String key) {
+        Objects.requireNonNull(storage, "storage");
+        if (key == null || key.isBlank()) {
+            throw new IllegalArgumentException("Characterization storage key must not be blank.");
+        }
+        state.storage = storage;
+        state.storageKey = key;
+        storage.load(key).ifPresent(this::defaults);
+        storage.loadRunning(key).ifPresent(this::reseedRunning);
+        storage.loadHistory(key).forEach(state.history::add);
         return this;
     }
 
@@ -435,6 +459,11 @@ public final class Characterization implements TelemetrySource {
         snapshot("match");
     }
 
+    /** Returns the store key set by {@link #persistAs}, or null when the characterization is not persisted. */
+    public String storageKey() {
+        return state.storageKey;
+    }
+
     /** Saves the active model to the configured storage. */
     public void save(String key) {
         state.storage.save(Objects.requireNonNull(key, "key"), state.active);
@@ -495,6 +524,17 @@ public final class Characterization implements TelemetrySource {
 
     private void snapshot(String reason) {
         state.history.add(new ModelHistory.Snapshot(state.clock.getAsDouble(), reason, runningEstimate()));
+        persist();
+    }
+
+    /** Writes the active model, running estimate and history through when a key is set. */
+    private void persist() {
+        if (state.storageKey == null) {
+            return;
+        }
+        state.storage.save(state.storageKey, state.active);
+        state.storage.saveRunning(state.storageKey, runningEstimate());
+        state.storage.saveHistory(state.storageKey, state.history.snapshots());
     }
 
     private void doFitModel() {
@@ -502,11 +542,13 @@ public final class Characterization implements TelemetrySource {
         state.active = fitted;
         state.baseline = fitted;
         reseedRunning(fitted);
+        persist();
     }
 
     private void doAdoptRunningEstimate() {
         state.active = runningEstimate();
         reseedRunning(state.active);
+        persist();
     }
 
     private void doRebaseline() {
