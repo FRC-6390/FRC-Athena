@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -84,6 +85,38 @@ public final class ReplayFiles {
      */
     public boolean delete(String name) {
         return files.delete(name);
+    }
+
+    /**
+     * Copies one replay file to a target path, for example a USB stick or a laptop. The copy is written to a
+     * temporary sibling and moved into place, so a partial copy never has the final name.
+     *
+     * @param name file name from {@link #list()}
+     * @param target destination file, or an existing directory to copy into under the same name
+     * @return the path written
+     * @throws IOException when the source is missing or the copy fails
+     */
+    public Path export(String name, Path target) throws IOException {
+        Path source = files.resolve(name);
+        if (!Files.isRegularFile(source)) {
+            throw new java.nio.file.NoSuchFileException(source.toString());
+        }
+        Path destination = target.toAbsolutePath().normalize();
+        if (Files.isDirectory(destination)) {
+            destination = destination.resolve(name);
+        }
+        Path parent = destination.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
+        Files.copy(source, temporary, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicUnsupported) {
+            Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return destination;
     }
 
     /** Returns the file name for a match identity and wall-clock time. */

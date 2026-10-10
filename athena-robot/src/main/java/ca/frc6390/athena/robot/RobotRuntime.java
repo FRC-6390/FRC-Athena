@@ -55,6 +55,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.nio.file.Path;
 import java.util.function.Function;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, commands, and sim.
@@ -90,6 +91,7 @@ public final class RobotRuntime implements AutoCloseable {
     private long cycleSequence;
     private volatile RuntimeCycleSnapshot cycleSnapshot;
     private ReplayRecorder replayRecorder;
+    private Supplier<RuntimeInputSnapshot> inputSource;
     private volatile boolean closed;
 
     private RobotRuntime(HardwareGraph hardwareGraph, SimulationSession simulationSession) {
@@ -760,7 +762,8 @@ public final class RobotRuntime implements AutoCloseable {
                 new EventContext(nowSeconds, dtSeconds, LifecycleMode.SIMULATION,
                         LifecyclePhase.PERIODIC, true, true),
                 null,
-                null);
+                null,
+                captureInputs());
         return List.of();
     }
 
@@ -778,6 +781,7 @@ public final class RobotRuntime implements AutoCloseable {
                 : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
         workers.runDue(safeMechanismContext.nowSeconds());
+        RuntimeInputSnapshot driverInputs = captureInputs();
         hardwareGraph.refreshInputs();
         HardwareCycleSnapshot mechanismInputs = replayRecorder == null ? null : hardwareGraph.cycleSnapshot();
         refreshFailures(safeMechanismContext.nowSeconds());
@@ -805,7 +809,7 @@ public final class RobotRuntime implements AutoCloseable {
                     safeMechanismContext.enabled(),
                     safeMechanismContext.autonomous());
         }
-        updateCycleSnapshot(safeMechanismContext, safeEventContext, outputs, mechanismInputs);
+        updateCycleSnapshot(safeMechanismContext, safeEventContext, outputs, mechanismInputs, driverInputs);
         return outputs;
     }
 
@@ -819,6 +823,7 @@ public final class RobotRuntime implements AutoCloseable {
         ensureOpen();
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
         workers.runDue(nowSeconds);
+        RuntimeInputSnapshot driverInputs = captureInputs();
         hardwareGraph.refreshInputs();
         HardwareCycleSnapshot mechanismInputs = replayRecorder == null ? null : hardwareGraph.cycleSnapshot();
         refreshFailures(nowSeconds);
@@ -832,7 +837,7 @@ public final class RobotRuntime implements AutoCloseable {
                 enabled,
                 simulation);
         List<ResolvedOutput> outputs = runMechanisms(mechanismContext, eventContext);
-        updateCycleSnapshot(mechanismContext, eventContext, outputs, mechanismInputs);
+        updateCycleSnapshot(mechanismContext, eventContext, outputs, mechanismInputs, driverInputs);
         return outputs;
     }
 
@@ -876,7 +881,8 @@ public final class RobotRuntime implements AutoCloseable {
             MechanismContext context,
             EventContext eventContext,
             List<ResolvedOutput> outputs,
-            HardwareCycleSnapshot mechanismInputs) {
+            HardwareCycleSnapshot mechanismInputs,
+            RuntimeInputSnapshot driverInputs) {
         List<RuntimeCycleSnapshot.DigitalInput> digitalInputs = mechanisms.digitalInputDevices().stream()
                 .map(input -> new RuntimeCycleSnapshot.DigitalInput(
                         input.defaultName(), input.channel(), safeDigitalRead(input, true), safeDigitalRead(input, false)))
@@ -901,10 +907,16 @@ public final class RobotRuntime implements AutoCloseable {
                 hardwareGraph.cycleSnapshot(),
                 digitalInputs,
                 mechanisms.traceSnapshots(),
-                localizationInputs);
+                localizationInputs,
+                driverInputs);
         if (replayRecorder != null) {
             replayRecorder.record(cycleSnapshot, mechanismInputs, outputs);
         }
+    }
+
+    private RuntimeInputSnapshot captureInputs() {
+        Supplier<RuntimeInputSnapshot> source = inputSource;
+        return source == null ? RuntimeInputSnapshot.empty() : source.get();
     }
 
     private static boolean safeDigitalRead(DigitalInputDevice input, boolean raw) {
@@ -1072,6 +1084,19 @@ public final class RobotRuntime implements AutoCloseable {
             ReplayMarkers.activate(null);
         }
         if (failure != null) throw failure;
+    }
+
+    /**
+     * Sets the source of driver station and joystick state. It is sampled once at the start of each cycle, before
+     * mechanisms run, and recorded in the cycle snapshot. Without a source the snapshot holds empty input.
+     *
+     * @param source input source, or null to clear it
+     * @return this runtime
+     */
+    public RobotRuntime inputs(Supplier<RuntimeInputSnapshot> source) {
+        ensureOpen();
+        inputSource = source;
+        return this;
     }
 
     /**

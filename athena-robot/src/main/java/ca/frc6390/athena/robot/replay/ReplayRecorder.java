@@ -7,7 +7,10 @@ import ca.frc6390.athena.robot.RuntimeFailureReporter;
 import ca.frc6390.athena.runtime.wire.WireWriter;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,7 +23,9 @@ import java.util.function.Supplier;
  * replay events, and optionally streams live records to a {@link ReplayStreamSink}.
  *
  * <p>Attached to a runtime with {@code RobotRuntime.replay(...)}. All methods run on the robot thread, except
- * {@link #mark} and {@link #keyframe}, which may be called from any thread.</p>
+ * {@link #mark}, {@link #keyframe}, and the waiting and counting accessors. A flush does not compress or touch
+ * the disk on the robot thread: it hands the buffered segments to a {@link ReplayWriter} thread, see
+ * {@link #flush()}.</p>
  */
 public final class ReplayRecorder {
     /** Segments close at a cycle boundary once they reach this size. */
@@ -47,7 +52,8 @@ public final class ReplayRecorder {
     private long lastSequence = -1;
     private double lastTimestampSeconds;
     private ReplayStreamSink sink;
-    private Path lastFile;
+    private final Set<String> issuedNames = new HashSet<>();
+    private ReplayWriter writer;
 
     public ReplayRecorder(ReplayPolicy policy, Path directory, RuntimeFailureReporter reporter) {
         this.policy = policy;
@@ -66,9 +72,35 @@ public final class ReplayRecorder {
         return directory;
     }
 
-    /** Returns the most recent file written by this recorder. */
-    public synchronized Optional<Path> lastFile() {
-        return Optional.ofNullable(lastFile);
+    /** Returns the most recent file the writer thread finished. */
+    public Optional<Path> lastFile() {
+        ReplayWriter current = writer;
+        return current == null ? Optional.empty() : current.lastWritten();
+    }
+
+    /**
+     * Waits until every queued flush has been written, or dropped. Intended for tests and orderly shutdown; the
+     * robot loop must not call it.
+     *
+     * @param timeout maximum wait
+     * @return true when no flush is pending
+     * @throws InterruptedException when interrupted while waiting
+     */
+    public boolean awaitFlushed(Duration timeout) throws InterruptedException {
+        ReplayWriter current = writer;
+        return current == null || current.awaitIdle(timeout);
+    }
+
+    /** Returns flushes accepted but not yet written. */
+    public int pendingFlushes() {
+        ReplayWriter current = writer;
+        return current == null ? 0 : current.pending();
+    }
+
+    /** Returns flushes dropped because the writer queue was full. */
+    public long droppedFlushes() {
+        ReplayWriter current = writer;
+        return current == null ? 0 : current.dropped();
     }
 
     /** Returns the match identity recorded in new files. */
@@ -165,9 +197,13 @@ public final class ReplayRecorder {
     }
 
     /**
-     * Writes everything buffered to a new file.
+     * Hands everything buffered to the writer thread, which writes it to a new file. Robot-thread cost is O(number
+     * of buffered segments) reference moves plus encoding of the dictionary; no compression or I/O happens here.
+     * The returned path is where the file will be written. It is not guaranteed to exist until
+     * {@link #awaitFlushed(Duration)} returns, and the writer may choose a later name if a file appeared there.
+     * Use {@link #lastFile()} for the name actually written.
      *
-     * @return the file, or empty when nothing was buffered or writing failed
+     * @return the destination, or empty when nothing was buffered or the recorder is closed
      */
     public synchronized Optional<Path> flush() {
         return flush("explicit");
@@ -217,9 +253,15 @@ public final class ReplayRecorder {
         }
     }
 
-    /** Closes the stream sink reference. Buffered data is not flushed. */
+    /**
+     * Closes the stream sink reference and stops the writer thread once queued flushes are written. Buffered data
+     * that was not flushed is discarded.
+     */
     public synchronized void close() {
         sink = null;
+        if (writer != null) {
+            writer.close();
+        }
     }
 
     void clock(Supplier<LocalDateTime> clock) {
@@ -251,22 +293,29 @@ public final class ReplayRecorder {
         metadata.put("firstTimestampSeconds", String.valueOf(segments.get(0).firstTimestampSeconds()));
         metadata.put("lastTimestampSeconds",
                 String.valueOf(segments.get(segments.size() - 1).lastTimestampSeconds()));
-        metadata.put("createdAt", clock.get().toString());
         LocalDateTime now = clock.get();
-        Path target = directory.resolve(ReplayFiles.fileName(match, now));
-        for (int attempt = 0; attempt < 600 && java.nio.file.Files.exists(target); attempt++) {
+        metadata.put("createdAt", now.toString());
+        String name = ReplayFiles.fileName(match, now);
+        // Names issued by this recorder are unique within the second; the writer checks the disk for the rest.
+        for (int attempt = 0; attempt < 600 && issuedNames.contains(name); attempt++) {
             now = now.plusSeconds(1);
-            target = directory.resolve(ReplayFiles.fileName(match, now));
+            name = ReplayFiles.fileName(match, now);
         }
-        try {
-            ReplayFileWriter.write(target, metadata, dictionary.toByteArray(), records);
-            lastFile = target;
-            ReplayFiles.at(directory).enforce(policy.retention(), target.getFileName().toString());
-            return Optional.of(target);
-        } catch (IOException | RuntimeException exception) {
-            reporter.error("Athena replay flush to " + target + " failed (" + reason + ").", exception);
+        issuedNames.add(name);
+        Path target = directory.resolve(name);
+        if (!replayWriter().submit(new ReplayWriter.Job(target, metadata, dictionary.toByteArray(), records, reason))) {
+            reporter.error("Athena replay flush to " + target + " was refused; the recorder is closed.", null);
             return Optional.empty();
         }
+        return Optional.of(target);
+    }
+
+    private ReplayWriter replayWriter() {
+        if (writer == null) {
+            writer = new ReplayWriter(reporter, protectedName -> ReplayFiles.at(directory)
+                    .enforce(policy.retention(), protectedName));
+        }
+        return writer;
     }
 
     private void openSegment() {

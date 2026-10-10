@@ -15,6 +15,7 @@ import ca.frc6390.athena.robot.RuntimeCycleSnapshot;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +39,7 @@ class ReplayRecorderTest {
             recorder.record(snapshot(cycle, cycle * 0.02, 1.5 + (cycle % 2) * 0.25, true), null, List.of());
         }
         recorder.mark(ReplayMarkers.MATCH_END, "end", 0);
-        Path file = recorder.flush().orElseThrow();
+        Path file = flushed(recorder);
 
         assertEquals("practice-20260307-143005.athrp", file.getFileName().toString());
         try (ReplayReader reader = ReplayReader.open(file)) {
@@ -80,7 +81,7 @@ class ReplayRecorderTest {
         for (int cycle = 1; cycle <= 200; cycle++) {
             recorder.record(snapshot(cycle, cycle * 0.02, 1.0, true), null, List.of());
         }
-        Path file = recorder.flush().orElseThrow();
+        Path file = flushed(recorder);
         long size = Files.size(file);
         // 200 cycles with ~20 signals each would be far larger than this if every value were repeated.
         assertTrue(size < 40_000, "size " + size);
@@ -107,7 +108,7 @@ class ReplayRecorderTest {
             recorder.record(snapshot(cycle, cycle * 0.02, cycle * 0.001, true), null, List.of());
             if (cycle == 1000) recorder.keyframe();
         }
-        Path file = recorder.flush().orElseThrow();
+        Path file = flushed(recorder);
         try (ReplayReader reader = ReplayReader.open(file)) {
             assertTrue(reader.blockCount() > 1, "blocks: " + reader.blockCount());
             int target = reader.blockCount() - 1;
@@ -131,7 +132,7 @@ class ReplayRecorderTest {
     }
 
     @Test
-    void matchIdentificationFlushesPracticeAndNamesTheNextFileAfterTheMatch() throws IOException {
+    void matchIdentificationFlushesPracticeAndNamesTheNextFileAfterTheMatch() throws Exception {
         ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of(), directory, null);
         recorder.clock(() -> LocalDateTime.of(2026, 3, 7, 9, 0, 0));
         recorder.record(snapshot(1, 0.02, 1.0, false), null, List.of());
@@ -140,6 +141,7 @@ class ReplayRecorderTest {
         recorder.clock(() -> LocalDateTime.of(2026, 3, 7, 9, 5, 0));
         recorder.matchEnd();
 
+        assertTrue(recorder.awaitFlushed(Duration.ofSeconds(10)));
         List<String> names = ReplayFiles.at(directory).list().stream().map(ReplayFiles.FileInfo::name).sorted().toList();
         assertEquals(List.of("2026mrcmp-q12-20260307-090500.athrp", "practice-20260307-090000.athrp"), names);
         ReplayFiles.FileInfo match = ReplayFiles.at(directory).list().stream()
@@ -150,7 +152,7 @@ class ReplayRecorderTest {
     }
 
     @Test
-    void disableFlushesOnlyAfterAnEnabledPeriodThatWasNotFlushed() throws IOException {
+    void disableFlushesOnlyAfterAnEnabledPeriodThatWasNotFlushed() throws Exception {
         ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of(), directory, null);
         recorder.clock(() -> LocalDateTime.of(2026, 1, 1, 0, 0, 0));
         recorder.record(snapshot(1, 0.02, 1.0, false), null, List.of());
@@ -160,10 +162,12 @@ class ReplayRecorderTest {
         recorder.enabledPeriod(ReplayMarkers.TELEOP_START, "teleop");
         recorder.record(snapshot(2, 0.04, 1.0, true), null, List.of());
         recorder.disabled();
+        assertTrue(recorder.awaitFlushed(Duration.ofSeconds(10)));
         assertEquals(1, ReplayFiles.at(directory).list().size());
 
         recorder.record(snapshot(3, 0.06, 1.0, false), null, List.of());
         recorder.brownoutRecovered();
+        assertTrue(recorder.awaitFlushed(Duration.ofSeconds(10)));
         assertEquals(2, ReplayFiles.at(directory).list().size());
     }
 
@@ -271,7 +275,7 @@ class ReplayRecorderTest {
             ReplayMarkers.mark(ReplayMarkers.FAULT, "motor disconnected");
             ReplayMarkers.keyframe();
             recorder.record(snapshot(1, 0.02, 1.0, true), null, List.of());
-            Path file = recorder.flush().orElseThrow();
+            Path file = flushed(recorder);
             try (ReplayReader reader = ReplayReader.open(file)) {
                 ReplayReader.Cursor cursor = reader.cursor();
                 assertTrue(cursor.next());
@@ -282,6 +286,18 @@ class ReplayRecorderTest {
         } finally {
             ReplayMarkers.activate(null);
         }
+    }
+
+    /** Flushes and waits for the writer thread, then returns the file it wrote. */
+    static Path flushed(ReplayRecorder recorder) throws IOException {
+        recorder.flush().orElseThrow();
+        try {
+            assertTrue(recorder.awaitFlushed(Duration.ofSeconds(10)), "writer did not finish");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        }
+        return recorder.lastFile().orElseThrow();
     }
 
     private static long cycle(int frameCount) {

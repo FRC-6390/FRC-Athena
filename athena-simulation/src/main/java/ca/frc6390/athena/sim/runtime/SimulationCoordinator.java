@@ -372,6 +372,10 @@ final class SimulationCoordinator implements SimModel.Context {
         return encoders;
     }
 
+    Map<HardwareIdentity, SimImuHandle> imuHandles() {
+        return imus;
+    }
+
     Map<DigitalInputDevice, SimDigitalInputHandle> digitalInputHandles() {
         return digitalInputs;
     }

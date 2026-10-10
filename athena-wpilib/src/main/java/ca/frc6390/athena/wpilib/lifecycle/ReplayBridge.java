@@ -33,9 +33,13 @@ final class ReplayBridge {
         this.recorder = runtime.replayRecorder().orElseThrow();
     }
 
-    /** Creates the bridge with driver station match information and brownout detection. */
+    /**
+     * Creates the bridge with driver station match information and brownout detection. The runtime also samples
+     * joysticks and driver station state each cycle, so recordings can be replayed with the same input.
+     */
     static ReplayBridge attach(RobotRuntime runtime, ReplayPolicy policy, boolean simulation) {
         Path directory = policy.directory().orElse(defaultDirectory(simulation));
+        runtime.inputs(DriverStationInputs::sample);
         return new ReplayBridge(runtime, policy, directory, ReplayBridge::driverStationMatch);
     }
 

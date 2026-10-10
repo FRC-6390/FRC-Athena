@@ -25,14 +25,19 @@ public final class ReplayReader implements Closeable {
     private record BlockRef(long payloadOffset, int payloadLength) {
     }
 
+    private static final long UNKNOWN_START = Long.MIN_VALUE;
+
     private final RandomAccessFile file;
     private final Map<String, String> metadata;
     private final List<BlockRef> blocks;
+    private final long[] blockStarts;
 
     private ReplayReader(RandomAccessFile file, Map<String, String> metadata, List<BlockRef> blocks) {
         this.file = file;
         this.metadata = Collections.unmodifiableMap(metadata);
         this.blocks = List.copyOf(blocks);
+        this.blockStarts = new long[this.blocks.size()];
+        Arrays.fill(blockStarts, UNKNOWN_START);
     }
 
     /**
@@ -100,6 +105,40 @@ public final class ReplayReader implements Closeable {
     /** Returns a new cursor positioned before the first event. */
     public Cursor cursor() {
         return new Cursor(this);
+    }
+
+    /**
+     * Returns the timestamp of the first frame or marker in a block. The block is decoded on the first call and
+     * the result is cached, so a time seek costs one decode per probed block.
+     *
+     * @param index block index
+     * @return first timestamp in microseconds, or {@link Long#MIN_VALUE} when the block holds no events
+     * @throws IOException when the block cannot be read
+     */
+    public long blockStartMicros(int index) throws IOException {
+        if (index < 0 || index >= blocks.size()) {
+            throw new IndexOutOfBoundsException("Block " + index + " is out of range.");
+        }
+        if (blockStarts[index] == UNKNOWN_START) {
+            long start = Long.MIN_VALUE;
+            WireReader records = new WireReader(readBlock(index));
+            while (records.hasRemaining()) {
+                WireReader.Record record = records.record();
+                if (record.type() == Wire.RECORD_FRAME) {
+                    WireReader payload = record.payload();
+                    payload.u8();
+                    payload.u8();
+                    start = payload.u64();
+                    break;
+                }
+                if (record.type() == Wire.RECORD_MARKER) {
+                    start = record.payload().zigzag();
+                    break;
+                }
+            }
+            blockStarts[index] = start;
+        }
+        return blockStarts[index];
     }
 
     private byte[] readBlock(int index) throws IOException {
@@ -176,6 +215,7 @@ public final class ReplayReader implements Closeable {
         private int markerKind;
         private String markerMessage = "";
         private int markerSignalId;
+        private boolean current;
 
         private Cursor(ReplayReader reader) {
             this.reader = reader;
@@ -188,15 +228,55 @@ public final class ReplayReader implements Closeable {
             }
             nextBlock = index;
             records = null;
+            current = false;
         }
 
         /**
-         * Advances to the next frame or marker.
+         * Positions the cursor at the first frame or marker whose timestamp is at or after {@code micros}. The block
+         * containing that point is found by binary search over block start times, and decoding starts at its
+         * keyframe, so no earlier block is read. The next call to {@link #next()} returns that event.
+         *
+         * @param micros target time in microseconds (the same clock as {@link #timestampMicros()})
+         * @throws IOException when a block cannot be read
+         */
+        public void seekTime(long micros) throws IOException {
+            current = false;
+            if (reader.blockCount() == 0) {
+                return;
+            }
+            int low = 0;
+            int high = reader.blockCount() - 1;
+            int chosen = 0;
+            while (low <= high) {
+                int middle = (low + high) >>> 1;
+                if (reader.blockStartMicros(middle) <= micros) {
+                    chosen = middle;
+                    low = middle + 1;
+                } else {
+                    high = middle - 1;
+                }
+            }
+            seekBlock(chosen);
+            while (next()) {
+                if (timestampMicros >= micros) {
+                    current = true;
+                    return;
+                }
+            }
+        }
+
+        /**
+         * Advances to the next frame or marker. After {@link #seekTime(long)} the first call returns the event the seek
+         * stopped on.
          *
          * @return false at the end of the file
          * @throws IOException when a block cannot be read
          */
         public boolean next() throws IOException {
+            if (current) {
+                current = false;
+                return true;
+            }
             while (true) {
                 if (records == null || !records.hasRemaining()) {
                     if (nextBlock >= reader.blockCount()) {
