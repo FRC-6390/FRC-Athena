@@ -410,6 +410,10 @@ impl Client {
         lock(&self.shared.model).lock_state(group)
     }
 
+    pub fn server_status(&self) -> Option<crate::model::ServerStatus> {
+        lock(&self.shared.model).server_status()
+    }
+
     pub fn status(&self) -> LinkStatus {
         let c = &self.shared.counters;
         let time = *lock(&self.shared.time);

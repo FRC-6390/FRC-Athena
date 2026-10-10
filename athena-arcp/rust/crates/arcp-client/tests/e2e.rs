@@ -135,6 +135,16 @@ fn commands_status_files_and_records_round_trip() {
     next_matching(&rx, "frame", has_angle(1.5));
     assert_eq!(client.value(ANGLE), Some(Value::F64(1.5)));
 
+    // The server status arrives as system signals, once a second, with or without subscriptions.
+    let deadline = Instant::now() + WAIT;
+    while client.server_status().is_none() {
+        assert!(Instant::now() < deadline, "server status never arrived");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let status = client.server_status().unwrap();
+    assert_eq!(status.clients, 1);
+    assert!(!status.throttled && status.throttled_patterns.is_empty());
+
     // Locked: the robot rejects and reports the value it still holds (E5).
     let rejected = client.write(ANGLE, Value::F64(9.0)).expect("write answered");
     assert!(!rejected.accepted);
@@ -195,7 +205,7 @@ fn commands_status_files_and_records_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// UDP relay between the server and the client. It drops the third frame-bearing datagram and
+/// UDP relay between the server and the client. It drops the third angle-bearing datagram and
 /// forwards everything else to `target` (the client's bound port, set after connect).
 struct LossyRelay {
     port: u16,
@@ -222,9 +232,10 @@ impl LossyRelay {
                 if target_port == 0 {
                     continue;
                 }
+                // Only datagrams carrying the angle signal count; status frames pass through.
                 let seq = decode_stream(&buf[..n]).ok().and_then(|recs| {
                     recs.into_iter().find_map(|r| match r {
-                        WireRecord::Frame(f) => Some(f.sequence),
+                        WireRecord::Frame(f) if f.entries.iter().any(|e| e.signal_id == ANGLE) => Some(f.sequence),
                         _ => None,
                     })
                 });

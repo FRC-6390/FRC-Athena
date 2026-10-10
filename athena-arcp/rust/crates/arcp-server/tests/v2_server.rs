@@ -197,6 +197,12 @@ fn server() -> (ArcpServerV2, Arc<RecordingHandler>) {
     server_with(ServerConfig::default())
 }
 
+/// Drops the server status signals (`athena/arcp/status/*`) the server adds to every dictionary.
+fn without_status(mut dict: Dictionary) -> Dictionary {
+    dict.entries.retain(|e| !e.path.starts_with("athena/arcp/status/"));
+    dict
+}
+
 fn angle(v: f64) -> Entry {
     Entry { signal_id: ANGLE, value: Value::F64(v) }
 }
@@ -222,7 +228,7 @@ fn dictionary_is_announced_on_connect_and_on_change() {
     let (id, msg) = client.read_message();
     assert_eq!(id, 0);
     match msg {
-        ServerMessage::Schema { dictionary: dict, .. } => assert_eq!(dict, extended),
+        ServerMessage::Schema { dictionary: dict, .. } => assert_eq!(without_status(dict), extended),
         other => panic!("{other:?}"),
     }
 }
@@ -233,7 +239,7 @@ fn schema_request_returns_full_dictionary_with_metadata() {
     let mut client = Client::connect(server.control_addr());
     match client.request(ClientMessage::SchemaRequest) {
         ServerMessage::Schema { dictionary: dict, schemas: s } => {
-            assert_eq!(dict, dictionary());
+            assert_eq!(without_status(dict.clone()), dictionary());
             assert_eq!(s, schemas());
             let angle = &dict.entries[0];
             assert!(angle.writable());
@@ -302,8 +308,12 @@ fn one_cycle_produces_one_batched_datagram() {
     client.hello(port);
     client.subscribe("robot/**", Rate::OnChange);
     drain_udp(&udp);
+    // An empty cycle sends the once-a-second server status first, so the test cycle stays inside
+    // the same second and only carries the robot's changed signals.
+    server.publish_cycle(4_000_000, &[]);
+    drain_udp(&udp);
 
-    server.publish_cycle(5_000_000, &[angle(1.0), Entry { signal_id: ENABLED, value: Value::Bool(true) }]);
+    server.publish_cycle(4_500_000, &[angle(1.0), Entry { signal_id: ENABLED, value: Value::Bool(true) }]);
     let mut count = 0;
     let mut buf = [0u8; 65536];
     let mut total_entries = 0;
@@ -366,7 +376,9 @@ fn large_cycles_are_fragmented_and_recoverable() {
     }
     server.publish_dictionary(dict, schemas());
     drain_udp(&udp);
-    server.publish_cycle(9_000_000, &entries);
+    server.publish_cycle(8_000_000, &[]);
+    drain_udp(&udp);
+    server.publish_cycle(8_500_000, &entries);
 
     let records = drain_udp(&udp);
     let f = frames(&records);
@@ -583,4 +595,38 @@ fn file_categories_are_listed_downloaded_and_deleted() {
     assert_eq!(status, Status::Ok);
     assert!(!replays.join("m1.athrp").exists());
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn server_status_signals_are_in_every_dictionary_and_sent_each_second() {
+    let (server, _) = server();
+    let mut client = Client::connect(server.control_addr());
+    client.hello(0);
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    udp.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+    let udp_port = udp.local_addr().unwrap().port();
+    client.hello(udp_port);
+
+    let dict = match client.request(ClientMessage::SchemaRequest) {
+        ServerMessage::Schema { dictionary, .. } => dictionary,
+        other => panic!("{other:?}"),
+    };
+    let status: Vec<_> = dict.entries.iter().filter(|e| e.path.starts_with("athena/arcp/status/")).collect();
+    assert_eq!(status.len(), 6);
+    assert!(status.iter().all(|e| e.role == 8));
+    let clients_id = status.iter().find(|e| e.path.ends_with("/clients")).unwrap().signal_id;
+    assert!(status.iter().all(|e| e.signal_id > 4), "status ids must not collide with robot ids");
+
+    // Two cycles one robot-second apart: the second one carries a fresh status frame.
+    server.publish_cycle(1_000_000, &[angle(1.0)]);
+    server.publish_cycle(2_100_000, &[angle(2.0)]);
+    let records = drain_udp(&udp);
+    let status_frames: Vec<_> = frames(&records)
+        .into_iter()
+        .filter(|f| f.entries.iter().any(|e| e.signal_id == clients_id))
+        .collect();
+    assert!(!status_frames.is_empty(), "status sent");
+    let entries = &status_frames[0].entries;
+    assert_eq!(entries.iter().find(|e| e.signal_id == clients_id).unwrap().value, Value::I64(1));
+    assert!(status_frames.len() <= 2, "at most one status frame per interval");
 }

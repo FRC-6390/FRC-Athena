@@ -6,14 +6,19 @@
   import DriverView from './components/driver/DriverView.svelte';
   import WorkspaceSwitcher, { type Workspace } from './components/workspaces/WorkspaceSwitcher.svelte';
   import { useLiveStore } from './lib/data/live.svelte';
+  import ConnectionBar from './components/live/ConnectionBar.svelte';
+  import PitFiles from './components/pit/PitFiles.svelte';
   import { createMockSource } from './lib/data/mock';
   import { createSession } from './lib/data/session';
+  import { isTauriRuntime, LiveSource } from './lib/data/live-source';
 
   /**
-   * Next dashboard shell (F2). Served at `?ui=next`; the classic App remains the default until the
-   * workspaces cover the classic canvas. Uses the mock robot until a live source is selected.
+   * Dashboard shell (F2), the default route. The live robot connection is used inside the Tauri app;
+   * the mock robot is used with `?source=mock` or in a plain browser (`bun run dev`).
    */
-  const session = createSession(createMockSource());
+  const useMock = new URLSearchParams(window.location.search).get('source') === 'mock' || !isTauriRuntime();
+  const liveSource = useMock ? null : new LiveSource();
+  const session = createSession(liveSource ?? createMockSource());
   const live = useLiveStore(session.store);
 
   let workspace = $state<Workspace>('driver');
@@ -47,6 +52,9 @@
       <a href="?ui=classic">Classic dashboard</a>
     </div>
   </header>
+  {#if liveSource}
+    <div class="connection"><ConnectionBar live={liveSource} /></div>
+  {/if}
 
   <main>
     {#if workspace === 'driver'}
@@ -55,6 +63,8 @@
       <section class="panel">
         <h2>Pit</h2>
         <PitView {session} {live} />
+        <h2>Robot files</h2>
+        <PitFiles live={liveSource} onopenanalysis={() => (workspace = 'analysis')} />
       </section>
     {:else if workspace === 'tuning'}
       <section class="panel">
@@ -104,6 +114,10 @@
     font-size: 12px;
     color: var(--text-soft);
     flex-wrap: wrap;
+  }
+  .connection {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
   }
   .status .warn {
     color: #fbbf24;

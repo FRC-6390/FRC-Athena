@@ -20,6 +20,6 @@ pub use arcp_core::v2::control::{FileInfo, Rate, Status, WriteReply, MAX_FILE_CH
 pub use arcp_core::v2::record::{DictEntry, Dictionary, Frame, Marker, Record, StructSchema};
 pub use arcp_core::v2::{Entry, Value};
 pub use client::{decode_backfill, Client, ClientConfig, ClientError, Event, LinkStatus};
-pub use model::Model;
+pub use model::{Model, ServerStatus};
 pub use reassembly::{Reassembler, SeqEvent, SequenceTracker};
 pub use timesync::{estimate, TimeEstimate, TimeSample};

@@ -8,6 +8,20 @@ use arcp_core::v2::Value;
 /// Role of lock-state signals (appendix E1-W, "Lock state on the wire").
 const ROLE_LOCK: u8 = 7;
 const LOCK_PREFIX: &str = "athena/locks/";
+const STATUS_PREFIX: &str = "athena/arcp/status/";
+
+/// The server's own status, read from the `athena/arcp/status/*` system signals.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerStatus {
+    pub clients: i64,
+    pub bytes_per_second: f64,
+    pub budget_bytes_per_second: f64,
+    /// True when the bandwidth budget has lowered at least one subscription rate.
+    pub throttled: bool,
+    /// Patterns of the throttled subscriptions.
+    pub throttled_patterns: Vec<String>,
+    pub dropped_frames: i64,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Model {
@@ -57,6 +71,35 @@ impl Model {
 
     pub fn value(&self, signal_id: u64) -> Option<&Value> {
         self.latest.get(&signal_id)
+    }
+
+    /// Latest server status, or `None` until the robot's first status frame arrives.
+    pub fn server_status(&self) -> Option<ServerStatus> {
+        let get = |name: &str| {
+            let path = format!("{STATUS_PREFIX}{name}");
+            let entry = self.dictionary.entries.iter().find(|e| e.path == path)?;
+            self.latest.get(&entry.signal_id)
+        };
+        let as_i64 = |v: Option<&Value>| match v? {
+            Value::I64(x) => Some(*x),
+            _ => None,
+        };
+        let as_f64 = |v: Option<&Value>| match v? {
+            Value::F64(x) => Some(*x),
+            _ => None,
+        };
+        let patterns = match get("throttledPatterns")? {
+            Value::StrArray(p) => p.clone(),
+            _ => return None,
+        };
+        Some(ServerStatus {
+            clients: as_i64(get("clients"))?,
+            bytes_per_second: as_f64(get("bytesPerSecond"))?,
+            budget_bytes_per_second: as_f64(get("budgetBytesPerSecond"))?,
+            throttled: matches!(get("throttled")?, Value::Bool(true)),
+            throttled_patterns: patterns,
+            dropped_frames: as_i64(get("droppedFrames"))?,
+        })
     }
 
     /// Current lock state of a lock group: `Some(true)` locked, `None` when the robot does not

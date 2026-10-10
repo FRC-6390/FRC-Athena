@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { decodeReplay } from '../../lib/data/decoder';
+  import { pendingReplay } from '../../lib/replay-handoff';
   import { buildReplayModel, type ReplayModel } from '../../lib/analysis/replay';
   import { buildCsv } from '../../lib/analysis/csv';
   import ReplayScrubber from './ReplayScrubber.svelte';
@@ -48,6 +50,15 @@
     }
     return { from, to };
   });
+
+  /** A replay downloaded from the robot in the Pit workspace opens here. */
+  onMount(() =>
+    pendingReplay.subscribe((pending) => {
+      if (!pending) return;
+      pendingReplay.set(null);
+      void load(new File([pending.bytes as BlobPart], pending.name));
+    })
+  );
 
   async function load(file: File) {
     loading = true;
