@@ -7,8 +7,23 @@ use std::sync::{Arc, Mutex};
 
 use arcp_core::v2::control::{encode_server, frame, Rate, ServerMessage};
 use arcp_core::v2::pattern;
-use arcp_core::v2::record::{Dictionary, Marker, Record, StructSchema, FRAME_FLAG_FRAGMENT, FRAME_FLAG_KEYFRAME, FRAME_VERSION, RECORD_FRAME};
-use arcp_core::v2::{Entry, Writer};
+use arcp_core::v2::record::{DictEntry, Dictionary, Marker, Record, StructSchema, FRAME_FLAG_FRAGMENT, FRAME_FLAG_KEYFRAME, FRAME_VERSION, RECORD_FRAME};
+use arcp_core::v2::{Entry, Value, Writer};
+
+/// Server status signals (appendix E1-W, "Server status on the wire"): role 8, always in the dictionary.
+pub(crate) const STATUS_PATHS: [&str; 6] = [
+    "athena/arcp/status/clients",
+    "athena/arcp/status/bytesPerSecond",
+    "athena/arcp/status/budgetBytesPerSecond",
+    "athena/arcp/status/throttled",
+    "athena/arcp/status/throttledPatterns",
+    "athena/arcp/status/droppedFrames",
+];
+/// Wire type tags of [`STATUS_PATHS`], in the same order.
+const STATUS_TAGS: [u8; 6] = [2, 3, 3, 1, 8, 2];
+const ROLE_SYSTEM: u8 = 8;
+/// Status is refreshed and sent at least this often, in robot time.
+const STATUS_INTERVAL_MICROS: u64 = 1_000_000;
 
 /// Largest number of times a subscription's rate may be divided by the budget logic.
 const MAX_DIVISOR: u32 = 16;
@@ -74,7 +89,13 @@ pub(crate) struct Session {
 }
 
 pub(crate) struct State {
+    /// Dictionary as published by the robot (without status signals).
+    pub robot_dictionary: Dictionary,
+    /// Robot dictionary plus the status signals; this is what every session receives.
     pub dictionary: Dictionary,
+    pub status_ids: [u64; 6],
+    pub last_status_ts: Option<u64>,
+    pub dropped_frames: u64,
     pub schemas: Vec<StructSchema>,
     pub latest: HashMap<u64, arcp_core::v2::Value>,
     pub latest_ts: u64,
@@ -91,7 +112,11 @@ pub(crate) struct State {
 impl State {
     pub fn new(budget_bytes_per_sec: u64, mtu: usize, keyframe_interval_micros: u64) -> Self {
         Self {
+            robot_dictionary: Dictionary::default(),
             dictionary: Dictionary::default(),
+            status_ids: [0; 6],
+            last_status_ts: None,
+            dropped_frames: 0,
             schemas: Vec::new(),
             latest: HashMap::new(),
             latest_ts: 0,
@@ -149,7 +174,24 @@ impl State {
 
     /// Replaces the dictionary and recomputes every subscription's matches.
     pub fn set_dictionary(&mut self, dictionary: Dictionary, schemas: Vec<StructSchema>) {
-        self.dictionary = dictionary;
+        self.robot_dictionary = dictionary;
+        let mut full = self.robot_dictionary.clone();
+        let base = full.entries.iter().map(|e| e.signal_id).max().unwrap_or(0) + 1;
+        for (i, path) in STATUS_PATHS.iter().enumerate() {
+            let signal_id = base + i as u64;
+            self.status_ids[i] = signal_id;
+            full.entries.push(DictEntry {
+                signal_id,
+                path: (*path).to_owned(),
+                type_tag: STATUS_TAGS[i],
+                unit: String::new(),
+                role: ROLE_SYSTEM,
+                flags: 0,
+                lock_group: String::new(),
+                struct_schema_id: 0,
+            });
+        }
+        self.dictionary = full;
         self.schemas = schemas;
         let dict = &self.dictionary;
         for session in &mut self.sessions {
@@ -179,10 +221,51 @@ impl State {
         let keyframe_interval = self.keyframe_interval_micros;
         let latest = &self.latest;
         for session in &mut self.sessions {
-            bytes += send_due(session, latest, ts, keyframe_interval, mtu, udp);
+            bytes += send_due(session, latest, ts, keyframe_interval, mtu, udp, &mut self.dropped_frames);
         }
         self.window_bytes += bytes;
+        self.send_status(ts, udp);
         self.sessions.retain(|s| !s.dead);
+    }
+
+    /// Once per interval, sends the server status signals to every session with a UDP address,
+    /// whatever its subscriptions are.
+    fn send_status(&mut self, ts: u64, udp: &UdpSocket) {
+        if self.last_status_ts.is_some_and(|t| ts.saturating_sub(t) < STATUS_INTERVAL_MICROS) {
+            return;
+        }
+        self.last_status_ts = Some(ts);
+        let values = self.status_values();
+        let entries: Vec<Entry> =
+            self.status_ids.iter().zip(values).map(|(&signal_id, value)| Entry { signal_id, value }).collect();
+        let mtu = self.mtu;
+        let mut bytes = 0u64;
+        for session in &mut self.sessions {
+            if session.udp.is_none() {
+                continue;
+            }
+            let seq = next_seq(session);
+            bytes += send_frames(udp, session.udp, false, ts, seq, &entries, mtu, &mut self.dropped_frames);
+        }
+        self.window_bytes += bytes;
+    }
+
+    fn status_values(&self) -> [Value; 6] {
+        let throttled: Vec<String> = self
+            .sessions
+            .iter()
+            .flat_map(|s| s.subs.iter())
+            .filter(|sub| sub.divisor > 1)
+            .map(|sub| sub.pattern.clone())
+            .collect();
+        [
+            Value::I64(self.sessions.len() as i64),
+            Value::F64(self.last_window_bytes as f64),
+            Value::F64(self.budget_bytes_per_sec as f64),
+            Value::Bool(!throttled.is_empty()),
+            Value::StrArray(throttled),
+            Value::I64(self.dropped_frames as i64),
+        ]
     }
 
     /// Once per second of robot time, compares bytes sent against the budget and lowers
@@ -248,7 +331,7 @@ impl State {
             session.last_keyframe = Some(ts);
         }
         let seq = next_seq(session);
-        let bytes = send_frames(udp, session.udp, false, ts, seq, &entries, mtu);
+        let bytes = send_frames(udp, session.udp, false, ts, seq, &entries, mtu, &mut self.dropped_frames);
         self.window_bytes += bytes;
     }
 
@@ -329,6 +412,7 @@ fn send_due(
     keyframe_interval: u64,
     mtu: usize,
     udp: &UdpSocket,
+    dropped: &mut u64,
 ) -> u64 {
     if session.udp.is_none() || session.subs.is_empty() {
         return 0;
@@ -369,7 +453,7 @@ fn send_due(
         session.last_keyframe = Some(ts);
     }
     let seq = next_seq(session);
-    send_frames(udp, session.udp, due_key, ts, seq, &entries, mtu)
+    send_frames(udp, session.udp, due_key, ts, seq, &entries, mtu, dropped)
 }
 
 /// Encodes entries into one or more frame records (each datagram-sized) and sends them.
@@ -381,6 +465,7 @@ pub(crate) fn send_frames(
     seq: u32,
     entries: &[Entry],
     mtu: usize,
+    dropped: &mut u64,
 ) -> u64 {
     let Some(addr) = to else { return 0 };
     let encoded: Vec<Vec<u8>> = entries
@@ -432,6 +517,8 @@ pub(crate) fn send_frames(
         datagram.record(RECORD_FRAME, payload.as_slice());
         if udp.send_to(datagram.as_slice(), addr).is_ok() {
             sent += datagram.len() as u64;
+        } else {
+            *dropped += 1;
         }
     }
     sent
