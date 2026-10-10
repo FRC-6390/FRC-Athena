@@ -6,6 +6,10 @@ import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;
 import ca.frc6390.athena.mechanism.core.Output;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.robot.RuntimeCycleSnapshot;
+import ca.frc6390.athena.robot.RuntimeInputSnapshot;
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.wire.Wire;
 import ca.frc6390.athena.runtime.wire.WireWriter;
 import java.util.HashMap;
@@ -111,6 +115,9 @@ final class ReplayEncoder {
     private int dictionaryFrom;
 
     private final int[] lifecycleIds;
+    private final int[][] joystickIds = new int[RuntimeInputSnapshot.JOYSTICK_PORTS][];
+    private final int[] driverStationIds;
+    private final Map<Integer, int[]> localizationIds = new HashMap<>();
     private final Map<HardwareIdentity, int[]> motorIds = new HashMap<>();
     private final Map<String, int[]> encoderIds = new HashMap<>();
     private final Map<String, int[]> imuIds = new HashMap<>();
@@ -126,6 +133,13 @@ final class ReplayEncoder {
 
     ReplayEncoder() {
         lifecycleIds = entity("lifecycle", LIFECYCLE, ReplaySignal.ROLE_LIFECYCLE);
+        // Input signals are declared up front so the dictionary is the same in every file from this recorder.
+        for (int port = 0; port < joystickIds.length; port++) {
+            joystickIds[port] = entity("input/joystick/" + port, ReplayInputFields.JOYSTICK_FIELDS,
+                    ReplaySignal.ROLE_INPUT);
+        }
+        driverStationIds = entity("input/driverStation", ReplayInputFields.DRIVER_STATION_FIELDS,
+                ReplaySignal.ROLE_INPUT);
     }
 
     /** Forces the next frame to be a keyframe carrying every known signal. */
@@ -160,6 +174,8 @@ final class ReplayEncoder {
         stageLifecycle(snapshot, outputs != null);
         stageHardware(hardware);
         stageDigital(snapshot.digitalInputs());
+        stageInputs(snapshot.inputs());
+        stageLocalizations(snapshot.localizations());
         if (outputs != null) {
             stageCommands(hardware, outputs);
         }
@@ -341,6 +357,65 @@ final class ReplayEncoder {
         }
     }
 
+    private void stageInputs(RuntimeInputSnapshot inputs) {
+        for (int port = 0; port < joystickIds.length; port++) {
+            RuntimeInputSnapshot.Joystick joystick = inputs.joystick(port);
+            int[] ids = joystickIds[port];
+            putBool(ids[ReplayInputFields.J_CONNECTED], joystick.connected());
+            putString(ids[ReplayInputFields.J_NAME], joystick.name());
+            putI64(ids[ReplayInputFields.J_TYPE], joystick.type());
+            putI64(ids[ReplayInputFields.J_BUTTONS], joystick.buttons());
+            for (int axis = 0; axis < RuntimeInputSnapshot.AXES; axis++) {
+                putF64(ids[ReplayInputFields.J_AXIS_0 + axis], joystick.axis(axis));
+            }
+            for (int pov = 0; pov < RuntimeInputSnapshot.POVS; pov++) {
+                putI64(ids[ReplayInputFields.J_POV_0 + pov], joystick.pov(pov));
+            }
+        }
+        RuntimeInputSnapshot.DriverStationState state = inputs.driverStation();
+        int[] ds = driverStationIds;
+        putBool(ds[ReplayInputFields.DS_ENABLED], state.enabled());
+        putBool(ds[ReplayInputFields.DS_AUTONOMOUS], state.autonomous());
+        putBool(ds[ReplayInputFields.DS_TEST], state.test());
+        putBool(ds[ReplayInputFields.DS_FMS], state.fmsAttached());
+        putBool(ds[ReplayInputFields.DS_DS_ATTACHED], state.dsAttached());
+        putString(ds[ReplayInputFields.DS_ALLIANCE], state.alliance());
+        putF64(ds[ReplayInputFields.DS_MATCH_TIME], state.matchTime());
+        putString(ds[ReplayInputFields.DS_EVENT], state.eventName());
+        putString(ds[ReplayInputFields.DS_MATCH_TYPE], state.matchType());
+        putI64(ds[ReplayInputFields.DS_MATCH_NUMBER], state.matchNumber());
+        putString(ds[ReplayInputFields.DS_GAME_MESSAGE], state.gameMessage());
+    }
+
+    /** Stages a summary of each localization: the newest measurement and, when present, the newest pose. */
+    private void stageLocalizations(List<RuntimeCycleSnapshot.LocalizationInput> localizations) {
+        for (RuntimeCycleSnapshot.LocalizationInput input : localizations) {
+            int[] ids = localizationIds.computeIfAbsent(input.index(),
+                    index -> entity("localization/" + index, ReplayInputFields.LOCALIZATION_FIELDS,
+                            ReplaySignal.ROLE_LOCALIZATION));
+            Measurement newest = null;
+            PoseMeasurementSample pose = null;
+            for (Measurement measurement : input.measurements()) {
+                if (newest == null || measurement.timestampSeconds() >= newest.timestampSeconds()) {
+                    newest = measurement;
+                }
+                if (measurement instanceof PoseMeasurementSample sample
+                        && (pose == null || sample.timestampSeconds() >= pose.timestampSeconds())) {
+                    pose = sample;
+                }
+            }
+            putString(ids[0], input.type());
+            putI64(ids[1], input.measurements().size());
+            putString(ids[2], newest == null ? "" : newest.getClass().getSimpleName());
+            putF64(ids[3], newest == null ? Double.NaN : newest.timestampSeconds());
+            putF64(ids[4], newest == null ? Double.NaN : newest.latencySeconds());
+            PoseSnapshot value = pose == null ? null : pose.pose();
+            putF64(ids[5], value == null ? Double.NaN : value.xMeters());
+            putF64(ids[6], value == null ? Double.NaN : value.yMeters());
+            putF64(ids[7], value == null ? Double.NaN : value.headingRadians());
+        }
+    }
+
     private void stageCommands(HardwareCycleSnapshot hardware, List<ResolvedOutput> outputs) {
         for (int slot = 0; slot < commandCount; slot++) {
             commandModes[slot] = "neutral";
@@ -424,6 +499,11 @@ final class ReplayEncoder {
     private void putBool(int id, boolean value) {
         stage(id);
         pendingBits[id] = value ? 1L : 0L;
+    }
+
+    private void putI64(int id, long value) {
+        stage(id);
+        pendingBits[id] = value;
     }
 
     private void putString(int id, String value) {

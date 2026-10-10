@@ -151,22 +151,26 @@ public final class PlayStationGamepad extends Gamepad {
 
         @Override
         public double axis(int axis) {
-            return controller.getRawAxis(axis);
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.axis(axis) : controller.getRawAxis(axis);
         }
 
         @Override
         public boolean button(int button) {
-            return controller.getRawButton(button);
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.button(button) : controller.getRawButton(button);
         }
 
         @Override
         public int pov() {
-            return controller.getPOV();
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.pov(0) : controller.getPOV();
         }
 
         @Override
         public boolean connected() {
-            return controller.isConnected();
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.connected() : controller.isConnected();
         }
     }
 }

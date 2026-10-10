@@ -99,7 +99,7 @@ class ReplaySimulationTest {
                     new EventContext(now, 0.02, LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, true));
             runtime.simulationPeriodic(now, 0.02);
         }
-        return runtime.replayRecorder().orElseThrow().flush().orElseThrow();
+        return ReplayRecorderTest.flushed(runtime.replayRecorder().orElseThrow());
     }
 
     private record RecordedCommands(List<Double> values) {

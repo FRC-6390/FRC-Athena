@@ -29,6 +29,8 @@ public record ReplaySignal(
     public static final int ROLE_LIFECYCLE = 2;
     public static final int ROLE_DIGITAL_INPUT = 3;
     public static final int ROLE_COMMAND = 4;
+    public static final int ROLE_INPUT = 5;
+    public static final int ROLE_LOCALIZATION = 6;
 
     public static final int FLAG_WRITABLE = 1;
     public static final int FLAG_PERSISTED = 2;

@@ -6,6 +6,8 @@ import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
 import ca.frc6390.athena.robot.RobotRuntime;
+import ca.frc6390.athena.robot.RuntimeInputSnapshot;
+import ca.frc6390.athena.robot.RuntimeInputs;
 import ca.frc6390.athena.sim.runtime.SimulationInjector;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.io.IOException;
@@ -32,8 +34,11 @@ import java.util.function.Function;
  *         .report();
  * }</pre>
  *
- * <p>Not replayed: IMU inputs, motor connection and failure flags, and localization measurements. Replay
- * cycles that run no mechanisms (physics-only frames) are skipped.</p>
+ * <p>Driver station and joystick state is injected through {@link RuntimeInputs} for each mechanism cycle, so
+ * controller bindings see the recorded buttons, axes, and POVs. IMU readings are injected into the simulated
+ * IMUs. Not replayed: motor connection and failure flags, and localization measurements (recorded, but the
+ * localization pipeline runs on the injected sensors). Replay cycles that run no mechanisms (physics-only frames)
+ * are skipped.</p>
  */
 public final class ReplaySimulation {
     /** Differences beyond this count are counted but not listed. */
@@ -45,6 +50,7 @@ public final class ReplaySimulation {
     private static final String ENCODER_PREFIX = "hardware/encoder/";
     private static final String DIGITAL_PREFIX = "digital/";
     private static final String COMMAND_PREFIX = "command/";
+    private static final String IMU_PREFIX = "hardware/imu/";
 
     private ReplaySimulation() {
     }
@@ -157,41 +163,51 @@ public final class ReplaySimulation {
         long compared = 0;
         long differenceCount = 0;
         List<CommandDifference> differences = new ArrayList<>();
-        while (cursor.next()) {
-            if (!cursor.isFrame()) {
-                continue;
-            }
-            frames++;
-            inputs.refresh(cursor);
-            inject(injector, cursor, inputs);
-            if (!cursor.bool(LIFECYCLE + "mechanismsRan")) {
-                continue;
-            }
-            cycles++;
-            double timestamp = cursor.f64(LIFECYCLE + "timestampSeconds");
-            double dt = cursor.f64(LIFECYCLE + "dtSeconds");
-            boolean enabled = cursor.bool(LIFECYCLE + "enabled");
-            boolean autonomous = cursor.bool(LIFECYCLE + "autonomous");
-            LifecycleMode mode = replayMode(LifecycleMode.valueOf(cursor.string(LIFECYCLE + "mode")),
-                    enabled, autonomous);
-            LifecyclePhase phase = LifecyclePhase.valueOf(cursor.string(LIFECYCLE + "phase"));
-            List<ResolvedOutput> outputs = runtime.periodic(
-                    new MechanismContext(timestamp, 0.0, dt, enabled, autonomous, true),
-                    new EventContext(timestamp, dt, mode, phase, enabled, true));
-            Map<String, ResolvedCommand> replayed = commands(outputs);
-            for (String motor : inputs.commandMotors) {
-                String recordedMode = cursor.string(COMMAND_PREFIX + motor + "/mode");
-                double recordedValue = cursor.f64(COMMAND_PREFIX + motor + "/value");
-                ResolvedCommand rerun = replayed.getOrDefault(motor, ResolvedCommand.NEUTRAL);
-                compared++;
-                if (!recordedMode.equals(rerun.mode()) || !sameValue(recordedValue, rerun.value())) {
-                    differenceCount++;
-                    if (differences.size() < MAX_LISTED_DIFFERENCES) {
-                        differences.add(new CommandDifference(cursor.sequence(), timestamp, motor,
-                                recordedMode, recordedValue, rerun.mode(), rerun.value()));
+        try {
+            while (cursor.next()) {
+                if (!cursor.isFrame()) {
+                    continue;
+                }
+                frames++;
+                inputs.refresh(cursor);
+                inject(injector, cursor, inputs);
+                if (!cursor.bool(LIFECYCLE + "mechanismsRan")) {
+                    continue;
+                }
+                cycles++;
+                double timestamp = cursor.f64(LIFECYCLE + "timestampSeconds");
+                double dt = cursor.f64(LIFECYCLE + "dtSeconds");
+                boolean enabled = cursor.bool(LIFECYCLE + "enabled");
+                boolean autonomous = cursor.bool(LIFECYCLE + "autonomous");
+                LifecycleMode mode = replayMode(LifecycleMode.valueOf(cursor.string(LIFECYCLE + "mode")),
+                        enabled, autonomous);
+                LifecyclePhase phase = LifecyclePhase.valueOf(cursor.string(LIFECYCLE + "phase"));
+                List<ResolvedOutput> outputs;
+                RuntimeInputs.inject(ReplayInputFields.read(cursor));
+                try {
+                    outputs = runtime.periodic(
+                            new MechanismContext(timestamp, 0.0, dt, enabled, autonomous, true),
+                            new EventContext(timestamp, dt, mode, phase, enabled, true));
+                } finally {
+                    RuntimeInputs.release();
+                }
+                Map<String, ResolvedCommand> replayed = commands(outputs);
+                for (String motor : inputs.commandMotors) {
+                    String recordedMode = cursor.string(COMMAND_PREFIX + motor + "/mode");
+                    double recordedValue = cursor.f64(COMMAND_PREFIX + motor + "/value");
+                    ResolvedCommand rerun = replayed.getOrDefault(motor, ResolvedCommand.NEUTRAL);
+                    compared++;
+                    if (!recordedMode.equals(rerun.mode()) || !sameValue(recordedValue, rerun.value())) {
+                        differenceCount++;
+                        if (differences.size() < MAX_LISTED_DIFFERENCES) {
+                            differences.add(new CommandDifference(cursor.sequence(), timestamp, motor,
+                                    recordedMode, recordedValue, rerun.mode(), rerun.value()));
+                        }
                     }
                 }
             }
+        } finally {
+            RuntimeInputs.release();
         }
         return new ReplayReport(frames, cycles, compared, differenceCount, differences);
     }
@@ -215,6 +231,19 @@ public final class ReplaySimulation {
         }
         for (String digital : inputs.digitalInputs) {
             injector.digitalInput(digital, cursor.bool(DIGITAL_PREFIX + digital + "/active"));
+        }
+        for (String imu : inputs.imus) {
+            String base = IMU_PREFIX + imu + "/";
+            injector.imu(imu,
+                    cursor.f64(base + "yawDegrees"),
+                    cursor.f64(base + "pitchDegrees"),
+                    cursor.f64(base + "rollDegrees"),
+                    cursor.f64(base + "yawRateDegreesPerSecond"),
+                    cursor.f64(base + "pitchRateDegreesPerSecond"),
+                    cursor.f64(base + "rollRateDegreesPerSecond"),
+                    cursor.f64(base + "linearAccelerationXG"),
+                    cursor.f64(base + "linearAccelerationYG"),
+                    cursor.f64(base + "linearAccelerationZG"));
         }
     }
 
@@ -257,6 +286,7 @@ public final class ReplaySimulation {
         private final List<String> motors = new ArrayList<>();
         private final List<String> encoders = new ArrayList<>();
         private final List<String> digitalInputs = new ArrayList<>();
+        private final List<String> imus = new ArrayList<>();
         private final List<String> commandMotors = new ArrayList<>();
 
         void refresh(ReplayReader.Cursor cursor) {
@@ -267,6 +297,7 @@ public final class ReplaySimulation {
             motors.clear();
             encoders.clear();
             digitalInputs.clear();
+            imus.clear();
             commandMotors.clear();
             for (ReplaySignal signal : cursor.signals()) {
                 String path = signal.path();
@@ -276,6 +307,8 @@ public final class ReplaySimulation {
                     encoders.add(between(path, ENCODER_PREFIX, "/positionRotations"));
                 } else if (path.startsWith(DIGITAL_PREFIX) && path.endsWith("/active")) {
                     digitalInputs.add(between(path, DIGITAL_PREFIX, "/active"));
+                } else if (path.startsWith(IMU_PREFIX) && path.endsWith("/yawDegrees")) {
+                    imus.add(between(path, IMU_PREFIX, "/yawDegrees"));
                 } else if (path.startsWith(COMMAND_PREFIX) && path.endsWith("/mode")) {
                     commandMotors.add(between(path, COMMAND_PREFIX, "/mode"));
                 }

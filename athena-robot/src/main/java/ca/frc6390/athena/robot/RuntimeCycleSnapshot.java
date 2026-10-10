@@ -20,13 +20,33 @@ public record RuntimeCycleSnapshot(
         HardwareCycleSnapshot hardware,
         List<DigitalInput> digitalInputs,
         List<MechanismTraceSnapshot> mechanisms,
-        List<LocalizationInput> localizations) {
+        List<LocalizationInput> localizations,
+        RuntimeInputSnapshot inputs) {
     public RuntimeCycleSnapshot {
         mode = mode == null ? LifecycleMode.ROBOT : mode;
         phase = phase == null ? LifecyclePhase.PERIODIC : phase;
         digitalInputs = digitalInputs == null ? List.of() : List.copyOf(digitalInputs);
         mechanisms = mechanisms == null ? List.of() : List.copyOf(mechanisms);
         localizations = localizations == null ? List.of() : List.copyOf(localizations);
+        inputs = inputs == null ? RuntimeInputSnapshot.empty() : inputs;
+    }
+
+    /** Creates a cycle snapshot without driver station input. */
+    public RuntimeCycleSnapshot(
+            long sequence,
+            double timestampSeconds,
+            double dtSeconds,
+            LifecycleMode mode,
+            LifecyclePhase phase,
+            boolean enabled,
+            boolean autonomous,
+            boolean simulation,
+            HardwareCycleSnapshot hardware,
+            List<DigitalInput> digitalInputs,
+            List<MechanismTraceSnapshot> mechanisms,
+            List<LocalizationInput> localizations) {
+        this(sequence, timestampSeconds, dtSeconds, mode, phase, enabled, autonomous, simulation, hardware,
+                digitalInputs, mechanisms, localizations, RuntimeInputSnapshot.empty());
     }
 
     public record DigitalInput(String name, int channel, boolean raw, boolean active) {

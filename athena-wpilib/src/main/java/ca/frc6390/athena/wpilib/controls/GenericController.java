@@ -170,15 +170,27 @@ public final class GenericController extends ControlOwner implements HookGroup, 
         }
 
         @Override
-        public double axis(int id) { return controller.getRawAxis(id); }
+        public double axis(int id) {
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.axis(id) : controller.getRawAxis(id);
+        }
 
         @Override
-        public boolean button(int id) { return controller.getRawButton(id); }
+        public boolean button(int id) {
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.button(id) : controller.getRawButton(id);
+        }
 
         @Override
-        public int pov() { return controller.getPOV(); }
+        public int pov() {
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.pov(0) : controller.getPOV();
+        }
 
         @Override
-        public boolean connected() { return controller.isConnected(); }
+        public boolean connected() {
+            var injected = InjectedJoysticks.at(controller.getPort());
+            return injected != null ? injected.connected() : controller.isConnected();
+        }
     }
 }

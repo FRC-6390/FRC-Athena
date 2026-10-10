@@ -2,8 +2,10 @@ package ca.frc6390.athena.sim.runtime;
 
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
+import ca.frc6390.athena.sim.hardware.SimImuHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
 import java.util.Objects;
 
@@ -68,6 +70,47 @@ public final class SimulationInjector {
             EncoderDevice device = handle.device();
             if (device.defaultName().equals(name)) {
                 coordinator.encoderState(device, positionRotations, absolutePositionRotations, velocityRotationsPerSecond);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Injects IMU readings. Angles are degrees, rates degrees per second, and acceleration g.
+     *
+     * @param name IMU name
+     * @param yawDegrees yaw
+     * @param pitchDegrees pitch
+     * @param rollDegrees roll
+     * @param yawRateDegreesPerSecond yaw rate
+     * @param pitchRateDegreesPerSecond pitch rate
+     * @param rollRateDegreesPerSecond roll rate
+     * @param accelerationXG x acceleration
+     * @param accelerationYG y acceleration
+     * @param accelerationZG z acceleration
+     * @return true when the IMU exists
+     */
+    public boolean imu(
+            String name,
+            double yawDegrees,
+            double pitchDegrees,
+            double rollDegrees,
+            double yawRateDegreesPerSecond,
+            double pitchRateDegreesPerSecond,
+            double rollRateDegreesPerSecond,
+            double accelerationXG,
+            double accelerationYG,
+            double accelerationZG) {
+        for (SimImuHandle handle : coordinator.imuHandles().values()) {
+            ImuDevice device = handle.device();
+            if (device.defaultName().equals(name)) {
+                handle.yawDegrees(yawDegrees)
+                        .pitchDegrees(pitchDegrees)
+                        .rollDegrees(rollDegrees)
+                        .angularRateDegreesPerSecond(rollRateDegreesPerSecond, pitchRateDegreesPerSecond,
+                                yawRateDegreesPerSecond)
+                        .linearAccelerationG(accelerationXG, accelerationYG, accelerationZG);
                 return true;
             }
         }

@@ -5,8 +5,8 @@ import ca.frc6390.athena.runtime.wire.Wire;
 /**
  * Entry point for other modules to add markers and request keyframes in the active replay recorder.
  *
- * <p>Marker kinds 1 to 13 are the appendix E1-W kinds. Kind {@link #BROWNOUT} (100) is an Athena-defined kind
- * in the user range. Application kinds should start at {@link #USER_BASE} plus one.</p>
+ * <p>Marker kinds 1 to 14 are the appendix E1-W kinds. Kind {@link #BROWNOUT} (14, {@code Wire.MARKER_BROWNOUT})
+ * is the brownout-recovered marker. Application kinds should start at {@link #USER_BASE} plus one.</p>
  */
 public final class ReplayMarkers {
     public static final int BOOT = Wire.MARKER_BOOT;
@@ -22,8 +22,8 @@ public final class ReplayMarkers {
     public static final int PERSISTED_WRITE = Wire.MARKER_PERSISTED_WRITE;
     public static final int RECORD = Wire.MARKER_RECORD;
     public static final int TEST_START = Wire.MARKER_TEST_START;
-    /** Athena-defined: brownout recovered. */
-    public static final int BROWNOUT = 100;
+    /** Brownout recovered (appendix E1-W kind 14). */
+    public static final int BROWNOUT = Wire.MARKER_BROWNOUT;
     public static final int USER_BASE = Wire.MARKER_USER_BASE;
 
     private static volatile ReplayRecorder active;
