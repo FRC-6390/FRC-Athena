@@ -18,8 +18,9 @@ import java.util.Set;
  * <p>All methods are called from the robot thread. Clients connect over TCP and UDP on their own
  * threads inside the native server, so nothing here runs on those threads.</p>
  *
- * <p>Call {@link #serviceRequests()} once per robot cycle so queued writes and actions are answered.
- * A request left unanswered for the native reply timeout is rejected by the server.</p>
+ * <p>Call {@link #serviceRequests()} once per robot cycle so queued writes, actions and backfill
+ * requests are answered. A request left unanswered for the native reply timeout is rejected by the
+ * server.</p>
  */
 public final class NativeArcpServer implements ArcpSink, AutoCloseable {
 
@@ -27,7 +28,7 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
      * Server configuration.
      *
      * @param controlPort TCP control port, 0 for an ephemeral port
-     * @param fileRoot directory exposed by the file service, or null to disable file requests
+     * @param fileRoot directory exposed by the file service for plain names, or null
      * @param budgetBytesPerSecond realtime bandwidth budget, 0 for none
      * @param mtu largest UDP datagram in bytes (128 to 65507)
      * @param keyframeIntervalMicros keyframe cadence per subscriber in microseconds
@@ -60,37 +61,72 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         }
     }
 
+    private static final int MAX_BACKFILL_BYTES = 1 << 20;
+
     private final WriteHandler writeHandler;
     private final ActionHandler actionHandler;
     private final Nt4Bridge nt4;
+    private ArcpBackfill backfill;
 
     private final ArcpMarshal.Out dictionaryOut = new ArcpMarshal.Out();
     private final ArcpMarshal.Out cycleOut = new ArcpMarshal.Out();
     private final ArcpMarshal.Out replyOut = new ArcpMarshal.Out();
+    private final ArcpMarshal.Out recordsOut = new ArcpMarshal.Out();
     private ByteBuffer requestBuffer = ByteBuffer.allocateDirect(ArcpMarshal.INITIAL_CAPACITY)
             .order(ByteOrder.LITTLE_ENDIAN);
 
     /** Dictionary entries by signal id, used for NT4 mirroring and for writable-value tracking. */
     private final Map<Long, ArcpDictEntry> dictionary = new HashMap<>();
-    /** Latest robot value of each writable signal, reported back when a write cannot be answered. */
+    /** Last accepted value of each writable signal, reported back when a write handler fails. */
     private final Map<Long, Object> lastWritable = new HashMap<>();
     private final Set<Long> writable = new HashSet<>();
 
     private long handle;
 
-    /** Starts the server with NT4 mirroring disabled. */
+    /** Starts the server with NT4 mirroring disabled and no categories. */
     public NativeArcpServer(Config config, WriteHandler writes, ActionHandler actions) {
-        this(config, writes, actions, Nt4Bridge.DISABLED);
+        this(config, Map.of(), writes, actions, Nt4Bridge.DISABLED);
     }
 
     public NativeArcpServer(Config config, WriteHandler writes, ActionHandler actions, Nt4Bridge nt4) {
+        this(config, Map.of(), writes, actions, nt4);
+    }
+
+    /**
+     * Starts the server.
+     *
+     * @param config server configuration
+     * @param fileCategories named directories for the file service; names are {@code category/file}.
+     *     Names must be plain words (no slash, colon or tab).
+     * @param writes write decisions
+     * @param actions action decisions
+     * @param nt4 NT4 mirror hook
+     */
+    public NativeArcpServer(Config config, Map<String, Path> fileCategories, WriteHandler writes,
+            ActionHandler actions, Nt4Bridge nt4) {
         Objects.requireNonNull(config, "config");
         this.writeHandler = Objects.requireNonNull(writes, "writes");
         this.actionHandler = Objects.requireNonNull(actions, "actions");
         this.nt4 = Objects.requireNonNull(nt4, "nt4");
         String root = config.fileRoot() == null ? null : config.fileRoot().toAbsolutePath().toString();
         this.handle = ArcpNative.create(config.controlPort(), root, config.budgetBytesPerSecond(), config.mtu(),
-                config.keyframeIntervalMicros());
+                config.keyframeIntervalMicros(), categoriesText(fileCategories));
+    }
+
+    private static String categoriesText(Map<String, Path> categories) {
+        if (categories == null || categories.isEmpty()) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder();
+        for (Map.Entry<String, Path> entry : categories.entrySet()) {
+            String name = Objects.requireNonNull(entry.getKey(), "category name");
+            if (name.isEmpty() || name.matches(".*[/:\\t\\n\\\\].*") || name.equals(".") || name.equals("..")) {
+                throw new IllegalArgumentException("invalid file category name: " + name);
+            }
+            Path dir = Objects.requireNonNull(entry.getValue(), "category directory").toAbsolutePath();
+            text.append(name).append('\t').append(dir).append('\n');
+        }
+        return text.toString();
     }
 
     /** Port the TCP control listener is bound to. */
@@ -124,15 +160,11 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         long h = requireOpen();
         cycleOut.cycle(cycle);
         ArcpNative.publishCycle(h, cycleTimestampMicros, cycleOut.buffer(), cycleOut.length());
-        boolean mirror = nt4 != Nt4Bridge.DISABLED;
-        for (ArcpCycle.Entry e : cycle.entries()) {
-            if (writable.contains(e.signalId())) {
-                lastWritable.put(e.signalId(), e.value());
-            }
-            if (mirror) {
-                ArcpDictEntry entry = dictionary.get(e.signalId());
+        if (nt4 != Nt4Bridge.DISABLED) {
+            for (int i = 0, n = cycle.size(); i < n; i++) {
+                ArcpDictEntry entry = dictionary.get(cycle.signalId(i));
                 if (entry != null) {
-                    nt4.valueChanged(entry, e.value());
+                    nt4.valueChanged(entry, cycle.value(i));
                 }
             }
         }
@@ -143,9 +175,25 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         ArcpNative.marker(requireOpen(), timestampMicros, kind, signalId, message == null ? "" : message);
     }
 
+    @Override
+    public synchronized void publishRecords(byte[] records, int length) {
+        if (length <= 0) {
+            return;
+        }
+        long h = requireOpen();
+        recordsOut.reset();
+        recordsOut.bytes(records, 0, length);
+        ArcpNative.publishRecords(h, recordsOut.buffer(), recordsOut.length());
+    }
+
+    @Override
+    public synchronized void backfill(ArcpBackfill source) {
+        this.backfill = source;
+    }
+
     /**
-     * Drains client writes and actions, asks the handlers, and sends the answers back. Call once per
-     * robot cycle. Costs one JNI call when nothing is queued.
+     * Drains client writes, actions and backfill requests, asks the robot, and sends the answers back.
+     * Call once per robot cycle. Costs one JNI call when nothing is queued.
      */
     @Override
     public synchronized void serviceRequests() {
@@ -181,6 +229,9 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
                 replyOut.u8(result.accepted() ? 1 : 0);
                 replyOut.string(result.reason());
                 replyOut.value(result.actualValue());
+            } else if (op == ArcpMarshal.OP_BACKFILL) {
+                Object last = in.value();
+                answerBackfill(signalId, (Long) last);
             } else {
                 WriteResult result = decideAction(signalId, op == ArcpMarshal.OP_ACTION_RUN);
                 replyOut.u8(result.accepted() ? 1 : 0);
@@ -191,6 +242,46 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         ArcpNative.reply(h, replyOut.buffer(), replyOut.length());
     }
 
+    private void answerBackfill(long from, long to) {
+        if (backfill == null) {
+            replyOut.u8(0);
+            replyOut.string("no replay buffer");
+            replyOut.u32(0);
+            return;
+        }
+        List<byte[]> groups = backfill.records(from, to);
+        int total = 0;
+        List<byte[]> bounded = new ArrayList<>(groups.size());
+        for (byte[] group : groups) {
+            if (total + group.length > MAX_BACKFILL_BYTES) {
+                break;
+            }
+            bounded.add(group);
+            total += group.length;
+        }
+        replyOut.u8(1);
+        replyOut.string("");
+        // The payload is "varint length, group bytes" repeated; Rust forwards it unchanged.
+        int payload = 0;
+        for (byte[] group : bounded) {
+            payload += varintSize(group.length) + group.length;
+        }
+        replyOut.u32(payload);
+        for (byte[] group : bounded) {
+            replyOut.varint(group.length);
+            replyOut.bytes(group, 0, group.length);
+        }
+    }
+
+    private static int varintSize(long value) {
+        int size = 1;
+        while ((value & ~0x7FL) != 0) {
+            value >>>= 7;
+            size++;
+        }
+        return size;
+    }
+
     private WriteResult decideWrite(long signalId, Object value) {
         WriteResult result;
         try {
@@ -198,8 +289,13 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         } catch (RuntimeException ex) {
             return WriteResult.reject("write handler failed: " + ex.getMessage(), held(signalId, value));
         }
-        return result == null ? WriteResult.reject("write handler returned no decision", held(signalId, value))
-                : result;
+        if (result == null) {
+            return WriteResult.reject("write handler returned no decision", held(signalId, value));
+        }
+        if (result.accepted() && writable.contains(signalId)) {
+            lastWritable.put(signalId, result.actualValue());
+        }
+        return result;
     }
 
     private WriteResult decideAction(long signalId, boolean run) {

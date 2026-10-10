@@ -101,8 +101,11 @@ final class ArcpNative {
         }
     }
 
+    /**
+     * @param fileCategories {@code name<TAB>absoluteDirectory} lines, one per category, or null
+     */
     static native long create(int controlPort, String fileRoot, long budgetBytesPerSecond, int mtu,
-            long keyframeIntervalMicros);
+            long keyframeIntervalMicros, String fileCategories);
 
     static native void destroy(long handle);
 
@@ -113,6 +116,9 @@ final class ArcpNative {
     static native void publishCycle(long handle, long timestampMicros, ByteBuffer buffer, int length);
 
     static native void marker(long handle, long timestampMicros, int kind, long signalId, String message);
+
+    /** Sends raw replay record envelopes to sessions that opted in with ReplaySubscribe. */
+    static native void publishRecords(long handle, ByteBuffer buffer, int length);
 
     /** Returns bytes written, or the negative size needed when the buffer is too small. */
     static native int poll(long handle, ByteBuffer buffer, int capacity);

@@ -11,7 +11,6 @@ use arcp_core::v2::control::{
 };
 use arcp_core::v2::pattern;
 
-use super::files;
 use super::state::{send, Subscription};
 use super::Inner;
 
@@ -140,26 +139,36 @@ impl Connection {
                 self.robot_reply(request_id, result)
             }
             ClientMessage::SchemaRequest => true,
-            ClientMessage::FileList => match self.file_root() {
-                Ok(root) => match files::list(&root) {
+            ClientMessage::FileList => match self.files() {
+                Ok(roots) => match roots.list() {
                     Ok(list) => self.reply(request_id, Status::Ok, "", ReplyData::Files(list)),
                     Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
                 },
                 Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
             },
-            ClientMessage::FileDownload { name, offset, max_len } => match self.file_root() {
-                Ok(root) => match files::download(&root, &name, offset, max_len) {
+            ClientMessage::FileDownload { name, offset, max_len } => match self.files() {
+                Ok(roots) => match roots.download(&name, offset, max_len) {
                     Ok((eof, data)) => self.reply(request_id, Status::Ok, "", ReplyData::Chunk { eof, data }),
                     Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
                 },
                 Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
             },
-            ClientMessage::FileDelete { name } => match self.file_root() {
-                Ok(root) => match files::delete(&root, &name) {
+            ClientMessage::FileDelete { name } => match self.files() {
+                Ok(roots) => match roots.delete(&name) {
                     Ok(()) => self.reply(request_id, Status::Ok, "", ReplyData::None),
                     Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
                 },
                 Err(e) => self.reply(request_id, Status::Error, e, ReplyData::None),
+            },
+            ClientMessage::ReplaySubscribe => {
+                if let Some(session) = self.inner.lock().session_mut(self.session_id) {
+                    session.replay = true;
+                }
+                self.reply(request_id, Status::Ok, "", ReplyData::None)
+            }
+            ClientMessage::Backfill { from, to } => match self.inner.handler.backfill(from, to) {
+                Ok(data) => self.reply(request_id, Status::Ok, "", ReplyData::Records(data)),
+                Err(reason) => self.reply(request_id, Status::Error, &reason, ReplyData::None),
             },
             ClientMessage::Hello { .. } | ClientMessage::TimePing { .. } => true,
         }
@@ -195,8 +204,12 @@ impl Connection {
         }
     }
 
-    fn file_root(&self) -> Result<std::path::PathBuf, &'static str> {
-        self.inner.file_root.clone().ok_or("file service not configured")
+    fn files(&self) -> Result<&super::files::Roots, &'static str> {
+        if self.inner.roots.enabled() {
+            Ok(&self.inner.roots)
+        } else {
+            Err("file service not configured")
+        }
     }
 
     fn reply(&self, request_id: u32, status: Status, reason: &str, data: ReplyData) -> bool {

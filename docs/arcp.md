@@ -1,0 +1,169 @@
+# ARCP on the robot
+
+ARCP (Athena Realtime Control Protocol) publishes the robot's mechanism telemetry to dashboards over UDP, accepts
+writes and Action requests over TCP, serves the robot's files, and streams replay records. The protocol is
+implemented in Rust (`athena-arcp/rust`). The robot code only declares a policy and the bridge in
+`ca.frc6390.athena.wpilib.arcp` marshals the data across JNI. See `athena-arcp/README.md` for the protocol
+and the native build, and `docs/2027-offseason-design.md` section E for the design.
+
+ARCP is **on by default** on the roboRIO and in simulation. The robot does not need it to run.
+
+## Configuring
+
+Declare one `ArcpPolicy` field on the robot class. `AthenaRobot` discovers it, like `ReplayPolicy`. Without the
+field the defaults apply.
+
+```java
+public final ArcpPolicy arcp = ArcpPolicy.of()
+        .controlPort(5810)                          // TCP control port; 0 (default) picks a free port
+        .bandwidthBudgetBytesPerSecond(400_000)     // 0 (default) = no budget
+        .mtu(1200)                                  // largest UDP datagram
+        .keyframeInterval(Duration.ofSeconds(1))
+        .storeDirectory(Path.of("/home/lvuser/athena/store"))   // optional; persistence follows it
+        .modelDirectory(Path.of("/home/lvuser/athena/models")); // optional; characterization storage
+
+// Turn ARCP off completely:
+public final ArcpPolicy arcp = ArcpPolicy.disabled();
+```
+
+- The UDP realtime socket is always ephemeral; the control port is the only port a client must reach.
+- Replay files follow the replay policy's directory (`ReplayPolicy.directory`). The `replays/` file category
+  always exposes that directory.
+- When the native library cannot start, the bridge reports a warning and the robot runs without ARCP.
+
+## What clients see
+
+### Dictionary
+
+The dictionary is built once from the mechanism telemetry schema when the robot starts.
+
+| Signal | Path | Role | Notes |
+| --- | --- | --- | --- |
+| Published `@Telemetry` values and `TelemetryValue`s | Telemetry path, for example `turret/Values/kP` | `state` for values under `State`, `control` for writable values, `device`, `hook`, otherwise `value` | Types: number (f64), boolean, string, number array. Writable: flag bit0. Persisted: flag bit1. `lockGroup` is the fully qualified group class name, for example `ca.frc6390.athena.mechanism.persist.Locks$InMatch`. |
+| Actions (`TelemetryAction`) | Telemetry path under `Actions`, for example `turret/Actions/aim` | `action` (5) | Boolean running state. Run and cancel are requests (see below). |
+| Lock state | `athena/locks/<fully qualified group class name>` | `lock` (7) | Boolean, true = locked. One per lock group in use. |
+
+Units are empty: `TelemetryValue` does not declare units yet. Points and geometry telemetry are not sent over ARCP;
+use NT4 for those.
+
+### Realtime values
+
+Each robot cycle the bridge samples the values and publishes only those that changed (`ArcpCycle`, one JNI call).
+Clients subscribe with mechanism-tree globs (`robot/turret/**`) and rates (`ON_CHANGE` or Hz). The server sends one
+frame per subscriber per cycle and a keyframe at least once per second.
+
+### Writes
+
+A write is applied with `TelemetryValue.tryWrite`, the same path the NT4 dashboard uses. The robot therefore
+enforces every rule:
+
+- read-only values reject with `rejected: read-only`;
+- values in a locked lock group reject with `rejected: locked (<group simple name>)`. The lock is defined with
+  `tuningLock(Group.class, condition)` on the robot. Undefined groups behave as `Locks.InMatch`, which is locked
+  while FMS is attached;
+- a value of the wrong type rejects with `rejected: type mismatch (...)`. Integers are accepted for numbers.
+
+The reply is `{accepted, reason, actualValue}`. `actualValue` is the value the robot holds after deciding, so a
+client can restore the displayed value. The server never blocks a write itself.
+
+### Actions
+
+`ACTION_RUN` calls `TelemetryAction.request()`, and `ACTION_CANCEL` calls `cancel()`. Unknown signals reject with
+`rejected: unknown action`.
+
+### Markers
+
+Replay markers (boot, match identified, auto and teleop start and end, disable, faults, stage changes, checks,
+overrides, persisted writes, records, brownout) are sent live to every control session with the realtime marker
+record. Marker kinds equal `ArcpMarker` and `ReplayMarkers`. The `signalId` is 0: replay signal ids are not ARCP
+signal ids (see below).
+
+### Replay stream
+
+Replay streaming needs both `ReplayPolicy.stream(true)` and the ARCP bridge. The records are the replay encoder's
+bytes (dictionary, frame and marker records in the shared ARCP v2 record format), forwarded unchanged.
+
+- A client opts in with `REPLAY_SUBSCRIBE`. Only opted-in sessions receive replay records, so ordinary dashboards do
+  not pay for them.
+- Frames carry sequence numbers. When a client sees a gap, it sends `BACKFILL(from, to)`. The reply is a sequence of
+  `varint length, group` pairs. Each group is a self-contained run of records that starts with a dictionary and a
+  keyframe, so it decodes on its own. The robot answers from its replay buffer. A reply is capped at 1 MiB; ask
+  again for the rest. A range that is no longer buffered returns no groups.
+- The dictionary is repeated at the start of every 64 KiB segment, so a client that joins late can resynchronise.
+- Replay subscribers also receive the realtime markers. Deduplicate markers by timestamp and kind if you consume both.
+
+**Why the replay and telemetry dictionaries are separate.** The replay encoder assigns integer ids to the signals it
+records (hardware, inputs, commands, lifecycle). The telemetry dictionary is the mechanism schema. The paths differ and
+the id spaces are independent. Sharing one id space would need a single signal registry for both, which is not
+done yet. Clients join the two by time and by marker.
+
+### Files
+
+The file service exposes these categories. Names are `category/file`:
+
+| Category | Directory | Contents |
+| --- | --- | --- |
+| `replays` | replay directory | `.athrp` replay files. Retention is enforced on the robot. |
+| `store` | persistent store | `athena-store.txt`, the persisted values. Deleting it resets them on the next boot. |
+| `models` | `ArcpPolicy.modelDirectory` | Characterization and model files. Empty until models are written there. |
+| `tuning` | `<store>-exports/tuning` | Generated: `diff.txt` and `pull.txt` (below). |
+| `status` | `<store>-exports/status` | Generated: `status.txt`, `key=value` lines (ARCP sessions, replay buffer, retention, free disk). |
+
+`FILE_LIST`, `FILE_DOWNLOAD` and `FILE_DELETE` work on these. Names must be plain: separators, `..` and
+unknown categories are rejected. Generated files are rewritten about once a second when their contents change.
+
+## Tuning layers
+
+Three layers, highest first:
+
+1. **Robot store**: values changed on the robot or from a dashboard. Written to `athena-store.txt`.
+2. **Deployed file**: `src/main/deploy/athena/tuning`, which WPILib deploys to `/home/lvuser/deploy/athena/tuning`.
+   Override it with `ArcpPolicy.deployedTuningFile(...)`. It is installed as a read-only fallback of the store, so a
+   deployed value is never copied into the robot store.
+3. **Code default**: the value the declaration sets.
+
+The deployed file uses the store file format, one entry per line, tab-separated:
+
+```
+# athena persistent store v1
+turret/Values/kP	D	2.5
+turret/Values/enabled	B	true
+turret/Values/label	S	hot
+```
+
+Type tags: `D` double, `L` long, `B` boolean, `S` string (escapes `\t`, `\n`, `\r`, `\\`), `A` comma-separated doubles.
+Malformed lines are skipped.
+
+`tuning/diff.txt` has one row per persisted value, tab-separated: `key robot deployed codeDefault source`. `source` is
+`deployed` (the robot matches the deployed file), `code` (the robot matches the code default), `robot-changed`
+(the robot differs from both), or `not-on-robot`. A `-` means the layer has no value.
+
+`tuning/pull.txt` holds the robot's persisted values in the same format. To keep the current tuning, download it and
+save it as `src/main/deploy/athena/tuning`, then deploy.
+
+Only persisted, writable numbers, booleans and strings take part. Persisted number arrays are not exported yet.
+
+## Limits
+
+- Writes and Action requests wait at most 250 ms for the robot. Call `NativeArcpServer.serviceRequests()` every
+  cycle; the bridge does it in `AthenaRobot.robotPeriodic`. At most 256 requests queue. A timeout rejects with
+  `robot did not answer`.
+- Struct, point and geometry signals are not sent. `TelemetryValue` has no unit yet, so dictionary units are empty.
+- Number-array values allocate when they change. Numbers, booleans and integers do not.
+- The Rust side owns the sockets and frame encoding. Java never encodes ARCP frames.
+
+## Build
+
+The native library is built by the normal Gradle build (`:athena-arcp:buildArcpNativeHost`, which runs cargo).
+`-ParcpSkipNative=true` builds without it; ARCP is then disabled at runtime with a warning. The roboRIO library
+is cross-built with `:athena-arcp:buildArcpNativeRoboRio`. See `athena-arcp/README.md`.
+
+## Tests
+
+- `athena-arcp`: `ArcpPolicyTest`, `ArcpMarshalTest`, and `NativeArcpServerTest` (real sockets through JNI).
+- `athena-wpilib`: `ArcpRobotRuntimeTest` starts a simulated robot runtime with the bridge on ephemeral ports. It
+  checks the dictionary, cycle values, lock signals, writes including FMS-locked writes (simulated driver station),
+  actions, the file service, the tuning layers and exports, replay streaming, markers and backfill.
+- `athena-mechanisms`: `PersistentStoreLayerTest` covers the layer precedence and the tuning file format.
+- Rust: `arcp-core` codec, `arcp-server` `tests/v2_server.rs` (replay opt-in and backfill, file categories), and
+  `arcp-jni` unit tests.

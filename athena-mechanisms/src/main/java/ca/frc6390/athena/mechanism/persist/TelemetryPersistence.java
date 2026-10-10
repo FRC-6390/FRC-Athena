@@ -32,6 +32,7 @@ public final class TelemetryPersistence {
     private final List<Binding> bindings = new ArrayList<>();
     private final Map<String, Binding> bindingsByKey = new HashMap<>();
     private final Set<String> boundKeys = new HashSet<>();
+    private final Map<String, Object> codeDefaults = new HashMap<>();
     private boolean pruned;
 
     /**
@@ -67,6 +68,16 @@ public final class TelemetryPersistence {
         }
     }
 
+    /**
+     * Returns the code default of each bound persisted value: the value the declaration set before a stored or
+     * deployed value replaced it. Keys are the persisted telemetry paths.
+     *
+     * @return immutable copy
+     */
+    public Map<String, Object> codeDefaults() {
+        return Map.copyOf(codeDefaults);
+    }
+
     /** Returns the attached store, or null when disabled. */
     public PersistentStore store() {
         return store;
@@ -87,6 +98,8 @@ public final class TelemetryPersistence {
             return value;
         }
         boundKeys.add(key);
+        // The declared value before any stored or deployed override: the code default.
+        codeDefaults.put(key, value.value());
         Object stored = store.get(key).orElse(null);
         try {
             switch (value.type()) {

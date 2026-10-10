@@ -20,6 +20,8 @@ use crate::marshal::{self, put_u64, put_u8, Reader};
 pub const OP_WRITE: u8 = 1;
 pub const OP_ACTION_RUN: u8 = 2;
 pub const OP_ACTION_CANCEL: u8 = 3;
+/// Backfill: `signal_id` carries the first wanted frame sequence, the value the last one (I64).
+pub const OP_BACKFILL: u8 = 4;
 
 /// Requests waiting for the robot thread. Beyond this, new requests are rejected at once.
 pub const MAX_PENDING: usize = 256;
@@ -29,6 +31,7 @@ pub const REPLY_TIMEOUT: Duration = Duration::from_millis(250);
 enum Answer {
     Write(WriteReply),
     Action(Result<(), String>),
+    Backfill(Result<Vec<u8>, String>),
 }
 
 struct Waiter {
@@ -180,9 +183,21 @@ impl Bridge {
             } else {
                 None
             };
+            // Backfill replies carry the record groups as a length-prefixed byte block.
+            let backfill = if op == OP_BACKFILL {
+                let n = r.u32()? as usize;
+                Some(r.bytes(n)?.to_vec())
+            } else {
+                None
+            };
             let Some(waiter) = q.waiting.remove(&id) else {
                 continue;
             };
+            if let Some(data) = backfill {
+                let answer = if accepted { Ok(data) } else { Err(reason) };
+                let _ = waiter.tx.try_send(Answer::Backfill(answer));
+                continue;
+            }
             let answer = match value {
                 Some(actual_value) => {
                     if accepted && q.writable.contains(&waiter.signal_id) {
@@ -216,10 +231,19 @@ impl RobotHandler for BridgeHandler {
         }
         match self.0.submit(OP_WRITE, signal_id, Some(value)) {
             Some(Answer::Write(reply)) => reply,
-            Some(Answer::Action(_)) => {
-                WriteReply::rejected("internal: wrong answer kind", fallback)
-            }
+            Some(_) => WriteReply::rejected("internal: wrong answer kind", fallback),
             None => WriteReply::rejected("robot did not answer (no robot cycle)", fallback),
+        }
+    }
+
+    fn backfill(&self, from: u64, to: u64) -> Result<Vec<u8>, String> {
+        if self.0.full() {
+            return Err("robot busy: request queue full".into());
+        }
+        match self.0.submit(OP_BACKFILL, from, Some(Value::I64(to as i64))) {
+            Some(Answer::Backfill(result)) => result,
+            Some(_) => Err("internal: wrong answer kind".into()),
+            None => Err("robot did not answer (no robot cycle)".into()),
         }
     }
 
@@ -230,7 +254,7 @@ impl RobotHandler for BridgeHandler {
         let op = if run { OP_ACTION_RUN } else { OP_ACTION_CANCEL };
         match self.0.submit(op, signal_id, None) {
             Some(Answer::Action(result)) => result,
-            Some(Answer::Write(_)) => Err("internal: wrong answer kind".into()),
+            Some(_) => Err("internal: wrong answer kind".into()),
             None => Err("robot did not answer (no robot cycle)".into()),
         }
     }

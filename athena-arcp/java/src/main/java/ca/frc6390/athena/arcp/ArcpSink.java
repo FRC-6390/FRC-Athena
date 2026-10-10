@@ -67,4 +67,22 @@ public interface ArcpSink {
 
     /** Current server state for dashboards and logs. */
     ArcpStatus status();
+
+    /**
+     * Sends raw replay record envelopes (dictionary, frames, markers) to sessions that opted in to replay.
+     * The bytes are complete records produced by the replay encoder; they are forwarded unchanged.
+     *
+     * @param records buffer holding complete record envelopes
+     * @param length number of valid bytes in {@code records}
+     */
+    default void publishRecords(byte[] records, int length) {
+    }
+
+    /**
+     * Installs the source for replay backfill requests. Called once when the replay stream is attached.
+     *
+     * @param source backfill source
+     */
+    default void backfill(ArcpBackfill source) {
+    }
 }

@@ -53,12 +53,35 @@ public final class ReplayRecorder {
     private double lastTimestampSeconds;
     private ReplayStreamSink sink;
     private final Set<String> issuedNames = new HashSet<>();
+    private final List<MarkerListener> markerListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private ReplayWriter writer;
     private final long sessionId = SESSIONS.incrementAndGet();
 
     /** Session identities are unique within a JVM and increase over time (seeded from the wall clock). */
     private static final java.util.concurrent.atomic.AtomicLong SESSIONS =
             new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis() / 1000L * 1000L);
+
+    /** Receives every marker as it is recorded, for live forwarding (for example to ARCP clients). */
+    @FunctionalInterface
+    public interface MarkerListener {
+        /**
+         * @param timestampSeconds robot time of the latest recorded cycle
+         * @param kind marker kind, see {@link ReplayMarkers}
+         * @param message marker message
+         * @param signalId related signal id, or 0
+         */
+        void marker(double timestampSeconds, int kind, String message, int signalId);
+    }
+
+    /**
+     * Adds a listener that is called for each marker recorded from now on. Listeners run on the thread that
+     * adds the marker and must not block.
+     *
+     * @param listener listener
+     */
+    public void addMarkerListener(MarkerListener listener) {
+        markerListeners.add(java.util.Objects.requireNonNull(listener, "listener"));
+    }
 
     public ReplayRecorder(ReplayPolicy policy, Path directory, RuntimeFailureReporter reporter) {
         this.policy = policy;
@@ -164,6 +187,11 @@ public final class ReplayRecorder {
         if (segment == null || segment.size() >= SEGMENT_TARGET_BYTES) {
             closeSegment();
             openSegment();
+            // openSegment wrote the dictionary of every known signal into dictionaryScratch. Stream it now, or live
+            // clients would receive values without names until a new signal appears.
+            if (streaming() && dictionaryScratch.size() > 0) {
+                sink.publishDictionary(dictionaryScratch.toByteArray());
+            }
         }
         dictionaryScratch.clear();
         frameScratch.clear();
@@ -213,6 +241,9 @@ public final class ReplayRecorder {
         segment.bytes(markerScratch.buffer(), 0, markerScratch.size());
         if (streaming()) {
             sink.publishMarker(Math.max(0, lastSequence), markerScratch.toByteArray());
+        }
+        for (MarkerListener listener : markerListeners) {
+            listener.marker(lastTimestampSeconds, kind, message, signalId);
         }
     }
 

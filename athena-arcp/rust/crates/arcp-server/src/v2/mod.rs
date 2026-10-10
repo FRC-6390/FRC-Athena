@@ -38,14 +38,22 @@ pub trait RobotHandler: Send + Sync + 'static {
     fn write(&self, signal_id: u64, value: Value) -> WriteReply;
     /// Runs (`run == true`) or cancels (`run == false`) the Action behind `signal_id`.
     fn action(&self, signal_id: u64, run: bool) -> Result<(), String>;
+    /// Returns buffered replay record groups covering frame sequences `from..=to` (see
+    /// [`ReplyData::Records`]). The default has no buffer.
+    fn backfill(&self, _from: u64, _to: u64) -> Result<Vec<u8>, String> {
+        Err("backfill not supported".into())
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// TCP control listener address. Port 0 picks a free port; see [`ArcpServerV2::control_addr`].
     pub control_bind: SocketAddr,
-    /// Directory exposed by the file service. `None` disables file requests.
+    /// Directory exposed by the file service for plain names. `None` disables plain names.
     pub file_root: Option<PathBuf>,
+    /// Named file-service categories (`category/name`), each a directory. Missing directories
+    /// list as empty.
+    pub file_categories: Vec<(String, PathBuf)>,
     /// Realtime bandwidth budget in bytes per second. `0` disables budgeting.
     pub bandwidth_budget_bytes_per_sec: u64,
     /// Maximum datagram size for frames (fragments split at this size).
@@ -59,6 +67,7 @@ impl Default for ServerConfig {
         Self {
             control_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
             file_root: None,
+            file_categories: Vec::new(),
             bandwidth_budget_bytes_per_sec: 0,
             mtu: 1200,
             keyframe_interval: Duration::from_secs(1),
@@ -89,7 +98,7 @@ pub(crate) struct Inner {
     state: Mutex<State>,
     pub(crate) udp: UdpSocket,
     pub(crate) handler: Arc<dyn RobotHandler>,
-    pub(crate) file_root: Option<PathBuf>,
+    pub(crate) roots: files::Roots,
     started: Instant,
     shutdown: AtomicBool,
 }
@@ -123,7 +132,7 @@ impl ArcpServerV2 {
             state: Mutex::new(State::new(config.bandwidth_budget_bytes_per_sec, config.mtu, keyframe_micros)),
             udp,
             handler,
-            file_root: config.file_root,
+            roots: files::Roots { root: config.file_root, categories: config.file_categories },
             started: Instant::now(),
             shutdown: AtomicBool::new(false),
         });
@@ -154,6 +163,13 @@ impl ArcpServerV2 {
     /// Sends a marker to every subscriber (markers are not filtered by subscriptions).
     pub fn marker(&self, marker: Marker) {
         self.inner.lock().send_marker(marker, &self.inner.udp);
+    }
+
+    /// Sends raw replay records (a concatenation of complete record envelopes) to every session that
+    /// subscribed with [`ClientMessage::ReplaySubscribe`]. Records are packed into datagrams of at
+    /// most `mtu` bytes; a single larger record is sent alone.
+    pub fn publish_records(&self, records: &[u8]) {
+        self.inner.lock().publish_records(records, &self.inner.udp);
     }
 
     pub fn status(&self) -> ServerStatus {
