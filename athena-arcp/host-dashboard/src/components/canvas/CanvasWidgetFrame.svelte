@@ -81,16 +81,16 @@
     left: 0;
     top: 0;
     box-sizing: border-box;
-    border: 1px solid rgba(99, 115, 140, 0.5);
-    border-radius: 7px;
-    background: rgba(26, 33, 45, 0.98);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
     padding: 0.12rem 0.28rem 0.24rem;
     display: grid;
     grid-template-rows: minmax(0.82rem, calc(var(--cell) * 0.46)) minmax(0, 1fr);
     gap: 0;
     cursor: pointer;
     overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
     content-visibility: auto;
     contain-intrinsic-size: 220px 140px;
     contain: layout paint;
@@ -106,7 +106,7 @@
 
   .widget-card.layout-card {
     border-style: dashed;
-    background: rgba(30, 37, 49, 0.86);
+    background: var(--surface-2);
     padding: 0.06rem 0.14rem 0.12rem;
     grid-template-rows: minmax(0.46rem, calc(var(--cell) * 0.2)) minmax(0, 1fr);
   }
@@ -116,14 +116,14 @@
   }
 
   .widget-card.in-layout {
-    border-color: rgba(56, 189, 248, 0.55);
-    background: rgba(21, 32, 44, 0.98);
-    box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.2), 0 4px 10px rgba(0, 0, 0, 0.25);
+    border-color: color-mix(in srgb, var(--info) 55%, transparent);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 20%, transparent);
   }
 
   .widget-card.active {
-    border-color: rgba(180, 35, 45, 0.9);
-    box-shadow: inset 0 0 0 1px rgba(180, 35, 45, 0.34), 0 6px 14px rgba(0, 0, 0, 0.28);
+    border-color: var(--brand);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 34%, transparent), 0 4px 12px rgba(0, 0, 0, 0.25);
   }
 
   .widget-head {
