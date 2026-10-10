@@ -8,12 +8,24 @@ import ca.frc6390.athena.localization.pipeline.VisionFilters;
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
+import ca.frc6390.athena.wpilib.geometry.AllianceTransform;
 import frc.robot.DriveTrain;
 import frc.robot.vision.VisionSources;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
+import java.util.function.Supplier;
 
 public final class LocalizationExamples implements Mechanism {
+    /**
+     * Blue-alliance geometry. Blue is the identity; red sees the same layout rotated 180 degrees about the field
+     * center. Resolved against the Driver Station on each call.
+     */
+    public static final AllianceTransform ALLIANCE = AllianceTransform.rotate180(16.54, 8.21);
+
+    /** A pose on the blue side of the field, mapped to the current alliance on every call. */
+    public final Supplier<Pose2d> blueStartPose = ALLIANCE.poseSupplier(
+            new Pose2d(1.5, 4.0, Rotation2d.kZero));
+
     public final PoseSignal odometry;
     public final Localization filteredVision;
     public final Localization fusedVision;
@@ -57,6 +69,15 @@ public final class LocalizationExamples implements Mechanism {
 
     public Pose2d pose() {
         return estimatedFieldPose.pose2d();
+    }
+
+    /** Zeroes heading relative to the alliance: forward on blue, toward the blue wall on red. */
+    public ActionBinding resetHeadingForAlliance() {
+        return context -> {
+            Pose2d current = pose();
+            Rotation2d forward = ALLIANCE.rotation(Rotation2d.kZero);
+            estimatedFieldPose.reset(new Pose2d(current.getTranslation(), forward)).apply(context);
+        };
     }
 
     public ActionBinding resetHeading() {

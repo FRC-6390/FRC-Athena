@@ -126,3 +126,54 @@ scoreHigh = Actions.sequence()
 ```
 
 The timeout provides a fallback so a failed or obstructed mechanism cannot prevent the sequence from advancing forever.
+
+## Typed units and characterization
+
+`SingleJointArm` declares its encoder with `measures(Degrees)` and its binding with `Controls.position(motor, Degrees)`.
+Targets, tolerances (`untilWithin(Degrees.of(2))`), and constraints are measures of the same unit. A binding built on
+a mismatched encoder fails when the mechanism is declared.
+
+The same arm declares a `Characterization`. Athena exposes its tests (`QuasistaticForward`, `DynamicForward`,
+`FitModel`, and the others) as dashboard Actions. `SimModel.arm(motor).model(model)` uses the active model as the
+simulated plant. The arm starts from a code default model (`defaults(...)`) until a fit runs on the robot, and the
+simulation reads the model when the robot is built. Checks come from the same binding: `blocked` and `load`. The
+`stowWhenBlocked` hook uses `blocked` to back off to stow.
+
+## Motion policies
+
+`SingleJointArm` sets `retarget(Retarget.SMOOTH)` and `release(Release.HOLD)` on its binding. `stow` is bounded with
+`atMost(...)` and uses `interruptible(Interrupt.AFTER_COMPLETE)`, so a newer request waits for it. `pickupOrFault`
+is an `Actions.attempt` chain: a tight tolerance first, then a looser one, then `Actions.fault(...)`.
+
+## Power, thermal, and staging
+
+`VelocityShooter.SHOOT` is a shared `PowerProfile` used by both shooter motors. `endgame` is an `update(...)` Action
+that lowers the profile's share while the match ends, and `normalPower` restores it.
+
+`StagedArm` derates its motor with `Thermal.derate(...)`. Its `ArmHealth` enum drives a `Staging`: `STRAINED` caps
+effort, `HOT` also caps speed and acceleration, and `SAFE_SHUTDOWN` requests stow. `lift.staged(health)` applies those
+caps only while the lift runs. The worst true stage wins, and a stage is left only after its condition has been false
+for two seconds.
+
+## Persisted tuning, lock groups, and recording
+
+`VelocityShooter.shotDistanceMeters` is `persist = true`, so the value survives reboots and deploys. The shooter's PID
+edits persist through `persistTuning(Locks.InMatch.class)`. `StagedArm.calibrated` and its tuning use the custom
+`Calibration` group. `Robot` defines that group's condition in its constructor with `tuningLock(...)`. Writes in a locked
+group are rejected by the robot.
+
+`VelocityShooter.distanceShot` is a persisted interpolation. Its `recordShot` Action inserts the current distance and
+wheel speed as a new table point, which tunes the table from the field.
+
+## Robot policies and replay tests
+
+`Robot` declares three typed policy fields, which `AthenaRobot` discovers like `AutoChooser`:
+
+- `ReplayPolicy`: a 48 MiB buffer, match and disable flushes, and retention limits.
+- `ArcpPolicy`: the ARCP control port (5810) and a bandwidth budget. Use `ArcpPolicy.disabled()` to turn ARCP off.
+- `PowerPolicy`: a 7.5 V floor and staggered starts.
+
+`src/test/java/frc/robot/ReplayRecordingTest.java` records a simulated teleop run of the arm, then replays the
+recording against the same code with `ReplaySimulation`. The replay must report zero command differences.
+
+Run the tests with `./gradlew test` from this project directory.

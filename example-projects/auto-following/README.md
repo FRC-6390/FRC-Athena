@@ -13,6 +13,9 @@ path provider. Selectable autos remain ordinary Athena `Action` trees and each a
 | `PathPlannerSetup` | Convert PathPlanner chassis-speed callbacks into normal Athena drive Actions |
 | `CommandInteropExamples` | Wrap and schedule a WPILib command through Athena's `CommandGraph` |
 
+`AutoContext` passes `AllianceTransform::isRedAlliance` to the Choreo provider, so mirrored paths follow the Driver
+Station alliance without alliance checks in each auto.
+
 `ExampleDrive` owns a `RobotVelocityPool`, its autonomous channel, and one shared `pooledDrive` action.
 The native follower publishes Choreo output through that channel, PathPlanner updates the same channel,
 and path completion clears it. `PathPlannerSetup` configures PathPlanner's global `AutoBuilder` and requests

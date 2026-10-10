@@ -40,6 +40,10 @@ def includeDesktopSupport = false
 wpi.java.debugJni = false
 
 dependencies {
+    testImplementation platform('org.junit:junit-bom:5.10.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     annotationProcessor wpi.java.deps.wpilibAnnotations()
     implementation wpi.java.deps.wpilib()
     implementation wpi.java.vendor.java()
@@ -67,6 +71,11 @@ jar {
 
 deployArtifact.jarTask = jar
 wpi.java.configureExecutableTasks(jar)
+
+wpi.java.configureTestTasks(test)
+test {
+    useJUnitPlatform()
+}
 
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add '-XDstringConcat=inline'

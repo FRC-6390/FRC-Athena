@@ -19,6 +19,10 @@ It demonstrates shared single/double/triple/ranged click recognition, debounced 
 key-repeat behavior, axis hysteresis, explicitly controlled toggle state, `allOf`/`anyOf`/`noneOf`, timed chords,
 ordered input sequences, `CommandAction` requirements, and WPILib command wrapping.
 
+Service mode is a binding set. `operator.in(() -> serviceMode, pad -> ...)` gates the POV bindings inside it:
+they fire only while the condition is true, and a held POV releases its action when the set turns off. Bindings
+made directly on the operator controller are not affected.
+
 The bumper signals are composed so pressing both requests neither direction. Held actions own their
 target devices while the signal is active and release that ownership when the signal becomes false,
 so a separate release-time stop binding is not required.
