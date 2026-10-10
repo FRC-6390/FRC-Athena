@@ -51,7 +51,7 @@ describe('registry', () => {
   test('suggestions are filtered by slot and ordered by score', () => {
     const value = def({ type: 'value', score: () => 10 });
     const graph = def({ type: 'graph', score: () => 40, slots: [{ key: 's', label: 's', matcher: { types: ['f64'] }, required: true }] });
-    const light = def({ type: 'light', slots: [{ key: 'v', label: 'v', matcher: { types: ['bool'] }, required: true }] });
+    const light = def({ type: 'light', score: () => 50, slots: [{ key: 'v', label: 'v', matcher: { types: ['bool'] }, required: true }] });
     [value, graph, light].forEach(registerWidget);
     expect(suggestWidgets(signal({})).map((d) => d.type)).toEqual(['graph', 'value']);
     expect(suggestWidgets(signal({ type: 'bool' })).map((d) => d.type)).toEqual(['light', 'value']);
