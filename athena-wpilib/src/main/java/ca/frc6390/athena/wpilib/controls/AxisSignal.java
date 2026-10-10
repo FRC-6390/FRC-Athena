@@ -16,6 +16,7 @@ public final class AxisSignal implements TelemetrySource {
     private static final int CURVE_SAMPLE_COUNT = 41;
 
     private final ControlOwner owner;
+    private final BindingGate gate;
     private final String name;
     private final DoubleSupplier source;
     private final DoubleSupplier clock;
@@ -35,17 +36,22 @@ public final class AxisSignal implements TelemetrySource {
 
     AxisSignal(DoubleSupplier source) {
         this(null, "axis", source, Timer::getFPGATimestamp,
-                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0);
+                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0, null);
     }
 
     AxisSignal(DoubleSupplier source, DoubleSupplier clock) {
         this(null, "axis", source, clock,
-                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0);
+                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0, null);
     }
 
     AxisSignal(ControlOwner owner, String name, DoubleSupplier source) {
+        this(owner, name, source, null);
+    }
+
+    /** Creates a supplier-backed axis that gates its thresholds with {@code gate} when non-null. */
+    AxisSignal(ControlOwner owner, String name, DoubleSupplier source, BindingGate gate) {
         this(owner, name, source, Timer::getFPGATimestamp,
-                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0);
+                0.0, false, false, AxisCurves.linear(), false, 1.0, 1.0, gate);
     }
 
     private AxisSignal(
@@ -59,8 +65,10 @@ public final class AxisSignal implements TelemetrySource {
             CurveMapping curve,
             boolean slewEnabled,
             double positiveSlewRate,
-            double negativeSlewRate) {
+            double negativeSlewRate,
+            BindingGate gate) {
         this.owner = owner;
+        this.gate = gate;
         this.name = requireName(name);
         this.source = Objects.requireNonNull(source, "source");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -178,13 +186,15 @@ public final class AxisSignal implements TelemetrySource {
     /** Returns a control signal active outside the supplied absolute magnitude. */
     public ControlSignal outside(double magnitude) {
         requireMagnitude(magnitude);
-        return new ControlSignal(owner, name + ".outside[" + magnitude + "]", context -> Math.abs(value()) > magnitude);
+        return new ControlSignal(owner, name + ".outside[" + magnitude + "]",
+                context -> Math.abs(value()) > magnitude, false, gate, null);
     }
 
     /** Returns a control signal active inside the supplied absolute magnitude. */
     public ControlSignal inside(double magnitude) {
         requireMagnitude(magnitude);
-        return new ControlSignal(owner, name + ".inside[" + magnitude + "]", context -> Math.abs(value()) < magnitude);
+        return new ControlSignal(owner, name + ".inside[" + magnitude + "]",
+                context -> Math.abs(value()) < magnitude, false, gate, null);
     }
 
     @Override
@@ -226,7 +236,7 @@ public final class AxisSignal implements TelemetrySource {
             double positiveSlewRate,
             double negativeSlewRate) {
         return new AxisSignal(owner, name, source, clock, deadband, squared, inverted, curve,
-                slewEnabled, positiveSlewRate, negativeSlewRate);
+                slewEnabled, positiveSlewRate, negativeSlewRate, gate);
     }
 
     private ControlSignal threshold(String operation, java.util.function.Predicate<Boolean> evaluator) {
@@ -239,7 +249,7 @@ public final class AxisSignal implements TelemetrySource {
             }
         }
         State state = new State();
-        return new ControlSignal(owner, name + "." + operation, context -> state.evaluate());
+        return new ControlSignal(owner, name + "." + operation, context -> state.evaluate(), false, gate, null);
     }
 
     private double raw() {

@@ -20,6 +20,11 @@ public class ButtonSignal extends ControlSignal {
         super(owner, name, evaluator);
     }
 
+    ButtonSignal(ControlOwner owner, String name, Evaluator evaluator,
+            BindingGate gate, BindingConflicts.Key conflictKey) {
+        super(owner, name, evaluator, false, gate, conflictKey);
+    }
+
     /** Runs once when the button is pressed. */
     public ButtonSignal onPress(DeviceAction action) {
         super.onTrue(action);
@@ -227,7 +232,7 @@ public class ButtonSignal extends ControlSignal {
     @Override
     public ButtonSignal debounce(Duration rising, Duration falling) {
         ControlSignal processed = super.debounce(rising, falling);
-        return new ButtonSignal(owner(), processed.name(), processed::sample);
+        return new ButtonSignal(owner(), processed.name(), processed::sample, gate(), null);
     }
 
     // Compatibility aliases retained for existing robot projects.

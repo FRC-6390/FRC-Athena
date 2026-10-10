@@ -11,7 +11,7 @@ public final class ToggleSignal extends ControlSignal {
     private final State state;
 
     private ToggleSignal(ControlSignal source, boolean initialState, State state) {
-        super(source.owner(), source.name() + ".toggle", state::evaluate);
+        super(source.owner(), source.name() + ".toggle", state::evaluate, false, source.gate(), null);
         this.state = state;
         state.source = source;
         state.value = initialState;

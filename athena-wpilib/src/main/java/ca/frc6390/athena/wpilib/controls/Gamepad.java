@@ -4,6 +4,7 @@ import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.HookGroup;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.XboxController;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,12 +12,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * A gamepad declaration exposing processed axes and directly bindable buttons.
  */
 public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource {
     private static final double DIGITAL_TRIGGER_THRESHOLD = 0.5;
+
+    /*
+     * Binding-set views (see in(...)) are Gamepad instances that share the root's input and layout.
+     * A view has its own gated signals, but its signals and axes are registered with the root so
+     * hooks and telemetry are discovered once from the root declaration.
+     */
 
     interface Input {
         double axis(int axis);
@@ -29,6 +37,10 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
     }
 
     private final Input controller;
+    private final Layout layout;
+    private final Gamepad root;
+    private final BindingGate gate;
+    private final BindingConflicts conflicts;
     private final AxisSignal leftX;
     private final AxisSignal leftY;
     private final AxisSignal rightX;
@@ -63,8 +75,24 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
     }
 
     Gamepad(Input controller, Layout layout) {
+        this(controller, layout, null, null, defaultConflicts());
+    }
+
+    /** Creates an Xbox-layout gamepad whose binding-conflict warnings go to {@code reporter}. */
+    Gamepad(Input controller, Consumer<String> reporter) {
+        this(controller, Layout.XBOX, null, null, new BindingConflicts(reporter));
+    }
+
+    private static BindingConflicts defaultConflicts() {
+        return new BindingConflicts(message -> DriverStation.reportWarning(message, false));
+    }
+
+    Gamepad(Input controller, Layout layout, Gamepad root, BindingGate gate, BindingConflicts conflicts) {
         this.controller = Objects.requireNonNull(controller, "controller");
-        Objects.requireNonNull(layout, "layout");
+        this.layout = Objects.requireNonNull(layout, "layout");
+        this.root = root == null ? this : root;
+        this.gate = gate;
+        this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
         signals = new ArrayList<>();
         registeredAxes = new LinkedHashMap<>();
         leftX = axis("leftX", layout.leftX());
@@ -143,14 +171,53 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
 
     public ButtonSignal signal(String name, BooleanSupplier source) {
         Objects.requireNonNull(source, "source");
-        return new ButtonSignal(this, name, context -> source.getAsBoolean());
+        return newButton(name, context -> source.getAsBoolean());
+    }
+
+    /**
+     * Creates bindings that are active only while {@code condition} is true.
+     *
+     * <p>Every signal created on the passed view is gated by the condition: a gated button fires
+     * its press action when it becomes active, its held action runs while active, and its release
+     * action runs when the condition turns false. Bindings made directly on this gamepad are not
+     * affected. Sets nest, and the inner condition is combined with the outer one.
+     *
+     * @param condition condition gating the bindings
+     * @param bindings consumer that creates the gated bindings on the view
+     * @return this gamepad, for chaining
+     */
+    public Gamepad in(BooleanSupplier condition, Consumer<Gamepad> bindings) {
+        Objects.requireNonNull(bindings, "bindings");
+        bindings.accept(createView(BindingGate.of(gate, Objects.requireNonNull(condition, "condition"))));
+        return this;
+    }
+
+    /** Creates a binding-set view of this gamepad's type. Subclasses return their own type. */
+    Gamepad createView(BindingGate viewGate) {
+        return new Gamepad(controller, layout, root, viewGate, conflicts);
+    }
+
+    Input input() {
+        return controller;
+    }
+
+    BindingGate gate() {
+        return gate;
+    }
+
+    BindingConflicts conflicts() {
+        return conflicts;
+    }
+
+    Gamepad root() {
+        return root;
     }
 
     @Override
     public Map<String, HookBinding> hooks() {
         Map<String, HookBinding> hooks = new LinkedHashMap<>();
-        for (int index = 0; index < signals.size(); index++) {
-            ControlSignal signal = signals.get(index);
+        for (int index = 0; index < root.signals.size(); index++) {
+            ControlSignal signal = root.signals.get(index);
             if (!signal.binding().actions().isEmpty()) {
                 hooks.put(signal.name() + "." + index, signal.binding());
             }
@@ -162,25 +229,26 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
     public Map<String, TelemetryValue> telemetry() {
         Map<String, TelemetryValue> values = new LinkedHashMap<>();
         values.put("Connected", TelemetryValue.bool(controller::connected));
-        registeredAxes.forEach((axisName, axis) -> axis.telemetry().forEach(
+        root.registeredAxes.forEach((axisName, axis) -> axis.telemetry().forEach(
                 (name, value) -> values.put("Axes/" + axisName + "/" + name, value)));
         return Map.copyOf(values);
     }
 
     void register(ControlSignal signal) {
-        signals.add(Objects.requireNonNull(signal, "signal"));
+        root.signals.add(Objects.requireNonNull(signal, "signal"));
     }
 
     void register(AxisSignal axis) {
         Objects.requireNonNull(axis, "axis");
-        if (registeredAxes.containsValue(axis)) return;
+        Map<String, AxisSignal> axes = root.registeredAxes;
+        if (axes.containsValue(axis)) return;
 
         String baseName = axis.name();
         String registeredName = baseName;
-        for (int suffix = 2; registeredAxes.containsKey(registeredName); suffix++) {
+        for (int suffix = 2; axes.containsKey(registeredName); suffix++) {
             registeredName = baseName + suffix;
         }
-        registeredAxes.put(registeredName, axis);
+        axes.put(registeredName, axis);
     }
 
     boolean connected() {
@@ -188,7 +256,7 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
     }
 
     private AxisSignal axis(String name, int axis) {
-        return new AxisSignal(this, name, () -> controller.axis(axis));
+        return new AxisSignal(this, name, () -> controller.axis(axis), gate);
     }
 
     final ButtonSignal button(String name, int button) {
@@ -200,7 +268,12 @@ public class Gamepad extends ControlOwner implements HookGroup, TelemetrySource 
     }
 
     private ButtonSignal buttonFrom(ControlSignal signal) {
-        return new ButtonSignal(this, signal.name(), signal::sample);
+        return newButton(signal.name(), signal::sample);
+    }
+
+    /** Creates a button signal that is gated when this gamepad is a binding-set view. */
+    private ButtonSignal newButton(String name, ControlSignal.Evaluator evaluator) {
+        return new ButtonSignal(this, name, evaluator, gate, gate == null ? null : conflicts.key(name));
     }
 
     private static final class XboxInput implements Input {
