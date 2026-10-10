@@ -201,8 +201,21 @@ bindings exactly. The same code gives zero differences; code that binds the butt
 
 Driver station state is recorded and injected too, and is available to robot code through
 `RuntimeInputs.injected()`. Code that calls `DriverStation` statics directly, such as
-`DriverStation.isTeleopEnabled()`, still reads the live driver station and is not redirected. Gate on the lifecycle
-mode the runtime provides instead.
+`DriverStation.isTeleopEnabled()`, reads the live driver station unless a sink drives it. To make those reads see the
+recorded state, pass the WPILib sink:
+
+```java
+ReplaySimulation.replay(file)
+        .driverStation(ReplayDriverStationSim.sink())   // athena-wpilib
+        .runAgainst(session -> RobotRuntime.simulated(session).register(new Robot()))
+        .report();
+ReplayDriverStationSim.reset();                          // when finished, before other code reads DS
+```
+
+The sink runs before the robot for every recorded frame. It sets the `DriverStationSim` control word (enabled,
+autonomous, test), FMS and DS attachment, alliance station, match time, event, match type and number, game message,
+and each joystick port's axes, POVs, buttons and name, then calls `notifyNewData()`. The HAL carries 32 buttons per
+stick, so the recorded mask is 32 bits wide. The sink is opt-in: without it only `RuntimeInputs` is injected.
 
 Recording a simulated run uses the same path as `AthenaRobot`:
 
@@ -221,7 +234,7 @@ Limits:
 - Motor connection and failure flags are recorded but not injected. IMU `connected` and `calibrating` flags are
   recorded but not injected. Localization measurements are recorded as summaries and are not injected. The
   localization pipeline runs on the injected sensors, so its output is reproduced only when its inputs are.
-- Code that reads `DriverStation` statics directly is not redirected (see above). Joysticks are read through the
-  controls adapters only.
+- Code that reads `DriverStation` statics directly is redirected only when the `driverStation(...)` sink is set (see
+  above). Joysticks are read through the controls adapters, and through the sink when it is set.
 - Replay compares commands only. It does not compare telemetry, traces, or localization output.
 - Files written before the input signals existed have none. Replay of those files injects empty input.
