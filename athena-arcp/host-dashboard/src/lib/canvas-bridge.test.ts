@@ -137,7 +137,7 @@ describe('classicCommands', () => {
         return reply('run');
       }
     });
-    await commands.setValue(5, '12.7');
+    expect(await commands.setValue(5, '12.7')).toBeNull();
     expect(calls).toEqual([['write', 5, 12]]);
   });
 
@@ -151,21 +151,22 @@ describe('classicCommands', () => {
       },
       run: async () => reply('run')
     });
-    expect(await commands.setValue(5, 'abc')).toBeNull();
-    expect(await commands.setValue(99, '1')).toBeNull();
+    expect(await commands.setValue(5, 'abc')).toContain('not a valid f64');
+    expect(await commands.setValue(99, '1')).toContain('unknown signal');
     expect(calls).toEqual([]);
   });
 
-  test('triggerAction runs the signal', async () => {
+  test('triggerAction runs the signal and reports robot rejections', async () => {
     const calls: number[] = [];
     const commands = classicCommands(fakeStore([]), {
       write: async () => reply('write'),
       run: async (id) => {
         calls.push(id);
-        return reply('run');
+        return id === 42 ? reply('run') : { ...reply('run'), accepted: false, reason: 'rejected: locked (InMatch)' };
       }
     });
-    await commands.triggerAction(42);
-    expect(calls).toEqual([42]);
+    expect(await commands.triggerAction(42)).toBeNull();
+    expect(await commands.triggerAction(43)).toBe('rejected: locked (InMatch)');
+    expect(calls).toEqual([42, 43]);
   });
 });

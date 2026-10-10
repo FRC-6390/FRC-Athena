@@ -16,10 +16,13 @@ export const MISSING_VALUE = '-';
 /** The slice of a ValueStore the adapter reads. Keeps tests free of a live store. */
 export type CanvasStoreView = Pick<ValueStore, 'allSignals' | 'latestSample' | 'descriptor'>;
 
-/** Commands the classic canvas calls. `raw` is the text the user typed. */
+/**
+ * Commands the classic canvas calls. `raw` is the text the user typed. Each resolves to an error message
+ * (rejected locally, or refused by the robot) or null when the command was accepted.
+ */
 export type CanvasCommands = {
-  setValue(signalId: number, raw: string): Promise<CommandReply | null>;
-  triggerAction(signalId: number): Promise<CommandReply | null>;
+  setValue(signalId: number, raw: string): Promise<string | null>;
+  triggerAction(signalId: number): Promise<string | null>;
 };
 
 /** Classic `access` strings: `observe` for readable values, `write` for tunables, `invoke` for actions. */
@@ -83,9 +86,14 @@ export function parseClassicValue(type: string, raw: string): SignalValue | null
   return parseInput(type, raw);
 }
 
+/** Error text for a robot reply that did not accept the command, or null when it did. */
+export function replyError(reply: CommandReply): string | null {
+  return reply.accepted ? null : reply.reason || 'rejected by robot';
+}
+
 /**
  * Commands for the classic canvas on top of a session. `setValue` parses the text for the signal's type
- * and writes it; text that does not parse resolves to null and nothing is sent. Writes are not otherwise
+ * and writes it; text that does not parse is reported and nothing is sent. Writes are not otherwise
  * pre-validated (the robot decides).
  */
 export function classicCommands(
@@ -95,13 +103,13 @@ export function classicCommands(
   return {
     async setValue(signalId, raw) {
       const descriptor = store.descriptor(signalId);
-      if (!descriptor) return null;
+      if (!descriptor) return `unknown signal ${signalId}`;
       const value = parseClassicValue(descriptor.type, raw);
-      if (value === null) return null;
-      return commands.write(signalId, value);
+      if (value === null) return `"${raw.trim()}" is not a valid ${descriptor.type} value`;
+      return replyError(await commands.write(signalId, value));
     },
     async triggerAction(signalId) {
-      return commands.run(signalId);
+      return replyError(await commands.run(signalId));
     }
   };
 }
