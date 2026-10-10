@@ -16,6 +16,8 @@ public final class PidController {
     private double proportionalOutput;
     private double integralOutput;
     private double derivativeOutput;
+    private double lastUnclamped;
+    private double lastClamped;
 
     PidController(PidGains gains) {
         this.gains = Objects.requireNonNull(gains, "gains");
@@ -53,7 +55,35 @@ public final class PidController {
         proportionalOutput = 0.0;
         integralOutput = 0.0;
         derivativeOutput = 0.0;
+        lastUnclamped = 0.0;
+        lastClamped = 0.0;
         first = true;
+    }
+
+    /**
+     * Forgets the previous measurement so the next derivative term is zero. Used on a gain change, where
+     * the derivative of the old gains must not leak into the new gains' output.
+     */
+    public void resetDerivative() {
+        first = true;
+    }
+
+    /**
+     * Bumpless transfer. Re-seeds the integral so that this controller's unclamped output, plus the
+     * contribution of every other loop ({@code currentVolts - clampedOutput}), equals {@code targetVolts}.
+     * Returns false (and changes nothing) when the controller has no integral action.
+     */
+    public boolean bumpTo(double targetVolts, double currentVolts) {
+        if (gains.i() == 0.0 || !Double.isFinite(targetVolts) || !Double.isFinite(currentVolts)) {
+            return false;
+        }
+        double others = currentVolts - lastClamped;
+        double shift = targetVolts - (lastUnclamped + others);
+        integral += shift / gains.i();
+        lastUnclamped += shift;
+        integralOutput += shift;
+        lastClamped = clamp(lastUnclamped);
+        return true;
     }
 
     /** Calculates an output in the units implied by the configured gains. */
@@ -80,7 +110,9 @@ public final class PidController {
         proportionalOutput = gains.p() * error;
         integralOutput = gains.i() * integral;
         derivativeOutput = gains.d() * derivative;
-        return clamp(proportionalOutput + integralOutput + derivativeOutput);
+        lastUnclamped = proportionalOutput + integralOutput + derivativeOutput;
+        lastClamped = clamp(lastUnclamped);
+        return lastClamped;
     }
 
     void applied(double requested, double applied) {

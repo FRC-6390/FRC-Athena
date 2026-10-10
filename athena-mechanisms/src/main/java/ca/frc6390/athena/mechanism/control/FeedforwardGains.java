@@ -74,6 +74,21 @@ public final class FeedforwardGains implements ControlLoop, TelemetrySource {
 
     private final class Runtime implements ControlLoopRuntime {
         private ControlLoopTrace trace = ControlLoopTrace.ZERO;
+        private double seenStatic = staticGain;
+        private double seenVelocity = velocityGain;
+        private double seenAcceleration = accelerationGain;
+        private double seenGravity = gravityGain;
+
+        @Override public boolean consumeGainChange() {
+            boolean changed = staticGain != seenStatic || velocityGain != seenVelocity
+                    || accelerationGain != seenAcceleration || gravityGain != seenGravity;
+            seenStatic = staticGain;
+            seenVelocity = velocityGain;
+            seenAcceleration = accelerationGain;
+            seenGravity = gravityGain;
+            return changed;
+        }
+
         @Override public ControlOutput calculate(ControlLoopContext context) {
             if (disabled) return ControlOutput.voltage(0.0);
             double velocity = context.reference().velocity();

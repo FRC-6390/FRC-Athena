@@ -9,6 +9,8 @@ import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
+import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
 import ca.frc6390.athena.api.FailurePolicy;
@@ -45,8 +47,14 @@ final class OutputApplier {
     private final Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<ca.frc6390.athena.runtime.control.ControlSink> activeSinks =
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<MotorDevice> heldMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    /** Motors whose neutral mode is overridden by a {@code Release.neutral(mode)} until next commanded. */
+    private final Set<MotorDevice> neutralOverrides = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    /** Motors commanded by any output in the current cycle (used to tell an idle gap from a takeover). */
+    private final Set<MotorDevice> motorsDrivenThisCycle = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private boolean captureTrace;
     private Map<ControlBinding<?>, StageCaps> stageCaps = java.util.Collections.emptyMap();
+    private boolean applyingHold;
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
         this.context = Objects.requireNonNull(context, "context");
@@ -100,6 +108,19 @@ final class OutputApplier {
         AppliedOutput applied = RuntimeHardwareAccess.current() == context
                 ? resolveControlOutput(output, safeContext)
                 : RuntimeHardwareAccess.call(context, () -> resolveControlOutput(output, safeContext));
+        motorsDrivenThisCycle.addAll(output.request().motors());
+        if (output.request().control() != null) {
+            ControlRuntimeState recorded = controlRuntimes(output.request().control());
+            recorded.lastRelease = releaseFor(output.request().control(), output.request().motionPolicy());
+            recorded.lastRetarget = retargetFor(output.request().control(), output.request().motionPolicy());
+            recorded.holdable = (output.output() instanceof Output.Position
+                    || output.output() instanceof Output.Velocity)
+                    && !(applied.output() instanceof Output.Neutral);
+            recorded.lastVolts = applied.output() instanceof Output.Voltage volts ? volts.volts() : Double.NaN;
+            if (!applyingHold) {
+                recorded.holdGoal = Double.NaN;
+            }
+        }
         if (output.request().control() != null) {
             ControlBinding<?> control = output.request().control();
             if (captureTrace) {
@@ -137,6 +158,14 @@ final class OutputApplier {
             return;
         }
         drivenMotors.add(handle);
+        if (neutralOverrides.remove(motor)) {
+            try {
+                handle.applyRuntimeConfiguration(MotorRuntimeConfig.declared(motor));
+            } catch (RuntimeException exception) {
+                if (motor.failurePolicy() == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
+                context.hardwareFailure(motor, exception);
+            }
+        }
         try {
             apply(handle, applied);
         } catch (RuntimeException exception) {
@@ -242,7 +271,14 @@ final class OutputApplier {
         return stageCaps.isEmpty() ? StageCaps.NONE : stageCaps.getOrDefault(control, StageCaps.NONE);
     }
 
+    /** Motors driven by held (released with HOLD or DECELERATE) controls in the last ended cycle. */
+    Set<MotorDevice> heldMotors() {
+        return heldMotors;
+    }
+
     void beginCycle() {
+        heldMotors.clear();
+        motorsDrivenThisCycle.clear();
         controlsAppliedThisCycle.clear();
         controlTraces.clear();
         appliedMotorCommands.clear();
@@ -261,15 +297,125 @@ final class OutputApplier {
             ControlBinding<?> control = entry.getKey();
             ControlRuntimeState state = entry.getValue();
             boolean applied = controlsAppliedThisCycle.contains(control);
-            if (!applied && state.active) {
+            if (!applied && state.active && holdsOnRelease(control, state)) {
+                holdReleased(control, state);
+                applied = true;
+            } else if (!applied && state.active && state.lastRetarget == Retarget.SMOOTH
+                    && control.motors().stream().noneMatch(motorsDrivenThisCycle::contains)) {
+                // A SMOOTH binding keeps its reference through an idle gap, so a takeover in a later cycle
+                // inherits it. A cycle in which another output drives the motor is a takeover by that
+                // output, and the reference restarts from measured feedback. Loop state always restarts.
+                softRelease(control, state);
+                if (control.sink() != null && !activeSinks.contains(control.sink())) {
+                    control.sink().release();
+                }
+                if (state.lastRelease.neutralMode() != null) {
+                    overrideNeutralMode(control, state.lastRelease.neutralMode());
+                }
+            } else if (!applied && state.active) {
                 resetFromCurrentFeedback(control, state);
                 if (control.sink() != null && !activeSinks.contains(control.sink())) {
                     control.sink().release();
+                }
+                if (state.lastRelease.neutralMode() != null) {
+                    overrideNeutralMode(control, state.lastRelease.neutralMode());
                 }
             }
             state.active = applied;
         }
         controlsAppliedThisCycle.clear();
+    }
+
+    private void softRelease(ControlBinding<?> control, ControlRuntimeState state) {
+        MotionReference reference = state.lastReference != null
+                ? state.lastReference
+                : MotionReference.stationary(state.lastPosition);
+        resetLoops(state, new AppliedControlLoopContext(
+                control, Outputs.neutral(), state.lastContext, reference));
+        state.hasLastRequest = false;
+        state.lastRequestType = null;
+        state.lastVolts = Double.NaN;
+        state.holdGoal = Double.NaN;
+    }
+
+    private boolean holdsOnRelease(ControlBinding<?> control, ControlRuntimeState state) {
+        if (!state.holdable || !state.lastRelease.holds()) return false;
+        if (overrides.disabled(control)) return false;
+        if (control.output() != null && overrides.disabled(control.output())) return false;
+        return control.motors().stream().noneMatch(overrides::disabled);
+    }
+
+    /**
+     * Keeps a released closed-loop control under control without a lease. HOLD keeps the last reference
+     * position (or zero velocity) and stops the profile immediately. DECELERATE sets the goal at the
+     * braking distance of the current reference, so the profile stops there at its maximum deceleration.
+     */
+    private void holdReleased(ControlBinding<?> control, ControlRuntimeState state) {
+        Release release = state.lastRelease;
+        Output target;
+        if (control.mode() == ControlMode.POSITION) {
+            if (Double.isNaN(state.holdGoal)) {
+                MotionReference reference = state.lastReference != null
+                        ? state.lastReference
+                        : MotionReference.stationary(state.lastPosition);
+                MotionProfile profile = effectiveProfile(control);
+                double goal = reference.position();
+                if (profile != null && release.decelerates()) {
+                    double velocity = reference.velocity();
+                    goal += Math.copySign(velocity * velocity / (2.0 * profile.maxAcceleration()), velocity);
+                } else if (profile != null) {
+                    state.profileRuntime(profile).reset(reference.position(), 0.0);
+                }
+                state.holdGoal = clampTunedPosition(overrides.tuning(control), goal);
+            }
+            target = Outputs.position(state.holdGoal);
+        } else {
+            if (!release.decelerates()) {
+                state.velocityReference = 0.0;
+                state.velocityReferenceInitialized = true;
+            }
+            target = Outputs.velocity(0.0);
+        }
+        heldMotors.addAll(control.motors());
+        ResolvedOutput hold = new ResolvedOutput(
+                OutputRequest.Basic.of(control, null, target, new MotionPolicy(null, release)), target);
+        applyingHold = true;
+        try {
+            apply(hold, state.lastContext);
+        } finally {
+            applyingHold = false;
+        }
+    }
+
+    /**
+     * Applies a temporary neutral mode to the control's motors. The declared configuration returns the
+     * next time one of these motors is commanded. Backends without runtime configuration keep their mode.
+     */
+    private void overrideNeutralMode(ControlBinding<?> control, MotorNeutralMode mode) {
+        for (MotorDevice motor : control.motors()) {
+            MotorHandle handle = context.motor(motor);
+            if (!handle.supportsRuntimeConfiguration()) continue;
+            MotorRuntimeConfig declared = MotorRuntimeConfig.declared(motor);
+            try {
+                handle.applyRuntimeConfiguration(new MotorRuntimeConfig(
+                        mode,
+                        declared.inverted(),
+                        declared.supplyCurrentLimitAmps(),
+                        declared.statorCurrentLimitAmps()));
+                neutralOverrides.add(motor);
+            } catch (RuntimeException exception) {
+                if (motor.failurePolicy() == FailurePolicy.PANIC) throw FaultIsolation.panic(exception);
+                context.hardwareFailure(motor, exception);
+            }
+        }
+    }
+
+    private static Release releaseFor(ControlBinding<?> control, MotionPolicy policy) {
+        return policy.release() != null ? policy.release() : control.release();
+    }
+
+    private static Retarget retargetFor(ControlBinding<?> control, MotionPolicy policy) {
+        return policy.retarget() != null ? policy.retarget() : control.retarget();
     }
 
     private void resetFromCurrentFeedback(ControlBinding<?> control, ControlRuntimeState state) {
@@ -326,7 +472,15 @@ final class OutputApplier {
             return appliedOutput.set(Outputs.neutral(), ControlRoute.OPEN_LOOP, null)
                     .withTrace(output.output(), transformed, null, position, velocity, true, true, false);
         }
-        StagedRequest staged = stageRequest(control, transformed, mechanismContext, state, position, velocity);
+        // A change of request kind is a takeover: SMOOTH inherits the reference, IMMEDIATE re-plans
+        // from the measured state. Decided before staging so the profile is not stepped from a stale state.
+        Class<?> requestType = requestKind(transformed);
+        boolean typeChanged = state.requestTypeChanged(requestType);
+        if (typeChanged) {
+            takeover(control, state, requestType, request.motionPolicy(), position, velocity);
+        }
+        StagedRequest staged = stageRequest(
+                control, transformed, mechanismContext, state, position, velocity, request.motionPolicy());
         if (staged == null) {
             resetControlState(state, Outputs.neutral(), mechanismContext, position, velocity);
             return appliedOutput.set(Outputs.neutral(), ControlRoute.OPEN_LOOP, null)
@@ -338,8 +492,10 @@ final class OutputApplier {
                 staged.output(),
                 mechanismContext,
                 staged.reference());
-        Class<?> requestType = staged.output().getClass();
-        if (state.requestTypeChanged(requestType)) {
+        if (staged.output() instanceof Output.Position || staged.output() instanceof Output.Velocity) {
+            state.lastReference = staged.reference();
+        }
+        if (typeChanged) {
             resetLoops(state, loopContext);
             state.lastRequestType = requestType;
             state.hasLastRequest = true;
@@ -350,6 +506,10 @@ final class OutputApplier {
                     output.output(), transformed, staged, position, velocity, staged.constrained(), false, false);
         }
         Output applied = null;
+        boolean gainsChanged = false;
+        for (int index = 0; index < state.runtimes.size(); index++) {
+            gainsChanged |= state.runtimes.get(index).consumeGainChange();
+        }
         if (staged.output() instanceof Output.Position || staged.output() instanceof Output.Velocity) {
             for (int index = 0; index < state.runtimes.size(); index++) {
                 if (state.roles[index] == ControlLoopRole.TARGET_TRANSFORM) {
@@ -358,6 +518,18 @@ final class OutputApplier {
                 ControlOutput controlOutput = state.runtimes.get(index).calculate(loopContext);
                 if (controlOutput != null) {
                     applied = combine(applied, controlOutput.output());
+                }
+            }
+        }
+        if (gainsChanged && applied instanceof Output.Voltage raw && Double.isFinite(state.lastVolts)
+                && Double.isFinite(raw.volts())) {
+            // Bumpless gain transfer: the integrating loop re-seeds its integral so the combined output
+            // equals the previous output at the change instant (see ControlLoopRuntime#bumpTo).
+            for (int index = 0; index < state.runtimes.size(); index++) {
+                if (state.roles[index] != ControlLoopRole.TARGET_TRANSFORM
+                        && state.runtimes.get(index).bumpTo(state.lastVolts, raw.volts())) {
+                    applied = Outputs.voltage(state.lastVolts);
+                    break;
                 }
             }
         }
@@ -440,7 +612,8 @@ final class OutputApplier {
             MechanismContext mechanismContext,
             ControlRuntimeState state,
             double position,
-            double velocity) {
+            double velocity,
+            MotionPolicy policy) {
         if (request instanceof Output.Position target) {
             if ((hasTargetConstraints(control) || control.planner() != null)
                     && !Double.isFinite(position)) {
@@ -474,7 +647,13 @@ final class OutputApplier {
                         goal,
                         Double.compare(goal, target.position()) != 0);
             }
-            MotionReference reference = state.profileRuntime(profile).step(
+            MotionProfileRuntime runtime = state.profileRuntime(profile);
+            if (retargetFor(control, policy) == Retarget.IMMEDIATE && Double.compare(goal, state.lastGoal) != 0) {
+                // IMMEDIATE: a new target re-plans from the measured state, braking at full profile decel.
+                runtime.reset(position, velocity);
+            }
+            state.lastGoal = goal;
+            MotionReference reference = runtime.step(
                     position,
                     velocity,
                     goal,
@@ -506,6 +685,12 @@ final class OutputApplier {
             double maximumAcceleration = overrides.tuning(control).maxAcceleration();
             double referenceVelocity = requestedVelocity;
             double referenceAcceleration = 0.0;
+            if (retargetFor(control, policy) == Retarget.IMMEDIATE
+                    && Double.compare(requestedVelocity, state.lastGoal) != 0) {
+                state.velocityReference = finiteOrZero(velocity);
+                state.velocityReferenceInitialized = true;
+            }
+            state.lastGoal = requestedVelocity;
             if (maximumAcceleration < Double.MAX_VALUE) {
                 if (!state.velocityReferenceInitialized) {
                     state.velocityReference = finiteOrZero(velocity);
@@ -552,6 +737,38 @@ final class OutputApplier {
                     : null;
         }
         return new StagedRequest(request, MotionReference.stationary(finiteOrZero(position)), 0.0, false);
+    }
+
+    /**
+     * Starts a request kind (position or velocity) on a binding whose previous kind differs. SMOOTH
+     * continues from the inherited reference; IMMEDIATE, or no inherited reference, starts from the
+     * measured state.
+     */
+    private void takeover(
+            ControlBinding<?> control,
+            ControlRuntimeState state,
+            Class<?> kind,
+            MotionPolicy policy,
+            double position,
+            double velocity) {
+        MotionReference prior = retargetFor(control, policy) == Retarget.SMOOTH ? state.lastReference : null;
+        double referencePosition = prior != null ? prior.position() : finiteOrZero(position);
+        double referenceVelocity = prior != null ? prior.velocity() : finiteOrZero(velocity);
+        if (kind == Output.Position.class) {
+            MotionProfile profile = effectiveProfile(control);
+            if (profile != null) {
+                state.profileRuntime(profile).reset(referencePosition, referenceVelocity);
+            }
+        } else if (kind == Output.Velocity.class) {
+            state.velocityReference = referenceVelocity;
+            state.velocityReferenceInitialized = true;
+        }
+    }
+
+    private static Class<?> requestKind(Output output) {
+        if (output instanceof Output.Position) return Output.Position.class;
+        if (output instanceof Output.Velocity) return Output.Velocity.class;
+        return output.getClass();
     }
 
     private ControlRuntimeState controlRuntimes(ControlBinding<?> control) {
@@ -794,6 +1011,10 @@ final class OutputApplier {
         state.lastRequestType = null;
         state.velocityReference = safeVelocity;
         state.velocityReferenceInitialized = false;
+        state.lastReference = null;
+        state.lastGoal = Double.NaN;
+        state.lastVolts = Double.NaN;
+        state.holdGoal = Double.NaN;
         if (state.profileRuntime != null) {
             state.profileRuntime.reset(safePosition, safeVelocity);
         }
@@ -1108,6 +1329,13 @@ final class OutputApplier {
         private boolean active;
         private boolean reseedPending;
         private double reseedPosition = Double.NaN;
+        private MotionReference lastReference;
+        private double lastGoal = Double.NaN;
+        private double lastVolts = Double.NaN;
+        private Release lastRelease = Release.NEUTRAL;
+        private Retarget lastRetarget = Retarget.SMOOTH;
+        private boolean holdable;
+        private double holdGoal = Double.NaN;
 
         private ControlRuntimeState(ControlBinding<?> binding) {
             this.binding = binding;

@@ -64,6 +64,11 @@ public final class MechanismScheduler {
     private final Map<PathAction, Set<Object>> pathOwnershipCache = new IdentityHashMap<>();
     private final Map<Object, Set<Action>> spawnedLeases = new IdentityHashMap<>();
     private final List<Object> evaluatingLeases = new ArrayList<>();
+    /** Interrupt policy of each running root Action; absent means ANYTIME. */
+    private final Map<Object, Interrupt> leaseInterrupts = new IdentityHashMap<>();
+    /** Newer requests held because a running Action does not allow interruption yet. */
+    private final List<PendingRequest> pendingRequests = new ArrayList<>();
+    private final List<Mechanism> pendingAborts = new ArrayList<>();
     private final List<RuntimeFault> pendingFaults = new ArrayList<>();
     private final Map<String, FaultHistory> faultHistory = new LinkedHashMap<>();
     private static final double FAULT_REPORT_PERIOD_SECONDS = 5.0;
@@ -592,6 +597,7 @@ public final class MechanismScheduler {
     private void releaseLease(Object key) {
         List<LeaseRegistration> registrations = leaseTargets.remove(key);
         leaseReservations.remove(key);
+        leaseInterrupts.remove(key);
         if (registrations != null) {
             removeIdentity(activeLeaseKeys, key);
             for (LeaseRegistration registration : registrations) {
@@ -880,8 +886,23 @@ public final class MechanismScheduler {
      * @throws IllegalArgumentException when ownership cannot be inferred
      */
     public MechanismScheduler request(Action action) {
-        Action safeAction = Objects.requireNonNull(action, "action");
-        activateLease(safeAction, safeAction, true);
+        Action requested = Objects.requireNonNull(action, "action");
+        if (requested instanceof Actions.Abort abort) {
+            pendingAborts.add(abort.mechanism());
+            return this;
+        }
+        Action safeAction = rootAction(requested);
+        Interrupt interrupt = requested instanceof Actions.Interruptible policy ? policy.interrupt() : null;
+        if (blockedBy(safeAction)) {
+            // A running Action does not allow interruption yet: hold this request instead of applying it.
+            forgetCompletion(safeAction);
+            pendingRequests.removeIf(pending -> pending.action() == safeAction);
+            pendingRequests.add(new PendingRequest(safeAction, interrupt));
+        } else {
+            pendingRequests.removeIf(pending -> pending.action() == safeAction);
+            activateLease(safeAction, safeAction, true);
+            setInterrupt(safeAction, interrupt);
+        }
         // A request made while a lease evaluates (for example doOnce(() -> intake.request()))
         // belongs to that lease and is cancelled with it. Any other request is independent, even
         // when the same action was previously spawned by a lease.
@@ -897,20 +918,110 @@ public final class MechanismScheduler {
     }
 
     /**
+     * Returns whether a running lease with a restrictive interrupt policy overlaps the action's
+     * resources and does not allow interruption yet.
+     */
+    private boolean blockedBy(Action action) {
+        Set<Object> resources = compiledAction(action).resources();
+        for (int index = 0; index < activeLeaseKeys.size(); index++) {
+            Object key = activeLeaseKeys.get(index);
+            Interrupt running = leaseInterrupts.get(key);
+            if (running == null || !running.restrictive()) continue;
+            LeaseReservation reservation = leaseReservations.get(key);
+            if (reservation == null || !overlaps(reservation.resources(), resources)) continue;
+            if (!running.allowsInterrupt(false)) return true;
+        }
+        return false;
+    }
+
+    private static boolean overlaps(Set<Object> running, Set<Object> requested) {
+        for (Object resource : requested) {
+            if (running.contains(resource)) return true;
+        }
+        return false;
+    }
+
+    private void setInterrupt(Action action, Interrupt interrupt) {
+        if (interrupt == null) {
+            leaseInterrupts.remove(action);
+        } else {
+            leaseInterrupts.put(action, interrupt);
+        }
+    }
+
+    private static Action rootAction(Action action) {
+        return action instanceof Actions.Interruptible policy ? policy.action() : action;
+    }
+
+    /**
+     * Starts held requests whose blockers have completed or allow interruption now, in request order.
+     * While the robot is disabled, interrupt policies are overridden: held requests start (and resume
+     * when enabled) instead of waiting for the running Action.
+     */
+    private void activatePending(boolean enabled) {
+        for (Mechanism mechanism : List.copyOf(pendingAborts)) {
+            abortMechanism(mechanism);
+        }
+        pendingAborts.clear();
+        for (int index = 0; index < pendingRequests.size(); ) {
+            PendingRequest pending = pendingRequests.get(index);
+            if (enabled && blockedBy(pending.action())) {
+                index++;
+                continue;
+            }
+            pendingRequests.remove(index);
+            activateLease(pending.action(), pending.action(), true);
+            setInterrupt(pending.action(), pending.interrupt());
+        }
+    }
+
+    /**
+     * Cancels every running lease that touches the mechanism, ignoring interrupt policies. Held newer
+     * requests are not cancelled: they proceed in the same cycle, as they would after the running Action.
+     */
+    private void abortMechanism(Mechanism mechanism) {
+        MechanismRuntime runtime = runtimes.get(mechanism);
+        if (runtime != null) {
+            for (Object key : List.copyOf(activeLeaseKeys)) {
+                List<LeaseRegistration> registrations = leaseTargets.get(key);
+                if (registrations == null) continue;
+                for (LeaseRegistration registration : registrations) {
+                    if (registration.runtime() == runtime) {
+                        cancelSpawned(key, Collections.newSetFromMap(new IdentityHashMap<>()));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private record PendingRequest(Action action, Interrupt interrupt) {
+    }
+
+    /**
+     * Aborts every committed Action on a mechanism. Requests made while a lease evaluates are applied at the
+     * start of the next cycle. Interrupt policies do not protect an Action from abort; disable does too.
+     */
+    public MechanismScheduler abort(Mechanism mechanism) {
+        pendingAborts.add(Objects.requireNonNull(mechanism, "mechanism"));
+        return this;
+    }
+
+    /**
      * Cancels an action and every lease it requested while it was running. Leases for actions
      * that merely appear inside its tree but were requested independently (for example by a
      * button) keep running. Resources no longer driven by another lease are neutralized during
      * the next output cycle.
      */
     public MechanismScheduler cancel(Action action) {
-        cancelSpawned(Objects.requireNonNull(action, "action"),
+        cancelSpawned(rootAction(Objects.requireNonNull(action, "action")),
                 Collections.newSetFromMap(new IdentityHashMap<>()));
         return this;
     }
 
     /** Returns whether a requested action has an active, incomplete lease. */
     public boolean isRunning(Action action) {
-        List<LeaseRegistration> registrations = leaseTargets.get(Objects.requireNonNull(action, "action"));
+        List<LeaseRegistration> registrations = leaseTargets.get(rootAction(Objects.requireNonNull(action, "action")));
         if (registrations == null) return false;
         for (LeaseRegistration registration : registrations) {
             if (!registration.runtime().leaseComplete(registration.runtimeKey())) return true;
@@ -923,7 +1034,7 @@ public final class MechanismScheduler {
      * and requesting the same action again restarts it and clears the previous result.
      */
     public boolean isComplete(Action action) {
-        Action safeAction = Objects.requireNonNull(action, "action");
+        Action safeAction = rootAction(Objects.requireNonNull(action, "action"));
         List<LeaseRegistration> registrations = leaseTargets.get(safeAction);
         if (registrations == null || registrations.isEmpty()) return completed(safeAction);
         for (LeaseRegistration registration : registrations) {
@@ -935,6 +1046,7 @@ public final class MechanismScheduler {
     private void cancelSpawned(Object key, Set<Object> visited) {
         if (key == null || !visited.add(key)) return;
         forgetCompletion(key);
+        pendingRequests.removeIf(pending -> pending.action() == key);
         releaseLease(key);
         Set<Action> spawned = spawnedLeases.remove(key);
         if (spawned == null) return;
@@ -961,6 +1073,9 @@ public final class MechanismScheduler {
      * five seconds while it keeps occurring; {@link RuntimeFault#occurrences()} counts repeats.
      */
     public List<RuntimeFault> drainRuntimeFaults() {
+        for (String message : FaultIsolation.drainReports()) {
+            pendingFaults.add(new RuntimeFault("Actions.fault", new IllegalStateException(message), 1));
+        }
         if (pendingFaults.isEmpty()) return List.of();
         List<RuntimeFault> drained = List.copyOf(pendingFaults);
         pendingFaults.clear();
@@ -1097,6 +1212,7 @@ public final class MechanismScheduler {
 
     private List<ResolvedOutput> periodicBound(MechanismContext mechanismContext, EventContext eventContext) {
         MechanismContext safeMechanismContext = mechanismContext == null ? MechanismContext.empty() : mechanismContext;
+        activatePending(safeMechanismContext.enabled());
         sampleSignals();
         List<ResolvedOutput> outputs = new ArrayList<>(outputCapacityHint);
         Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntime = drivenByRuntimeScratch;

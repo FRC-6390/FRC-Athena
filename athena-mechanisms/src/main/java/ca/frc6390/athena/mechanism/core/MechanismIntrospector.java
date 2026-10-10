@@ -76,7 +76,8 @@ final class MechanismIntrospector {
             }
             if (telemetry != null && Action.class.isAssignableFrom(field.getType())) {
                 Object value = read(field, mechanism);
-                if (value instanceof Action action) {
+                if (value instanceof Action declared) {
+                    Action action = declared instanceof Actions.Interruptible policy ? policy.action() : declared;
                     String actionName = AnnotatedTelemetry.name(fieldName, telemetry);
                     if (actions.putIfAbsent(actionName, action) != null) {
                         throw new IllegalArgumentException("Duplicate mechanism action path '" + actionName + "'.");
@@ -101,7 +102,8 @@ final class MechanismIntrospector {
                     && addMechanismChildren(children, fieldName, value)) {
                 // Mechanism collections are structural children, not generic declarations.
             } else if (value instanceof Action action) {
-                actions.put(fieldName, action);
+                // A declared interrupt policy applies when the wrapper is requested; the graph tracks the inner action.
+                actions.put(fieldName, action instanceof Actions.Interruptible policy ? policy.action() : action);
                 if (value instanceof TelemetrySource source) {
                     putDeclaration(declarations, fieldName, source);
                 }

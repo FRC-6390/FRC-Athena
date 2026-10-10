@@ -29,6 +29,11 @@ public interface OutputRequest {
         return output() instanceof Output.Position || output() instanceof Output.Velocity;
     }
 
+    /** Per-Action retarget and release overrides carried from the requesting Action. */
+    default MotionPolicy motionPolicy() {
+        return MotionPolicy.INHERIT;
+    }
+
     default double value() {
         Output output = output();
         if (output instanceof Output.Percent percent) {
@@ -54,13 +59,23 @@ public interface OutputRequest {
         return new Basic(control, null, output);
     }
 
-    record Basic(ControlBinding<?> control, MotorDevice motor, Output output) implements OutputRequest {
+    record Basic(ControlBinding<?> control, MotorDevice motor, Output output, MotionPolicy motionPolicy)
+            implements OutputRequest {
+        public Basic(ControlBinding<?> control, MotorDevice motor, Output output) {
+            this(control, motor, output, MotionPolicy.INHERIT);
+        }
+
         public Basic {
             Objects.requireNonNull(output, "output");
+            motionPolicy = motionPolicy == null ? MotionPolicy.INHERIT : motionPolicy;
         }
 
         static Basic of(ControlBinding<?> control, MotorDevice motor, Output output) {
             return new Basic(control, motor, output);
+        }
+
+        static Basic of(ControlBinding<?> control, MotorDevice motor, Output output, MotionPolicy policy) {
+            return new Basic(control, motor, output, policy);
         }
     }
 }
