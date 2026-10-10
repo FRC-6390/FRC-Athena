@@ -268,7 +268,9 @@ public final class TelemetryValue {
             return WriteResult.rejected("rejected: read-only");
         }
         if (locked()) {
-            return WriteResult.rejected("rejected: locked (" + meta.lockGroup().getSimpleName() + ")");
+            WriteResult rejection = WriteResult.rejected("rejected: locked (" + meta.lockGroup().getSimpleName() + ")");
+            RuntimeMarkers.current().mark(RuntimeMarkers.CHECK, rejection.reason() + " value=" + value);
+            return rejection;
         }
         try {
             writer.accept(value);

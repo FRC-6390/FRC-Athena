@@ -159,10 +159,33 @@ Calling `atCurrentLimit`, `velocityBelow` or `commandedVoltageAbove` selects the
 detector. Motors without constants keep the legacy detector too. Built-in constants are datasheet-level
 approximations (`MotorConstants`). Teams can supply their own with `MotorConstants.of(...)`.
 
+## Persistence (I3)
+
+`PersistentModelStorage` implements `ModelStorage` on the `PersistentStore`. The mechanism tree path plus the
+declaration name is the key (for example `robot/turret/angle`), so the entries are
+`<key>/model`, `<key>/running` and `<key>/history` (plus small companion keys for motor kinds and motion kind).
+
+- Attached when the robot registers its mechanisms (`MechanismScheduler`), before the first schema build. Each
+  characterization restores the stored model (it becomes the active model and drift baseline), the running estimate and
+  the history.
+- Written through on fit, adopt-running-estimate, rebaseline, and history snapshots. Snapshots come from
+  `recordDisable` (enabled more than 30 s) and `recordMatchEnd`. `AthenaRobot` calls these: `recordDisable` on disable,
+  with the length of the enabled period, and `recordMatchEnd` at teleop exit when the FMS is attached.
+- Not stored: standard errors (a restored model reports none), and the baseline separately (a restored baseline equals
+  the restored active model).
+- Boot-time cleanup keeps these keys (`TelemetryPersistence.keep`).
+
+Battery internal resistance (I3c): the rolling estimate is written to `power/battery/internalResistanceOhms`
+while it has observed excitation, and restored as the prior at boot (`BatteryResistanceEstimator.restorePrior`). It
+is used until new excitation is observed. Persistence is rolling, not per battery.
+
+## Gear ratio (I6)
+
+The default gear ratio is read from the feedback encoder of the binding: `1 / (gearRatio * conversion / unitsPerRevolution)`,
+so an encoder with `reduction(10)` gives 10 motor turns per mechanism turn. A binding without an encoder, or whose
+encoder measures a distance, keeps 1. `gearRatio(...)` overrides either way.
+
 ## Not yet implemented
 
 - Thermal characterization and thermal parameters.
-- Persistence of history and models through the persistent store (only `ModelStorage` exists).
-- Wiring `recordDisable`/`recordMatchEnd` to the robot's disable and match lifecycle.
-- WPILib physics use of friction and gravity from the model (only inertia is applied).
-- Gear ratio read from the encoder declaration (set it with `Characterization.gearRatio`).
+- WPILib physics use of friction and gravity from the model (only inertia is applied). Tracked as I5.

@@ -12,6 +12,16 @@ public interface RuntimeMarkers {
     int PERSISTED_WRITE = Wire.MARKER_PERSISTED_WRITE;
     /** Marker kind for interpolation records ({@link Wire#MARKER_RECORD}). */
     int RECORD = Wire.MARKER_RECORD;
+    /** Marker kind for runtime faults, including {@code Actions.fault} ({@link Wire#MARKER_FAULT}). */
+    int FAULT = Wire.MARKER_FAULT;
+    /** Marker kind for staging transitions ({@link Wire#MARKER_STAGE_CHANGE}). */
+    int STAGE_CHANGE = Wire.MARKER_STAGE_CHANGE;
+    /**
+     * Marker kind for rejected writes: a dashboard or runtime write refused by a lock group or a read-only
+     * check ({@link Wire#MARKER_CHECK}). Overrides are not used for rejections; {@code MARKER_OVERRIDE} means an
+     * operator-forced state.
+     */
+    int CHECK = Wire.MARKER_CHECK;
 
     /** The no-op implementation used when nothing is installed. */
     RuntimeMarkers NONE = new RuntimeMarkers() {

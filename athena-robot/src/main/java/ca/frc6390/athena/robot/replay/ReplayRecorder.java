@@ -54,12 +54,37 @@ public final class ReplayRecorder {
     private ReplayStreamSink sink;
     private final Set<String> issuedNames = new HashSet<>();
     private ReplayWriter writer;
+    private final long sessionId = SESSIONS.incrementAndGet();
+
+    /** Session identities are unique within a JVM and increase over time (seeded from the wall clock). */
+    private static final java.util.concurrent.atomic.AtomicLong SESSIONS =
+            new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis() / 1000L * 1000L);
 
     public ReplayRecorder(ReplayPolicy policy, Path directory, RuntimeFailureReporter reporter) {
         this.policy = policy;
         this.directory = directory;
         this.reporter = reporter == null ? RuntimeFailureReporter.stderr() : reporter;
         this.buffer = new ReplayBuffer(policy.bufferBytes());
+    }
+
+    /**
+     * Returns the identity of this recording session. It is fixed for the life of the recorder and is reported as
+     * the replay id of recorded interpolation points.
+     *
+     * @return session identity
+     */
+    public long sessionId() {
+        return sessionId;
+    }
+
+    /** Returns the sequence number of the latest recorded cycle (the frame index), or -1 before the first cycle. */
+    public synchronized long currentFrameIndex() {
+        return lastSequence;
+    }
+
+    /** Returns the timestamp of the latest recorded cycle, in seconds. */
+    public synchronized double currentTimestampSeconds() {
+        return lastTimestampSeconds;
     }
 
     /** Returns the policy in effect. */

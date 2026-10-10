@@ -1,7 +1,7 @@
 package ca.frc6390.athena.hardware.power;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
-import java.util.Locale;
+import ca.frc6390.athena.hardware.device.MotorSpec;
 
 /**
  * Nominal electrical and thermal constants used by Athena's motor model.
@@ -15,7 +15,7 @@ import java.util.Locale;
  * <p>The values below are <b>nominal placeholders</b> derived from typical published stall current,
  * free speed and resistance figures. They are not calibrated. Replace them with characterized values
  * (for example through the characterization thermal run) before relying on temperature estimates.
- * Motor kinds not listed use {@link #GENERIC}.</p>
+ * Constants come from the shared {@link MotorSpec} table; motor kinds not listed use {@link #GENERIC}.</p>
  *
  * @param resistanceOhms phase-to-phase winding resistance estimate
  * @param kvRadPerSecondPerVolt no-load speed constant in rad/s per volt
@@ -56,22 +56,6 @@ public record MotorThermalSpec(
      * @return constants, {@link #GENERIC} when the kind is not in the table
      */
     public static MotorThermalSpec forKind(MotorKind kind) {
-        if (kind == null) return GENERIC;
-        return switch (kind.motorKey().toLowerCase(Locale.ROOT)) {
-            // Kv values are free speed / nominal voltage; resistance is nominal voltage / stall current.
-            case "kraken-x60" -> new MotorThermalSpec(0.033, 500.0 * TWO_PI_OVER_60, 260.0, 300.0, 25.0, 150.0);
-            case "kraken-x44" -> new MotorThermalSpec(0.055, 420.0 * TWO_PI_OVER_60, 170.0, 280.0, 25.0, 150.0);
-            case "falcon-500" -> new MotorThermalSpec(0.047, 531.0 * TWO_PI_OVER_60, 260.0, 300.0, 25.0, 150.0);
-            case "minion" -> new MotorThermalSpec(0.030, 500.0 * TWO_PI_OVER_60, 160.0, 280.0, 25.0, 150.0);
-            case "neo" -> new MotorThermalSpec(0.114, 473.0 * TWO_PI_OVER_60, 180.0, 260.0, 25.0, 130.0);
-            case "neo-550" -> new MotorThermalSpec(0.130, 917.0 * TWO_PI_OVER_60, 120.0, 240.0, 25.0, 130.0);
-            case "neo-vortex" -> new MotorThermalSpec(0.057, 565.0 * TWO_PI_OVER_60, 200.0, 260.0, 25.0, 130.0);
-            case "cim" -> new MotorThermalSpec(0.090, 444.0 * TWO_PI_OVER_60, 350.0, 320.0, 25.0, 130.0);
-            case "mini-cim" -> new MotorThermalSpec(0.135, 487.0 * TWO_PI_OVER_60, 180.0, 280.0, 25.0, 130.0);
-            case "vex-775-pro" -> new MotorThermalSpec(0.090, 1561.0 * TWO_PI_OVER_60, 300.0, 300.0, 25.0, 130.0);
-            default -> GENERIC;
-        };
+        return MotorSpec.forKind(kind).map(MotorSpec::thermalSpec).orElse(GENERIC);
     }
-
-    private static final double TWO_PI_OVER_60 = 2.0 * Math.PI / 60.0;
 }

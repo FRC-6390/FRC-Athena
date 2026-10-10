@@ -24,11 +24,14 @@ import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.ResolvedOutput;
+import ca.frc6390.athena.mechanism.core.RuntimeEvents;
+import ca.frc6390.athena.mechanism.core.RuntimeMarkers;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.MechanismTraceSnapshot;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.robot.replay.ReplayMarkers;
+import ca.frc6390.athena.robot.replay.ReplayRuntimeMarkers;
 import ca.frc6390.athena.robot.replay.ReplayPolicy;
 import ca.frc6390.athena.robot.replay.ReplayRecorder;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
@@ -91,6 +94,7 @@ public final class RobotRuntime implements AutoCloseable {
     private long cycleSequence;
     private volatile RuntimeCycleSnapshot cycleSnapshot;
     private ReplayRecorder replayRecorder;
+    private RuntimeEvents.Subscription replayEvents;
     private Supplier<RuntimeInputSnapshot> inputSource;
     private volatile boolean closed;
 
@@ -718,6 +722,23 @@ public final class RobotRuntime implements AutoCloseable {
         return mechanisms.powerSnapshot();
     }
 
+    /**
+     * Tells persisted characterizations the robot was disabled after an enabled period. Snapshots the running
+     * estimate into the history when the period was longer than 30 seconds.
+     *
+     * @param enabledSeconds length of the enabled period that just ended
+     */
+    public void recordDisable(double enabledSeconds) {
+        ensureOpen();
+        mechanisms.recordDisable(enabledSeconds);
+    }
+
+    /** Tells persisted characterizations that the match ended (FMS). Snapshots the running estimate. */
+    public void recordMatchEnd() {
+        ensureOpen();
+        mechanisms.recordMatchEnd();
+    }
+
     /** Returns and clears stage transitions recorded by declared stagings, oldest first. */
     public List<ca.frc6390.athena.mechanism.staging.Staging.Change<?>> drainStageChanges() {
         return mechanisms.drainStageChanges();
@@ -1128,8 +1149,13 @@ public final class RobotRuntime implements AutoCloseable {
             failure = appendFailure(failure, exception);
         }
         if (replayRecorder != null) {
+            closeReplayEvents();
             replayRecorder.close();
             ReplayMarkers.activate(null);
+            if (RuntimeMarkers.current() instanceof ReplayRuntimeMarkers markers
+                    && markers.recorder() == replayRecorder) {
+                RuntimeMarkers.install(null);
+            }
         }
         if (failure != null) throw failure;
     }
@@ -1168,6 +1194,7 @@ public final class RobotRuntime implements AutoCloseable {
     public synchronized RobotRuntime replay(ReplayPolicy policy, Path directory) {
         ensureOpen();
         if (replayRecorder != null) {
+            closeReplayEvents();
             replayRecorder.close();
         }
         replayRecorder = new ReplayRecorder(
@@ -1183,7 +1210,26 @@ public final class RobotRuntime implements AutoCloseable {
                     }
                 });
         ReplayMarkers.activate(replayRecorder);
+        // Mechanism code (persisted writes, rejected writes, staging transitions, faults, records) plants its
+        // markers through RuntimeMarkers; with replay enabled they go to this recorder.
+        RuntimeMarkers.install(new ReplayRuntimeMarkers(replayRecorder));
+        // Staging transitions and faults are announced as runtime events; the recording turns them into markers.
+        ReplayRecorder recorder = replayRecorder;
+        replayEvents = RuntimeEvents.listen(event -> {
+            if (RuntimeEvents.STAGE_CHANGE.equals(event.category())) {
+                recorder.mark(ReplayMarkers.STAGE_CHANGE, event.message());
+            } else if (RuntimeEvents.FAULT.equals(event.category())) {
+                recorder.mark(ReplayMarkers.FAULT, event.message());
+            }
+        });
         return this;
+    }
+
+    private void closeReplayEvents() {
+        if (replayEvents != null) {
+            replayEvents.close();
+            replayEvents = null;
+        }
     }
 
     /**

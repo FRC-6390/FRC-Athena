@@ -76,6 +76,19 @@ Each block holds self-contained segments. A segment starts with the full diction
 decodes without earlier data. Seek with `ReplayReader.Cursor.seekBlock(i)`. The byte format is the one implemented in
 `ca.frc6390.athena.runtime.wire`. Frames, dictionary and marker records use that codec unchanged.
 
+Marker sources (integration, I1):
+
+- `RuntimeMarkers` (the SPI mechanism code uses) is installed by `RobotRuntime.replay(...)` with a
+  `ReplayRuntimeMarkers` bound to the recorder. `mark` goes to the recorder, `requestFullCapture` forces a keyframe,
+  and `recordMetadata` reports the FMS event, match type and number, the recording session as `replayId`, and the
+  latest cycle sequence as `frameIndex`. The install is removed when the runtime closes.
+- Staging transitions and faults are emitted as `RuntimeEvents` (`STAGE_CHANGE`, `FAULT`). The replay bridge subscribes
+  and records them as `STAGE_CHANGE` and `FAULT` markers. `RuntimeEvents` has any number of listeners, so the replay
+  bridge and the explorer can both consume them. `drainStageChanges()` still works and is not used for markers.
+- Persisted writes (`PERSISTED_WRITE`) come from the telemetry persistence layer.
+- Rejected writes: a write refused by a lock group is recorded as `CHECK` (not `OVERRIDE`, which means a forced
+  state). The message carries the reason and the value.
+
 Marker kinds are the appendix E1-W kinds: BOOT, MATCH_IDENTIFIED, AUTO_START, TELEOP_START, MATCH_END,
 DISABLE, FAULT, STAGE_CHANGE, CHECK, OVERRIDE, PERSISTED_WRITE, RECORD, TEST_START, and BROWNOUT (14,
 `ReplayMarkers.BROWNOUT` = `Wire.MARKER_BROWNOUT`), which marks battery recovery from a brownout.
@@ -201,8 +214,21 @@ bindings exactly. The same code gives zero differences; code that binds the butt
 
 Driver station state is recorded and injected too, and is available to robot code through
 `RuntimeInputs.injected()`. Code that calls `DriverStation` statics directly, such as
-`DriverStation.isTeleopEnabled()`, still reads the live driver station and is not redirected. Gate on the lifecycle
-mode the runtime provides instead.
+`DriverStation.isTeleopEnabled()`, reads the live driver station unless a sink drives it. To make those reads see the
+recorded state, pass the WPILib sink:
+
+```java
+ReplaySimulation.replay(file)
+        .driverStation(ReplayDriverStationSim.sink())   // athena-wpilib
+        .runAgainst(session -> RobotRuntime.simulated(session).register(new Robot()))
+        .report();
+ReplayDriverStationSim.reset();                          // when finished, before other code reads DS
+```
+
+The sink runs before the robot for every recorded frame. It sets the `DriverStationSim` control word (enabled,
+autonomous, test), FMS and DS attachment, alliance station, match time, event, match type and number, game message,
+and each joystick port's axes, POVs, buttons and name, then calls `notifyNewData()`. The HAL carries 32 buttons per
+stick, so the recorded mask is 32 bits wide. The sink is opt-in: without it only `RuntimeInputs` is injected.
 
 Recording a simulated run uses the same path as `AthenaRobot`:
 
@@ -221,7 +247,7 @@ Limits:
 - Motor connection and failure flags are recorded but not injected. IMU `connected` and `calibrating` flags are
   recorded but not injected. Localization measurements are recorded as summaries and are not injected. The
   localization pipeline runs on the injected sensors, so its output is reproduced only when its inputs are.
-- Code that reads `DriverStation` statics directly is not redirected (see above). Joysticks are read through the
-  controls adapters only.
+- Code that reads `DriverStation` statics directly is redirected only when the `driverStation(...)` sink is set (see
+  above). Joysticks are read through the controls adapters, and through the sink when it is set.
 - Replay compares commands only. It does not compare telemetry, traces, or localization output.
 - Files written before the input signals existed have none. Replay of those files injects empty input.

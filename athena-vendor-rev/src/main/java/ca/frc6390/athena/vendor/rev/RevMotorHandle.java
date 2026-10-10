@@ -53,6 +53,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     private double appliedVoltage;
     private double supplyCurrentAmps;
     private double statorCurrentAmps;
+    private double motorTemperatureCelsius = Double.NaN;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -150,6 +151,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         appliedVoltage = controller.appliedVoltage();
         supplyCurrentAmps = controller.supplyCurrentAmps();
         statorCurrentAmps = controller.statorCurrentAmps();
+        motorTemperatureCelsius = controller.motorTemperatureCelsius();
         inputsFresh = true;
     }
 
@@ -284,6 +286,15 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     @Override public double appliedVoltage() { ensureInputsFresh(); return appliedVoltage; }
     @Override public double supplyCurrentAmps() { ensureInputsFresh(); return supplyCurrentAmps; }
     @Override public double statorCurrentAmps() { ensureInputsFresh(); return statorCurrentAmps; }
+
+    /** SPARK motor temperature from the controller's periodic status, refreshed with the input batch. */
+    @Override
+    public java.util.OptionalDouble temperatureCelsius() {
+        ensureInputsFresh();
+        return Double.isFinite(motorTemperatureCelsius)
+                ? java.util.OptionalDouble.of(motorTemperatureCelsius)
+                : java.util.OptionalDouble.empty();
+    }
 
     @Override
     public void close() {
@@ -558,6 +569,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
         default double statorCurrentAmps() { return outputCurrentAmps(); }
 
+        /** Motor temperature in Celsius, or NaN when the controller does not report one. */
+        default double motorTemperatureCelsius() { return Double.NaN; }
+
         default void close() {}
     }
 
@@ -720,6 +734,8 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         }
 
         @Override public double statorCurrentAmps() { return spark.getOutputCurrent(); }
+
+        @Override public double motorTemperatureCelsius() { return spark.getMotorTemperature(); }
 
         @Override public void close() { spark.close(); }
 

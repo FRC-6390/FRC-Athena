@@ -71,6 +71,19 @@ public final class BatteryResistanceEstimator {
         }
     }
 
+    /**
+     * Seeds the estimate with a value from an earlier run (for example the persisted rolling estimate). It is used
+     * only until the estimator has observed excitation; after that the online estimate takes over. Non-finite values
+     * are ignored.
+     *
+     * @param ohms prior resistance in ohms
+     */
+    public void restorePrior(double ohms) {
+        if (!excited() && Double.isFinite(ohms)) {
+            this.ohms = clamp(ohms);
+        }
+    }
+
     /** Returns the current internal-resistance estimate in ohms. */
     public double ohms() { return ohms; }
 

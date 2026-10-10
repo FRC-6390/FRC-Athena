@@ -11,6 +11,7 @@ import ca.frc6390.athena.hardware.power.PowerPolicy;
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
 import ca.frc6390.athena.hardware.power.ThermalModel;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import ca.frc6390.athena.mechanism.persist.PersistentStore;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
@@ -44,10 +45,13 @@ final class PowerRuntime {
     static final double WRITE_DEADBAND_AMPS = 2.0;
     private static final double MAX_DT_SECONDS = 0.5;
     private static final double REGEN_EPSILON_VOLTS = 1e-6;
+    /** Store key of the rolling battery internal-resistance estimate. */
+    static final String BATTERY_OHMS_KEY = "power/battery/internalResistanceOhms";
 
     private PowerPolicy policy = PowerPolicy.defaults();
     private PowerPlanner planner = new PowerPlanner(policy);
     private BatteryResistanceEstimator estimator = newEstimator(policy);
+    private PersistentStore batteryStore;
     private DoubleSupplier busVolts = () -> Double.NaN;
     private final Map<MotorDevice, MotorState> states = new IdentityHashMap<>();
     private final List<MotorState> active = new ArrayList<>();
@@ -70,6 +74,24 @@ final class PowerRuntime {
         policy = value;
         planner = new PowerPlanner(value);
         estimator = newEstimator(value);
+        restoreBatteryPrior();
+    }
+
+    /**
+     * Keeps a rolling battery internal-resistance estimate in the store. The stored value is restored at boot as the
+     * prior, so the first budget after a restart uses the last measured resistance instead of the default. The value
+     * is written whenever the online estimate has observed excitation; the store flushes it in batches.
+     *
+     * @param store store, or null to disable
+     */
+    void batteryStore(PersistentStore store) {
+        batteryStore = store;
+        restoreBatteryPrior();
+    }
+
+    private void restoreBatteryPrior() {
+        if (batteryStore == null) return;
+        batteryStore.getDouble(BATTERY_OHMS_KEY).ifPresent(estimator::restorePrior);
     }
 
     void busVoltage(DoubleSupplier supplier) {
@@ -131,6 +153,9 @@ final class PowerRuntime {
 
         if (policy.estimateBatteryResistance()) {
             estimator.sample(bus, totalSupply);
+            if (batteryStore != null && estimator.excited()) {
+                batteryStore.put(BATTERY_OHMS_KEY, estimator.ohms());
+            }
         }
         batteryOhms = policy.estimateBatteryResistance() ? estimator.ohms() : policy.defaultBatteryOhms();
         openCircuitVolts = policy.estimateBatteryResistance()

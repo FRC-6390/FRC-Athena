@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.staging;
 
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
+import ca.frc6390.athena.mechanism.core.RuntimeEvents;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.measure.Time;
 import java.util.ArrayList;
@@ -245,6 +246,7 @@ public final class Staging<E extends Enum<E>> {
         if (entering != null && entering.action() != null) host.request(entering.action());
         changes.add(new Change<>(from, to, nowSeconds));
         if (changes.size() > CHANGE_HISTORY) changes.remove(0);
+        RuntimeEvents.emit(RuntimeEvents.STAGE_CHANGE, from + " -> " + to + " t=" + nowSeconds);
     }
 
     private record Definition<E extends Enum<E>>(

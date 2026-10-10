@@ -1,7 +1,6 @@
 package ca.frc6390.athena.hardware.device;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
-import ca.frc6390.athena.api.hardware.MotorKinds;
 import java.util.Optional;
 
 /**
@@ -85,22 +84,7 @@ public record MotorConstants(
      * @return constants, or empty when the model has no built-in constants
      */
     public static Optional<MotorConstants> forKind(MotorKind kind) {
-        MotorKind physical = kind == null ? null : kind.motorKind();
-        if (!(physical instanceof MotorKinds known)) {
-            return Optional.empty();
-        }
-        return switch (known) {
-            case FALCON_500 -> Optional.of(of(4.69, 257.0, 1.5, 6380.0));
-            case KRAKEN_X60 -> Optional.of(of(7.09, 366.0, 2.0, 5800.0));
-            case KRAKEN_X44 -> Optional.of(of(4.05, 275.0, 1.3, 7530.0));
-            case NEO -> Optional.of(of(2.6, 105.0, 1.8, 5676.0));
-            case NEO_550 -> Optional.of(of(0.97, 100.0, 1.4, 11000.0));
-            case NEO_VORTEX -> Optional.of(of(3.6, 211.0, 3.6, 6784.0));
-            case CIM -> Optional.of(of(2.42, 133.0, 2.7, 5330.0));
-            case MINI_CIM -> Optional.of(of(1.41, 89.0, 3.0, 5840.0));
-            case VEX_775_PRO -> Optional.of(of(0.71, 134.0, 0.7, 18730.0));
-            default -> Optional.empty();
-        };
+        return MotorSpec.forKind(kind).map(MotorSpec::constants);
     }
 
     /**

@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -39,6 +40,11 @@ import java.util.function.Function;
  * IMUs. Not replayed: motor connection and failure flags, and localization measurements (recorded, but the
  * localization pipeline runs on the injected sensors). Replay cycles that run no mechanisms (physics-only frames)
  * are skipped.</p>
+ *
+ * <p>Robot code that calls {@code DriverStation} statics directly reads the live driver station, not the injected
+ * state. To make those reads see the recorded state, pass a sink to {@link Replay#driverStation(Consumer)}; the
+ * WPILib implementation drives {@code DriverStationSim} (see {@code ReplayDriverStationSim} in athena-wpilib). The
+ * sink is called for every recorded frame, before the robot runs, including frames that run no mechanisms.</p>
  */
 public final class ReplaySimulation {
     /** Differences beyond this count are counted but not listed. */
@@ -68,9 +74,22 @@ public final class ReplaySimulation {
     /** A replay file ready to run against a robot. */
     public static final class Replay {
         private final Path file;
+        private Consumer<RuntimeInputSnapshot> driverStation;
 
         private Replay(Path file) {
             this.file = file;
+        }
+
+        /**
+         * Also applies each recorded frame's driver station and joystick state to the live WPILib state (or any other
+         * sink), before the robot runs that frame. Without a sink only {@link RuntimeInputs} is injected.
+         *
+         * @param sink receives the recorded input of every frame, or null to remove it
+         * @return this replay
+         */
+        public Replay driverStation(Consumer<RuntimeInputSnapshot> sink) {
+            this.driverStation = sink;
+            return this;
         }
 
         /**
@@ -84,7 +103,7 @@ public final class ReplaySimulation {
         public ReplayRun runAgainst(Function<SimulationSession, RobotRuntime> robot) {
             Objects.requireNonNull(robot, "robot");
             try (ReplayReader reader = ReplayReader.open(file)) {
-                return new ReplayRun(run(reader, robot));
+                return new ReplayRun(run(reader, robot, driverStation));
             } catch (IOException exception) {
                 throw new UncheckedIOException("Cannot replay " + file + ".", exception);
             }
@@ -151,8 +170,10 @@ public final class ReplaySimulation {
             double replayedValue) {
     }
 
-    private static ReplayReport run(ReplayReader reader, Function<SimulationSession, RobotRuntime> robot)
-            throws IOException {
+    private static ReplayReport run(
+            ReplayReader reader,
+            Function<SimulationSession, RobotRuntime> robot,
+            Consumer<RuntimeInputSnapshot> driverStation) throws IOException {
         SimulationSession session = SimulationSession.create();
         RobotRuntime runtime = Objects.requireNonNull(robot.apply(session), "robot runtime");
         SimulationInjector injector = session.injector();
@@ -171,6 +192,10 @@ public final class ReplaySimulation {
                 frames++;
                 inputs.refresh(cursor);
                 inject(injector, cursor, inputs);
+                RuntimeInputSnapshot recordedInput = ReplayInputFields.read(cursor);
+                if (driverStation != null) {
+                    driverStation.accept(recordedInput);
+                }
                 if (!cursor.bool(LIFECYCLE + "mechanismsRan")) {
                     continue;
                 }
@@ -183,7 +208,7 @@ public final class ReplaySimulation {
                         enabled, autonomous);
                 LifecyclePhase phase = LifecyclePhase.valueOf(cursor.string(LIFECYCLE + "phase"));
                 List<ResolvedOutput> outputs;
-                RuntimeInputs.inject(ReplayInputFields.read(cursor));
+                RuntimeInputs.inject(recordedInput);
                 try {
                     outputs = runtime.periodic(
                             new MechanismContext(timestamp, 0.0, dt, enabled, autonomous, true),
