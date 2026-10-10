@@ -1,0 +1,48 @@
+package ca.frc6390.athena.hardware.power;
+
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Voltage;
+import java.util.Objects;
+
+/**
+ * Bus-sag response for a {@link PowerProfile}: while the measured battery voltage is below the
+ * threshold, the motor's current cap is reduced by {@code shedFraction} (0.5 halves it).
+ *
+ * @param shedFraction fraction of the cap removed while sagging, in {@code (0, 1]}
+ * @param thresholdVolts battery voltage below which the response applies
+ */
+public record Sag(double shedFraction, double thresholdVolts) {
+    public Sag {
+        if (!(shedFraction > 0.0 && shedFraction <= 1.0)) {
+            throw new IllegalArgumentException("Sag shed fraction must be in (0, 1].");
+        }
+        if (!Double.isFinite(thresholdVolts) || thresholdVolts <= 0.0) {
+            throw new IllegalArgumentException("Sag threshold must be a positive finite voltage.");
+        }
+    }
+
+    /**
+     * Starts a sag response that removes {@code fraction} of the cap.
+     *
+     * @param fraction fraction of the cap to remove, in {@code (0, 1]}
+     * @return builder completed with {@link Shed#below(Voltage)}
+     */
+    public static Shed shed(double fraction) {
+        return new Shed(fraction);
+    }
+
+    /** First half of a sag declaration. */
+    public record Shed(double fraction) {
+        public Shed {
+            if (!(fraction > 0.0 && fraction <= 1.0)) {
+                throw new IllegalArgumentException("Sag shed fraction must be in (0, 1].");
+            }
+        }
+
+        /** Completes the declaration with the bus voltage below which the response applies. */
+        public Sag below(Voltage voltage) {
+            Objects.requireNonNull(voltage, "voltage");
+            return new Sag(fraction, voltage.in(Units.Volts));
+        }
+    }
+}

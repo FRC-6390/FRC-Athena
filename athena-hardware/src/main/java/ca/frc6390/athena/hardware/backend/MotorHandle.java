@@ -2,6 +2,8 @@ package ca.frc6390.athena.hardware.backend;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
 
+import java.util.OptionalDouble;
+
 /**
  * Runtime motor created by a backend.
  */
@@ -39,6 +41,16 @@ public interface MotorHandle {
     default void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         throw new UnsupportedOperationException(
                 "Runtime configuration is not available for " + device().defaultName());
+    }
+
+    /**
+     * Returns the controller-reported winding or motor temperature in Celsius. The default reports
+     * nothing: Athena then uses its lumped thermal model alone.
+     *
+     * @return temperature, or empty when the controller does not report one
+     */
+    default OptionalDouble temperatureCelsius() {
+        return OptionalDouble.empty();
     }
 
     /** Returns the latest applied motor voltage. */
