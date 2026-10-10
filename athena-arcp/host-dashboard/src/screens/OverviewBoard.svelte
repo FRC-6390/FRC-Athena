@@ -4,6 +4,7 @@
   import { summarize } from '../lib/mechanisms/model';
   import { formatClock, type DriverState } from '../lib/driver/driver-state';
   import { reasonTone } from './mechanisms/tones';
+  import { humanLabel } from '../lib/board/widgets/controls-values';
 
   type Props = {
     session: Session;
@@ -106,7 +107,7 @@
         {#each mechanisms as m (m.node.path)}
           <button type="button" class="mech" onclick={() => onmechanism(m.node.path)}>
             <span class="ui-dot" data-tone={m.reason ? reasonTone(m.reason) : 'stale'}></span>
-            <span class="mname">{m.node.name}</span>
+            <span class="mname">{humanLabel(m.node.name)}</span>
             <span class="mreason">{m.reason || '—'}</span>
           </button>
         {/each}

@@ -39,7 +39,24 @@
 
   const OVERVIEW = '__overview__';
   let boards = $state<BoardDoc[]>(loadBoards());
-  let activeId = $state<string>(OVERVIEW);
+  const ACTIVE_KEY = 'athena.boards.active';
+  /** The open board survives reloads (a per-viewer convenience; storage may be unavailable). */
+  function rememberedActive(): string {
+    try {
+      return localStorage.getItem(ACTIVE_KEY) ?? OVERVIEW;
+    } catch {
+      return OVERVIEW;
+    }
+  }
+  let activeId = $state<string>(rememberedActive());
+  $effect(() => {
+    const id = activeId;
+    try {
+      localStorage.setItem(ACTIVE_KEY, id);
+    } catch {
+      /* storage unavailable */
+    }
+  });
   let editing = $state(false);
   let selectedId = $state<string | null>(null);
   let menuOpen = $state(false);
@@ -125,11 +142,62 @@
     selectedId = instance.id;
   }
 
+  /** Adds a widget of `type` with explicit bindings (several signals per slot). */
+  function addBound(type: string, cell: { x: number; y: number }, bindings: Record<string, string[]>, title?: string, size?: { w: number; h: number }) {
+    const def = widgetDef(type);
+    if (!def) return;
+    const instance = createWidget(def, cell);
+    instance.bindings = bindings;
+    if (title) instance.title = title;
+    if (size) {
+      instance.w = size.w;
+      instance.h = size.h;
+    }
+    instance.x = Math.min(cell.x, Math.max(0, (active?.columns ?? 24) - instance.w));
+    changeActive((b) => {
+      b.widgets.push(instance);
+    });
+    selectedId = instance.id;
+  }
+
+  /**
+   * A dropped drawer folder becomes the widget for the whole thing: a control loop gets the tuner, a motor
+   * its card, a mechanism its card, a folder of actions a button group, anything else a status list.
+   */
+  function addGroup(payload: Extract<DragPayload, { kind: 'group' }>, cell: { x: number; y: number }) {
+    const signals = payload.paths
+      .map((p) => session.store.descriptorByPath(p))
+      .filter((s): s is NonNullable<typeof s> => s !== undefined);
+    if (signals.length === 0) return;
+    const readable = signals.filter((s) => s.type === 'f64' || s.type === 'i64' || s.type === 'bool' || s.type === 'string');
+    const byName = (...names: string[]) => names.map((n) => signals.find((s) => s.name === n)).find(Boolean);
+    if (payload.unit === 'control') {
+      const anchor = byName('FeedbackPosition', 'FeedbackVelocity', 'Target') ?? signals[0];
+      addBound('controlTuner', cell, { signal: [anchor.path] }, undefined, { w: 12, h: 6 });
+    } else if (payload.unit === 'device') {
+      const current = byName('SupplyCurrentAmps', 'StatorCurrentAmps');
+      if (current) addBound('motorCard', cell, { signal: [current.path] });
+      else addBound('status-list', cell, { rows: readable.filter((s) => s.localPath.includes('/State/')).slice(0, 10).map((s) => s.path) }, payload.label);
+    } else if (payload.unit === 'mechanism') {
+      const anchor = byName('Reason', 'ActiveAction') ?? signals[0];
+      addBound('mechanismCard', cell, { signal: [anchor.path] });
+    } else if (signals.every((s) => s.role === 'action' || s.localPath.startsWith('Actions/'))) {
+      addBound('button-group', cell, { actions: signals.filter((s) => s.type === 'bool').map((s) => s.path) }, payload.label);
+    } else {
+      const rows = readable.slice(0, 12);
+      addBound('status-list', cell, { rows: rows.map((s) => s.path) }, payload.label, { w: 6, h: Math.min(8, 2 + rows.length) });
+    }
+  }
+
   function handleDrop(payload: DragPayload, cell: { x: number; y: number }, at?: { left: number; top: number }) {
     if (!active) return;
     if (payload.kind === 'widget') {
       const def = widgetDef(payload.type);
       if (def) addWidget(def, cell);
+      return;
+    }
+    if (payload.kind === 'group') {
+      addGroup(payload, cell);
       return;
     }
     const signal = session.store.descriptorByPath(payload.path);

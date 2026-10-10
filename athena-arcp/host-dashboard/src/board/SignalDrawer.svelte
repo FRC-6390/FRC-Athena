@@ -4,6 +4,7 @@
   import { allWidgets } from '../lib/board/registry';
   import type { WidgetCategory } from '../lib/board/types';
   import { DRAG_MIME, type DragPayload } from './Board.svelte';
+  import { buildSignalTree, signalsUnder, type TreeNode } from '../lib/board/signal-tree';
 
   type Props = {
     session: Session;
@@ -18,20 +19,24 @@
   let query = $state('');
   let open = $state<Record<string, boolean>>({});
 
-  const groups = $derived.by(() => {
+  const tree = $derived.by(() => {
     void live.current;
-    const needle = query.trim().toLowerCase();
-    const map = new Map<string, SignalDescriptor[]>();
-    for (const signal of session.store.allSignals()) {
-      if (signal.role === 'lock' || signal.role === 'system') continue;
-      if (needle && !signal.path.toLowerCase().includes(needle)) continue;
-      const key = signal.mechanismPath || signal.path.split('/').slice(0, 2).join('/');
-      (map.get(key) ?? map.set(key, []).get(key)!).push(signal);
-    }
-    return [...map.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, signals]) => ({ key, signals: signals.sort((a, b) => a.localPath.localeCompare(b.localPath)) }));
+    return buildSignalTree(session.store.allSignals(), query);
   });
+
+  /** Folders start closed, except while searching or when there is only a little to show. */
+  const isOpen = (node: TreeNode, depth: number) => open[node.key] ?? (query !== '' ? node.count <= 60 : depth === 0 && tree.length <= 2);
+
+  function groupPayload(node: TreeNode): DragPayload {
+    return { kind: 'group', unit: node.unit ?? 'folder', label: node.label, paths: signalsUnder(node).map((s) => s.path) };
+  }
+
+  const unitHint: Record<string, string> = {
+    mechanism: 'Drag for a mechanism card',
+    control: 'Drag for a control tuner',
+    device: 'Drag for a device card',
+    folder: 'Drag for a list of these signals'
+  };
 
   const categories: WidgetCategory[] = ['Values', 'Controls', 'Charts', 'Robot', 'Match', 'Layout'];
   const widgets = $derived(
@@ -53,6 +58,57 @@
   const typeLabel = (t: string) => (t.startsWith('struct:') ? t.slice(7) : t);
 </script>
 
+{#snippet branch(node: TreeNode, depth: number)}
+  {#if node.signal}
+    {@const signal = node.signal}
+    <div
+      class="item"
+      role="button"
+      tabindex="0"
+      draggable="true"
+      style="--depth:{depth}"
+      title={signal.path}
+      ondragstart={(e) => drag(e, { kind: 'signal', path: signal.path })}
+      ondblclick={() => onadd({ kind: 'signal', path: signal.path })}
+      onkeydown={(e) => e.key === 'Enter' && onadd({ kind: 'signal', path: signal.path })}
+    >
+      <span class="name">{node.label}</span>
+      <span class="type" class:writable={signal.writable}>{typeLabel(signal.type)}</span>
+    </div>
+  {:else}
+    {@const expanded = isOpen(node, depth)}
+    <div
+      class="ghead"
+      class:unit={node.unit !== 'folder'}
+      role="button"
+      tabindex="0"
+      draggable="true"
+      style="--depth:{depth}"
+      title={unitHint[node.unit ?? 'folder']}
+      onclick={() => (open[node.key] = !expanded)}
+      onkeydown={(e) => {
+        if (e.key === 'Enter') onadd(groupPayload(node));
+        if (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          open[node.key] = e.key === 'ArrowLeft' ? false : e.key === 'ArrowRight' ? true : !expanded;
+        }
+      }}
+      ondblclick={() => onadd(groupPayload(node))}
+      ondragstart={(e) => drag(e, groupPayload(node))}
+    >
+      <span class="chev" class:open={expanded}>›</span>
+      <span class="gname">{node.label}</span>
+      {#if node.unit === 'control' || node.unit === 'device'}<span class="tag">{node.unit}</span>{/if}
+      <span class="count">{node.count}</span>
+    </div>
+    {#if expanded}
+      {#each node.children as child (child.key)}
+        {@render branch(child, depth + 1)}
+      {/each}
+    {/if}
+  {/if}
+{/snippet}
+
 <aside class="drawer ui-panel">
   <div class="tabs">
     <button type="button" class:active={tab === 'signals'} onclick={() => (tab = 'signals')}>Signals</button>
@@ -61,36 +117,14 @@
   <div class="search">
     <input class="ui-input" placeholder={tab === 'signals' ? 'Search signals' : 'Search widgets'} bind:value={query} />
   </div>
-  <p class="hint">Drag onto the board{tab === 'signals' ? ' — you pick how to show it' : ''}, or double-click to add.</p>
+  <p class="hint">
+    {#if tab === 'signals'}Drag a signal, or a whole control, device or mechanism, onto the board. Double-click adds it.{:else}Drag onto the board, or double-click to add.{/if}
+  </p>
 
   <div class="list">
     {#if tab === 'signals'}
-      {#each groups as group (group.key)}
-        {@const expanded = open[group.key] ?? (query !== '' || groups.length <= 3)}
-        <div class="group">
-          <button type="button" class="ghead" onclick={() => (open[group.key] = !expanded)}>
-            <span class="chev" class:open={expanded}>›</span>
-            <span class="gname">{group.key.replace(/^robot\//, '')}</span>
-            <span class="count">{group.signals.length}</span>
-          </button>
-          {#if expanded}
-            {#each group.signals as signal (signal.signalId)}
-              <div
-                class="item"
-                role="button"
-                tabindex="0"
-                draggable="true"
-                title={signal.path}
-                ondragstart={(e) => drag(e, { kind: 'signal', path: signal.path })}
-                ondblclick={() => onadd({ kind: 'signal', path: signal.path })}
-                onkeydown={(e) => e.key === 'Enter' && onadd({ kind: 'signal', path: signal.path })}
-              >
-                <span class="name">{signal.localPath}</span>
-                <span class="type" class:writable={signal.writable}>{typeLabel(signal.type)}</span>
-              </div>
-            {/each}
-          {/if}
-        </div>
+      {#each tree as node (node.key)}
+        {@render branch(node, 0)}
       {:else}
         <p class="empty">{query ? 'No signals match.' : 'Connect to a robot to see its signals.'}</p>
       {/each}
@@ -167,8 +201,9 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    height: 30px;
-    padding: 0 var(--sp-3);
+    height: 28px;
+    padding: 0 var(--sp-3) 0 calc(var(--sp-3) + var(--depth, 0) * 14px);
+    box-sizing: border-box;
     border: none;
     background: transparent;
     color: var(--text);
@@ -181,6 +216,23 @@
   .ghead:hover {
     background: var(--surface-2);
   }
+  .ghead.unit {
+    cursor: grab;
+  }
+  .ghead:focus-visible {
+    outline: 2px solid var(--info);
+    outline-offset: -2px;
+  }
+  .tag {
+    padding: 0 5px;
+    border-radius: 3px;
+    background: var(--info-soft);
+    color: var(--info);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   .chev {
     width: 10px;
     color: var(--text-faint);
@@ -191,7 +243,10 @@
   }
   .gname {
     flex: 1;
-    text-transform: capitalize;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .count {
     font-size: var(--fs-xs);
@@ -204,7 +259,7 @@
     align-items: center;
     gap: 6px;
     margin: 1px var(--sp-2);
-    padding: 5px 8px 5px 18px;
+    padding: 4px 8px 4px calc(18px + var(--depth, 0) * 14px - var(--sp-2));
     border-radius: var(--radius-sm);
     font-size: var(--fs-sm);
     color: var(--text);

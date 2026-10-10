@@ -1,7 +1,11 @@
 <script lang="ts" module>
   /** Drag payload type shared by the signal drawer, the widget palette and the board. */
   export const DRAG_MIME = 'application/x-athena-board';
-  export type DragPayload = { kind: 'signal'; path: string } | { kind: 'widget'; type: string };
+  export type DragPayload =
+    | { kind: 'signal'; path: string }
+    | { kind: 'widget'; type: string }
+    /** A drawer folder: a control loop, a device, a mechanism, or a plain folder of signals. */
+    | { kind: 'group'; unit: 'mechanism' | 'control' | 'device' | 'folder'; label: string; paths: string[] };
   export const CELL_HEIGHT = 56;
   export const CELL_MARGIN = 4;
 </script>
