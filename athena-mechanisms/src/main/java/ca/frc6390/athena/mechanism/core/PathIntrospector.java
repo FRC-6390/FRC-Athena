@@ -74,6 +74,11 @@ final class PathIntrospector {
             collect(branch.active(), paths, visited);
             return;
         }
+        if (value instanceof Actions.Either either) {
+            collect(either.active(), paths, visited);
+            collect(either.inactive(), paths, visited);
+            return;
+        }
         if (value instanceof Actions.Timeout timeout) {
             collect(timeout.action(), paths, visited);
             return;

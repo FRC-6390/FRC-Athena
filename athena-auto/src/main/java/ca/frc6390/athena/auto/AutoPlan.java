@@ -61,6 +61,10 @@ public record AutoPlan(List<String> steps, List<PathAction> paths) {
         } else if (action instanceof Actions.WhenBranch branch) {
             steps.add(prefix + "CONDITIONAL");
             collect(branch.active(), prefix + "  TRUE ", steps, paths, visited);
+        } else if (action instanceof Actions.Either either) {
+            steps.add(prefix + "EITHER");
+            collect(either.active(), prefix + "  TRUE ", steps, paths, visited);
+            collect(either.inactive(), prefix + "  FALSE ", steps, paths, visited);
         } else if (action instanceof Actions.Timeout timeout) {
             steps.add(prefix + "TIMEOUT " + timeout.seconds() + "s");
             collect(timeout.action(), prefix + "  ", steps, paths, visited);

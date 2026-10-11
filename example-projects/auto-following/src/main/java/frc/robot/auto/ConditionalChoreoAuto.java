@@ -15,8 +15,10 @@ public final class ConditionalChoreoAuto {
                 .then(context.mechanisms.score);
         return Actions.sequence()
                 .run(Paths.choreo("Choreo-Collect").resetOdometry())
-                .then(Actions.when(context.state::hasGamePiece)
-                        .run(returnAndScore)
-                        .otherwise(Paths.choreo("Choreo-Safe-Exit")));
+                // either(...) checks the sensor once at the branch point; when(...) would keep
+                // re-checking and switch paths mid-drive if the piece slipped.
+                .then(Actions.either(context.state::hasGamePiece,
+                        returnAndScore,
+                        Paths.choreo("Choreo-Safe-Exit")));
     }
 }

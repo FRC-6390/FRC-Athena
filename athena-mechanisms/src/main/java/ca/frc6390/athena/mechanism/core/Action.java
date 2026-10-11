@@ -67,7 +67,7 @@ public interface Action extends DeviceAction {
 
         @Override
         public Action then(Action next) {
-            return new Conditional(action, condition, Objects.requireNonNull(next, "next"));
+            return new Conditional(action, condition, Actions.chain(this.next, next));
         }
     }
 

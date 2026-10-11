@@ -54,6 +54,7 @@ public final class MechanismScheduler {
     private final Map<PathAction, Set<Object>> pathOwnershipCache = new IdentityHashMap<>();
     private final Map<Object, Set<Action>> spawnedLeases = new IdentityHashMap<>();
     private final List<Object> evaluatingLeases = new ArrayList<>();
+    private final List<Action> deferredRequests = new ArrayList<>();
     private final List<RuntimeFault> pendingFaults = new ArrayList<>();
     private final Map<String, FaultHistory> faultHistory = new LinkedHashMap<>();
     private static final double FAULT_REPORT_PERIOD_SECONDS = 5.0;
@@ -657,6 +658,9 @@ public final class MechanismScheduler {
             validateConcurrentResourceConflicts(choice.inactive(), path + ".choice.inactive", visited);
         } else if (action instanceof Actions.WhenBranch branch) {
             validateConcurrentResourceConflicts(branch.active(), path + ".when.active", visited);
+        } else if (action instanceof Actions.Either either) {
+            validateConcurrentResourceConflicts(either.active(), path + ".either.active", visited);
+            validateConcurrentResourceConflicts(either.inactive(), path + ".either.inactive", visited);
         } else if (action instanceof Actions.Timeout timeout) {
             validateConcurrentResourceConflicts(timeout.action(), path + ".timeout", visited);
         } else if (action instanceof Actions.WithinTolerance within) {
@@ -759,6 +763,9 @@ public final class MechanismScheduler {
             return containsOpaqueRuntimeGraph(choice.active()) || containsOpaqueRuntimeGraph(choice.inactive());
         }
         if (action instanceof Actions.WhenBranch branch) return containsOpaqueRuntimeGraph(branch.active());
+        if (action instanceof Actions.Either either) {
+            return containsOpaqueRuntimeGraph(either.active()) || containsOpaqueRuntimeGraph(either.inactive());
+        }
         if (action instanceof Actions.Timeout timeout) return containsOpaqueRuntimeGraph(timeout.action());
         if (action instanceof Actions.WithinTolerance within) return containsOpaqueRuntimeGraph(within.action());
         if (action instanceof Actions.Conditional conditional) {
@@ -844,6 +851,9 @@ public final class MechanismScheduler {
             collectPathResources(choice.inactive(), resources);
         } else if (action instanceof Actions.WhenBranch branch) {
             collectPathResources(branch.active(), resources);
+        } else if (action instanceof Actions.Either either) {
+            collectPathResources(either.active(), resources);
+            collectPathResources(either.inactive(), resources);
         } else if (action instanceof Actions.Timeout timeout) {
             collectPathResources(timeout.action(), resources);
         } else if (action instanceof Actions.WithinTolerance within) {
@@ -862,6 +872,15 @@ public final class MechanismScheduler {
      */
     public MechanismScheduler request(Action action) {
         Action safeAction = Objects.requireNonNull(action, "action");
+        for (int index = 0; index < evaluatingLeases.size(); index++) {
+            if (evaluatingLeases.get(index) == safeAction) {
+                // An action restarting itself (or an ancestor lease) from inside its own tree, for
+                // example sequence().doOnce(...).then(doOnce(() -> self.request())): restart it after
+                // this cycle instead of tearing down the tree that is evaluating right now.
+                deferredRequests.add(safeAction);
+                return this;
+            }
+        }
         activateLease(safeAction, safeAction, true);
         // A request made while a lease evaluates (for example doOnce(() -> intake.request()))
         // belongs to that lease and is cancelled with it. Any other request is independent, even
@@ -915,6 +934,7 @@ public final class MechanismScheduler {
 
     private void cancelSpawned(Object key, Set<Object> visited) {
         if (key == null || !visited.add(key)) return;
+        deferredRequests.removeIf(deferred -> deferred == key);
         forgetCompletion(key);
         releaseLease(key);
         Set<Action> spawned = spawnedLeases.remove(key);
@@ -1080,6 +1100,12 @@ public final class MechanismScheduler {
                 runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
             }
             retireCompletedRequests();
+            evaluatingLeases.clear();
+            if (!deferredRequests.isEmpty()) {
+                List<Action> deferred = List.copyOf(deferredRequests);
+                deferredRequests.clear();
+                deferred.forEach(this::request);
+            }
         }
         outputCapacityHint = Math.max(outputCapacityHint, outputs.size());
         return outputs;
@@ -1400,6 +1426,9 @@ public final class MechanismScheduler {
             collectActionDeclarations(choice.inactive(), declarations);
         } else if (action instanceof Actions.WhenBranch branch) {
             collectActionDeclarations(branch.active(), declarations);
+        } else if (action instanceof Actions.Either either) {
+            collectActionDeclarations(either.active(), declarations);
+            collectActionDeclarations(either.inactive(), declarations);
         } else if (action instanceof Actions.Timeout timeout) {
             collectActionDeclarations(timeout.action(), declarations);
         } else if (action instanceof Actions.WithinTolerance within) {

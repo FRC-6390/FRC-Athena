@@ -1,5 +1,7 @@
 package ca.frc6390.athena.hardware.runtime;
 
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
+
 /**
  * Marker for an Athena action created by a hardware declaration.
  */
@@ -52,6 +54,29 @@ public interface DeviceAction extends ActionBinding, Runnable {
                 factory.setAccessible(true);
             }
             return (T) factory.invoke(null, this, seconds.doubleValue());
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Device action composition requires athena-mechanisms on the classpath.", exception);
+        }
+    }
+
+    /**
+     * Runs this action until the stall detector reports a commanded motor that is not moving,
+     * then completes. Debounce timing restarts every time the composed action starts.
+     *
+     * @param signal stall detector, usually {@code motor.stall()} with tuned thresholds
+     * @param <T> resulting Athena action type
+     * @return stall-completing action
+     */
+    @SuppressWarnings("unchecked")
+    default <T extends DeviceAction> T untilStalled(MotorStallSignal signal) {
+        try {
+            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
+            var factory = actions.getDeclaredMethod(
+                    "untilStalled", DeviceAction.class, MotorStallSignal.class);
+            if (!factory.canAccess(null)) {
+                factory.setAccessible(true);
+            }
+            return (T) factory.invoke(null, this, signal);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Device action composition requires athena-mechanisms on the classpath.", exception);
         }

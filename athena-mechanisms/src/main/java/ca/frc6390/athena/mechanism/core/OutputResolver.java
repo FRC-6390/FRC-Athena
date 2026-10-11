@@ -81,6 +81,11 @@ final class OutputResolver {
             resolveState(branch.choose(context), context, outputs);
             return;
         }
+        if (action instanceof Actions.Either either) {
+            Action chosen = either.choose(context);
+            if (chosen != null) resolveState(chosen, context, outputs);
+            return;
+        }
         if (action instanceof Actions.Parallel parallel) {
             resolveStates(parallel.Actions(), context, outputs);
             return;
@@ -117,7 +122,7 @@ final class OutputResolver {
         if (action instanceof Actions.RuntimeAction || action instanceof Actions.DoOnce
                 || action instanceof Actions.EncoderSetPosition
                 || action instanceof Actions.WaitSeconds || action instanceof Actions.WaitUntil
-                || action instanceof PathAction) {
+                || action instanceof Actions.WaitUntilStalled || action instanceof PathAction) {
             return;
         }
         if (action instanceof Actions.DynamicOutput dynamic) {

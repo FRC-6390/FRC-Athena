@@ -46,6 +46,8 @@ final class MechanismRuntime {
     };
     private Action action;
     private double stateStartSeconds = Double.NaN;
+    private double disabledSinceSeconds = Double.NaN;
+    private int evaluationIndex = -1;
     private long actionRecency;
     private long localRecency;
     private MechanismTraceSnapshot traceSnapshot;
@@ -247,8 +249,13 @@ final class MechanismRuntime {
     void releaseLease(Object key) {
         ActiveLease removed = activeLeases.remove(key);
         if (removed != null) {
-            leasesByRecency.remove(removed);
-            removed.scheduler.reset();
+            int index = leasesByRecency.indexOf(removed);
+            leasesByRecency.remove(index);
+            // A lease evaluating this cycle may restart or cancel an earlier lease (for example
+            // doOnce(() -> other.request())); keep the cursor on the next unevaluated lease.
+            if (evaluationIndex >= 0 && index <= evaluationIndex) evaluationIndex--;
+            removed.released = true;
+            if (!removed.evaluating) removed.scheduler.reset();
         }
     }
 
@@ -304,7 +311,14 @@ final class MechanismRuntime {
         List<CandidateOutput> candidates = candidateScratch;
         candidates.clear();
         if (!safeMechanismContext.enabled()) {
+            if (Double.isNaN(disabledSinceSeconds)) disabledSinceSeconds = safeMechanismContext.nowSeconds();
             return;
+        }
+        if (!Double.isNaN(disabledSinceSeconds)) {
+            // Action timers do not advance while disabled: a wait, timeout, or forTime resumes
+            // with the time it had left instead of completing on the first enabled cycle.
+            shiftClocks(safeMechanismContext.nowSeconds() - disabledSinceSeconds);
+            disabledSinceSeconds = Double.NaN;
         }
         if (Double.isNaN(stateStartSeconds)) {
             stateStartSeconds = safeMechanismContext.nowSeconds();
@@ -332,30 +346,51 @@ final class MechanismRuntime {
             reportFault(baseActionLocation(action), exception);
         }
         evaluatedTimedContext = timedContext;
-        for (int leaseIndex = 0; leaseIndex < leasesByRecency.size(); leaseIndex++) {
-            ActiveLease lease = leasesByRecency.get(leaseIndex);
-            if (lease.scheduler().complete()) {
+        try {
+            for (evaluationIndex = 0; evaluationIndex < leasesByRecency.size(); evaluationIndex++) {
+                ActiveLease lease = leasesByRecency.get(evaluationIndex);
+                if (lease.scheduler().complete()) {
+                    lease.refreshReservation(leaseResources);
+                    continue;
+                }
+                int firstCandidate = candidates.size();
+                if (runtimeHooks != null) runtimeHooks.enterLease(lease.owner());
+                lease.evaluating = true;
+                try {
+                    StateScheduler.Result result = lease.evaluate(safeMechanismContext);
+                    if (!lease.released) {
+                        addCandidates(
+                                candidates,
+                                "lease",
+                                lease.recency(),
+                                result,
+                                lease.reservedResources(),
+                                lease.diagnosticLocation());
+                    }
+                } catch (RuntimeException exception) {
+                    truncate(candidates, firstCandidate);
+                    if (!lease.released) reportFault(lease.diagnosticLocation(), exception);
+                } finally {
+                    lease.evaluating = false;
+                    if (runtimeHooks != null) runtimeHooks.exitLease();
+                }
+                if (lease.released) {
+                    // Cancelled or restarted while it evaluated; its replacement (if any) runs instead.
+                    lease.scheduler().reset();
+                    continue;
+                }
                 lease.refreshReservation(leaseResources);
-                continue;
             }
-            int firstCandidate = candidates.size();
-            if (runtimeHooks != null) runtimeHooks.enterLease(lease.owner());
-            try {
-                addCandidates(
-                        candidates,
-                        "lease",
-                        lease.recency(),
-                        lease.evaluate(safeMechanismContext),
-                        lease.reservedResources(),
-                        lease.diagnosticLocation());
-            } catch (RuntimeException exception) {
-                truncate(candidates, firstCandidate);
-                reportFault(lease.diagnosticLocation(), exception);
-            } finally {
-                if (runtimeHooks != null) runtimeHooks.exitLease();
-            }
-            lease.refreshReservation(leaseResources);
+        } finally {
+            evaluationIndex = -1;
         }
+    }
+
+    private void shiftClocks(double pausedSeconds) {
+        if (!(pausedSeconds > 0.0)) return;
+        if (!Double.isNaN(stateStartSeconds)) stateStartSeconds += pausedSeconds;
+        scheduler.shift(pausedSeconds);
+        for (ActiveLease lease : leasesByRecency) lease.shift(pausedSeconds);
     }
 
     /** Arbitrates the candidates from {@link #evaluateCandidates} and applies the winners. */
@@ -951,6 +986,8 @@ final class MechanismRuntime {
         private final Set<Object> liveResources = new LinkedHashSet<>();
         private boolean liveComputed;
         private double startSeconds = Double.NaN;
+        private boolean evaluating;
+        private boolean released;
 
         private ActiveLease(
                 Action action,
@@ -1018,6 +1055,11 @@ final class MechanismRuntime {
             return Double.isNaN(startSeconds) ? 0.0 : Math.max(0.0, nowSeconds - startSeconds);
         }
 
+        private void shift(double seconds) {
+            if (!Double.isNaN(startSeconds)) startSeconds += seconds;
+            scheduler.shift(seconds);
+        }
+
         private StateScheduler.Result evaluate(MechanismContext context) {
             if (Double.isNaN(startSeconds)) {
                 startSeconds = context.nowSeconds();
@@ -1064,6 +1106,12 @@ final class MechanismRuntime {
             }
         }
 
+        void shift(double seconds) {
+            if (root != null) {
+                root.shift(seconds);
+            }
+        }
+
         Result evaluate(Action action, MechanismContext context) {
             if (root == null || root.action() != action) {
                 root = SchedulerNode.lower(action);
@@ -1104,7 +1152,8 @@ final class MechanismRuntime {
             }
             if (action instanceof Actions.Sequence sequence) {
                 List<Actions.SequenceStep> steps = sequence.steps();
-                if (node.terminal || node.index >= steps.size()) {
+                if (node.terminal) return;
+                if (node.index >= steps.size()) {
                     if (sequence.next() != null) {
                         collectChild(schedule.namedChildren.get("next"), sequence.next(), resources, out);
                     }
@@ -1156,6 +1205,10 @@ final class MechanismRuntime {
             }
             if (action instanceof Action.Then then) {
                 collectThen(schedule, node, then.action(), then.next(), resources, out);
+                return;
+            }
+            if (action instanceof Actions.Either && node.entered) {
+                if (node.chosen != null) collectChild(schedule.namedChildren.get("either"), node.chosen, resources, out);
                 return;
             }
             if (action instanceof PathAction path) {
@@ -1310,6 +1363,14 @@ final class MechanismRuntime {
             if (action instanceof Actions.WhenBranch branch) {
                 return evaluate(schedule.named("when", branch.choose(local)), context);
             }
+            if (action instanceof Actions.Either either) {
+                if (!node.entered) {
+                    node.entered = true;
+                    node.chosen = either.choose(local);
+                }
+                if (node.chosen == null) return schedule.result(null, true, local);
+                return evaluate(schedule.named("either", node.chosen), context);
+            }
             if (action instanceof Actions.Timeout timeout) {
                 if (node.terminal) return schedule.result(null, true, local);
                 if (timeout.expired(local)) {
@@ -1402,6 +1463,9 @@ final class MechanismRuntime {
             if (action instanceof Actions.WaitUntil wait) {
                 return schedule.result(null, wait.complete(local), local);
             }
+            if (action instanceof Actions.WaitUntilStalled stall) {
+                return schedule.result(null, stalled(stall.signal(), node, local), local);
+            }
             if (action instanceof PathAction pathState) {
                 if (node.pathComplete) {
                     return schedule.result(null, true, local);
@@ -1475,18 +1539,14 @@ final class MechanismRuntime {
                 MechanismContext local,
                 Node node) {
             if (node.terminal) {
-                return sequence.next() == null
-                        ? schedule.result(null, true, local)
-                        : evaluate(schedule.named("next", sequence.next()), context);
+                return schedule.result(null, true, local);
             }
             if (Actions.hasElapsed(local.timeInStateSeconds(), sequence.timeoutSeconds())) {
-                if (node.index < sequence.steps().size()) {
-                    schedule.indexed(node.index, sequence.steps().get(node.index).action()).reset();
-                }
+                // Like timeout(...) on any other action, a sequence timeout ends the whole sequence,
+                // including stages appended with then(...).
+                schedule.resetChildren();
                 node.terminal = true;
-                return sequence.next() == null
-                        ? schedule.result(null, true, local)
-                        : evaluate(schedule.named("next", sequence.next()), context);
+                return schedule.result(null, true, local);
             }
             List<Actions.SequenceStep> steps = sequence.steps();
             while (node.index < steps.size()) {
@@ -1601,11 +1661,36 @@ final class MechanismRuntime {
                 }
                 return next == null ? schedule.result(null, true, local) : evaluate(schedule.named("next", next), context);
             }
-            Evaluation child = evaluate(schedule.named("conditional", wrapped), context);
+            SchedulerNode childNode = schedule.named("conditional", wrapped);
+            Evaluation child = evaluate(childNode, context);
             if (child.complete()) {
-                return next == null ? child : evaluate(schedule.named("next", next), context);
+                // Latch: once the wrapped action finishes on its own, later cycles must not fall
+                // back into it (for example a waitUntil that turns false again or an untilWithin
+                // that drifts out of tolerance) and abandon the next stage.
+                node.terminal = true;
+                if (next == null) return child;
+                childNode.reset();
+                return evaluate(schedule.named("next", next), context);
             }
             return child;
+        }
+
+        /** Debounces a stall detector against this node's own start, so every run starts fresh. */
+        private boolean stalled(
+                ca.frc6390.athena.hardware.signal.MotorStallSignal signal,
+                Node node,
+                MechanismContext context) {
+            if (node.terminal) return true;
+            boolean raw = RuntimeHardwareAccess.call(actionContext, signal::instantaneousActive);
+            if (!raw) {
+                node.stallSinceSeconds = Double.NaN;
+                return false;
+            }
+            if (Double.isNaN(node.stallSinceSeconds)) node.stallSinceSeconds = context.nowSeconds();
+            if (Actions.hasElapsed(context.nowSeconds() - node.stallSinceSeconds, signal.durationSeconds())) {
+                node.terminal = true;
+            }
+            return node.terminal;
         }
 
         private Evaluation evaluateThen(
@@ -1800,7 +1885,9 @@ final class MechanismRuntime {
         }
 
         private static final class Node {
-            private final double startSeconds;
+            private double startSeconds;
+            private double stallSinceSeconds = Double.NaN;
+            private Action chosen;
             private boolean entered;
             private int index;
             private PathAction pathState;
@@ -1900,6 +1987,17 @@ final class MechanismRuntime {
                     }
                 }
                 namedChildren.values().forEach(SchedulerNode::reset);
+            }
+
+            private void shift(double seconds) {
+                if (runtime != null) {
+                    runtime.startSeconds += seconds;
+                    runtime.stallSinceSeconds = Double.NaN;
+                }
+                for (SchedulerNode child : indexedChildren) {
+                    if (child != null) child.shift(seconds);
+                }
+                namedChildren.values().forEach(child -> child.shift(seconds));
             }
 
             private void resetChildren() {
