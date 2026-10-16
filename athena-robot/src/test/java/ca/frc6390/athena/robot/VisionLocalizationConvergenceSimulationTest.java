@@ -24,15 +24,20 @@ import ca.frc6390.athena.localization.pipeline.VisionSourceStatus;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
+import ca.frc6390.athena.runtime.measurement.Measurement;
+import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.device.CameraMountPose;
+import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.runtime.VisionSimNoise;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 import ca.frc6390.athena.vision.runtime.VisionSimulationTarget;
 import ca.frc6390.athena.vision.runtime.VisionSimulations;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -42,9 +47,18 @@ import org.junit.jupiter.api.Test;
  * PhotonVision cameras (one sees two tags, the rear one sees a single tag), per-camera filter stages and a Kalman
  * node that starts from an odometry origin far away from the simulated robot.
  *
- * <p>The PhotonVision simulation provider reports the simulated robot pose (no PnP noise) whenever a tag is inside
- * the camera's 70 degree field of view, so these tests check the Athena pipeline (gating, Kalman fusion, camera
- * status), not the accuracy of a real pose solver. The provider does not need the PhotonVision native simulation.</p>
+ * <p>The default simulation uses {@link VisionSimNoise#realistic()}: 30 fps frames with 25 +- 5 ms latency, pose noise
+ * that grows with the square of the tag distance (single-tag frames four times noisier), 2 % dropped frames and 5 %
+ * single-tag ambiguity flips to a mirrored pose. The tests in this class use those frames end to end, so they check
+ * that the Athena pipeline (latency compensation, ambiguity and range gating, Kalman fusion, camera status) converges
+ * on imperfect vision. {@link #perfectNoiseKalmanConvergesQuickly()} keeps the exact-pose variant for pipeline-only
+ * checks. The provider does not need the PhotonVision native simulation.</p>
+ *
+ * <p>Measured with the fixed seed of {@link VisionSimNoise#realistic()} (convergence metrics from the
+ * test's {@code run} loop): realistic vision first enters the 0.15 m / 3 deg band at 0.52 s, stays within 0.10 m and
+ * 3.5 deg afterwards, and ends 1.9 cm from truth. The one 3.5 deg transient at 4.3 s is a single-tag heading sample
+ * at 2.9 m (sigma of about 3.4 deg), which is why the post-convergence check allows 2x the band. Perfect vision enters
+ * the band at 0.30 s and ends at 0.0 m.</p>
  */
 class VisionLocalizationConvergenceSimulationTest {
     private static final double DT = 0.02;
@@ -59,7 +73,8 @@ class VisionLocalizationConvergenceSimulationTest {
     private static final VisionSimulationField FIELD = VisionSimulationField.of(
             VisionSimulationTarget.aprilTag(1, 2.18094, 3.52614, 1.3, Math.PI),
             VisionSimulationTarget.aprilTag(2, 2.01142, 2.23857, 1.3, Math.PI),
-            VisionSimulationTarget.aprilTag(3, 7.59808, 1.0, 1.3, Math.PI));
+            VisionSimulationTarget.aprilTag(3, 7.59808, 1.0, 1.3, Math.PI))
+            .noise(VisionSimNoise.realistic());
 
     @Test
     void kalmanConvergesFromFarOdometryOriginWithTwoPhotonCameras() {
@@ -81,6 +96,11 @@ class VisionLocalizationConvergenceSimulationTest {
         assertTrue(convergence.lastDivergedSeconds() < RUN_SECONDS - 1.0,
                 () -> "Estimate left the tolerance band late: last out at " + convergence.lastDivergedSeconds()
                         + " s");
+        assertTrue(convergence.worstPositionAfterConverged() < 2.0 * POSITION_TOLERANCE_METERS,
+                () -> "Position excursion after convergence: " + convergence.worstPositionAfterConverged() + " m");
+        assertTrue(convergence.worstHeadingDegreesAfterConverged() < 2.0 * HEADING_TOLERANCE_DEGREES,
+                () -> "Heading excursion after convergence: " + convergence.worstHeadingDegreesAfterConverged()
+                        + " deg");
         assertWithinTolerance(robot.estimate.pose(), simulation.pose());
 
         VisionSourceStatus front = status(robot.estimate, "Front");
@@ -94,16 +114,36 @@ class VisionLocalizationConvergenceSimulationTest {
     }
 
     @Test
+    void perfectNoiseKalmanConvergesQuickly() {
+        SimulationSession simulation = SimulationSession.create()
+                .visionField(FIELD.noise(VisionSimNoise.perfect()))
+                .resetPose(truth());
+        LocalizationRobot robot = new LocalizationRobot(
+                photonCamera("Front", frontMount()),
+                photonCamera("Rear", rearMount()),
+                true);
+        robot.odometry.reset(new PoseSnapshot(0.0, 0.0, 0.0));
+        RobotRuntime runtime = RobotRuntime.simulated(simulation).register(robot);
+
+        Convergence convergence = run(simulation, runtime, robot, RUN_SECONDS);
+
+        assertTrue(convergence.firstConvergedSeconds() <= CONVERGENCE_DEADLINE_SECONDS,
+                () -> "Perfect vision did not converge: first converged at " + convergence.firstConvergedSeconds());
+        assertWithinTolerance(robot.estimate.pose(), simulation.pose());
+    }
+
+    @Test
     void frameStampedFarInTheFutureAtStartupDoesNotLockCamerasOut() {
         SimulationSession simulation = SimulationSession.create().visionField(FIELD).resetPose(truth());
         VisionSimulation photon = VisionSimulations.createDiscovered(
                         List.of(photonCamera("Front", frontMount()), photonCamera("Rear", rearMount())), FIELD)
                 .orElseThrow(() -> new AssertionError("PhotonVision simulation provider not on the test classpath"));
-        PhotonVisionDevice front = (PhotonVisionDevice) photon.bind(photonCamera("Front", frontMount()));
-        PhotonVisionDevice rear = (PhotonVisionDevice) photon.bind(photonCamera("Rear", rearMount()));
-        // The first simulated frame (for both cameras) is stamped 1000 s in the future, as an unsynced camera clock
+        // The first delivered frame of each camera is stamped 1000 s in the future, as an unsynced camera clock
         // would report at startup. Later frames are correct.
-        simulation.vision(new FirstFrameFromFuture(photon, 1000.0));
+        FirstFrameFromFuture stamped = new FirstFrameFromFuture(photon, 1000.0);
+        PhotonVisionDevice front = (PhotonVisionDevice) stamped.bind(photonCamera("Front", frontMount()));
+        PhotonVisionDevice rear = (PhotonVisionDevice) stamped.bind(photonCamera("Rear", rearMount()));
+        simulation.vision(stamped);
         // The front camera feeds the Kalman node directly (no filter stage), so the Kalman's own future-frame guard
         // is what keeps the first frame from locking the camera out.
         LocalizationRobot robot = new LocalizationRobot(front, rear, false);
@@ -118,8 +158,14 @@ class VisionLocalizationConvergenceSimulationTest {
         assertWithinTolerance(robot.estimate.pose(), simulation.pose());
         VisionSourceStatus front2 = status(robot.estimate, "Front");
         assertTrue(front2.acceptedPerSecond() > 0.0, () -> "Front camera stayed locked out: " + front2);
+        assertEquals(2, stamped.stampedCameras(), "both cameras must have delivered a future-stamped frame");
     }
 
+    /**
+     * Steps the simulation and runtime. {@code firstConverged} is the first time the estimate is inside the tolerance
+     * band. After that, {@code worstAfterConverged*} record the largest excursions, which a realistic single-tag
+     * heading transient can make slightly larger than the band.
+     */
     private static Convergence run(
             SimulationSession simulation,
             RobotRuntime runtime,
@@ -128,6 +174,8 @@ class VisionLocalizationConvergenceSimulationTest {
         double firstConverged = Double.NaN;
         double lastDiverged = 0.0;
         double finalError = Double.NaN;
+        double worstPosition = 0.0;
+        double worstHeading = 0.0;
         int cycles = (int) Math.round(seconds / DT);
         for (int cycle = 1; cycle <= cycles; cycle++) {
             double now = cycle * DT;
@@ -142,13 +190,13 @@ class VisionLocalizationConvergenceSimulationTest {
                 }
             } else {
                 lastDiverged = now;
-                if (!Double.isNaN(firstConverged)) {
-                    // Keeps the first-converged time honest: a later excursion resets it.
-                    firstConverged = Double.NaN;
-                }
+            }
+            if (!Double.isNaN(firstConverged)) {
+                worstPosition = Math.max(worstPosition, positionError(estimate, truth));
+                worstHeading = Math.max(worstHeading, headingErrorDegrees(estimate, truth));
             }
         }
-        return new Convergence(firstConverged, lastDiverged, finalError);
+        return new Convergence(firstConverged, lastDiverged, finalError, worstPosition, worstHeading);
     }
 
     private static boolean converged(PoseSnapshot estimate, PoseSnapshot truth) {
@@ -199,30 +247,84 @@ class VisionLocalizationConvergenceSimulationTest {
         return Cameras.photonVision(name).mount(mount).failurePolicy(FailurePolicy.DISABLE_DEVICE);
     }
 
-    private record Convergence(double firstConvergedSeconds, double lastDivergedSeconds, double finalError) {
+    private record Convergence(
+            double firstConvergedSeconds,
+            double lastDivergedSeconds,
+            double finalError,
+            double worstPositionAfterConverged,
+            double worstHeadingDegreesAfterConverged) {
     }
 
-    /** Delegates to a vision simulation, stamping only its first update with a time far in the future. */
+    /**
+     * Delegates to a vision simulation and stamps only the first delivered frame of each bound camera with a time far
+     * in the future. Frames are delivered through the bound pose supplier, so the stamp is applied there.
+     */
     private static final class FirstFrameFromFuture implements VisionSimulation {
         private final VisionSimulation delegate;
         private final double futureSeconds;
-        private boolean first = true;
+
+        private final List<StampFirstFrame> stamps = new ArrayList<>();
 
         private FirstFrameFromFuture(VisionSimulation delegate, double futureSeconds) {
             this.delegate = delegate;
             this.futureSeconds = futureSeconds;
         }
 
+        /** Number of bound cameras whose first frame has been stamped. */
+        private int stampedCameras() {
+            return (int) stamps.stream().filter(StampFirstFrame::stamped).count();
+        }
+
+        @Override
+        public CameraDevice bind(CameraDevice camera) {
+            if (camera == null || camera.hasBoundSignals()) {
+                return camera;
+            }
+            // Bind the simulation through a fresh declaration: copies of a declaration share their signal bindings,
+            // so binding the simulation to `camera` itself would replace the supplier this wrapper reads.
+            CameraDevice inner = delegate.bind(Cameras.photonVision(camera.name()).mount(camera.mountPose()));
+            StampFirstFrame poses = new StampFirstFrame(futureSeconds);
+            stamps.add(poses);
+            return camera.bindPose(() -> poses.apply(inner.sourcePose().measurements()))
+                    .bindTargets(() -> inner.sourceTargets().measurements());
+        }
+
         @Override
         public void update(PoseSnapshot robotPose) {
-            update(robotPose, 0.0);
+            delegate.update(robotPose);
         }
 
         @Override
         public void update(PoseSnapshot robotPose, double timestampSeconds) {
-            double stamp = first ? timestampSeconds + futureSeconds : timestampSeconds;
-            first = false;
-            delegate.update(robotPose, stamp);
+            delegate.update(robotPose, timestampSeconds);
+        }
+    }
+
+    /** Stamps the first non-empty frame list it sees, and every read of that same list, into the future. */
+    private static final class StampFirstFrame {
+        private final double futureSeconds;
+        private List<Measurement> stampedList;
+
+        private StampFirstFrame(double futureSeconds) {
+            this.futureSeconds = futureSeconds;
+        }
+
+        private boolean stamped() {
+            return stampedList != null;
+        }
+
+        private List<Measurement> apply(List<Measurement> frames) {
+            if (stampedList == null && !frames.isEmpty()) {
+                stampedList = frames;
+            }
+            if (frames != stampedList) {
+                return frames;
+            }
+            return frames.stream()
+                    .map(measurement -> measurement instanceof PoseMeasurementSample pose
+                            ? (Measurement) pose.timing(pose.timestampSeconds() + futureSeconds, pose.latencySeconds())
+                            : measurement)
+                    .toList();
         }
     }
 
