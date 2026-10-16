@@ -49,16 +49,21 @@ class RebuiltVisionLocalizationSimulationTest {
         double initialError = Math.hypot(
                 mechanism.estimatedFieldPose.pose().xMeters() - 2.0,
                 mechanism.estimatedFieldPose.pose().yMeters() - 4.0);
+        // Cameras deliver at their own frame rate (30 fps on a 50 Hz loop), so count frames over the run.
+        int filteredAccepted = 0;
+        int fusedAccepted = 0;
         for (int cycle = 1; cycle <= 12; cycle++) {
             simulation.step(0.02);
             runtime.robotPeriodic(cycle * 0.02, 0.02);
+            filteredAccepted += mechanism.filteredVision.acceptedMeasurements().size();
+            fusedAccepted += mechanism.fusedVision.acceptedMeasurements().size();
         }
         double correctedError = Math.hypot(
                 mechanism.estimatedFieldPose.pose().xMeters() - 2.0,
                 mechanism.estimatedFieldPose.pose().yMeters() - 4.0);
 
-        assertFalse(mechanism.filteredVision.acceptedMeasurements().isEmpty());
-        assertFalse(mechanism.fusedVision.acceptedMeasurements().isEmpty());
+        assertTrue(filteredAccepted > 0, "no frame passed the filters");
+        assertTrue(fusedAccepted > 0, "no frame reached the fused stage");
         assertTrue(correctedError < initialError,
                 () -> "Vision did not correct odometry: initial=" + initialError + ", corrected=" + correctedError);
     }
@@ -74,10 +79,12 @@ class RebuiltVisionLocalizationSimulationTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
         runtime.request(mechanism.drive);
 
+        int filteredAccepted = 0;
         for (int cycle = 1; cycle <= 50; cycle++) {
             double now = cycle * 0.02;
             runtime.teleopPeriodic(now, 0.02);
             runtime.simulationPeriodic(now, 0.02);
+            filteredAccepted += mechanism.filteredVision.acceptedMeasurements().size();
         }
 
         PoseSnapshot truth = simulation.pose();
@@ -89,7 +96,7 @@ class RebuiltVisionLocalizationSimulationTest {
                 () -> "Odometry diverged from simulation truth: truth=" + truth + ", odometry=" + odometry);
         assertTrue(Math.hypot(estimate.xMeters() - truth.xMeters(), estimate.yMeters() - truth.yMeters()) < 0.5,
                 () -> "Vision localization pinned or dragged the estimate: truth=" + truth + ", estimate=" + estimate);
-        assertFalse(mechanism.filteredVision.acceptedMeasurements().isEmpty());
+        assertTrue(filteredAccepted > 0, "no frame passed the filters");
     }
 
     @Test
