@@ -138,6 +138,26 @@ public final class PhotonVisionDevice implements CameraDevice, CameraClock {
     }
 
     /**
+     * Selects the pose solve used by the adapter bound from this declaration. Usually set through
+     * {@code pose().multiTagOnCoprocessor()} or {@code pose().lowestAmbiguity()}. Defaults to
+     * {@link PhotonVisionPoseStrategy#MULTI_TAG_ON_COPROCESSOR}.
+     *
+     * @param strategy pose strategy; null restores the default
+     */
+    public void configurePoseStrategy(PhotonVisionPoseStrategy strategy) {
+        state.poseStrategy = strategy == null ? PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR : strategy;
+    }
+
+    /**
+     * Returns the pose solve selected for this declaration.
+     *
+     * @return pose strategy; never null
+     */
+    public PhotonVisionPoseStrategy poseStrategy() {
+        return state.poseStrategy;
+    }
+
+    /**
      * Connects this declaration to the clock status of its bound adapter. Called by the adapter when it binds.
      *
      * @param status supplier of the latest clock status; null restores {@link CameraClockStatus#unknown()}
@@ -172,6 +192,7 @@ public final class PhotonVisionDevice implements CameraDevice, CameraClock {
     /** Runtime options shared by all copies of one declaration. */
     private static final class State {
         private volatile boolean singleTagUsesHeading;
+        private volatile PhotonVisionPoseStrategy poseStrategy = PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR;
         private volatile Supplier<CameraClockStatus> clockStatus = CameraClockStatus::unknown;
     }
 }

@@ -7,6 +7,7 @@ import java.util.Objects;
 
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.device.PhotonVisionPoseStrategy;
 
 /**
  * PhotonVision pose stream with source-specific strategy metadata.
@@ -30,20 +31,22 @@ public final class PhotonVisionPoseSignal implements PoseSignal {
     }
 
     /**
-     * Uses a coprocessor multi-tag solve when available.
+     * Uses a coprocessor multi-tag solve when available. Stored on the shared camera declaration.
      *
      * @return updated signal
      */
     public PhotonVisionPoseSignal multiTagOnCoprocessor() {
+        camera.configurePoseStrategy(PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR);
         return new PhotonVisionPoseSignal(camera, delegate, "multi-tag-coprocessor", singleTagUsesHeading);
     }
 
     /**
-     * Uses the lowest ambiguity pose.
+     * Uses the lowest ambiguity pose. Stored on the shared camera declaration.
      *
      * @return updated signal
      */
     public PhotonVisionPoseSignal lowestAmbiguity() {
+        camera.configurePoseStrategy(PhotonVisionPoseStrategy.LOWEST_AMBIGUITY);
         return new PhotonVisionPoseSignal(camera, delegate, "lowest-ambiguity", singleTagUsesHeading);
     }
 

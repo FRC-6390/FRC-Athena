@@ -274,6 +274,46 @@ class PhotonVisionCameraAdapterTest {
     }
 
     @Test
+    void poseStrategyOptionsReachTheAdapterThroughTheSharedDeclaration() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+
+        device.pose().lowestAmbiguity();
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+        // A copy of the declaration (as bind() produces) sees the same choice.
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.poseStrategyFor(device.mount(
+                        ca.frc6390.athena.vision.device.CameraMountPose.identity())));
+
+        device.pose().multiTagOnCoprocessor();
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(null));
+    }
+
+    @Test
+    void singleTagHeadingOnlyChangesMultiTagConfiguredFrames() {
+        PhotonVisionDevice multi = Cameras.photonVision("multi").pose().multiTagOnCoprocessor()
+                .singleTagUsesHeading().camera();
+        PhotonVisionDevice lowest = Cameras.photonVision("lowest").pose().lowestAmbiguity()
+                .singleTagUsesHeading().camera();
+
+        assertEquals(PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(multi), multi.singleTagHeadingEnabled(), 1));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(multi), multi.singleTagHeadingEnabled(), 2));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(lowest), lowest.singleTagHeadingEnabled(), 1));
+    }
+
+    @Test
     void singleTagFrameUsesTrigSolveAndMultiTagFrameKeepsCoprocessor() {
         assertEquals(
                 PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE,

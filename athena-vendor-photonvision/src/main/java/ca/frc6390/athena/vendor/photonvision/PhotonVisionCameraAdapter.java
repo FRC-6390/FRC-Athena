@@ -20,6 +20,7 @@ import ca.frc6390.athena.vision.device.CameraClockStatus;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.device.PhotonVisionPoseStrategy;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
@@ -794,10 +795,23 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 transform(CameraMountPose.identity()));
         return new PhotonPoseEstimatorClient(
                 estimator,
-                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                poseStrategyFor(device),
                 device::mountPose,
                 null,
                 device::singleTagHeadingEnabled);
+    }
+
+    /**
+     * Maps the pose solve selected on a declaration to the PhotonLib strategy. Defaults to
+     * coprocessor multi-tag when nothing was selected.
+     *
+     * @param device camera declaration
+     * @return PhotonLib pose strategy
+     */
+    static PhotonPoseEstimator.PoseStrategy poseStrategyFor(PhotonVisionDevice device) {
+        return device != null && device.poseStrategy() == PhotonVisionPoseStrategy.LOWEST_AMBIGUITY
+                ? PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY
+                : PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR;
     }
 
     private static Transform3d transform(CameraMountPose mount) {
