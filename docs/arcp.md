@@ -91,6 +91,24 @@ cycled and reported the motor. The bridge checks once per second; when a motor i
 `publishDictionary` again. The server pushes the new schema to every session. Existing signal ids never change, and
 entries are only added, so a client keeps its subscriptions and can look up the new paths when the schema arrives.
 
+#### Vision channels
+
+| Path | Role | Unit | Meaning |
+| --- | --- | --- | --- |
+| `athena/vision/<camera>/State` | system | none | `OK`, `REJECTED`, `RECOVERING`, `UNSYNCED`, `STALE` or `NO_TARGETS`. |
+| `athena/vision/<camera>/Reason` | system | none | Short text naming the rejection, for example `ambiguity 0.31 > 0.20`. Empty when OK. |
+| `athena/vision/<camera>/AcceptedPerSecond` | system | `Hz` | Frames accepted in the last second. |
+| `athena/vision/<camera>/RejectedPerSecond` | system | `Hz` | Frames rejected in the last second, by any stage. |
+| `athena/vision/<camera>/FrameAgeMs` | system | `ms` | Robot time minus the capture time of the newest frame. |
+| `athena/vision/<camera>/TagCount` | system | none | Tags in the newest frame (i64). |
+| `athena/vision/<camera>/SecondsSinceAccepted` | system | `s` | Seconds since the last accepted frame. |
+
+`<camera>` is the camera's device name. The paths appear the first time a Kalman localization judges a frame from that
+camera, and they are added by the same growth step as the power channels. The values come from every Kalman
+localization in the process, refreshed each robot cycle. When two localizations report one camera name, one of the two
+is shown. NetworkTables publishes the same paths under `athena/vision/...` for localizations that call
+`publishNetworkTables()`. A `TimeSync` flag is planned and is not published yet.
+
 ### Realtime values
 
 Each robot cycle the bridge samples the values and publishes only those that changed (`ArcpCycle`, one JNI call).
