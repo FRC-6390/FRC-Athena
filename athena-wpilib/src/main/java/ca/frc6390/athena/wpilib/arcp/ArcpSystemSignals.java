@@ -3,6 +3,8 @@ package ca.frc6390.athena.wpilib.arcp;
 import ca.frc6390.athena.arcp.ArcpCycle;
 import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
+import ca.frc6390.athena.localization.pipeline.VisionSourceStatus;
+import ca.frc6390.athena.localization.pipeline.VisionStatusRegistry;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
 import java.util.ArrayList;
@@ -27,11 +29,17 @@ import java.util.function.Supplier;
  *   <li>{@code athena/power/bus/shedding}: bool, true while the power budget sheds current.</li>
  *   <li>{@code athena/power/<motor>/current}: f64, amps: the motor's estimated current draw;</li>
  *   <li>{@code athena/power/<motor>/capAmps}: f64, amps: the planner's cap on the motor, 0 when it is not capped.</li>
+ *   <li>{@code athena/vision/<camera>/State}: string, OK, REJECTED, RECOVERING, UNSYNCED, STALE or NO_TARGETS;</li>
+ *   <li>{@code athena/vision/<camera>/Reason}: string, short text naming the rejection, empty when OK;</li>
+ *   <li>{@code athena/vision/<camera>/AcceptedPerSecond}, {@code RejectedPerSecond}: f64, frames per second;</li>
+ *   <li>{@code athena/vision/<camera>/FrameAgeMs}: f64, milliseconds since the newest frame was captured;</li>
+ *   <li>{@code athena/vision/<camera>/TagCount}: i64, tags in the newest frame;</li>
+ *   <li>{@code athena/vision/<camera>/SecondsSinceAccepted}: f64, seconds since the last accepted frame.</li>
  * </ul>
  *
  * <p>The per-motor paths exist only once the power pass has reported the motor, which happens after its first cycle.
- * {@link #discoverMotors()} adds them and the dictionary grows; existing ids never change. Entries are only ever
- * added.</p>
+ * The per-camera vision paths exist once a Kalman localization has judged a frame from that camera. Both are added by
+ * {@link #discoverMotors()} and {@link #discoverVision()}; existing ids never change. Entries are only ever added.</p>
  *
  * <p>Numbers that are not finite are not published; clients keep the last value they received. Sampling runs on
  * the robot thread and publishes only the values that changed.</p>
@@ -46,6 +54,7 @@ final class ArcpSystemSignals {
     static final String BUS_SHEDDING = "athena/power/bus/shedding";
 
     private static final int TYPE_BOOL = 1;
+    private static final int TYPE_I64 = 2;
     private static final int TYPE_F64 = 3;
     private static final int TYPE_STRING = 4;
 
@@ -65,6 +74,11 @@ final class ArcpSystemSignals {
 
         /** The power pass's per-motor state. Empty until the power pass has cycled. */
         default List<PowerSnapshot.Motor> motors() {
+            return List.of();
+        }
+
+        /** The vision sources' statuses from the Kalman localizations. Empty until one has refreshed. */
+        default List<VisionSourceStatus> visionSources() {
             return List.of();
         }
 
@@ -117,6 +131,11 @@ final class ArcpSystemSignals {
                 public List<PowerSnapshot.Motor> motors() {
                     return power.get().motors();
                 }
+
+                @Override
+                public List<VisionSourceStatus> visionSources() {
+                    return VisionStatusRegistry.latest();
+                }
             };
         }
     }
@@ -134,7 +153,38 @@ final class ArcpSystemSignals {
         }
     }
 
+    /** One camera's published channels and the last values sent for them. */
+    private static final class VisionChannel {
+        final long stateId;
+        final long reasonId;
+        final long acceptedId;
+        final long rejectedId;
+        final long frameAgeId;
+        final long tagCountId;
+        final long secondsId;
+        String lastState;
+        String lastReason;
+        double lastAccepted = Double.NaN;
+        double lastRejected = Double.NaN;
+        double lastFrameAgeMs = Double.NaN;
+        Long lastTagCount;
+        double lastSeconds = Double.NaN;
+
+        VisionChannel(long firstId) {
+            stateId = firstId;
+            reasonId = firstId + 1;
+            acceptedId = firstId + 2;
+            rejectedId = firstId + 3;
+            frameAgeId = firstId + 4;
+            tagCountId = firstId + 5;
+            secondsId = firstId + 6;
+        }
+    }
+
+    private static final int VISION_SIGNALS_PER_CAMERA = 7;
     private static final String POWER_PREFIX = "athena/power/";
+    private static final String VISION_PREFIX = "athena/vision/";
+    private final Map<String, VisionChannel> vision = new HashMap<>();
 
     private final Source source;
     private final List<ArcpDictEntry> dictionary;
@@ -181,6 +231,35 @@ final class ArcpSystemSignals {
 
     private static ArcpDictEntry entry(long id, String path, int typeTag, String unit) {
         return new ArcpDictEntry(id, path, typeTag, unit, ArcpDictEntry.ROLE_SYSTEM, 0, "", 0);
+    }
+
+    /**
+     * Adds the seven signals of every camera the Kalman localizations report that is not known yet. Returns true when
+     * the dictionary grew. Reads the vision statuses, so call it at the export cadence, not every cycle.
+     *
+     * @return true when entries were added
+     */
+    boolean discoverVision() {
+        boolean grew = false;
+        for (VisionSourceStatus status : source.visionSources()) {
+            if (vision.containsKey(status.name())) {
+                continue;
+            }
+            VisionChannel channel = new VisionChannel(nextId);
+            nextId += VISION_SIGNALS_PER_CAMERA;
+            vision.put(status.name(), channel);
+            String prefix = VISION_PREFIX + status.name() + "/";
+            dictionary.add(entry(channel.stateId, prefix + "State", TYPE_STRING, ""));
+            dictionary.add(entry(channel.reasonId, prefix + "Reason", TYPE_STRING, ""));
+            dictionary.add(entry(channel.acceptedId, prefix + "AcceptedPerSecond", TYPE_F64, "Hz"));
+            dictionary.add(entry(channel.rejectedId, prefix + "RejectedPerSecond", TYPE_F64, "Hz"));
+            dictionary.add(entry(channel.frameAgeId, prefix + "FrameAgeMs", TYPE_F64, "ms"));
+            dictionary.add(entry(channel.tagCountId, prefix + "TagCount", TYPE_I64, ""));
+            dictionary.add(entry(channel.secondsId, prefix + "SecondsSinceAccepted", TYPE_F64, "s"));
+            // TODO: TimeSync (bool, camera clock synced to robot time) goes here once the status exists.
+            grew = true;
+        }
+        return grew;
     }
 
     /** The dictionary entries, in signal id order. */
@@ -252,6 +331,9 @@ final class ArcpSystemSignals {
             cycle.setBoolean(sheddingId, shedding);
             lastShedding = shedding;
         }
+        if (!vision.isEmpty()) {
+            sampleVision(cycle);
+        }
         if (!motors.isEmpty()) {
             for (PowerSnapshot.Motor motor : source.motors()) {
                 MotorChannel channel = motors.get(motor.name());
@@ -271,6 +353,44 @@ final class ArcpSystemSignals {
                 }
             }
         }
+    }
+
+    private void sampleVision(ArcpCycle cycle) {
+        for (VisionSourceStatus status : source.visionSources()) {
+            VisionChannel channel = vision.get(status.name());
+            if (channel == null) {
+                continue;
+            }
+            String state = status.state().name();
+            if (!state.equals(channel.lastState)) {
+                cycle.set(channel.stateId, state);
+                channel.lastState = state;
+            }
+            String reason = text(status.reason());
+            if (!reason.equals(channel.lastReason)) {
+                cycle.set(channel.reasonId, reason);
+                channel.lastReason = reason;
+            }
+            channel.lastAccepted = publishIfChanged(cycle, channel.acceptedId, status.acceptedPerSecond(), channel.lastAccepted);
+            channel.lastRejected = publishIfChanged(cycle, channel.rejectedId, status.rejectedPerSecond(), channel.lastRejected);
+            channel.lastFrameAgeMs = publishIfChanged(cycle, channel.frameAgeId,
+                    status.frameAgeSeconds() * 1000.0, channel.lastFrameAgeMs);
+            if (channel.lastTagCount == null || channel.lastTagCount != status.tagCount()) {
+                cycle.setLong(channel.tagCountId, status.tagCount());
+                channel.lastTagCount = (long) status.tagCount();
+            }
+            channel.lastSeconds = publishIfChanged(cycle, channel.secondsId, status.secondsSinceAccepted(),
+                    channel.lastSeconds);
+        }
+    }
+
+    /** Writes a finite value that changed; returns the value to remember. Non-finite values are not sent. */
+    private static double publishIfChanged(ArcpCycle cycle, long signalId, double value, double last) {
+        if (!Double.isFinite(value) || value == last) {
+            return last;
+        }
+        cycle.setNumber(signalId, value);
+        return value;
     }
 
     private static String text(String value) {

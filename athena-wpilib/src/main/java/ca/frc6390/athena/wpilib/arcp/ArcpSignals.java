@@ -27,7 +27,8 @@ import java.util.function.Predicate;
  *   <li>every {@link TelemetryAction} under its path, carrying its running state, role 5;</li>
  *   <li>one lock-state boolean per lock group in use, at {@code athena/locks/<group class name>}, role 7;</li>
  *   <li>the robot-level system signals of {@link ArcpSystemSignals}, role 8, including the per-motor power
- *       channels that appear once the power pass has reported the motor (see {@link #discoverPowerMotors()}).</li>
+ *       channels that appear once the power pass has reported the motor, and the per-camera vision channels that appear
+ *       once a Kalman localization has judged a frame from the camera (see {@link #discoverDynamicSignals()}).</li>
  * </ul>
  *
  * <p>Units: a control's {@code State/Output} is volts, {@code TemperatureCelsius} is degrees Celsius,
@@ -121,7 +122,7 @@ final class ArcpSignals {
     }
 
     /**
-     * The dictionary entries, in signal id order. The list grows when {@link #discoverPowerMotors()} returns true;
+     * The dictionary entries, in signal id order. The list grows when {@link #discoverDynamicSignals()} returns true;
      * the caller then publishes it again.
      */
     List<ArcpDictEntry> dictionary() {
@@ -132,13 +133,15 @@ final class ArcpSignals {
     }
 
     /**
-     * Adds the per-motor power channels for motors the power pass has reported since the last call. Returns true when
-     * the dictionary grew. Call at the export cadence, not every cycle.
+     * Adds the per-motor power channels and the per-camera vision channels that appeared since the last call. Returns
+     * true when the dictionary grew. Call at the export cadence, not every cycle.
      *
      * @return true when the dictionary grew
      */
-    boolean discoverPowerMotors() {
-        return system.discoverMotors();
+    boolean discoverDynamicSignals() {
+        boolean motors = system.discoverMotors();
+        boolean vision = system.discoverVision();
+        return motors || vision;
     }
 
     /** Number of published values (not counting actions and lock signals). */

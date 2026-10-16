@@ -281,12 +281,12 @@ public final class ArcpBridge implements AutoCloseable {
     }
 
     /**
-     * Adds the power channels of motors the power pass has reported since the last check, and republishes the
-     * dictionary when that grew it. Existing signal ids are unchanged, so clients keep their subscriptions.
+     * Adds the power channels of motors and the vision channels of cameras that appeared since the last check, and
+     * republishes the dictionary when that grew it. Existing signal ids are unchanged, so clients keep their subscriptions.
      */
     private void publishGrownDictionary() {
         try {
-            if (signals.discoverPowerMotors()) {
+            if (signals.discoverDynamicSignals()) {
                 server.publishDictionary(signals.dictionary(), List.of());
             }
         } catch (RuntimeException failure) {
