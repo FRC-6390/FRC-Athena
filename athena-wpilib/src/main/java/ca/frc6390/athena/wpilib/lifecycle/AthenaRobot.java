@@ -15,6 +15,7 @@ import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.arcp.ArcpBridge;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
+import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 import ca.frc6390.athena.mechanism.persist.Locks;
 import ca.frc6390.athena.mechanism.persist.PersistentStore;
 import ca.frc6390.athena.mechanism.persist.TuningLocks;
@@ -61,6 +62,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
     private SystemTuning systemTuning = SystemTuning.automatic();
+    private VisionSimulationField simulationVisionField = VisionSimulationField.EMPTY;
     private int reportedSystemFailures;
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
     private boolean reportedJvmConfiguration;
@@ -130,6 +132,17 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemTuning = Objects.requireNonNull(tuning, "tuning");
     }
 
+    /**
+     * Selects the AprilTag layout that simulated cameras see (simulation only). Without it, simulated cameras see a
+     * single default tag. Safe to call from the robot constructor.
+     */
+    public final void simulationVisionField(VisionSimulationField field) {
+        if (runtime != null) {
+            throw new IllegalStateException("The simulation vision field must be selected before robotInit.");
+        }
+        simulationVisionField = Objects.requireNonNull(field, "field");
+    }
+
     /** Returns the latest JVM and roboRIO system-health snapshot. */
     public final SystemStatus systemStatus() {
         if (systemRuntime == null) {
@@ -146,7 +159,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     public final void robotInit() {
         lastTimestampSeconds = timestampSeconds();
         lastSimulationTimestampSeconds = lastTimestampSeconds;
-        runtime = createRuntime(RobotBase.isSimulation(), digitalInputs);
+        runtime = createRuntime(RobotBase.isSimulation(), digitalInputs, simulationVisionField);
         runtime.powerBusVoltage(edu.wpi.first.wpilibj.RobotController::getBatteryVoltage);
         runtime.failureReporter(new ca.frc6390.athena.robot.RuntimeFailureReporter() {
             @Override public void error(String message, Throwable cause) {
@@ -400,7 +413,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     static RobotRuntime createRuntime(boolean simulation) {
-        return createRuntime(simulation, new ConcurrentHashMap<>());
+        return createRuntime(simulation, new ConcurrentHashMap<>(), VisionSimulationField.EMPTY);
     }
 
     private PersistentStore openPersistentStore() {
@@ -418,9 +431,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         }
     }
 
-    private static RobotRuntime createRuntime(boolean simulation, Map<Integer, DigitalInput> inputs) {
+    static RobotRuntime createRuntime(
+            boolean simulation,
+            Map<Integer, DigitalInput> inputs,
+            VisionSimulationField visionField) {
         RobotRuntime runtime = simulation
-                ? RobotRuntime.simulated(SimulationSession.create().physicsEngine(new WpilibSimPhysicsEngine()))
+                ? RobotRuntime.simulated(SimulationSession.create()
+                        .physicsEngine(new WpilibSimPhysicsEngine())
+                        .visionField(visionField))
                 : RobotRuntime.create();
         return runtime.digitalInputs(device -> {
             DigitalInput input = inputs.computeIfAbsent(device.channel(), DigitalInput::new);
