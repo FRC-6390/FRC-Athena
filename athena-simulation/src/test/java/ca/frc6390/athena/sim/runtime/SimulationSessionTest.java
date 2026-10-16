@@ -310,7 +310,16 @@ class SimulationSessionTest {
 
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
         assertTrue(session.encoder(encoder).velocityRotationsPerSecond() > 0.0);
-        session.withDigitalInputs(() -> assertTrue(limit.active()));
+        // The X60 with the default 0.01 kg m^2 spins up over about a second, so the 12 rotation limit is
+        // reached after a few hundred milliseconds of full output rather than within the first 0.2 s.
+        boolean[] active = {false};
+        for (int step = 0; step < 500 && !active[0]; step++) {
+            session.step(0.02);
+            session.withDigitalInputs(() -> active[0] = limit.active());
+        }
+        assertTrue(active[0], () -> "limit should activate near 12 rotations, reached "
+                + session.encoder(encoder).positionRotations());
+        assertTrue(session.encoder(encoder).positionRotations() > 11.0);
     }
 
     @Test
@@ -327,12 +336,17 @@ class SimulationSessionTest {
         graph.motor(motor).setPercentOutput(1.0);
         session.step(0.06);
 
-        assertEquals(0.9, session.encoder(mechanismEncoder).positionRotations(), 1.0e-9);
-        assertEquals(15.0, session.encoder(mechanismEncoder).velocityRotationsPerSecond(), 1.0e-9);
-        assertEquals(1.8, session.motor(motor).integratedPositionRotations(), 1.0e-9);
-        assertEquals(30.0, session.motor(motor).integratedVelocityRotationsPerSecond(), 1.0e-9);
-        assertEquals(1.8, graph.encoder(motor.encoder()).positionRotations(), 1.0e-9);
-        assertEquals(30.0, graph.encoder(motor.encoder()).velocityRotationsPerSecond(), 1.0e-9);
+        // The motor turns twice per mechanism turn: the mechanism encoder reads mechanism rotations and the
+        // integrated motor encoder reads motor rotations, whatever the (physical) spin-up speed is.
+        double mechanism = session.encoder(mechanismEncoder).positionRotations();
+        double mechanismVelocity = session.encoder(mechanismEncoder).velocityRotationsPerSecond();
+        assertTrue(mechanism > 0.0 && mechanismVelocity > 0.0);
+        assertEquals(2.0 * mechanism, session.motor(motor).integratedPositionRotations(), 1.0e-9);
+        assertEquals(2.0 * mechanismVelocity, session.motor(motor).integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(session.motor(motor).integratedPositionRotations(),
+                graph.encoder(motor.encoder()).positionRotations(), 1.0e-9);
+        assertEquals(session.motor(motor).integratedVelocityRotationsPerSecond(),
+                graph.encoder(motor.encoder()).velocityRotationsPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -376,28 +390,31 @@ class SimulationSessionTest {
 
     @Test
     void brakedMotorReleasedAtSpeedStopsWhileCoastingMotorKeepsRolling() {
+        // A 100:1 turret axis with 0.5 kg m^2 of inertia: shorted windings brake it within a couple of degrees.
         double brakedTravel = releasedTravelRotations(MotorDevice.of(MotorKinds.KRAKEN_X44, 50).brake());
         double coastTravel = releasedTravelRotations(MotorDevice.of(MotorKinds.KRAKEN_X44, 51).coast());
 
         assertTrue(brakedTravel < 0.01,
-                () -> "braked motor should stop within about 3.6 degrees at 180 deg/s, travelled "
+                () -> "braked axis should stop within about 3.6 degrees at 180 deg/s, travelled "
                         + brakedTravel * 360.0 + " degrees");
         assertTrue(coastTravel > 3.0 * brakedTravel,
-                () -> "coasting motor should roll much further: braked=" + brakedTravel
+                () -> "coasting axis should roll much further: braked=" + brakedTravel
                         + " coast=" + coastTravel);
     }
 
-    /** Releases a motor at 180 deg/s with no output and returns the rotations it travels afterwards. */
+    /** Releases a 100:1, 0.5 kg m^2 axis at 180 deg/s with no output and returns the rotations it travels. */
     private static double releasedTravelRotations(MotorDevice motor) {
         EncoderDevice encoder = motor.encoder();
-        SimulationSession session = SimulationSession.create().model("axis", SimModel.motor(motor));
-        session.encoder(encoder).positionRotations(0.0).velocityRotationsPerSecond(0.5);
+        SimulationSession session = SimulationSession.create().model("axis", SimModel.motor(motor)
+                .gearRatio(GearRatio.reduction(100.0, 1.0))
+                .momentOfInertia(0.5));
+        session.encoder(encoder).positionRotations(0.0).velocityRotationsPerSecond(0.5 * 100.0);
         session.motor(motor).stop();
 
         for (int cycle = 0; cycle < 150; cycle++) {
             session.step(0.02);
         }
-        return session.encoder(encoder).positionRotations();
+        return session.encoder(encoder).positionRotations() / 100.0;
     }
 
     @Test
