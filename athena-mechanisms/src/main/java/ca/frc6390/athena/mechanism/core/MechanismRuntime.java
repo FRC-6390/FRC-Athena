@@ -25,6 +25,8 @@ import ca.frc6390.athena.api.FailurePolicy;
  */
 final class MechanismRuntime {
     private static final String MARKER_PREFIX = "pathMarker:";
+    /** Absorbs tick-time rounding so a settle time of N control periods completes on the Nth cycle. */
+    private static final double SETTLE_EPSILON_SECONDS = 1.0e-9;
     private final Mechanism mechanism;
     private final MechanismNode node;
     private final ActionContext actionContext;
@@ -1513,8 +1515,18 @@ final class MechanismRuntime {
             }
             if (action instanceof Actions.WithinTolerance within) {
                 Evaluation child = evaluate(schedule.named("withinTolerance", within.action()), context);
-                boolean complete = child.complete()
-                        || isWithinTolerance(child.output(), within.tolerance(), local);
+                boolean inside = isWithinTolerance(child.output(), within.tolerance(), within.maxVelocity(), local);
+                // The settle timer starts on the first in-window cycle and restarts whenever the
+                // measurement leaves the window. With no settle time it is satisfied immediately.
+                if (!inside) {
+                    node.withinSinceSeconds = Double.NaN;
+                } else if (Double.isNaN(node.withinSinceSeconds)) {
+                    node.withinSinceSeconds = context.nowSeconds();
+                }
+                boolean settled = inside
+                        && context.nowSeconds() - node.withinSinceSeconds + SETTLE_EPSILON_SECONDS
+                                >= within.settleSeconds();
+                boolean complete = child.complete() || settled;
                 return schedule.result(child.output(), complete, child.context());
             }
             if (action instanceof Actions.Conditional conditional) {
@@ -1820,7 +1832,8 @@ final class MechanismRuntime {
             return child;
         }
 
-        private boolean isWithinTolerance(Action output, double tolerance, MechanismContext context) {
+        private boolean isWithinTolerance(
+                Action output, double tolerance, double maxVelocity, MechanismContext context) {
             ControlTarget target = controlTarget(output);
             if (target == null || !Double.isFinite(target.value())) {
                 return false;
@@ -1842,7 +1855,14 @@ final class MechanismRuntime {
                 double span = control.continuousRange().maximum() - control.continuousRange().minimum();
                 error = Math.IEEEremainder(error, span);
             }
-            return Math.abs(error) <= tolerance;
+            if (Math.abs(error) > tolerance) {
+                return false;
+            }
+            if (Double.isFinite(maxVelocity)) {
+                double velocity = RuntimeHardwareAccess.call(actionContext, () -> feedbackVelocity(control));
+                return Math.abs(velocity) <= maxVelocity;
+            }
+            return true;
         }
 
         /**
@@ -2003,6 +2023,7 @@ final class MechanismRuntime {
             private MechanismContext lastPathContext;
             private boolean pathComplete;
             private boolean terminal;
+            private double withinSinceSeconds = Double.NaN;
             private boolean[] latchedComplete;
             private final List<Action> groupOutputs = new ArrayList<>();
             private final ScheduledOutputs scheduledOutputs = new ScheduledOutputs(groupOutputs);

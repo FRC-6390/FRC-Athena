@@ -85,6 +85,61 @@ public interface Action extends DeviceAction {
         return Actions.untilWithin(this, tolerance);
     }
 
+    /**
+     * Requires the measurement of an {@link #untilWithin(double) untilWithin} action to stay inside its
+     * window continuously for {@code seconds} before it completes. The timer restarts whenever the
+     * measurement leaves the window. Use this to stop a mechanism that swings through the target at speed
+     * from completing on the first in-window cycle and coasting past it.
+     *
+     * @param seconds required continuous time inside the window (finite, non-negative)
+     * @return settled tolerance action
+     * @throws IllegalArgumentException when this action is not an {@code untilWithin} action
+     */
+    default Action settled(double seconds) {
+        return Actions.settled(this, seconds);
+    }
+
+    /** Typed form of {@link #settled(double)}. */
+    default Action settled(java.time.Duration duration) {
+        Objects.requireNonNull(duration, "duration");
+        return Actions.settled(this, duration.toNanos() / 1.0e9);
+    }
+
+    /**
+     * Requires the measured velocity of an {@link #untilWithin(double) untilWithin} position action to be
+     * at most {@code maxVelocity} in magnitude (control units per second) for it to complete. Velocity
+     * controls are rejected: their target is already a velocity.
+     *
+     * @param maxVelocity maximum absolute measured velocity, non-negative
+     * @return velocity-limited tolerance action
+     * @throws IllegalArgumentException when this action is not a position {@code untilWithin} action
+     */
+    default Action maxVelocity(double maxVelocity) {
+        return Actions.maxVelocity(this, maxVelocity);
+    }
+
+    /** Typed form of {@link #maxVelocity(double)}: a rate of the control binding's unit per second. */
+    default Action maxVelocity(Measure<?> maxVelocity) {
+        return Actions.maxVelocity(this, maxVelocity);
+    }
+
+    /**
+     * Convenience for {@code untilWithin(tolerance).settled(seconds)}: completes once the position or
+     * velocity error stays within {@code tolerance} continuously for {@code seconds}.
+     *
+     * @param tolerance maximum absolute target error in the control's configured units
+     * @param seconds required continuous time inside the window
+     * @return settled tolerance action
+     */
+    default Action untilSettled(double tolerance, double seconds) {
+        return untilWithin(tolerance).settled(seconds);
+    }
+
+    /** Typed form of {@link #untilSettled(double, double)}. */
+    default Action untilSettled(Measure<?> tolerance, java.time.Duration settle) {
+        return untilWithin(tolerance).settled(settle);
+    }
+
     default Action then(Action next) {
         return new Then(this, next);
     }

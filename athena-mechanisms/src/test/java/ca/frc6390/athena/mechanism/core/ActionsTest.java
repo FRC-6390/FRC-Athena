@@ -1,11 +1,14 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import edu.wpi.first.units.Units;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -98,6 +101,56 @@ class ActionsTest {
         assertThrows(IllegalArgumentException.class, () -> openLoop.untilWithin(0.1));
         assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(-0.1));
         assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(Double.NaN));
+    }
+
+    @Test
+    void settleAndVelocityOptionsRequireUntilWithinAndValidValues() {
+        ControlBinding<?> position = Controls.position(MOTOR);
+        Action target = position.position(1.0);
+
+        assertThrows(IllegalArgumentException.class, () -> target.settled(0.1));
+        assertThrows(IllegalArgumentException.class, () -> target.maxVelocity(5.0));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(-0.1));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(-1.0));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(Double.NaN));
+    }
+
+    @Test
+    void velocityControlsRejectMaxVelocityButAcceptSettle() {
+        ControlBinding<?> velocity = Controls.velocity(MOTOR);
+        Action target = velocity.velocity(3.0);
+
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.5).maxVelocity(1.0));
+        assertEquals(0.1, assertInstanceOf(Actions.WithinTolerance.class,
+                target.untilWithin(0.5).settled(0.1)).settleSeconds(), 1.0e-9);
+    }
+
+    @Test
+    void settledOptionsPreserveToleranceAndDefaultsStayLegacy() {
+        ControlBinding<?> position = Controls.position(MOTOR);
+        Action target = position.position(1.0);
+
+        Actions.WithinTolerance legacy = assertInstanceOf(Actions.WithinTolerance.class, target.untilWithin(0.5));
+        assertEquals(0.0, legacy.settleSeconds(), 1.0e-9);
+        assertTrue(Double.isInfinite(legacy.maxVelocity()));
+
+        Actions.WithinTolerance settled = assertInstanceOf(Actions.WithinTolerance.class,
+                target.untilWithin(0.5).maxVelocity(2.0).settled(java.time.Duration.ofMillis(250)));
+        assertEquals(0.5, settled.tolerance(), 1.0e-9);
+        assertEquals(0.25, settled.settleSeconds(), 1.0e-9);
+        assertEquals(2.0, settled.maxVelocity(), 1.0e-9);
+    }
+
+    @Test
+    void typedMaxVelocityConvertsRateToControlUnitsPerSecond() {
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
+        Actions.WithinTolerance typed = assertInstanceOf(Actions.WithinTolerance.class,
+                position.position(Units.Rotations.of(0.5))
+                        .untilWithin(Units.Rotations.of(0.01))
+                        .maxVelocity(Units.RPM.of(60.0)));
+
+        assertEquals(1.0, typed.maxVelocity(), 1.0e-9);
     }
 
     private record TestMechanism(Action initial) implements Mechanism {

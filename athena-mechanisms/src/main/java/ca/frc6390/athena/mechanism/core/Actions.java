@@ -269,6 +269,45 @@ public final class Actions {
         return new WithinTolerance(action, control.modeValue(tolerance));
     }
 
+    /**
+     * Requires the measurement to stay inside the tolerance window for {@code seconds} continuously.
+     * The timer restarts whenever the measurement leaves the window.
+     */
+    public static Action settled(Action action, double seconds) {
+        WithinTolerance within = requireWithin(action, "settled");
+        return new WithinTolerance(within.action(), within.tolerance(), seconds, within.maxVelocity());
+    }
+
+    /** Limits the measured velocity (control units per second) while inside the tolerance window. */
+    public static Action maxVelocity(Action action, double maxVelocity) {
+        WithinTolerance within = requireWithin(action, "maxVelocity");
+        return new WithinTolerance(within.action(), within.tolerance(), within.settleSeconds(), maxVelocity);
+    }
+
+    /** Typed velocity limit: a rate of the control binding's unit per second. */
+    public static Action maxVelocity(Action action, Measure<?> maxVelocity) {
+        Objects.requireNonNull(maxVelocity, "maxVelocity");
+        WithinTolerance within = requireWithin(action, "maxVelocity");
+        double limit = toleranceControl(within.action()).rateValue(maxVelocity);
+        return new WithinTolerance(within.action(), within.tolerance(), within.settleSeconds(), limit);
+    }
+
+    private static WithinTolerance requireWithin(Action action, String method) {
+        Objects.requireNonNull(action, "action");
+        if (action instanceof WithinTolerance within) {
+            return within;
+        }
+        throw new IllegalArgumentException(method + " applies to untilWithin(...); call untilWithin first.");
+    }
+
+    private static boolean isVelocityControl(Action action) {
+        if (action instanceof ControlVelocity || action instanceof DynamicControlVelocity) {
+            return true;
+        }
+        return action instanceof InterpolatedControlAction interpolated
+                && interpolated.control().mode() == ControlMode.VELOCITY;
+    }
+
     private static ControlBinding<?> toleranceControl(Action action) {
         if (action instanceof ControlPosition position) {
             return position.control();
@@ -965,7 +1004,23 @@ public final class Actions {
         }
     }
 
-    public record WithinTolerance(Action action, double tolerance) implements Action {
+    /**
+     * A control action that completes once its measured feedback is inside {@code tolerance} of the
+     * target, held there for {@code settleSeconds} and, when {@code maxVelocity} is finite, moving no
+     * faster than {@code maxVelocity}. The defaults ({@code settleSeconds == 0}, no velocity limit) keep
+     * the original {@code untilWithin(tolerance)} behaviour, which completes on the first in-window cycle.
+     *
+     * @param action control action being measured
+     * @param tolerance maximum absolute target error in the control's units
+     * @param settleSeconds continuous time the measurement must stay inside the window before completing
+     * @param maxVelocity maximum absolute measured velocity (control units per second); infinity for none
+     */
+    public record WithinTolerance(Action action, double tolerance, double settleSeconds, double maxVelocity)
+            implements Action {
+        public WithinTolerance(Action action, double tolerance) {
+            this(action, tolerance, 0.0, Double.POSITIVE_INFINITY);
+        }
+
         public WithinTolerance {
             Objects.requireNonNull(action, "action");
             if (!supportsTolerance(action)) {
@@ -974,6 +1029,16 @@ public final class Actions {
             }
             if (!Double.isFinite(tolerance) || tolerance < 0.0) {
                 throw new IllegalArgumentException("Control tolerance must be finite and non-negative.");
+            }
+            if (!Double.isFinite(settleSeconds) || settleSeconds < 0.0) {
+                throw new IllegalArgumentException("Settle time must be finite and non-negative.");
+            }
+            if (Double.isNaN(maxVelocity) || maxVelocity < 0.0) {
+                throw new IllegalArgumentException("Maximum velocity must be non-negative.");
+            }
+            if (Double.isFinite(maxVelocity) && isVelocityControl(action)) {
+                throw new IllegalArgumentException(
+                        "maxVelocity applies to position controls only; a velocity control already targets a velocity.");
             }
         }
     }
