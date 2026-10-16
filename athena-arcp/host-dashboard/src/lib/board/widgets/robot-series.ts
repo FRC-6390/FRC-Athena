@@ -214,17 +214,3 @@ export function rollingStats(
   }
   return { count, min, max, mean, std: Math.sqrt(Math.max(0, m2 / count)), rateHz, histogram };
 }
-
-/** About `count` evenly spaced round values (1, 2, 2.5, 5 × 10^n) covering `domain`, for axis labels. */
-export function niceTicks(domain: Domain, count = 4): number[] {
-  const span = domain.max - domain.min;
-  if (!(span > 0) || !Number.isFinite(span)) return [];
-  const raw = span / Math.max(1, count);
-  const magnitude = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? raw;
-  const ticks: number[] = [];
-  for (let v = Math.ceil(domain.min / step) * step; v <= domain.max + step * 1e-9; v += step) {
-    ticks.push(Math.abs(v) < step * 1e-9 ? 0 : Number(v.toPrecision(12)));
-  }
-  return ticks;
-}

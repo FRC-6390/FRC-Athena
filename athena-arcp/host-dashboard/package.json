@@ -37,7 +37,8 @@
     "@fortawesome/svelte-fontawesome": "^0.2.4",
     "@tauri-apps/api": "2.10.1",
     "gridstack": "12.3.3",
-    "three": "^0.183.1"
+    "three": "^0.183.1",
+    "uplot": "1.6.32"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.0.0",

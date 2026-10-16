@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Session } from '../../lib/data/session';
   import type { ControlSection } from '../../lib/mechanisms/model';
-  import Plot from '../../ui/Plot.svelte';
+  import TimeChart from '../../ui/TimeChart.svelte';
+  import type { ChartSeries } from '../../lib/chart/time-chart';
   import ValueRow from '../../ui/ValueRow.svelte';
 
   type Props = {
@@ -12,6 +13,23 @@
 
   let { section, session, live }: Props = $props();
   let showOther = $state(false);
+
+  const PLOT_COLORS: Record<string, string> = {
+    target: 'var(--series-target)',
+    reference: 'var(--series-reference)',
+    measured: 'var(--series-measured)'
+  };
+  const PLOT_FALLBACK = ['var(--series-4)', 'var(--series-5)', 'var(--text)'];
+
+  const plotLines = $derived.by((): ChartSeries[] => {
+    void live.current;
+    return section.plot.map((signal, i) => ({
+      id: String(signal.signalId),
+      label: signal.name,
+      color: PLOT_COLORS[signal.name] ?? PLOT_FALLBACK[i % PLOT_FALLBACK.length],
+      samples: session.store.samples(signal.signalId)
+    }));
+  });
 
   const constraintLabel = (name: string) =>
     name.replace(/^max/, 'max ').replace(/^min/, 'min ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
@@ -24,7 +42,7 @@
   </header>
   {#if section.plot.length > 0}
     <div class="ui-panel-body">
-      <Plot signals={section.plot} store={session.store} {live} />
+      <TimeChart series={plotLines} windowSeconds={10} height={170} />
     </div>
   {/if}
   <div class="tables">
