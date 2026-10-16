@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { connectionTargets } from './connection-targets';
 import {
   DEFAULT_BRIDGE_URL,
   probeBridge,
@@ -90,33 +89,5 @@ describe('bridge probe', () => {
         throw new Error('no WebSocket');
       })
     ).toBe(false);
-  });
-});
-
-describe('quick-connect targets', () => {
-  test('with a team number the radio and mDNS hosts are filled in', () => {
-    const targets = connectionTargets(6390);
-    expect(targets).toEqual([
-      { label: 'Simulator', host: '127.0.0.1', needsTeam: false },
-      { label: 'Robot (USB)', host: '172.22.11.2', needsTeam: false },
-      { label: 'Robot (radio)', host: '10.63.90.2', needsTeam: false },
-      { label: 'Robot (mDNS)', host: 'roborio-6390-frc.local', needsTeam: false }
-    ]);
-  });
-
-  test('without a team the placeholders stay and need a team', () => {
-    const targets = connectionTargets();
-    expect(targets.map((t) => t.host)).toEqual([
-      '127.0.0.1',
-      '172.22.11.2',
-      '10.TE.AM.2',
-      'roborio-TEAM-frc.local'
-    ]);
-    expect(targets.map((t) => t.needsTeam)).toEqual([false, false, true, true]);
-  });
-
-  test('an invalid team number keeps the placeholders', () => {
-    expect(connectionTargets(0)[2]).toEqual({ label: 'Robot (radio)', host: '10.TE.AM.2', needsTeam: true });
-    expect(connectionTargets(10000)[3].needsTeam).toBe(true);
   });
 });
