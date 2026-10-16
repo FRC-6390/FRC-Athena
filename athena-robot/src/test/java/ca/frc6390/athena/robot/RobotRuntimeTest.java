@@ -13,7 +13,6 @@ import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.api.RecoveryPolicy;
-import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModuleModel;
@@ -231,11 +230,12 @@ class RobotRuntimeTest {
                             workerStarted.countDown();
                         })))
                 .startWorkers()
-                .schedule(CommandAction.create("active")
-                        .onEnd(commandEnds::incrementAndGet)
+                .request(Actions.lifecycle("active")
+                        .onEnd(interrupted -> commandEnds.incrementAndGet())
                         .build());
         try {
             assertTrue(workerStarted.await(1, TimeUnit.SECONDS));
+            runtime.teleopPeriodic(0.0, 0.02);
 
             runtime.close();
             runtime.close();

@@ -256,14 +256,7 @@ project(':athena-localization') {
 
 project(':athena-auto') {
     dependencies {
-        api project(':athena-commands')
         api project(':athena-mechanisms')
-        api project(':athena-runtime')
-    }
-}
-
-project(':athena-commands') {
-    dependencies {
         api project(':athena-runtime')
     }
 }
@@ -318,7 +311,6 @@ project(':athena-simulation') {
 project(':athena-robot') {
     dependencies {
         api project(':athena-auto')
-        api project(':athena-commands')
         api project(':athena-hardware')
         api project(':athena-localization')
         api project(':athena-mechanisms')
@@ -372,7 +364,6 @@ project(':athena-wpilib') {
 
     dependencies {
         api project(':athena-robot')
-        api project(':athena-commands')
         api project(':athena-drivetrain')
         api project(':athena-localization')
         api project(':athena-runtime')

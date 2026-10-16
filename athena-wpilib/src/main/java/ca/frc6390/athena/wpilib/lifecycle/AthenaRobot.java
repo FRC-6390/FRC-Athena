@@ -1,7 +1,6 @@
 package ca.frc6390.athena.wpilib.lifecycle;
 
 import ca.frc6390.athena.auto.AutoChooser;
-import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
@@ -9,9 +8,9 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.TelemetrySchema;
 import ca.frc6390.athena.mechanism.core.Action;
+import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.ActionRequests;
 import ca.frc6390.athena.robot.RobotRuntime;
-import ca.frc6390.athena.wpilib.commands.WpilibCommands;
 import ca.frc6390.athena.wpilib.arcp.ArcpBridge;
 import ca.frc6390.athena.wpilib.simulation.WpilibSimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
@@ -138,8 +137,9 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         return systemRuntime.status();
     }
 
-    public final CommandAction Action(Action Action) {
-        return WpilibCommands.run("Action:robot", () -> set(Action));
+    /** Returns an Action that sets this robot's Action once when it runs. */
+    public final Action Action(Action Action) {
+        return Actions.run(() -> set(Action));
     }
 
     @Override

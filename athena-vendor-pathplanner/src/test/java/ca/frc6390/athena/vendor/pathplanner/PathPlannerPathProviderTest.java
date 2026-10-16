@@ -9,7 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 
-import ca.frc6390.athena.commands.CommandAction;
+import ca.frc6390.athena.auto.AutoChooser;
+import ca.frc6390.athena.auto.Autos;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
 import ca.frc6390.athena.mechanism.core.Paths;
@@ -40,36 +41,55 @@ class PathPlannerPathProviderTest {
     }
 
     @Test
-    void loadWrapsCommandLifecycle() {
+    void loadReturnsPathActionThatBuildsTheAutoWhenItStarts() {
         FakeClient client = new FakeClient(List.of());
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
 
-        CommandAction Action = provider.load("  Auto A  ");
-        Action.onInitialize().run();
-        Action.onExecute().run();
-        assertFalse(Action.isFinished().getAsBoolean());
-        client.lastCommand.finished = true;
-        assertEquals(true, Action.isFinished().getAsBoolean());
-        Action.onEnd().run();
+        PathAction path = provider.load("  Auto A  ");
+        PathRuntime runtime = provider.runtime();
 
-        assertEquals("pathplanner:Auto A", Action.name());
+        assertEquals("pathplanner", path.source());
+        assertEquals("Auto A", path.name());
+        assertEquals("pathplanner:Auto A", path.key());
+        assertTrue(client.buildAutoNames.isEmpty(), "load must not build the auto");
+
+        runtime.initialize(path, null);
+        runtime.execute(path, null);
+        assertFalse(runtime.isFinished(path, null));
+        client.lastCommand.finished = true;
+        assertTrue(runtime.isFinished(path, null));
+        runtime.end(path, null, false);
+
         assertEquals(List.of("Auto A"), client.buildAutoNames);
         assertEquals(List.of("initialize", "execute", "isFinished", "isFinished", "end:false"),
                 client.lastCommand.events);
     }
 
     @Test
-    void missingPathFailuresArePropagatedFromClient() {
+    void loadedPathIsAcceptedByAutoChooser() {
+        PathPlannerPathProvider provider = new PathPlannerPathProvider(new FakeClient(List.of()));
+        PathAction path = provider.load("Auto A");
+
+        AutoChooser chooser = Autos.chooser("Autos").auto("Auto A", path);
+
+        assertEquals(List.of("Auto A"), List.copyOf(chooser.optionNames()));
+        assertSame(path, chooser.selectedAction());
+    }
+
+    @Test
+    void missingPathFailuresArePropagatedWhenThePathStarts() {
         FakeClient client = new FakeClient(List.of());
         client.missingAutoName = "Missing";
         PathPlannerPathProvider provider = new PathPlannerPathProvider(client);
+        PathAction path = provider.load(" Missing ");
+        PathRuntime runtime = provider.runtime();
 
-        IllegalArgumentException loadFailure = assertThrows(IllegalArgumentException.class,
-                () -> provider.load(" Missing "));
+        IllegalArgumentException startFailure = assertThrows(IllegalArgumentException.class,
+                () -> runtime.initialize(path, null));
         IllegalArgumentException commandFailure = assertThrows(IllegalArgumentException.class,
                 () -> provider.command("Missing"));
 
-        assertEquals("Missing PathPlanner auto 'Missing'.", loadFailure.getMessage());
+        assertEquals("Missing PathPlanner auto 'Missing'.", startFailure.getMessage());
         assertEquals("Missing PathPlanner auto 'Missing'.", commandFailure.getMessage());
         assertEquals(List.of("Missing", "Missing"), client.buildAutoNames);
     }
