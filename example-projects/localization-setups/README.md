@@ -10,8 +10,10 @@ It also shows target streams from Limelight and PhotonVision, a supplier-bound t
 The example deliberately keeps each stage as a public field so robot code and telemetry can inspect every result:
 
 ```text
-camera PoseSignals -> filteredVision -> fusedVision
-swerve odometry -----------------------> estimatedFieldPose
+camera PoseSignal -> per-camera stage (limelightStage, photonStage, heliosStage) --\
+                                                                                  +-> estimatedFieldPose
+swerve odometry -------------------------------------------------------------------/
+camera PoseSignals -> filteredVision -> fusedVision   (kept for comparison and telemetry)
 ```
 
 - `VisionSources` configures Limelight, PhotonVision, and Helios camera mounts and per-source standard deviations.
@@ -20,7 +22,52 @@ swerve odometry -----------------------> estimatedFieldPose
 - `filteredVision` rejects invalid, stale, ambiguous, distant, and off-field measurements.
 - `fusedVision` uses covariance intersection for camera samples close in time while rejecting disagreement.
 - `weightedFieldPose` and `latestCameraPose` show alternative reusable localization stages.
+- `limelightStage`, `photonStage` and `heliosStage` are the per-camera filter chains. Each one feeds the Kalman node directly.
 - `estimatedFieldPose` uses Athena's WPILib-backed timestamp-aware swerve pose estimator, per-source covariance, process covariance, and an innovation gate.
+
+## Recommended setup
+
+For the Kalman node, give each camera its own input. Covariance intersection assumes the cameras may be correlated, so it
+keeps the variance of one camera and throws away the gain from the others. Feeding each camera straight into
+`Localizations.kalman()` lets independent frames add their information. The
+`twoCamerasFeedingTheKalmanDirectlyConvergeFasterThanCovarianceIntersection` test in
+`athena-localization` checks this on the same samples.
+
+```java
+estimatedFieldPose = Localizations.kalman()
+        .input(odometry, limelightStage, photonStage, heliosStage)   // one input per camera
+        .defaultVisionStdDevs(0.7, Math.toRadians(20.0))
+        .visionStdDevSpeedScaling(0.5, 0.25)            // trust frames less while driving or turning
+        .maxVisionAngularVelocity(3.0)                  // drop frames taken while spinning faster than 3 rad/s
+        .seedFromVisionWhileDisabled(DriverStation::isDisabled)   // multi-tag pose snaps in while disabled
+        .publishNetworkTables()
+        .name("estimatedFieldPose");
+```
+
+- **Speed scaling** multiplies a frame's standard deviations by `1 + a*|v| + b*|omega|`, using the frame's own speeds
+  when the camera reports them and odometry otherwise.
+- **Spin gate** rejects frames taken above the rotation limit. The reason reads `spinning 4.1 rad/s > 3.0`.
+- **Seeding while disabled** resets the estimate to a multi-tag frame, translation and heading, at most once per 0.25 s.
+  Single-tag frames still take the normal update. The node has no mode of its own, so pass the supplier that tells it the
+  robot is disabled.
+
+## Camera diagnostics
+
+Every Kalman localization reports a status per camera, refreshed each cycle: `visionStatus()` in code, and the
+`athena/vision/<camera>/...` paths on NetworkTables and ARCP (see [docs/arcp.md](../../docs/arcp.md#vision-channels)).
+Filters name their rejection, so the status says which one dropped a frame:
+
+| State | Meaning | Example reason |
+| --- | --- | --- |
+| `OK` | The newest frame was accepted. | empty |
+| `REJECTED` | A filter or the Kalman node dropped the newest frame. | `ambiguity 0.31 > 0.20`, `latency 0.210 s > 0.150 s`, `filter glare` |
+| `RECOVERING` | The innovation or heading gate holds the frame until the camera is self-consistent for a few frames. | `innovation 41.0 > 9.0 (recovering 2/3)` |
+| `UNSYNCED` | The camera's timestamps are ahead of robot time, so its clock is not synced yet. | `frame 3.2 s in the future` |
+| `STALE` | No new frame for more than 0.5 s. | `no frame for 0.8 s` |
+
+Custom filters that do not implement `rejectionReason(...)` are reported as `filter <name>`, or `filter #<position>`
+when unnamed. Rates count over the last second. Covariance intersection stages report the name of the fused node, not
+the camera, so per-camera diagnostics need per-camera Kalman inputs.
 
 `LocalizationExamples.pose()` exposes the final result as `Pose2d`. Start preserves the current translation and resets the complete localization chain to zero heading. Back resets it to the example field pose `(2 m, 4 m, 0 rad)`.
 

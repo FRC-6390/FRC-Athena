@@ -28,9 +28,11 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.kinematics.SwerveModulePosition;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
 
 class WpilibLocalizationParityTest {
@@ -165,6 +167,277 @@ class WpilibLocalizationParityTest {
         assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
     }
 
+    /** A camera whose ambiguity is too high is rejected by name, and the status says why. */
+    @Test
+    void ambiguousSingleTagFrameIsReportedAsRejectedByTheAmbiguityFilter() {
+        ParityRig rig = new ParityRig(UnaryOperator.identity(), VisionFilters.maxAmbiguity(0.20));
+        rig.stepAthenaOnly(0.0, singleTag(5.0, 2.0, 0.0, 0.0, 0.31, "Intake", RobotVelocity.zero()));
+
+        var status = statusOf(rig, "Intake");
+        assertEquals(VisionSourceStatus.State.REJECTED, status.state());
+        assertEquals("ambiguity 0.31 > 0.20", status.reason());
+        assertEquals(0.0, status.acceptedPerSecond(), 1e-12);
+        assertEquals(1.0, status.rejectedPerSecond(), 1e-12);
+        assertTrue(Double.isNaN(status.secondsSinceAccepted()), "never accepted");
+    }
+
+    /** An innovation-gated frame is held back by the recovery path; the status names the gate and the progress. */
+    @Test
+    void innovationGatedFrameIsRecoveringThenOkOnceSelfConsistent() {
+        ParityRig rig = new ParityRig(9.0);
+        String camera = "Turret";
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        // The robot is at the origin; a multi-tag frame at (5, 2) is far outside the innovation gate.
+        rig.stepAthenaOnly(0.00, multiTag(5.0, 2.0, 0.0, 0.00, stdDevs, camera));
+        var recovering = statusOf(rig, camera);
+        assertEquals(VisionSourceStatus.State.RECOVERING, recovering.state());
+        assertTrue(recovering.reason().startsWith("innovation "), recovering.reason());
+        assertTrue(recovering.reason().endsWith("(recovering 1/3)"), recovering.reason());
+
+        for (int i = 1; i <= 3; i++) {
+            double t = i * 0.02;
+            rig.stepAthenaOnly(t, multiTag(5.0, 2.0, 0.0, t, stdDevs, camera));
+        }
+        var recovered = statusOf(rig, camera);
+        assertEquals(VisionSourceStatus.State.OK, recovered.state());
+        assertEquals("", recovered.reason());
+        assertTrue(recovered.acceptedPerSecond() > 0.0);
+    }
+
+    /** A frame whose clock runs ahead of robot time is UNSYNCED with the amount of skew in its reason. */
+    @Test
+    void frameFromTheFutureIsUnsyncedAndDoesNotLockTheCameraOut() {
+        ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY);
+        String camera = "Side";
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        rig.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 3.2, stdDevs, camera));
+        var status = statusOf(rig, camera);
+        assertEquals(VisionSourceStatus.State.UNSYNCED, status.state());
+        assertEquals("frame 3.2 s in the future", status.reason());
+        assertTrue(status.frameAgeSeconds() < -3.0);
+
+        rig.stepAthenaOnly(0.02, multiTag(5.0, 2.0, 0.0, 0.01, stdDevs, camera));
+        assertEquals(VisionSourceStatus.State.OK, statusOf(rig, camera).state(),
+                "a later correct frame is accepted, not locked out");
+    }
+
+    /** No new frame for more than half a second after frames arrived is STALE. */
+    @Test
+    void cameraWithoutNewFramesBecomesStale() {
+        ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY);
+        String camera = "Climber";
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        rig.stepAthenaOnly(1.00, multiTag(5.0, 2.0, 0.0, 1.00, stdDevs, camera));
+        assertEquals(VisionSourceStatus.State.OK, statusOf(rig, camera).state());
+
+        rig.stepAthenaOnly(1.30, new VisionSample[0]);
+        assertEquals(VisionSourceStatus.State.OK, statusOf(rig, camera).state(), "0.3 s is still fresh");
+
+        rig.stepAthenaOnly(1.60, new VisionSample[0]);
+        var stale = statusOf(rig, camera);
+        assertEquals(VisionSourceStatus.State.STALE, stale.state());
+        assertEquals("no frame for 0.6 s", stale.reason());
+        assertEquals(0.6, stale.frameAgeSeconds(), 1e-9);
+        assertEquals(0.6, stale.secondsSinceAccepted(), 1e-9);
+    }
+
+    /** A rotating robot's frame is refused past the spin limit and the reason gives the rate. */
+    @Test
+    void frameTakenWhileSpinningIsRejectedWithItsRate() {
+        ParityRig rig = new ParityRig(kalman -> kalman.maxVisionAngularVelocity(3.0));
+        String camera = "Intake";
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        rig.stepAthenaOnly(0.0, new VisionSample[] {
+                multiTagWithSpeed(5.0, 2.0, 0.0, 0.0, stdDevs, camera, new RobotVelocity(0.0, 0.0, 4.1))});
+        var status = statusOf(rig, camera);
+        assertEquals(VisionSourceStatus.State.REJECTED, status.state());
+        assertEquals("spinning 4.1 rad/s > 3.0", status.reason());
+        assertEquals(0.0, rig.athena.pose().xMeters(), 1e-9, "the spinning frame did not move the estimate");
+    }
+
+    /** Speed scaling trusts a frame less while driving: the same frame moves the estimate less. */
+    @Test
+    void visionStdDevSpeedScalingMovesTheEstimateLessWhenDriving() {
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.3, 0.3, 0.1);
+        ParityRig plain = new ParityRig(UnaryOperator.identity());
+        ParityRig scaled = new ParityRig(kalman -> kalman.visionStdDevSpeedScaling(1.0, 0.0));
+        RobotVelocity driving = new RobotVelocity(3.0, 0.0, 0.0);
+
+        plain.stepAthenaOnly(0.0, new VisionSample[] {
+                multiTagWithSpeed(1.0, 0.0, 0.0, 0.0, stdDevs, "Intake", driving)});
+        scaled.stepAthenaOnly(0.0, new VisionSample[] {
+                multiTagWithSpeed(1.0, 0.0, 0.0, 0.0, stdDevs, "Intake", driving)});
+
+        double plainX = plain.athena.pose().xMeters();
+        double scaledX = scaled.athena.pose().xMeters();
+        assertTrue(plainX > 0.0 && scaledX > 0.0, "both pull toward the vision pose");
+        assertTrue(scaledX < plainX, "scaled=" + scaledX + " plain=" + plainX);
+    }
+
+    /**
+     * While disabled, a multi-tag frame resets the estimate to the vision pose at once; single-tag frames still
+     * take the normal update, and the reset is rate limited to one per 0.25 s.
+     */
+    @Test
+    void seedFromVisionWhileDisabledResetsToMultiTagPoseAtMostOncePerQuarterSecond() {
+        boolean[] disabled = {true};
+        ParityRig rig = new ParityRig(kalman -> kalman.seedFromVisionWhileDisabled(() -> disabled[0]));
+        String camera = "Intake";
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        rig.stepAthenaOnly(0.00, new VisionSample[] {multiTagWithSpeed(5.0, 2.0, 0.3, 0.00, stdDevs, camera,
+                RobotVelocity.zero())});
+        assertEquals(5.0, rig.athena.pose().xMeters(), 1e-9, "seeded to the multi-tag pose");
+        assertEquals(2.0, rig.athena.pose().yMeters(), 1e-9);
+        assertEquals(0.3, rig.athena.pose().headingRadians(), 1e-9, "heading seeded too");
+
+        rig.stepAthenaOnly(0.05, new VisionSample[] {multiTagWithSpeed(9.0, 9.0, 0.3, 0.05, stdDevs, camera,
+                RobotVelocity.zero())});
+        assertTrue(Math.abs(rig.athena.pose().xMeters() - 9.0) > 0.5,
+                "within 0.25 s of the last seed the frame takes the normal, damped update");
+
+        rig.stepAthenaOnly(0.30, new VisionSample[] {multiTagWithSpeed(7.0, 4.0, 0.3, 0.30, stdDevs, camera,
+                RobotVelocity.zero())});
+        assertEquals(7.0, rig.athena.pose().xMeters(), 1e-9, "a seed is allowed again after 0.25 s");
+        assertEquals(4.0, rig.athena.pose().yMeters(), 1e-9);
+
+        disabled[0] = false;
+        rig.stepAthenaOnly(0.60, new VisionSample[] {multiTagWithSpeed(1.0, 1.0, 0.3, 0.60, stdDevs, camera,
+                RobotVelocity.zero())});
+        assertTrue(Math.abs(rig.athena.pose().xMeters() - 1.0) > 0.5, "enabled robots never seed");
+    }
+
+    /**
+     * Two cameras fed straight into the Kalman node converge faster than the same frames fused first by covariance
+     * intersection. Covariance intersection assumes the two cameras may be correlated, so it keeps the variance of one
+     * camera; two independent updates keep the information of both. The comparison is the convergence transient, the
+     * part where the extra information shows.
+     */
+    @Test
+    void twoCamerasFeedingTheKalmanDirectlyConvergeFasterThanCovarianceIntersection() {
+        ParityRig direct = new ParityRig(2, true);
+        ParityRig fused = new ParityRig(2, false);
+        java.util.Random noise = new java.util.Random(2026);
+        MeasurementStdDevs cameraStdDevs = MeasurementStdDevs.of(0.45, 0.45, Math.toRadians(8.0));
+        double directError = 0.0;
+        double fusedError = 0.0;
+        int steps = 15;
+        for (int i = 0; i < steps; i++) {
+            double t = i * 0.05;
+            List<List<VisionSample>> frames = new ArrayList<>();
+            for (int camera = 0; camera < 2; camera++) {
+                frames.add(List.of(multiTagWithSpeed(
+                        5.0 + noise.nextGaussian() * 0.45,
+                        2.0 + noise.nextGaussian() * 0.45,
+                        Math.toRadians(20.0) + noise.nextGaussian() * Math.toRadians(8.0),
+                        t - 0.01, cameraStdDevs, "camera" + camera, RobotVelocity.zero())));
+            }
+            direct.stepCameras(t, frames);
+            fused.stepCameras(t, frames);
+            directError += squaredError(direct.athena.pose());
+            fusedError += squaredError(fused.athena.pose());
+        }
+        assertTrue(directError < fusedError,
+                "transient error direct=" + Math.sqrt(directError) + " fused=" + Math.sqrt(fusedError));
+    }
+
+    /**
+     * The registry carries each refreshed camera's status for the ARCP bridge, and the dashboard path builder is the
+     * one the NetworkTables publisher uses. The NetworkTables values themselves are not read here because the test
+     * JVM has no ntcore native library.
+     */
+    @Test
+    void refreshedCameraIsInTheRegistryUnderItsDashboardPaths() {
+        ParityRig rig = new ParityRig(UnaryOperator.identity(), VisionFilters.maxAmbiguity(0.20));
+        rig.stepAthenaOnly(0.0, singleTag(5.0, 2.0, 0.0, 0.0, 0.31, "RegCam", RobotVelocity.zero()));
+
+        VisionSourceStatus status = VisionStatusRegistry.latest().stream()
+                .filter(candidate -> candidate.name().equals("RegCam"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("RegCam missing from the registry"));
+        assertEquals(VisionSourceStatus.State.REJECTED, status.state());
+        assertEquals("ambiguity 0.31 > 0.20", status.reason());
+        assertEquals("athena/vision/RegCam/State", VisionSourceStatus.path("RegCam", "State"));
+        assertEquals("athena/vision/RegCam/SecondsSinceAccepted",
+                VisionSourceStatus.path("RegCam", "SecondsSinceAccepted"));
+    }
+
+    /** A filter that names no reason is reported by its name, and an unnamed one by its position. */
+    @Test
+    void customFiltersThatDoNotNameTheirRejectionAreReportedByNameOrPosition() {
+        LocalizationFilter glare = new LocalizationFilter() {
+            @Override
+            public boolean accept(Localization localization, Measurement measurement, PoseSnapshot pose) {
+                return false;
+            }
+
+            @Override
+            public String name() {
+                return "glare";
+            }
+        };
+        ParityRig named = new ParityRig(UnaryOperator.identity(), glare);
+        named.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(0.2, 0.2, 0.1), "Named"));
+        assertEquals("filter glare", statusOf(named, "Named").reason());
+
+        LocalizationFilter unnamed = (localization, measurement, pose) -> false;
+        ParityRig positional = new ParityRig(UnaryOperator.identity(), VisionFilters.maxAmbiguity(1.0), unnamed);
+        positional.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(0.2, 0.2, 0.1), "Plain"));
+        assertEquals("filter #2", statusOf(positional, "Plain").reason());
+    }
+
+    private static VisionSourceStatus statusOf(ParityRig rig, String camera) {
+        return rig.athena.visionStatus().stream()
+                .filter(status -> status.name().equals(camera))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no status for " + camera + " in " + rig.athena.visionStatus()));
+    }
+
+    private static double squaredError(PoseSnapshot pose) {
+        double dx = pose.xMeters() - 5.0;
+        double dy = pose.yMeters() - 2.0;
+        double dh = Math.IEEEremainder(pose.headingRadians() - Math.toRadians(20.0), Math.PI * 2.0);
+        return dx * dx + dy * dy + dh * dh;
+    }
+
+    private static VisionSample multiTag(
+            double xMeters,
+            double yMeters,
+            double headingRadians,
+            double timestampSeconds,
+            MeasurementStdDevs stdDevs,
+            Object source) {
+        return multiTagWithSpeed(xMeters, yMeters, headingRadians, timestampSeconds, stdDevs, source,
+                RobotVelocity.zero());
+    }
+
+    private static VisionSample multiTagWithSpeed(
+            double xMeters,
+            double yMeters,
+            double headingRadians,
+            double timestampSeconds,
+            MeasurementStdDevs stdDevs,
+            Object source,
+            RobotVelocity speeds) {
+        return new VisionSample(new PoseSnapshot(xMeters, yMeters, headingRadians), speeds, timestampSeconds,
+                0.02, 0.05, 2, 2.0, stdDevs, source);
+    }
+
+    private static VisionSample singleTag(
+            double xMeters,
+            double yMeters,
+            double headingRadians,
+            double timestampSeconds,
+            double ambiguity,
+            Object source,
+            RobotVelocity speeds) {
+        return new VisionSample(new PoseSnapshot(xMeters, yMeters, headingRadians), speeds, timestampSeconds,
+                0.02, ambiguity, 1, 2.0, MeasurementStdDevs.of(0.9, 0.9, Math.toRadians(12.0)), source);
+    }
+
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
     }
@@ -247,9 +520,10 @@ class WpilibLocalizationParityTest {
                 new Translation2d(-0.25, 0.25),
                 new Translation2d(-0.25, -0.25));
         private final MutablePoseSignal visionSource = new MutablePoseSignal();
+        private final List<MutablePoseSignal> cameraSignals = new ArrayList<>();
         private final Localization visionStage;
         private final SwerveOdometry odometry = athenaKinematics.odometry(imu);
-        private final Localization athena;
+        private Localization athena;
         private final ActionContext context = new ActionContext() {
             @Override
             public EncoderHandle encoder(EncoderDevice device) {
@@ -264,6 +538,34 @@ class WpilibLocalizationParityTest {
 
         private ParityRig() {
             this(Double.POSITIVE_INFINITY, false, false, Double.POSITIVE_INFINITY);
+        }
+
+        /** One camera behind the given filters, with a Kalman node tuned by {@code kalmanTuning}. */
+        private ParityRig(UnaryOperator<Localization> kalmanTuning, LocalizationFilter... visionFilters) {
+            visionStage = Localizations.filter().input(visionSource).filter(visionFilters);
+            athena = kalmanTuning.apply(Localizations.kalman()
+                    .input(odometry, visionStage)
+                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
+                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians()));
+        }
+
+        /**
+         * Two cameras as separate Kalman inputs ({@code direct}) or fused by covariance intersection first. Each
+         * camera has its own signal so {@link #stepCameras} can feed it.
+         */
+        private ParityRig(int cameraCount, boolean direct) {
+            for (int camera = 0; camera < cameraCount; camera++) {
+                cameraSignals.add(new MutablePoseSignal());
+            }
+            visionStage = Localizations.filter().input(visionSource);
+            List<PoseSignal> inputs = new ArrayList<>(cameraSignals);
+            athena = direct
+                    ? Localizations.kalman().input(odometry).input(inputs.toArray(PoseSignal[]::new))
+                    : Localizations.kalman().input(odometry, Localizations.covarianceIntersection()
+                            .input(inputs.toArray(PoseSignal[]::new)));
+            athena = athena
+                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
+                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians());
         }
 
         private ParityRig(double innovationGate) {
@@ -296,6 +598,16 @@ class WpilibLocalizationParityTest {
                     .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians())
                     .maxHeadingDisagreementRadians(maxHeadingResidualRadians)
                     .maxNormalizedVisionResidual(innovationGate);
+        }
+
+        /** Steps a two-or-more camera rig: each list is one camera's frames for this cycle. */
+        private void stepCameras(double timestampSeconds, List<List<VisionSample>> perCamera) {
+            setModuleInputs(distances(0.0, 0.0, 0.0, 0.0), angles(0.0, 0.0, 0.0, 0.0));
+            imu.yawDegrees = 0.0;
+            for (int camera = 0; camera < perCamera.size(); camera++) {
+                cameraSignals.get(camera).measurements = List.copyOf(perCamera.get(camera));
+            }
+            athena.refresh(context, timestampSeconds, 0.02);
         }
 
         private void stepAthenaOnly(double timestampSeconds, VisionSample... vision) {

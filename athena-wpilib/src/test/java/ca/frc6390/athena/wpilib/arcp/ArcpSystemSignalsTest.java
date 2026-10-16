@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.arcp.ArcpCycle;
 import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
+import ca.frc6390.athena.localization.pipeline.VisionSourceStatus;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -23,8 +24,10 @@ class ArcpSystemSignalsTest {
         double demand = 3.0;
         boolean shedding;
         List<PowerSnapshot.Motor> motors = List.of();
+        List<VisionSourceStatus> vision = List.of();
 
         @Override public List<PowerSnapshot.Motor> motors() { return motors; }
+        @Override public List<VisionSourceStatus> visionSources() { return vision; }
         @Override public double batteryVolts() { return volts; }
         @Override public String mode() { return mode; }
         @Override public double matchTimeSeconds() { return matchTime; }
@@ -178,5 +181,94 @@ class ArcpSystemSignalsTest {
 
     private static PowerSnapshot.Motor motor(String name, double demandAmps, double capAmps) {
         return new PowerSnapshot.Motor(name, demandAmps, capAmps, 1.0, 25.0, 1.0, 0.0, "Declared");
+    }
+
+    private static VisionSourceStatus camera(String name, VisionSourceStatus.State state, String reason,
+            double accepted, double rejected, double frameAgeSeconds, int tags, double secondsSinceAccepted) {
+        return new VisionSourceStatus(name, state, reason, accepted, rejected, frameAgeSeconds, tags,
+                secondsSinceAccepted);
+    }
+
+    @Test
+    void visionChannelsAppearPerCameraWithTheDashboardPathsTypesAndUnits() {
+        FakeSource source = new FakeSource();
+        ArcpSystemSignals signals = new ArcpSystemSignals(40, source);
+        assertFalse(signals.discoverVision(), "no cameras before a Kalman localization has judged a frame");
+
+        source.vision = List.of(camera("Intake", VisionSourceStatus.State.REJECTED, "ambiguity 0.31 > 0.20",
+                2.0, 3.0, 0.02, 1, 0.4));
+        assertTrue(signals.discoverVision());
+        assertFalse(signals.discoverVision(), "the same camera again adds nothing");
+
+        Map<String, ArcpDictEntry> entries = byPath(signals);
+        assertEquals(List.of(
+                "athena/vision/Intake/State",
+                "athena/vision/Intake/Reason",
+                "athena/vision/Intake/AcceptedPerSecond",
+                "athena/vision/Intake/RejectedPerSecond",
+                "athena/vision/Intake/FrameAgeMs",
+                "athena/vision/Intake/TagCount",
+                "athena/vision/Intake/SecondsSinceAccepted"),
+                signals.dictionary().stream().map(ArcpDictEntry::path)
+                        .filter(path -> path.startsWith("athena/vision/")).toList());
+        assertEquals(4, entries.get("athena/vision/Intake/State").typeTag());
+        assertEquals(4, entries.get("athena/vision/Intake/Reason").typeTag());
+        assertEquals(3, entries.get("athena/vision/Intake/AcceptedPerSecond").typeTag());
+        assertEquals(2, entries.get("athena/vision/Intake/TagCount").typeTag(), "TagCount is i64");
+        assertEquals("ms", entries.get("athena/vision/Intake/FrameAgeMs").unit());
+        assertEquals("Hz", entries.get("athena/vision/Intake/AcceptedPerSecond").unit());
+        for (String path : entries.keySet()) {
+            if (path.startsWith("athena/vision/")) {
+                assertEquals(ArcpDictEntry.ROLE_SYSTEM, entries.get(path).role(), path);
+                assertFalse(entries.get(path).writable(), path);
+            }
+        }
+    }
+
+    @Test
+    void visionSamplesPublishStateReasonRatesAgeAndTagCountOnChange() {
+        FakeSource source = new FakeSource();
+        source.vision = List.of(camera("Intake", VisionSourceStatus.State.REJECTED, "ambiguity 0.31 > 0.20",
+                2.0, 3.0, 0.02, 1, 0.4));
+        ArcpSystemSignals signals = new ArcpSystemSignals(1, source);
+        signals.discoverVision();
+        Map<String, ArcpDictEntry> entries = byPath(signals);
+
+        Map<Long, Object> first = sampled(signals);
+        assertEquals("REJECTED", first.get(entries.get("athena/vision/Intake/State").signalId()));
+        assertEquals("ambiguity 0.31 > 0.20", first.get(entries.get("athena/vision/Intake/Reason").signalId()));
+        assertEquals(2.0, (Double) first.get(entries.get("athena/vision/Intake/AcceptedPerSecond").signalId()), 1e-12);
+        assertEquals(20.0, (Double) first.get(entries.get("athena/vision/Intake/FrameAgeMs").signalId()), 1e-9);
+        assertEquals(1L, first.get(entries.get("athena/vision/Intake/TagCount").signalId()));
+        assertEquals(0.4, (Double) first.get(entries.get("athena/vision/Intake/SecondsSinceAccepted").signalId()), 1e-12);
+
+        assertTrue(sampled(signals).isEmpty(), "unchanged values are not sent again");
+
+        source.vision = List.of(camera("Intake", VisionSourceStatus.State.STALE, "no frame for 0.8 s",
+                2.0, 3.0, Double.NaN, 1, Double.NaN));
+        Map<Long, Object> changed = sampled(signals);
+        assertEquals("STALE", changed.get(entries.get("athena/vision/Intake/State").signalId()));
+        assertFalse(changed.containsKey(entries.get("athena/vision/Intake/FrameAgeMs").signalId()),
+                "a NaN frame age is not sent; the last value stands");
+    }
+
+    @Test
+    void aSecondCameraAppendsItsOwnIdsAndTheFirstCameraKeepsItsIds() {
+        FakeSource source = new FakeSource();
+        source.vision = List.of(camera("Intake", VisionSourceStatus.State.OK, "", 2.0, 0.0, 0.01, 2, 0.0));
+        ArcpSystemSignals signals = new ArcpSystemSignals(1, source);
+        signals.discoverVision();
+        long intakeState = byPath(signals).get("athena/vision/Intake/State").signalId();
+
+        source.vision = List.of(
+                camera("Intake", VisionSourceStatus.State.OK, "", 2.0, 0.0, 0.01, 2, 0.0),
+                camera("Turret", VisionSourceStatus.State.UNSYNCED, "frame 3.2 s in the future", 0.0, 4.0, -3.2, 1,
+                        Double.NaN));
+        assertTrue(signals.discoverVision());
+
+        Map<String, ArcpDictEntry> entries = byPath(signals);
+        assertEquals(intakeState, entries.get("athena/vision/Intake/State").signalId());
+        assertEquals(intakeState + 7, entries.get("athena/vision/Turret/State").signalId());
+        assertEquals(intakeState + 14, signals.nextId(), "the second camera takes the next seven ids");
     }
 }
