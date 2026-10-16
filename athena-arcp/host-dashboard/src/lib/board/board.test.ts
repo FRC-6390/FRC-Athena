@@ -104,7 +104,7 @@ describe('history', () => {
 describe('templates', () => {
   beforeEach(() => {
     clearRegistry();
-    for (const type of ['match-timer', 'match-battery', 'match-alerts', 'match-camera', 'match-field', 'mechanismStatus']) registerWidget(def({ type }));
+    for (const type of ['match-timer', 'match-battery', 'match-alerts', 'match-camera', 'match-field', 'mechanismStatus', 'visionStatus']) registerWidget(def({ type }));
   });
 
   test('driver board rows end flush with the grid', () => {
@@ -116,5 +116,24 @@ describe('templates', () => {
     for (const w of board.widgets) rows.set(w.y, (rows.get(w.y) ?? 0) + w.w);
     expect([...rows.values()].every((total) => total === board.columns)).toBe(true);
     expect(board.widgets.map((w) => w.type)).toContain('mechanismStatus');
+    expect(board.widgets.map((w) => w.type)).not.toContain('visionStatus');
+  });
+
+  test('driver board adds a vision row flush with the grid when cameras exist', () => {
+    const signals = [
+      signal({ signalId: 1, path: 'robot/arm/State/Reason', type: 'string', mechanismPath: 'robot/arm', localPath: 'State/Reason', name: 'Reason' }),
+      signal({ signalId: 2, path: 'athena/vision/front/State', type: 'string', mechanismPath: 'athena/vision', localPath: 'front/State', name: 'State' }),
+      signal({ signalId: 3, path: 'athena/vision/back/State', type: 'string', mechanismPath: 'athena/vision', localPath: 'back/State', name: 'State' })
+    ];
+    const board = driverBoard(signals);
+    const vision = board.widgets.find((w) => w.type === 'visionStatus');
+    expect(vision).toBeDefined();
+    expect(vision!.w).toBe(board.columns);
+    // The row sits right after the timer, battery and alerts row.
+    const firstRow = board.widgets.find((w) => w.type === 'match-timer')!.y;
+    expect(vision!.y).toBeGreaterThan(firstRow);
+    const rows = new Map<number, number>();
+    for (const w of board.widgets) rows.set(w.y, (rows.get(w.y) ?? 0) + w.w);
+    expect([...rows.values()].every((total) => total === board.columns)).toBe(true);
   });
 });

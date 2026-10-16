@@ -3,6 +3,7 @@ import { buildMechanismTree, flattenMechanisms, type MechanismNode } from '../da
 import { controlSections, deviceSections, actionSignals, summarize } from '../mechanisms/model';
 import { ROBOT_PATHS } from '../data/types';
 import { defaultSettings, newId, widgetDef } from './registry';
+import { groupCameras, VISION_PREFIX } from './widgets/vision-status';
 import type { BoardDoc, WidgetInstance } from './types';
 
 /**
@@ -73,6 +74,9 @@ export function driverBoard(signals: readonly SignalDescriptor[], name = 'Driver
   pack.add('match-alerts', { faults: [] }, { w: 6, h: 3 });
   const chooser = signals.find((s) => s.type === 'string' && s.writable && /auto/i.test(s.path));
   if (chooser) pack.add('match-chooser', { selected: [chooser.path] }, { w: 8, h: 3 });
+  pack.newRow();
+  const cameras = groupCameras(signals.filter((s) => s.path.startsWith(VISION_PREFIX))).length;
+  if (cameras > 0) pack.add('visionStatus', { cameras: [] }, { w: 24, h: Math.min(5, 1 + cameras) }, {}, 'Vision');
   pack.newRow();
   const count = mechanisms(signals).length;
   if (poses.length > 0) pack.add('match-field', { pose: [poses[0]] }, { w: 12, h: 7 });

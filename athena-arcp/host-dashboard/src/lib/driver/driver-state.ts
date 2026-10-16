@@ -5,6 +5,7 @@
 import type { ValueStore } from '../data/store';
 import { MARKER_KIND, ROBOT_PATHS, type SignalValue } from '../data/types';
 import { CURRENT_NAMES } from '../mechanisms/model';
+import { groupCameras, visionAlertText, VISION_PREFIX } from '../board/widgets/vision-status';
 
 /** Seconds of FRC match time, used for countdowns. */
 export const AUTO_SECONDS = 15;
@@ -125,6 +126,16 @@ export function deriveDriverState(store: ValueStore): DriverState {
   const phase: MatchPhase =
     markerPhase.phase === 'idle' ? phaseFromMode(mode) : markerPhase.phase;
   const since = markerPhase.phase === 'idle' ? null : markerPhase.since;
+  // A camera stuck UNSYNCED or STALE while the robot is enabled is worth a warning on the driver banner.
+  const enabled = phase === 'auto' || phase === 'teleop';
+  if (enabled) {
+    for (const camera of groupCameras(signals.filter((s) => s.path.startsWith(VISION_PREFIX)))) {
+      const state = camera.signals.State;
+      if (!state) continue;
+      const text = visionAlertText(camera.name, store.samples(state.signalId), nowMicros);
+      if (text) alerts.push({ key: `vision-${camera.name}`, level: 'warn', text });
+    }
+  }
 
   // The robot's own match clock (seconds left in the period) wins over a countdown from the markers.
   const matchTime = numberOf(valueOf(store, ROBOT_PATHS.matchTime));

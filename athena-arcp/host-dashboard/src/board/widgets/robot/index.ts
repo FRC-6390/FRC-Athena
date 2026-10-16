@@ -1,5 +1,6 @@
 import { registerWidget } from '../../../lib/board/registry';
 import type { SignalDescriptor } from '../../../lib/data/types';
+import { VISION_PREFIX } from '../../../lib/board/widgets/vision-status';
 import type { BindingSlot, SettingField, SignalMatcher, WidgetDef } from '../../../lib/board/types';
 import { controlRoot } from '../../../lib/board/widgets/robot-siblings';
 import { NUMBER } from '../core';
@@ -14,6 +15,7 @@ import SwerveWidget from './SwerveWidget.svelte';
 import MotorCardWidget from './MotorCardWidget.svelte';
 import MechanismCardWidget from './MechanismCardWidget.svelte';
 import MechanismStatusWidget from './MechanismStatusWidget.svelte';
+import VisionStatusWidget from './VisionStatusWidget.svelte';
 import ControlTunerWidget from './ControlTunerWidget.svelte';
 import PowerSplitWidget from './PowerSplitWidget.svelte';
 
@@ -211,6 +213,18 @@ export function registerRobotWidgets(): void {
       minSize: { w: 3, h: 2 },
       score: () => 5,
       component: MechanismStatusWidget
+    },
+    {
+      type: 'visionStatus', titleFrom: 'fixed',
+      name: 'Vision status',
+      category: 'Robot',
+      description: 'Every camera under athena/vision (or the ones bound) as a tile: state, reason, accepted and rejected rates, tag count and frame age. Warns when a camera has no accepted pose or its clock is not synced.',
+      slots: [{ key: 'cameras', label: 'Cameras (optional, any signal of each)', matcher: { test: (s) => s.path.startsWith(VISION_PREFIX) }, multiple: true }],
+      settings: [],
+      defaultSize: { w: 24, h: 3 },
+      minSize: { w: 6, h: 2 },
+      score: (s) => (s.path.startsWith(VISION_PREFIX) ? 50 : 0),
+      component: VisionStatusWidget
     },
     {
       type: 'controlTuner', titleFrom: 'control',
