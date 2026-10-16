@@ -820,27 +820,9 @@ public final class MechanismScheduler {
         if (action instanceof PathAction path) {
             PathRuntime runtime = pathRuntimes.get(path);
             if (runtime != null) runtime.ownership(path).forEach(value -> collectOwnedResource(value, resources));
-            path.markers().values().forEach(marker -> collectPathResources(marker, resources));
-        } else if (action instanceof Actions.Parallel parallel) {
-            parallel.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Race race) {
-            race.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Deadline deadline) {
-            deadline.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Sequence sequence) {
-            sequence.steps().forEach(step -> collectPathResources(step.action(), resources));
-            collectPathResources(sequence.next(), resources);
-        } else if (action instanceof Actions.Cycle cycle) {
-            cycle.steps().forEach(step -> collectPathResources(step.action(), resources));
-        } else if (action instanceof Actions.Choice choice) {
-            collectPathResources(choice.active(), resources);
-            collectPathResources(choice.inactive(), resources);
-        } else if (action instanceof Actions.WhenBranch branch) {
-            collectPathResources(branch.active(), resources);
-        } else if (action instanceof Actions.Timeout timeout) {
-            collectPathResources(timeout.action(), resources);
-        } else if (action instanceof Actions.WithinTolerance within) {
-            collectPathResources(within.action(), resources);
+        }
+        for (Action.Child child : action.children()) {
+            collectPathResources(child.action(), resources);
         }
     }
 

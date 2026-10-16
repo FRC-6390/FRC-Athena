@@ -145,6 +145,96 @@ class LeaseReservationTest {
         assertEquals(0.0, hardware.motor(INTAKE).percent, 1.0e-9);
     }
 
+    /**
+     * A restrictive root reserves every path it can reach. A concurrent request for the drive motor must
+     * be held while a drive path runs, whether the path is a plain step or sits under then(...) and
+     * until(...).then(...).
+     */
+    @Test
+    void pathInAStepIsReservedForConcurrentRequests() {
+        boolean[] done = {false};
+        Action auto = Actions.sequence()
+                .run(intakePath("IntakeA"))
+                .run(drivePath("DriveStep"))
+                .timeout(30.0);
+        assertConcurrentDriveHeldWhileDrivePathRuns(auto, 0.5, () -> done[0] = true);
+    }
+
+    @Test
+    void pathUnderThenAndUntilIsReservedForConcurrentRequests() {
+        boolean[] done = {false};
+        Action auto = Actions.sequence()
+                .run(intakePath("IntakeA"))
+                .then(intakePath("IntakeB"))
+                .then(drivePath("DriveThen").until(() -> done[0]).then(intakePath("IntakeY")))
+                .timeout(30.0);
+        assertConcurrentDriveHeldWhileDrivePathRuns(auto, 1000.0, () -> done[0] = true);
+    }
+
+    @Test
+    void pathUnderTwoThenStagesIsReservedForConcurrentRequests() {
+        boolean[] done = {false};
+        Action auto = Actions.sequence()
+                .run(intakePath("IntakeA"))
+                .then(intakePath("IntakeB"))
+                .then(intakePath("IntakeC"))
+                .then(drivePath("DriveLate").until(() -> done[0]))
+                .timeout(30.0);
+        assertConcurrentDriveHeldWhileDrivePathRuns(auto, 1000.0, () -> done[0] = true);
+    }
+
+    private static PathAction intakePath(String name) {
+        return new PathAction("test", name);
+    }
+
+    private static PathAction drivePath(String name) {
+        return new PathAction("test", name);
+    }
+
+    private static void assertConcurrentDriveHeldWhileDrivePathRuns(
+            Action auto, double driveSeconds, Runnable releaseDrive) {
+        RecordingContext hardware = new RecordingContext();
+        PlainRobot robot = new PlainRobot();
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
+        for (PathAction path : PathIntrospector.inspect(auto)) {
+            if (path.name().startsWith("Drive")) {
+                scheduler.path(path, new OwnedPath(driveSeconds, List.of(DRIVE), DRIVE.percent(0.7)));
+            } else {
+                scheduler.path(path, new OwnedPath(0.1, List.of(INTAKE), INTAKE.percent(0.5)));
+            }
+            scheduler.declarationOwner(path, robot);
+        }
+        Action concurrent = DRIVE.percent(-0.3);
+
+        scheduler.teleopPeriodic(0.0, 0.02);
+        scheduler.request(auto.interruptible(Interrupt.AFTER_COMPLETE));
+        double now = 0.02;
+        for (int cycle = 0; cycle < 100 && hardware.motor(DRIVE).percent != 0.7; cycle++, now += 0.02) {
+            scheduler.autoPeriodic(now, 0.02);
+        }
+        assertEquals(0.7, hardware.motor(DRIVE).percent, 1.0e-9, "drive path must be running");
+
+        scheduler.request(concurrent);
+        for (int cycle = 0; cycle < 5; cycle++, now += 0.02) scheduler.autoPeriodic(now, 0.02);
+        assertFalse(hardware.motor(DRIVE).history.contains(-0.3),
+                "a concurrent drive request ran over a drive path reached through then(...)");
+
+        releaseDrive.run();
+        for (int cycle = 0; cycle < 200 && !hardware.motor(DRIVE).history.contains(-0.3); cycle++, now += 0.02) {
+            scheduler.autoPeriodic(now, 0.02);
+        }
+        assertTrue(hardware.motor(DRIVE).history.contains(-0.3),
+                "the held drive request must run once the auto completes");
+    }
+
+    /** Declares the motors so requests against them resolve to this mechanism. */
+    private static final class PlainRobot implements Mechanism {
+        @SuppressWarnings("unused")
+        private final MotorDevice drive = DRIVE;
+        @SuppressWarnings("unused")
+        private final MotorDevice intake = INTAKE;
+    }
+
     private static final class DriveRobot implements Mechanism {
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
