@@ -553,7 +553,7 @@
   }
 
   function stopReplay(statusText = 'replay stopped') {
-    if (replayState?.timerId !== null) {
+    if (replayState && replayState.timerId !== null) {
       window.clearInterval(replayState.timerId);
     }
     replayState = null;
@@ -618,7 +618,7 @@
       return;
     }
 
-    if (replayState?.timerId !== null) {
+    if (replayState && replayState.timerId !== null) {
       window.clearInterval(replayState.timerId);
     }
 
@@ -728,8 +728,8 @@
       id: raw.id,
       name: raw.name,
       source: raw.source,
-      startedAtEpochMs: Number.isFinite(raw.startedAtEpochMs) ? Math.floor(raw.startedAtEpochMs) : Date.now(),
-      durationMs: Number.isFinite(raw.durationMs) ? Math.max(0, Math.round(raw.durationMs)) : 0,
+      startedAtEpochMs: Number.isFinite(raw.startedAtEpochMs) ? Math.floor(raw.startedAtEpochMs ?? 0) : Date.now(),
+      durationMs: Number.isFinite(raw.durationMs) ? Math.max(0, Math.round(raw.durationMs ?? 0)) : 0,
       signals,
       frames
     };
@@ -1793,7 +1793,7 @@
       void refreshWindowModes();
     };
     let refreshCancelled = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshTimer: number | null = null;
     const refreshDelayMs = () => {
       if (!connected) return REFRESH_MS_DISCONNECTED;
       if (railSection !== 'dashboards') return REFRESH_MS_OTHER;
@@ -1865,7 +1865,7 @@
         unlistenRemoteLogStatus();
       }
       void stopRemoteLogStreaming({ silent: true });
-      if (replayState?.timerId !== null) {
+      if (replayState && replayState.timerId !== null) {
         window.clearInterval(replayState.timerId);
       }
       window.removeEventListener('keydown', onGlobalKeyDown);

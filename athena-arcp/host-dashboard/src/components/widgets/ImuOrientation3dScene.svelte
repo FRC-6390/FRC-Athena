@@ -48,7 +48,7 @@
   }
 
   function disposeSceneGraph(root: THREE.Object3D) {
-    root.traverse((node) => {
+    root.traverse((node: THREE.Object3D) => {
       const mesh = node as THREE.Mesh;
       if (mesh.geometry) {
         mesh.geometry.dispose();
@@ -162,7 +162,7 @@
       if (renderer) {
         renderer.dispose();
         const canvas = renderer.domElement;
-        if (canvas.parentElement === hostEl) {
+        if (hostEl && canvas.parentElement === hostEl) {
           hostEl.removeChild(canvas);
         }
       }

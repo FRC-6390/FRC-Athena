@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { SignalRow } from '../../lib/arcp';
   import type { WidgetConfigRecord } from '../../lib/dashboard';
+  import type { FullAutoFill } from 'svelte/elements';
   import { readInputConfig } from '../../lib/widget-config';
 
   type Props = {
@@ -61,7 +62,7 @@
     max={config.max || undefined}
     step={config.step || undefined}
     pattern={config.pattern || undefined}
-    autocomplete={config.autocomplete || undefined}
+    autocomplete={(config.autocomplete || undefined) as FullAutoFill | undefined}
     spellcheck={config.spellcheck}
     oninput={(event) => onInput((event.currentTarget as HTMLInputElement).value)}
     onkeydown={onKeydown}
