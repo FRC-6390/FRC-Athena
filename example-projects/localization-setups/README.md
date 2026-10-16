@@ -91,3 +91,12 @@ There is no `configure()` or manual registration method. Athena discovers the me
 ./gradlew build
 ./gradlew simulateJava
 ```
+
+Headless simulation (no GUI; the WebSocket sim server listens on port 3310):
+
+```text
+./gradlew simulateJava -PathenaHeadless
+```
+
+The simulation sees the tags set in `Robot`'s constructor through `simulationVisionField(...)`, so the simulated cameras
+produce vision frames.

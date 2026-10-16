@@ -15,7 +15,10 @@ import ca.frc6390.athena.mechanism.core.LifecyclePhase;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
+import ca.frc6390.athena.vision.runtime.VisionSimulationField;
+import ca.frc6390.athena.vision.runtime.VisionSimulationTarget;
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.function.DoubleSupplier;
 import org.junit.jupiter.api.Test;
@@ -62,6 +65,15 @@ class AthenaRobotTest {
     void createsSimulationRuntimeOnlyWhenWpilibReportsSimulation() {
         assertNotNull(AthenaRobot.createRuntime(true).simulationSession());
         assertNull(AthenaRobot.createRuntime(false).simulationSession());
+    }
+
+    @Test
+    void simulationRuntimeUsesTheSelectedVisionField() {
+        VisionSimulationField field = VisionSimulationField.of(VisionSimulationTarget.aprilTag(7, 3.0, 1.0, 1.3, 0.0));
+
+        assertEquals(field, AthenaRobot.createRuntime(true, new ConcurrentHashMap<>(), field)
+                .simulationSession().visionField());
+        assertEquals(VisionSimulationField.EMPTY, AthenaRobot.createRuntime(true).simulationSession().visionField());
     }
 
     @Test

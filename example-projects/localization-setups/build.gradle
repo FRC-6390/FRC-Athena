@@ -56,8 +56,13 @@ dependencies {
     simulationRelease wpi.sim.enableRelease()
 }
 
-wpi.sim.addGui().defaultEnabled = true
+// Headless sim: ./gradlew simulateJava -PathenaHeadless (no GUI extension is loaded). The WebSocket sim
+// server (ws://127.0.0.1:3310/wpilibws; 3310 because 3300 is a common dev-server port) lets scripts enable
+// the robot instead.
+wpi.sim.addGui().defaultEnabled = !project.hasProperty('athenaHeadless')
 wpi.sim.addDriverstation()
+wpi.sim.addWebsocketsServer().defaultEnabled = project.hasProperty('athenaHeadless')
+wpi.sim.envVar('HALSIMWS_PORT', '3310')
 
 jar {
     from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
