@@ -199,6 +199,18 @@ public final class Actions {
         return doOnce(action);
     }
 
+    /**
+     * Starts a lifecycle Action builder for external imperative behaviour: {@code onStart}, a per-cycle
+     * {@code execute}, an {@code until} finish condition, and an {@code onEnd(interrupted)} callback. See
+     * {@link LifecycleAction}.
+     *
+     * @param name diagnostic name
+     * @return lifecycle Action builder
+     */
+    public static LifecycleAction.Builder lifecycle(String name) {
+        return LifecycleAction.builder(name);
+    }
+
     public static Action run(ActionBinding action) {
         return doOnce(action);
     }
@@ -401,6 +413,7 @@ public final class Actions {
                 || action instanceof Fault || action instanceof Abort) {
             return true;
         }
+        if (action instanceof LifecycleAction lifecycle) return lifecycle.finishes();
         if (action instanceof Interruptible interruptible) return bounded(interruptible.action());
         if (action instanceof WithinTolerance within) return bounded(within.action());
         if (action instanceof Conditional conditional) {
@@ -1334,6 +1347,9 @@ public final class Actions {
                 || action instanceof Timeout || action instanceof WithinTolerance
                 || action instanceof Conditional || action instanceof Action.Conditional) {
             return Completion.POSSIBLE;
+        }
+        if (action instanceof LifecycleAction lifecycle) {
+            return lifecycle.finishes() ? Completion.POSSIBLE : Completion.NEVER;
         }
         if (action instanceof Sequence sequence) {
             if (Double.isFinite(sequence.timeoutSeconds())) return Completion.POSSIBLE;

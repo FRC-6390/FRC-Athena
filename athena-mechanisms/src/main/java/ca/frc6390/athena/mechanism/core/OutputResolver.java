@@ -117,6 +117,7 @@ final class OutputResolver {
         if (action instanceof Actions.RuntimeAction || action instanceof Actions.DoOnce
                 || action instanceof Actions.EncoderSetPosition
                 || action instanceof Actions.WaitSeconds || action instanceof Actions.WaitUntil
+                || action instanceof LifecycleAction
                 || action instanceof PathAction) {
             return;
         }
