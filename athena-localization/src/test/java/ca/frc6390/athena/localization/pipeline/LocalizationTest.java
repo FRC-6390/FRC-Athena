@@ -345,6 +345,24 @@ class LocalizationTest {
         assertTrue(age.refresh(null, 1.5, 0.02).measurements().isEmpty());
     }
 
+    @Test
+    void latencyAndAgeFiltersRejectFramesFromTheFuture() {
+        // Captured at t=40 while the robot clock reads 1.0: the camera clock is not synced yet.
+        Sample unsynced = sample(1.0, 2.0, 0.0, 40.0, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Sample slightSkew = sample(1.0, 2.0, 0.0, 1.05, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Localization latency = Localizations.filter()
+                .input(signal(unsynced, slightSkew))
+                .filter(VisionFilters.maxLatencySeconds(0.1));
+        Localization age = Localizations.filter()
+                .input(signal(unsynced, slightSkew))
+                .filter(VisionFilters.maxAgeSeconds(0.1));
+
+        assertEquals(List.of(slightSkew), latency.refresh(null, 1.0, 0.02).measurements());
+        assertEquals(List.of(slightSkew), age.refresh(null, 1.0, 0.02).measurements());
+    }
+
     private static PoseSignal signal(Measurement... measurements) {
         List<Measurement> values = List.of(measurements);
         return () -> values;

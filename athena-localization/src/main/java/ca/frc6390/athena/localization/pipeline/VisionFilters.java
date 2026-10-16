@@ -14,7 +14,9 @@ public final class VisionFilters {
      * <p>Total latency is the larger of the reported pipeline latency and the frame age
      * ({@code now - capture timestamp}) when the localization is refreshed by the runtime. Frame age
      * also covers transport delay and frames that a camera keeps re-reporting while no new result
-     * arrives. When no runtime timestamp is available only the reported latency is checked.</p>
+     * arrives. Frames captured in the future (more than 0.1 s ahead of the runtime timestamp) are
+     * rejected too: they come from a camera whose clock is not synced to the robot yet. When no runtime
+     * timestamp is available only the reported latency is checked.</p>
      *
      * @param seconds maximum latency in seconds
      * @return filter
@@ -22,13 +24,13 @@ public final class VisionFilters {
     public static LocalizationFilter maxLatencySeconds(double seconds) {
         double maximum = nonNegative(seconds, "Maximum latency");
         return (localization, measurement, pose) -> measurement == null
-                || (measurement.latencySeconds() <= maximum
-                        && !(ageSeconds(localization, measurement) > maximum));
+                || (measurement.latencySeconds() <= maximum && ageWithin(ageSeconds(localization, measurement), maximum));
     }
 
     /**
      * Rejects measurements whose capture timestamp is older than a limit relative to the
-     * runtime cycle timestamp. Measurements pass when no runtime timestamp is available.
+     * runtime cycle timestamp, or captured more than 0.1 s in the future (camera clock not synced yet).
+     * Measurements pass when no runtime timestamp is available.
      *
      * @param seconds maximum frame age in seconds
      * @return filter
@@ -36,7 +38,18 @@ public final class VisionFilters {
     public static LocalizationFilter maxAgeSeconds(double seconds) {
         double maximum = nonNegative(seconds, "Maximum age");
         return (localization, measurement, pose) -> measurement == null
-                || !(ageSeconds(localization, measurement) > maximum);
+                || ageWithin(ageSeconds(localization, measurement), maximum);
+    }
+
+    /** Clock skew allowed before a frame counts as coming from the future. */
+    private static final double FUTURE_TOLERANCE_SECONDS = 0.1;
+
+    /**
+     * True when the frame age is unknown (NaN), or between "slightly in the future" and the maximum. A
+     * clearly negative age means the camera clock is not synced to the robot yet, so the frame is rejected.
+     */
+    private static boolean ageWithin(double age, double maximum) {
+        return Double.isNaN(age) || (age >= -FUTURE_TOLERANCE_SECONDS && age <= maximum);
     }
 
     private static double ageSeconds(Localization localization, Measurement measurement) {
