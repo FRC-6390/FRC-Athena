@@ -34,6 +34,32 @@ public final class Actions {
     private Actions() {
     }
 
+    /** Builds one labelled child, or null when the child is absent. */
+    static Action.Child child(String role, Action action) {
+        return action == null ? null : new Action.Child(role, action);
+    }
+
+    /** Collects the non-null children in order. */
+    static List<Action.Child> childrenOf(Action.Child... children) {
+        List<Action.Child> out = new ArrayList<>(children.length);
+        for (Action.Child child : children) {
+            if (child != null) out.add(child);
+        }
+        return List.copyOf(out);
+    }
+
+    /** Adds every action of a list under one role. */
+    static void addChildren(List<Action.Child> out, String role, List<? extends Action> actions) {
+        for (Action action : actions) {
+            out.add(new Action.Child(role, action));
+        }
+    }
+
+    /** Label suffix describing a control's effort limit, empty when it has none. */
+    static String effortLabel(EffortRequest effort) {
+        return effort == null || !effort.limited() ? "" : " effort " + effort.currentLimitAmps() + "A";
+    }
+
     public static Action neutral() {
         return NEUTRAL;
     }
@@ -91,7 +117,7 @@ public final class Actions {
     }
 
     static Action then(DeviceAction action, DeviceAction next) {
-        return new Action.Then(mechanismAction(action), mechanismAction(next));
+        return new Then(mechanismAction(action), mechanismAction(next));
     }
 
     static Action timeout(DeviceAction action, double seconds) {
@@ -329,11 +355,8 @@ public final class Actions {
 
     public static Action then(Action action, Action next) {
         Objects.requireNonNull(next, "next");
-        if (action instanceof Action.Conditional conditional) {
-            return new Action.Conditional(conditional.action(), conditional.condition(), next);
-        }
         if (action instanceof Conditional conditional) {
-            return new Conditional(conditional.action(), conditional.condition(), next);
+            return conditional.then(next);
         }
         if (action instanceof Sequence sequence) {
             return sequence.then(next);
@@ -347,6 +370,17 @@ public final class Actions {
      * Nested use is rejected when the Action tree is compiled.
      */
     public record Interruptible(Action action, Interrupt interrupt) implements Action {
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("body", action));
+        }
+
+        @Override
+        public String describe() {
+            return "INTERRUPT " + interrupt;
+        }
+
         public Interruptible {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(interrupt, "interrupt");
@@ -406,11 +440,7 @@ public final class Actions {
         if (action instanceof Conditional conditional) {
             return bounded(conditional.action()) && bounded(conditional.next());
         }
-        if (action instanceof Action.Conditional conditional) {
-            return bounded(conditional.action()) && bounded(conditional.next());
-        }
         if (action instanceof Then then) return bounded(then.action()) && bounded(then.next());
-        if (action instanceof Action.Then then) return bounded(then.action()) && bounded(then.next());
         if (action instanceof Sequence sequence) {
             if (Double.isFinite(sequence.timeoutSeconds())) return true;
             for (SequenceStep step : sequence.steps()) {
@@ -600,6 +630,11 @@ public final class Actions {
     }
 
     public record ControlPercent(ControlBinding<?> control, double percent, EffortRequest effort) implements Action, Output.Percent, EffortCarrier {
+        @Override
+        public String describe() {
+            return "PERCENT " + percent + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: the Action sets no effort limit. */
         public ControlPercent(ControlBinding<?> control, double percent) {
             this(control, percent, EffortRequest.NONE);
@@ -614,6 +649,11 @@ public final class Actions {
     }
 
     public record DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier, EffortRequest effort) implements Action, Output.Percent, EffortCarrier {
+        @Override
+        public String describe() {
+            return "PERCENT (dynamic)" + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: the Action sets no effort limit. */
         public DynamicControlPercent(ControlBinding<?> control, DoubleSupplier percentSupplier) {
             this(control, percentSupplier, EffortRequest.NONE);
@@ -633,6 +673,11 @@ public final class Actions {
     }
 
     public record ControlVoltage(ControlBinding<?> control, double volts, EffortRequest effort) implements Action, Output.Voltage, EffortCarrier {
+        @Override
+        public String describe() {
+            return "VOLTAGE " + volts + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: the Action sets no effort limit. */
         public ControlVoltage(ControlBinding<?> control, double volts) {
             this(control, volts, EffortRequest.NONE);
@@ -647,6 +692,11 @@ public final class Actions {
     }
 
     public record DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier, EffortRequest effort) implements Action, Output.Voltage, EffortCarrier {
+        @Override
+        public String describe() {
+            return "VOLTAGE (dynamic)" + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: the Action sets no effort limit. */
         public DynamicControlVoltage(ControlBinding<?> control, DoubleSupplier voltsSupplier) {
             this(control, voltsSupplier, EffortRequest.NONE);
@@ -692,6 +742,11 @@ public final class Actions {
 
     public record ControlPosition(ControlBinding<?> control, double position, MotionPolicy policy, EffortRequest effort)
             implements Action, Output.Position, EffortCarrier {
+        @Override
+        public String describe() {
+            return "POSITION " + position + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public ControlPosition(ControlBinding<?> control, double position) {
             this(control, position, MotionPolicy.INHERIT, EffortRequest.NONE);
@@ -716,6 +771,11 @@ public final class Actions {
 
     public record DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier, MotionPolicy policy, EffortRequest effort)
             implements Action, Output.Position, EffortCarrier {
+        @Override
+        public String describe() {
+            return "POSITION (dynamic)" + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public DynamicControlPosition(ControlBinding<?> control, DoubleSupplier positionSupplier) {
             this(control, positionSupplier, MotionPolicy.INHERIT, EffortRequest.NONE);
@@ -745,6 +805,11 @@ public final class Actions {
 
     public record ControlVelocity(ControlBinding<?> control, double velocity, MotionPolicy policy, EffortRequest effort)
             implements Action, Output.Velocity, EffortCarrier {
+        @Override
+        public String describe() {
+            return "VELOCITY " + velocity + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public ControlVelocity(ControlBinding<?> control, double velocity) {
             this(control, velocity, MotionPolicy.INHERIT, EffortRequest.NONE);
@@ -769,6 +834,11 @@ public final class Actions {
 
     public record DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier, MotionPolicy policy, EffortRequest effort)
             implements Action, Output.Velocity, EffortCarrier {
+        @Override
+        public String describe() {
+            return "VELOCITY (dynamic)" + effortLabel(effort);
+        }
+
         /** Source-compatible constructor: inherited motion policy and no effort limit. */
         public DynamicControlVelocity(ControlBinding<?> control, DoubleSupplier velocitySupplier) {
             this(control, velocitySupplier, MotionPolicy.INHERIT, EffortRequest.NONE);
@@ -831,6 +901,11 @@ public final class Actions {
             RobotVelocityPool.Channel channel,
             Supplier<RobotVelocity> velocity,
             Action driveAction) implements Action {
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("drive", driveAction));
+        }
+
         public VelocityContribution {
             Objects.requireNonNull(channel, "channel");
             Objects.requireNonNull(velocity, "velocity");
@@ -880,6 +955,12 @@ public final class Actions {
     }
 
     public record WaitSeconds(double seconds) implements Action {
+
+        @Override
+        public String describe() {
+            return "WAIT " + seconds + "s";
+        }
+
         public boolean complete(MechanismContext ctx) {
             return hasElapsed(ctx.timeInStateSeconds(), seconds);
         }
@@ -896,6 +977,17 @@ public final class Actions {
     }
 
     public record Timeout(Action action, double seconds) implements Action {
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("body", action));
+        }
+
+        @Override
+        public String describe() {
+            return "TIMEOUT " + seconds + "s";
+        }
+
         public Timeout {
             Objects.requireNonNull(action, "action");
         }
@@ -906,6 +998,17 @@ public final class Actions {
     }
 
     public record Choice(ActionCondition condition, Action active, Action inactive) implements Action {
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("true", active), child("false", inactive));
+        }
+
+        @Override
+        public String describe() {
+            return "CONDITIONAL";
+        }
+
         public Choice {
             Objects.requireNonNull(condition, "condition");
             Objects.requireNonNull(active, "active");
@@ -918,6 +1021,17 @@ public final class Actions {
     }
 
     public record WhenBranch(ActionCondition condition, Action active) implements Action {
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("true", active));
+        }
+
+        @Override
+        public String describe() {
+            return "CONDITIONAL";
+        }
+
         public WhenBranch {
             Objects.requireNonNull(condition, "condition");
             Objects.requireNonNull(active, "active");
@@ -933,18 +1047,58 @@ public final class Actions {
     }
 
     public record Parallel(List<Action> Actions) implements Action {
+
+        @Override
+        public List<Child> children() {
+            List<Child> out = new ArrayList<>();
+            addChildren(out, "branch", Actions());
+            return List.copyOf(out);
+        }
+
+        @Override
+        public String describe() {
+            return "PARALLEL";
+        }
+
         public Parallel {
             Actions = copyStates(Actions);
         }
     }
 
     public record Race(List<Action> Actions) implements Action {
+
+        @Override
+        public List<Child> children() {
+            List<Child> out = new ArrayList<>();
+            addChildren(out, "branch", Actions());
+            return List.copyOf(out);
+        }
+
+        @Override
+        public String describe() {
+            return "RACE";
+        }
+
         public Race {
             Actions = copyStates(Actions);
         }
     }
 
     public static final class Deadline implements Action {
+
+        @Override
+        public List<Child> children() {
+            List<Child> out = new ArrayList<>();
+            out.add(new Child("primary", primary));
+            addChildren(out, "with", others);
+            return List.copyOf(out);
+        }
+
+        @Override
+        public String describe() {
+            return "DEADLINE";
+        }
+
         private final Action primary;
         private final List<Action> others;
         private final List<Action> actions;
@@ -997,10 +1151,30 @@ public final class Actions {
         }
     }
 
+    /**
+     * Runs {@code action} until {@code condition} holds, then {@code next} when one is chained. A second
+     * chained continuation sequences after the first instead of replacing it.
+     */
     public record Conditional(Action action, ActionCondition condition, Action next) implements Action {
         public Conditional {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(condition, "condition");
+        }
+
+        @Override
+        public Action then(Action continuation) {
+            Objects.requireNonNull(continuation, "next");
+            return next == null ? new Conditional(action, condition, continuation) : new Then(this, continuation);
+        }
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("body", action), child("then", next));
+        }
+
+        @Override
+        public String describe() {
+            return "UNTIL";
         }
     }
 
@@ -1017,6 +1191,19 @@ public final class Actions {
      */
     public record WithinTolerance(Action action, double tolerance, double settleSeconds, double maxVelocity)
             implements Action {
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("body", action));
+        }
+
+        @Override
+        public String describe() {
+            StringBuilder label = new StringBuilder("WITHIN ").append(tolerance);
+            if (settleSeconds > 0.0) label.append(" settled ").append(settleSeconds).append("s");
+            if (Double.isFinite(maxVelocity)) label.append(" maxVelocity ").append(maxVelocity);
+            return label.toString();
+        }
+
         public WithinTolerance(Action action, double tolerance) {
             this(action, tolerance, 0.0, Double.POSITIVE_INFINITY);
         }
@@ -1043,14 +1230,42 @@ public final class Actions {
         }
     }
 
+    /** Runs {@code action} to completion, then {@code next}. Pure sequencing glue: no label of its own. */
     public record Then(Action action, Action next) implements Action {
         public Then {
             Objects.requireNonNull(action, "action");
             Objects.requireNonNull(next, "next");
         }
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("first", action), child("then", next));
+        }
+
+        @Override
+        public String describe() {
+            return "";
+        }
     }
 
     public static final class Sequence implements Action {
+
+        @Override
+        public List<Child> children() {
+            List<Child> out = new ArrayList<>();
+            for (SequenceStep step : steps) {
+                out.add(new Child("step", step.action()));
+            }
+            Child continuation = child("then", next);
+            if (continuation != null) out.add(continuation);
+            return List.copyOf(out);
+        }
+
+        @Override
+        public String describe() {
+            return Double.isFinite(timeoutSeconds) ? "SEQUENCE TIMEOUT " + timeoutSeconds + "s" : "SEQUENCE";
+        }
+
         private final List<SequenceStep> steps = new ArrayList<>();
         private final List<SequenceStep> stepView = Collections.unmodifiableList(steps);
         private final List<Action> started = new ArrayList<>();
@@ -1203,6 +1418,21 @@ public final class Actions {
     }
 
     public static final class Cycle implements Action {
+
+        @Override
+        public List<Child> children() {
+            List<Child> out = new ArrayList<>();
+            for (CycleStep step : steps) {
+                out.add(new Child("step", step.action()));
+            }
+            return List.copyOf(out);
+        }
+
+        @Override
+        public String describe() {
+            return "CYCLE";
+        }
+
         private final List<CycleStep> steps = new ArrayList<>();
         private final List<CycleStep> stepView = Collections.unmodifiableList(steps);
 
@@ -1264,39 +1494,11 @@ public final class Actions {
         rejectNestedRootOnly(action);
         if (action instanceof Sequence sequence) {
             validateSequence(sequence);
-            for (SequenceStep step : sequence.steps()) validate(step.action(), visited);
-            validate(sequence.next(), visited);
-        } else if (action instanceof Parallel parallel) {
-            parallel.Actions().forEach(child -> validate(child, visited));
-        } else if (action instanceof Race race) {
-            race.Actions().forEach(child -> validate(child, visited));
-        } else if (action instanceof Deadline deadline) {
-            deadline.Actions().forEach(child -> validate(child, visited));
-        } else if (action instanceof Cycle cycle) {
-            cycle.steps().forEach(step -> validate(step.action(), visited));
-        } else if (action instanceof Timeout timeout) {
-            validate(timeout.action(), visited);
-        } else if (action instanceof WithinTolerance within) {
-            validate(within.action(), visited);
-        } else if (action instanceof Conditional conditional) {
-            validate(conditional.action(), visited);
-            validate(conditional.next(), visited);
-        } else if (action instanceof Action.Conditional conditional) {
-            validate(conditional.action(), visited);
-            validate(conditional.next(), visited);
         } else if (action instanceof Then then) {
             validateThenSource(then.action());
-            validate(then.action(), visited);
-            validate(then.next(), visited);
-        } else if (action instanceof Action.Then then) {
-            validateThenSource(then.action());
-            validate(then.action(), visited);
-            validate(then.next(), visited);
-        } else if (action instanceof Choice choice) {
-            validate(choice.active(), visited);
-            validate(choice.inactive(), visited);
-        } else if (action instanceof WhenBranch branch) {
-            validate(branch.active(), visited);
+        }
+        for (Action.Child child : action.children()) {
+            validate(child.action(), visited);
         }
     }
 
@@ -1332,7 +1534,7 @@ public final class Actions {
                 || action instanceof EncoderSetPosition || action instanceof ImuYawMutation
                 || action instanceof WaitSeconds || action instanceof WaitUntil
                 || action instanceof Timeout || action instanceof WithinTolerance
-                || action instanceof Conditional || action instanceof Action.Conditional) {
+                || action instanceof Conditional) {
             return Completion.POSSIBLE;
         }
         if (action instanceof Sequence sequence) {
@@ -1374,9 +1576,6 @@ public final class Actions {
             return unknown ? Completion.UNKNOWN : Completion.NEVER;
         }
         if (action instanceof Then then) {
-            return both(completion(then.action(), visited), completion(then.next(), visited));
-        }
-        if (action instanceof Action.Then then) {
             return both(completion(then.action(), visited), completion(then.next(), visited));
         }
         if (action instanceof VelocityContribution contribution) {

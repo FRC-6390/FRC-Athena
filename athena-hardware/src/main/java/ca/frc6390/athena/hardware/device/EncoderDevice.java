@@ -10,6 +10,7 @@ import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.runtime.DeviceActionFactories;
 import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.runtime.RuntimeScope;
@@ -350,7 +351,7 @@ public record EncoderDevice(
         if (!Double.isFinite(position)) {
             throw new IllegalArgumentException("Encoder position must be finite.");
         }
-        return action("setPosition", new Class<?>[] {EncoderDevice.class, double.class}, this, position);
+        return DeviceActionFactories.get().encoderSetPosition(this, position);
     }
 
     /**
@@ -443,20 +444,6 @@ public record EncoderDevice(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
-    }
-
-    @SuppressWarnings("unchecked")
-    private static DeviceAction action(String method, Class<?>[] parameterTypes, Object... args) {
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod(method, parameterTypes);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (DeviceAction) factory.invoke(null, args);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("Encoder action factories require athena-mechanisms on the classpath.", exception);
-        }
     }
 
     public sealed interface EncoderSource

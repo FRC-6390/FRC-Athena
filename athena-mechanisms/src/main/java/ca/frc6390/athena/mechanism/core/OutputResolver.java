@@ -55,15 +55,7 @@ final class OutputResolver {
             resolveState(conditional.action(), context, outputs);
             return;
         }
-        if (action instanceof Action.Conditional conditional) {
-            resolveState(conditional.action(), context, outputs);
-            return;
-        }
         if (action instanceof Actions.Then then) {
-            resolveState(then.action(), context, outputs);
-            return;
-        }
-        if (action instanceof Action.Then then) {
             resolveState(then.action(), context, outputs);
             return;
         }

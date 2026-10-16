@@ -2,6 +2,7 @@ package ca.frc6390.athena.hardware.signal;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.runtime.DeviceActionFactories;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.DoubleSupplier;
@@ -46,31 +47,13 @@ public final class Imus {
         if (!Double.isFinite(yawDegrees)) {
             throw new IllegalArgumentException("IMU yaw must be finite.");
         }
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod("setYaw", ImuSource.class, double.class);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (T) factory.invoke(null, source, yawDegrees);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("IMU actions require athena-mechanisms on the classpath.", exception);
-        }
+        return (T) DeviceActionFactories.get().imuSetYaw(source, yawDegrees);
     }
 
     @SuppressWarnings("unchecked")
     static <T extends DeviceAction> T setYawAction(ImuSource source, DoubleSupplier yawDegrees) {
         Objects.requireNonNull(yawDegrees, "yawDegrees");
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod("setYaw", ImuSource.class, DoubleSupplier.class);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (T) factory.invoke(null, source, yawDegrees);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("IMU actions require athena-mechanisms on the classpath.", exception);
-        }
+        return (T) DeviceActionFactories.get().imuSetYaw(source, yawDegrees);
     }
 
     private abstract static class DerivedSource implements ImuSource {

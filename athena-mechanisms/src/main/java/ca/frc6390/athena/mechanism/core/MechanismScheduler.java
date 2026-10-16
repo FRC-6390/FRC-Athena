@@ -696,13 +696,7 @@ public final class MechanismScheduler {
         } else if (action instanceof Actions.Conditional conditional) {
             validateConcurrentResourceConflicts(conditional.action(), path + ".conditional.action", visited);
             validateConcurrentResourceConflicts(conditional.next(), path + ".conditional.next", visited);
-        } else if (action instanceof Action.Conditional conditional) {
-            validateConcurrentResourceConflicts(conditional.action(), path + ".conditional.action", visited);
-            validateConcurrentResourceConflicts(conditional.next(), path + ".conditional.next", visited);
         } else if (action instanceof Actions.Then then) {
-            validateConcurrentResourceConflicts(then.action(), path + ".then.action", visited);
-            validateConcurrentResourceConflicts(then.next(), path + ".then.next", visited);
-        } else if (action instanceof Action.Then then) {
             validateConcurrentResourceConflicts(then.action(), path + ".then.action", visited);
             validateConcurrentResourceConflicts(then.next(), path + ".then.next", visited);
         } else if (action instanceof PathAction pathAction) {
@@ -769,39 +763,8 @@ public final class MechanismScheduler {
             return runtime == null || runtime.ownership(path).isEmpty();
         }
         if (action instanceof Actions.Computed) return false;
-        if (action instanceof Actions.Parallel parallel) {
-            return parallel.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
-        }
-        if (action instanceof Actions.Race race) {
-            return race.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
-        }
-        if (action instanceof Actions.Deadline deadline) {
-            return deadline.Actions().stream().anyMatch(this::containsOpaqueRuntimeGraph);
-        }
-        if (action instanceof Actions.Sequence sequence) {
-            return sequence.steps().stream().anyMatch(step -> containsOpaqueRuntimeGraph(step.action()))
-                    || containsOpaqueRuntimeGraph(sequence.next());
-        }
-        if (action instanceof Actions.Cycle cycle) {
-            return cycle.steps().stream().anyMatch(step -> containsOpaqueRuntimeGraph(step.action()));
-        }
-        if (action instanceof Actions.Choice choice) {
-            return containsOpaqueRuntimeGraph(choice.active()) || containsOpaqueRuntimeGraph(choice.inactive());
-        }
-        if (action instanceof Actions.WhenBranch branch) return containsOpaqueRuntimeGraph(branch.active());
-        if (action instanceof Actions.Timeout timeout) return containsOpaqueRuntimeGraph(timeout.action());
-        if (action instanceof Actions.WithinTolerance within) return containsOpaqueRuntimeGraph(within.action());
-        if (action instanceof Actions.Conditional conditional) {
-            return containsOpaqueRuntimeGraph(conditional.action()) || containsOpaqueRuntimeGraph(conditional.next());
-        }
-        if (action instanceof Action.Conditional conditional) {
-            return containsOpaqueRuntimeGraph(conditional.action()) || containsOpaqueRuntimeGraph(conditional.next());
-        }
-        if (action instanceof Actions.Then then) {
-            return containsOpaqueRuntimeGraph(then.action()) || containsOpaqueRuntimeGraph(then.next());
-        }
-        if (action instanceof Action.Then then) {
-            return containsOpaqueRuntimeGraph(then.action()) || containsOpaqueRuntimeGraph(then.next());
+        for (Action.Child child : action.children()) {
+            if (containsOpaqueRuntimeGraph(child.action())) return true;
         }
         return false;
     }
@@ -857,27 +820,9 @@ public final class MechanismScheduler {
         if (action instanceof PathAction path) {
             PathRuntime runtime = pathRuntimes.get(path);
             if (runtime != null) runtime.ownership(path).forEach(value -> collectOwnedResource(value, resources));
-            path.markers().values().forEach(marker -> collectPathResources(marker, resources));
-        } else if (action instanceof Actions.Parallel parallel) {
-            parallel.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Race race) {
-            race.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Deadline deadline) {
-            deadline.Actions().forEach(child -> collectPathResources(child, resources));
-        } else if (action instanceof Actions.Sequence sequence) {
-            sequence.steps().forEach(step -> collectPathResources(step.action(), resources));
-            collectPathResources(sequence.next(), resources);
-        } else if (action instanceof Actions.Cycle cycle) {
-            cycle.steps().forEach(step -> collectPathResources(step.action(), resources));
-        } else if (action instanceof Actions.Choice choice) {
-            collectPathResources(choice.active(), resources);
-            collectPathResources(choice.inactive(), resources);
-        } else if (action instanceof Actions.WhenBranch branch) {
-            collectPathResources(branch.active(), resources);
-        } else if (action instanceof Actions.Timeout timeout) {
-            collectPathResources(timeout.action(), resources);
-        } else if (action instanceof Actions.WithinTolerance within) {
-            collectPathResources(within.action(), resources);
+        }
+        for (Action.Child child : action.children()) {
+            collectPathResources(child.action(), resources);
         }
     }
 
@@ -1734,9 +1679,7 @@ public final class MechanismScheduler {
         if (action == null) {
             return;
         }
-        if (action instanceof Actions.Parallel parallel) {
-            parallel.Actions().forEach(child -> collectActionDeclarations(child, declarations));
-        } else if (action instanceof Actions.Computed computed) {
+        if (action instanceof Actions.Computed computed) {
             for (Object owner : computed.ownership()) {
                 if (owner instanceof Action ownedAction) collectActionDeclarations(ownedAction, declarations);
                 else if (owner instanceof Iterable<?> values) {
@@ -1746,45 +1689,18 @@ public final class MechanismScheduler {
                     });
                 } else declarations.add(owner);
             }
-        } else if (action instanceof Actions.HardwareComputed computed) {
+            return;
+        }
+        if (action instanceof Actions.HardwareComputed computed) {
             declarations.addAll(computed.declarations());
-        } else if (action instanceof Actions.VelocityContribution contribution) {
-            collectActionDeclarations(contribution.driveAction(), declarations);
-        } else if (action instanceof Actions.ImuYawMutation setYaw) {
+            return;
+        }
+        if (action instanceof Actions.ImuYawMutation setYaw) {
             declarations.addAll(setYaw.imu().dependencies());
-        } else if (action instanceof Actions.Race race) {
-            race.Actions().forEach(child -> collectActionDeclarations(child, declarations));
-        } else if (action instanceof Actions.Deadline deadline) {
-            deadline.Actions().forEach(child -> collectActionDeclarations(child, declarations));
-        } else if (action instanceof Actions.Sequence sequence) {
-            sequence.steps().forEach(step -> collectActionDeclarations(step.action(), declarations));
-            collectActionDeclarations(sequence.next(), declarations);
-        } else if (action instanceof Actions.Cycle cycle) {
-            cycle.steps().forEach(step -> collectActionDeclarations(step.action(), declarations));
-        } else if (action instanceof Actions.Choice choice) {
-            collectActionDeclarations(choice.active(), declarations);
-            collectActionDeclarations(choice.inactive(), declarations);
-        } else if (action instanceof Actions.WhenBranch branch) {
-            collectActionDeclarations(branch.active(), declarations);
-        } else if (action instanceof Actions.Timeout timeout) {
-            collectActionDeclarations(timeout.action(), declarations);
-        } else if (action instanceof Actions.WithinTolerance within) {
-            collectActionDeclarations(within.action(), declarations);
-        } else if (action instanceof Actions.Conditional conditional) {
-            collectActionDeclarations(conditional.action(), declarations);
-            collectActionDeclarations(conditional.next(), declarations);
-        } else if (action instanceof Action.Conditional conditional) {
-            collectActionDeclarations(conditional.action(), declarations);
-            collectActionDeclarations(conditional.next(), declarations);
-        } else if (action instanceof Actions.Then then) {
-            collectActionDeclarations(then.action(), declarations);
-            collectActionDeclarations(then.next(), declarations);
-        } else if (action instanceof Action.Then then) {
-            collectActionDeclarations(then.action(), declarations);
-            collectActionDeclarations(then.next(), declarations);
-        } else if (action instanceof PathAction path) {
+            return;
+        }
+        if (action instanceof PathAction path) {
             declarations.add(path);
-            path.markers().values().forEach(marker -> collectActionDeclarations(marker, declarations));
         } else if (action instanceof Actions.MotorNeutral motor) {
             declarations.add(motor.motor());
         } else if (action instanceof Actions.MotorPercent motor) {
@@ -1803,6 +1719,9 @@ public final class MechanismScheduler {
         } else if (control(action) != null) {
             declarations.add(control(action));
             declarations.addAll(controlDeclarations(control(action)));
+        }
+        for (Action.Child child : action.children()) {
+            collectActionDeclarations(child.action(), declarations);
         }
     }
 

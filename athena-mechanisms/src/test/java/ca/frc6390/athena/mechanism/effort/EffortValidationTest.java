@@ -143,7 +143,7 @@ class EffortValidationTest {
                 .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 10).measures(Units.Rotations));
         Action composed = arm.position(0.5).until(() -> false)
                 .then(arm.position(0.0)).effort(Units.Amps.of(3));
-        Action.Conditional conditional = assertInstanceOf(Action.Conditional.class, composed);
+        Actions.Conditional conditional = assertInstanceOf(Actions.Conditional.class, composed);
         var first = assertInstanceOf(Actions.ControlPosition.class, conditional.action());
         assertEquals(3.0, first.effort().currentLimitAmps(), 1e-12);
         var next = assertInstanceOf(Actions.ControlPosition.class, conditional.next());
