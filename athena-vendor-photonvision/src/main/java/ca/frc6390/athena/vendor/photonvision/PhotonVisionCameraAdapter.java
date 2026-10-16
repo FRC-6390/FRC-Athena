@@ -3,6 +3,8 @@ package ca.frc6390.athena.vendor.photonvision;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
@@ -13,9 +15,12 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
+import ca.frc6390.athena.vision.device.CameraClock;
+import ca.frc6390.athena.vision.device.CameraClockStatus;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
+import ca.frc6390.athena.vision.device.PhotonVisionPoseStrategy;
 import ca.frc6390.athena.vision.signal.PoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
@@ -23,9 +28,11 @@ import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation3d;
+import edu.wpi.first.wpilibj.Timer;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
 import org.photonvision.targeting.PhotonPipelineResult;
@@ -34,12 +41,18 @@ import org.photonvision.targeting.PhotonTrackedTarget;
 /**
  * PhotonVision camera adapter backed by PhotonLib.
  */
-public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoCloseable {
+public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoCloseable, CameraClock {
     private static volatile AprilTagFieldLayout defaultFieldLayout;
+    private static volatile Supplier<Rotation2d> robotHeadingSource;
+
+    /** Robot time source that reports "no clock" (used by adapters built without a robot clock). */
+    private static final DoubleSupplier NO_ROBOT_CLOCK = () -> Double.NaN;
 
     private final PhotonVisionDevice device;
     private final PhotonClient client;
     private final PhotonPoseClient poseClient;
+    private final DoubleSupplier robotClock;
+    private final ClockMonitor clockMonitor = new ClockMonitor();
 
     /**
      * Creates an adapter for support checks and static target conversion only.
@@ -48,6 +61,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         device = null;
         client = null;
         poseClient = null;
+        robotClock = NO_ROBOT_CLOCK;
     }
 
     /**
@@ -59,7 +73,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                defaultPoseClient(device::mountPose, defaultFieldLayout()));
+                defaultPoseClient(device, defaultFieldLayout()),
+                Timer::getFPGATimestamp);
     }
 
     /**
@@ -78,7 +93,30 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         return new PhotonVisionCameraAdapter(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                defaultPoseClient(device::mountPose, fieldLayout == null ? defaultFieldLayout() : fieldLayout));
+                defaultPoseClient(device, fieldLayout == null ? defaultFieldLayout() : fieldLayout),
+                Timer::getFPGATimestamp);
+    }
+
+    /**
+     * Sets the robot heading used by heading-constrained single-tag solves when no reference pose is supplied.
+     *
+     * <p>Call this in the robot constructor or when the gyro is configured, for example
+     * {@code PhotonVisionCameraAdapter.defaultRobotHeading(() -> gyroRotation)}. Passing null disables
+     * the heading source, and single-tag frames then use the lowest-ambiguity solve.</p>
+     *
+     * @param heading robot heading supplier, or null
+     */
+    public static void defaultRobotHeading(Supplier<Rotation2d> heading) {
+        robotHeadingSource = heading;
+    }
+
+    /**
+     * Returns the robot heading source used by heading-constrained single-tag solves.
+     *
+     * @return heading supplier, or null when none is configured
+     */
+    public static Supplier<Rotation2d> defaultRobotHeading() {
+        return robotHeadingSource;
     }
 
     /**
@@ -154,7 +192,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         this(
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
-                new PhotonPoseEstimatorClient(poseEstimator, poseStrategy, device::mountPose, referencePose));
+                new PhotonPoseEstimatorClient(
+                        poseEstimator, poseStrategy, device::mountPose, referencePose, device::singleTagHeadingEnabled),
+                Timer::getFPGATimestamp);
     }
 
     PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client) {
@@ -162,9 +202,15 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     }
 
     PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client, PhotonPoseClient poseClient) {
+        this(device, client, poseClient, NO_ROBOT_CLOCK);
+    }
+
+    PhotonVisionCameraAdapter(
+            PhotonVisionDevice device, PhotonClient client, PhotonPoseClient poseClient, DoubleSupplier robotClock) {
         this.device = Objects.requireNonNull(device, "device");
         this.client = Objects.requireNonNull(client, "client");
         this.poseClient = poseClient;
+        this.robotClock = Objects.requireNonNull(robotClock, "robotClock");
     }
 
     /**
@@ -207,7 +253,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
      */
     public TargetSignal targetSignal() {
         ensureConfigured();
-        return device.bindTargets(new PhotonVisionMeasurementBuffer(device, client, poseClient)::targetMeasurements).targets();
+        return device.bindTargets(bindBuffer()::targetMeasurements).targets();
     }
 
     /**
@@ -218,7 +264,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     public PoseSignal poseSignal() {
         ensureConfigured();
         ensurePoseConfigured();
-        return device.bindPose(new PhotonVisionMeasurementBuffer(device, client, poseClient)::poseMeasurements).pose();
+        return device.bindPose(bindBuffer()::poseMeasurements).pose();
     }
 
     /**
@@ -228,7 +274,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
      */
     public PhotonVisionDevice bind() {
         ensureConfigured();
-        PhotonVisionMeasurementBuffer buffer = new PhotonVisionMeasurementBuffer(device, client, poseClient);
+        PhotonVisionMeasurementBuffer buffer = bindBuffer();
         PhotonVisionDevice bound = device.bindTargets(buffer::targetMeasurements);
         return poseClient == null ? bound : bound.bindPose(buffer::poseMeasurements);
     }
@@ -269,6 +315,47 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
      */
     public PhotonVisionDevice device() {
         return device;
+    }
+
+    /**
+     * Returns the camera clock status as of the most recent refresh.
+     *
+     * <p>A status is only computed once the adapter has been refreshed with a robot clock (after
+     * {@link #bind()} or a signal read in robot code). Until then, and always for adapters built
+     * without a clock, this returns {@link CameraClockStatus#unknown()}. {@code synced} is true when the
+     * last PhotonVision time-sync confirmation is younger than one second and the latest frame is not
+     * stamped more than 0.1 s ahead of robot time.</p>
+     *
+     * @return clock status; never null
+     */
+    @Override
+    public CameraClockStatus clockStatus() {
+        return clockMonitor.status();
+    }
+
+    private PhotonVisionMeasurementBuffer bindBuffer() {
+        ensureConfigured();
+        device.bindClockStatus(clockMonitor::status);
+        return new PhotonVisionMeasurementBuffer(device, client, poseClient, clockMonitor, robotClock);
+    }
+
+    /**
+     * Computes the clock status for the latest frame.
+     *
+     * @param result latest frame read from the camera, or null
+     * @param receivedAtSeconds robot time when that frame was read; NaN if never read
+     * @param refreshedAtSeconds robot time of the latest refresh; NaN if no robot clock
+     * @return clock status
+     */
+    static CameraClockStatus clockStatus(
+            PhotonVisionResult result, double receivedAtSeconds, double refreshedAtSeconds) {
+        if (result == null || !Double.isFinite(receivedAtSeconds) || !Double.isFinite(refreshedAtSeconds)) {
+            return CameraClockStatus.unknown();
+        }
+        // The pong age was true when the frame was read; add the time since then.
+        double pongAgeSeconds = result.secondsSinceLastPong()
+                + Math.max(0.0, refreshedAtSeconds - receivedAtSeconds);
+        return CameraClockStatus.of(pongAgeSeconds, result.timestampSeconds(), refreshedAtSeconds);
     }
 
     static List<Measurement> measurementsFromTargets(List<PhotonVisionTarget> targets, Object source) {
@@ -408,6 +495,14 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
     interface PhotonPoseClient {
         Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result);
+
+        /**
+         * Called once per robot cycle before frames are read, with the robot time of that cycle.
+         *
+         * @param robotTimeSeconds robot time of the cycle; NaN when no robot clock is available
+         */
+        default void beginCycle(double robotTimeSeconds) {
+        }
     }
 
     private static final class PhotonCameraClient implements PhotonClient {
@@ -441,6 +536,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final PhotonPoseEstimator.PoseStrategy strategy;
         private final Supplier<CameraMountPose> mountPose;
         private final Supplier<Pose2d> referencePose;
+        private final BooleanSupplier singleTagUsesHeading;
 
         private PhotonPoseEstimatorClient(
                 PhotonPoseEstimator estimator,
@@ -454,12 +550,48 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 PhotonPoseEstimator.PoseStrategy strategy,
                 Supplier<CameraMountPose> mountPose,
                 Supplier<Pose2d> referencePose) {
+            this(estimator, strategy, mountPose, referencePose, () -> false);
+        }
+
+        PhotonPoseEstimatorClient(
+                PhotonPoseEstimator estimator,
+                PhotonPoseEstimator.PoseStrategy strategy,
+                Supplier<CameraMountPose> mountPose,
+                Supplier<Pose2d> referencePose,
+                BooleanSupplier singleTagUsesHeading) {
             this.estimator = Objects.requireNonNull(estimator, "estimator");
             this.strategy = strategy == null
                     ? PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
                     : strategy;
             this.mountPose = mountPose;
             this.referencePose = referencePose;
+            this.singleTagUsesHeading = singleTagUsesHeading == null ? () -> false : singleTagUsesHeading;
+        }
+
+        /**
+         * Feeds the robot heading into the estimator's heading buffer, timestamped with this cycle's robot time.
+         * PNP_DISTANCE_TRIG_SOLVE reads that buffer at each frame's capture time.
+         */
+        @Override
+        public void beginCycle(double robotTimeSeconds) {
+            if (!Double.isFinite(robotTimeSeconds) || !singleTagUsesHeading.getAsBoolean()) {
+                return;
+            }
+            Rotation2d heading = robotHeading();
+            if (heading != null) {
+                estimator.addHeadingData(robotTimeSeconds, heading);
+            }
+        }
+
+        private Rotation2d robotHeading() {
+            if (referencePose != null) {
+                Pose2d reference = referencePose.get();
+                if (reference != null) {
+                    return reference.getRotation();
+                }
+            }
+            Supplier<Rotation2d> source = robotHeadingSource;
+            return source == null ? null : source.get();
         }
 
         @Override
@@ -578,9 +710,20 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             return candidate.getTranslation().getDistance(estimated.getTranslation()) <= SAME_POSE_TOLERANCE_METERS;
         }
 
+        /**
+         * Chooses the solve for one frame. A one-tag frame uses the heading-constrained trig solve when
+         * enabled, and falls back to lowest ambiguity while no heading sample exists.
+         */
         private Optional<org.photonvision.EstimatedRobotPose> estimateWithConfiguredStrategy(
                 PhotonPipelineResult result) {
-            return switch (strategy) {
+            int tagCount = result.getTargets() == null ? 0 : result.getTargets().size();
+            PhotonPoseEstimator.PoseStrategy active =
+                    strategyForFrame(strategy, singleTagUsesHeading.getAsBoolean(), tagCount);
+            if (active == PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE) {
+                return estimator.estimatePnpDistanceTrigSolvePose(result)
+                        .or(() -> estimator.estimateLowestAmbiguityPose(result));
+            }
+            return switch (active) {
                 case LOWEST_AMBIGUITY -> estimator.estimateLowestAmbiguityPose(result);
                 case CLOSEST_TO_CAMERA_HEIGHT -> estimator.estimateClosestToCameraHeightPose(result);
                 case CLOSEST_TO_REFERENCE_POSE -> closestToReference(result);
@@ -592,6 +735,19 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 default -> estimator.estimateCoprocMultiTagPose(result)
                         .or(() -> estimator.estimateLowestAmbiguityPose(result));
             };
+        }
+
+        /**
+         * Returns the solve to try first for a frame. Only the default coprocessor multi-tag strategy is
+         * overridden, and only for frames with exactly one tag when single-tag heading is enabled.
+         */
+        static PhotonPoseEstimator.PoseStrategy strategyForFrame(
+                PhotonPoseEstimator.PoseStrategy configured, boolean singleTagUsesHeading, int tagCount) {
+            return singleTagUsesHeading
+                    && configured == PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
+                    && tagCount == 1
+                    ? PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE
+                    : configured;
         }
 
         private Optional<org.photonvision.EstimatedRobotPose> closestToReference(PhotonPipelineResult result) {
@@ -633,16 +789,29 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         return primary.isPresent() ? primary : Objects.requireNonNull(singleTag, "singleTag").get();
     }
 
-    private static PhotonPoseClient defaultPoseClient(
-            Supplier<CameraMountPose> mount, AprilTagFieldLayout fieldLayout) {
-        Supplier<CameraMountPose> safeMount = mount == null ? CameraMountPose::identity : mount;
+    private static PhotonPoseClient defaultPoseClient(PhotonVisionDevice device, AprilTagFieldLayout fieldLayout) {
         PhotonPoseEstimator estimator = new PhotonPoseEstimator(
                 Objects.requireNonNull(fieldLayout, "fieldLayout"),
                 transform(CameraMountPose.identity()));
         return new PhotonPoseEstimatorClient(
                 estimator,
-                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
-                safeMount);
+                poseStrategyFor(device),
+                device::mountPose,
+                null,
+                device::singleTagHeadingEnabled);
+    }
+
+    /**
+     * Maps the pose solve selected on a declaration to the PhotonLib strategy. Defaults to
+     * coprocessor multi-tag when nothing was selected.
+     *
+     * @param device camera declaration
+     * @return PhotonLib pose strategy
+     */
+    static PhotonPoseEstimator.PoseStrategy poseStrategyFor(PhotonVisionDevice device) {
+        return device != null && device.poseStrategy() == PhotonVisionPoseStrategy.LOWEST_AMBIGUITY
+                ? PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY
+                : PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR;
     }
 
     private static Transform3d transform(CameraMountPose mount) {
@@ -655,16 +824,33 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                         Math.toRadians(safe.yawDegrees())));
     }
 
+    /**
+     * One frame read from PhotonVision.
+     *
+     * @param secondsSinceLastPong age of the last time-sync confirmation when the frame was published; NaN if unknown
+     */
     static record PhotonVisionResult(
             double timestampSeconds,
             double latencySeconds,
             List<PhotonVisionTarget> targets,
-            Optional<PhotonVisionPoseEstimate> pose) {
+            Optional<PhotonVisionPoseEstimate> pose,
+            double secondsSinceLastPong) {
         PhotonVisionResult {
             timestampSeconds = finiteOrZero(timestampSeconds);
             latencySeconds = Math.max(0.0, finiteOrZero(latencySeconds));
             targets = targets == null ? List.of() : List.copyOf(targets);
             pose = pose == null ? Optional.empty() : pose;
+            secondsSinceLastPong = Double.isFinite(secondsSinceLastPong) && secondsSinceLastPong >= 0.0
+                    ? secondsSinceLastPong
+                    : Double.NaN;
+        }
+
+        PhotonVisionResult(
+                double timestampSeconds,
+                double latencySeconds,
+                List<PhotonVisionTarget> targets,
+                Optional<PhotonVisionPoseEstimate> pose) {
+            this(timestampSeconds, latencySeconds, targets, pose, Double.NaN);
         }
 
         boolean hasTargets() {
@@ -680,7 +866,38 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                     ? result.getTargets().stream().map(PhotonVisionCameraAdapter::targetFromPhoton).toList()
                     : List.of();
             return new PhotonVisionResult(
-                    result.getTimestampSeconds(), PhotonVisionCameraAdapter.latencySeconds(result), targets, pose);
+                    result.getTimestampSeconds(),
+                    PhotonVisionCameraAdapter.latencySeconds(result),
+                    targets,
+                    pose,
+                    PhotonVisionCameraAdapter.secondsSinceLastPong(result));
+        }
+    }
+
+    /** PhotonLib reports metadata.timeSinceLastPong in microseconds. */
+    private static double secondsSinceLastPong(PhotonPipelineResult result) {
+        if (result == null || result.metadata == null) {
+            return Double.NaN;
+        }
+        return result.metadata.timeSinceLastPong / 1.0e6;
+    }
+
+    /** Shared by every buffer of one adapter; holds the most recent frame and refresh times. */
+    static final class ClockMonitor {
+        private volatile PhotonVisionResult latest;
+        private volatile double receivedAtSeconds = Double.NaN;
+        private volatile double refreshedAtSeconds = Double.NaN;
+
+        void refresh(PhotonVisionResult newFrame, double robotTimeSeconds) {
+            if (newFrame != null) {
+                latest = newFrame;
+                receivedAtSeconds = robotTimeSeconds;
+            }
+            refreshedAtSeconds = robotTimeSeconds;
+        }
+
+        CameraClockStatus status() {
+            return clockStatus(latest, receivedAtSeconds, refreshedAtSeconds);
         }
     }
 
@@ -712,12 +929,21 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final Object source;
         private final PhotonClient client;
         private final PhotonPoseClient poseClient;
+        private final ClockMonitor clockMonitor;
+        private final DoubleSupplier robotClock;
         private PhotonVisionResult latest = new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
 
-        private PhotonVisionMeasurementBuffer(Object source, PhotonClient client, PhotonPoseClient poseClient) {
+        private PhotonVisionMeasurementBuffer(
+                Object source,
+                PhotonClient client,
+                PhotonPoseClient poseClient,
+                ClockMonitor clockMonitor,
+                DoubleSupplier robotClock) {
             this.source = source;
             this.client = Objects.requireNonNull(client, "client");
             this.poseClient = poseClient;
+            this.clockMonitor = Objects.requireNonNull(clockMonitor, "clockMonitor");
+            this.robotClock = Objects.requireNonNull(robotClock, "robotClock");
         }
 
         private List<Measurement> targetMeasurements() {
@@ -734,10 +960,17 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             if (!client.isConnected()) {
                 throw new IllegalStateException("PhotonVision camera is disconnected: " + source);
             }
-            List<PhotonVisionResult> results = client.unreadResults(poseClient);
-            if (!results.isEmpty()) {
-                latest = results.get(results.size() - 1);
+            double robotTimeSeconds = robotClock.getAsDouble();
+            if (poseClient != null) {
+                poseClient.beginCycle(robotTimeSeconds);
             }
+            List<PhotonVisionResult> results = client.unreadResults(poseClient);
+            PhotonVisionResult newFrame = null;
+            if (!results.isEmpty()) {
+                newFrame = results.get(results.size() - 1);
+                latest = newFrame;
+            }
+            clockMonitor.refresh(newFrame, robotTimeSeconds);
         }
     }
 

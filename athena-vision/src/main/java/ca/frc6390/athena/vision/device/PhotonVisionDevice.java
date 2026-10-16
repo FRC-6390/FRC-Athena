@@ -12,16 +12,22 @@ import ca.frc6390.athena.vision.signal.PhotonVisionPoseSignal;
 import ca.frc6390.athena.vision.signal.TargetSignal;
 /**
  * PhotonVision camera declaration.
+ *
+ * <p>Copies made by {@code mount}, {@code bindPose} and similar methods share one runtime state
+ * object, so options set through {@link #pose()} and the clock status published by a bound adapter
+ * are visible from every copy of the declaration.</p>
  */
-public final class PhotonVisionDevice implements CameraDevice {
+public final class PhotonVisionDevice implements CameraDevice, CameraClock {
     private final GenericCameraDevice camera;
+    private final State state;
 
     public PhotonVisionDevice(String name) {
-        this(new GenericCameraDevice(CameraKinds.PHOTONVISION, name));
+        this(new GenericCameraDevice(CameraKinds.PHOTONVISION, name), new State());
     }
 
-    private PhotonVisionDevice(GenericCameraDevice camera) {
+    private PhotonVisionDevice(GenericCameraDevice camera, State state) {
         this.camera = camera;
+        this.state = state;
     }
 
     @Override
@@ -34,7 +40,7 @@ public final class PhotonVisionDevice implements CameraDevice {
 
     @Override
     public PhotonVisionDevice failurePolicy(FailurePolicy policy) {
-        return new PhotonVisionDevice(camera.failurePolicy(policy));
+        return new PhotonVisionDevice(camera.failurePolicy(policy), state);
     }
 
     @Override
@@ -42,7 +48,7 @@ public final class PhotonVisionDevice implements CameraDevice {
 
     @Override
     public PhotonVisionDevice onRecovery(RecoveryPolicy policy) {
-        return new PhotonVisionDevice(camera.onRecovery(policy));
+        return new PhotonVisionDevice(camera.onRecovery(policy), state);
     }
 
     @Override
@@ -57,22 +63,22 @@ public final class PhotonVisionDevice implements CameraDevice {
 
     @Override
     public PhotonVisionDevice mount(CameraMountPose pose) {
-        return new PhotonVisionDevice(camera.mount(pose));
+        return new PhotonVisionDevice(camera.mount(pose), state);
     }
 
     @Override
     public PhotonVisionDevice mount(Supplier<CameraMountPose> pose) {
-        return new PhotonVisionDevice(camera.mount(pose));
+        return new PhotonVisionDevice(camera.mount(pose), state);
     }
 
     @Override
     public PhotonVisionDevice bindPose(Supplier<? extends List<? extends Measurement>> poseMeasurements) {
-        return new PhotonVisionDevice(camera.bindPose(poseMeasurements));
+        return new PhotonVisionDevice(camera.bindPose(poseMeasurements), state);
     }
 
     @Override
     public PhotonVisionDevice bindTargets(Supplier<? extends List<? extends Measurement>> targetMeasurements) {
-        return new PhotonVisionDevice(camera.bindTargets(targetMeasurements));
+        return new PhotonVisionDevice(camera.bindTargets(targetMeasurements), state);
     }
 
     @Override
@@ -108,11 +114,85 @@ public final class PhotonVisionDevice implements CameraDevice {
     }
 
     /**
+     * Enables or disables the single-tag heading solve for this declaration.
+     *
+     * <p>When enabled, frames with exactly one tag are solved with PhotonLib's
+     * {@code PNP_DISTANCE_TRIG_SOLVE} using the robot heading from
+     * {@code PhotonVisionCameraAdapter.defaultRobotHeading}, falling back to the lowest-ambiguity
+     * solve while no heading sample is available. Multi-tag frames are unaffected. Usually set
+     * through {@code pose().singleTagUsesHeading()}.</p>
+     *
+     * @param enabled true to use the heading-constrained single-tag solve
+     */
+    public void configureSingleTagHeading(boolean enabled) {
+        state.singleTagUsesHeading = enabled;
+    }
+
+    /**
+     * Returns whether the heading-constrained single-tag solve is enabled.
+     *
+     * @return true when enabled
+     */
+    public boolean singleTagHeadingEnabled() {
+        return state.singleTagUsesHeading;
+    }
+
+    /**
+     * Selects the pose solve used by the adapter bound from this declaration. Usually set through
+     * {@code pose().multiTagOnCoprocessor()} or {@code pose().lowestAmbiguity()}. Defaults to
+     * {@link PhotonVisionPoseStrategy#MULTI_TAG_ON_COPROCESSOR}.
+     *
+     * @param strategy pose strategy; null restores the default
+     */
+    public void configurePoseStrategy(PhotonVisionPoseStrategy strategy) {
+        state.poseStrategy = strategy == null ? PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR : strategy;
+    }
+
+    /**
+     * Returns the pose solve selected for this declaration.
+     *
+     * @return pose strategy; never null
+     */
+    public PhotonVisionPoseStrategy poseStrategy() {
+        return state.poseStrategy;
+    }
+
+    /**
+     * Connects this declaration to the clock status of its bound adapter. Called by the adapter when it binds.
+     *
+     * @param status supplier of the latest clock status; null restores {@link CameraClockStatus#unknown()}
+     */
+    public void bindClockStatus(Supplier<CameraClockStatus> status) {
+        state.clockStatus = status == null ? CameraClockStatus::unknown : status;
+    }
+
+    /**
+     * Returns the camera clock status as of the most recent adapter refresh.
+     *
+     * <p>Returns {@link CameraClockStatus#unknown()} until a PhotonVision adapter has bound this
+     * declaration and refreshed at least once.</p>
+     *
+     * @return clock status; never null
+     */
+    @Override
+    public CameraClockStatus clockStatus() {
+        CameraClockStatus status = state.clockStatus.get();
+        return status == null ? CameraClockStatus.unknown() : status;
+    }
+
+    /**
      * Returns this declaration as a generic camera device.
      *
      * @return camera device
      */
     public CameraDevice asCamera() {
         return this;
+    }
+
+    /** Runtime options shared by all copies of one declaration. */
+    private static final class State {
+        private volatile boolean singleTagUsesHeading;
+        private volatile PhotonVisionPoseStrategy poseStrategy = PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR;
+        private volatile Supplier<CameraClockStatus> clockStatus = CameraClockStatus::unknown;
     }
 }

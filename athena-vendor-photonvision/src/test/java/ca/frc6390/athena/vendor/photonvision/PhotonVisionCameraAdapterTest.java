@@ -1,6 +1,7 @@
 package ca.frc6390.athena.vendor.photonvision;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,8 +25,10 @@ import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.config.Cameras;
+import ca.frc6390.athena.vision.device.CameraClockStatus;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
 import ca.frc6390.athena.vision.signal.PhotonVisionPoseSignal;
+import java.util.Optional;
 
 class PhotonVisionCameraAdapterTest {
     @Test
@@ -256,6 +259,150 @@ class PhotonVisionCameraAdapterTest {
 
         assertEquals(6.0, pose.averageTargetDistanceMeters(), 1.0e-9);
         assertEquals(1, pose.targetCount());
+    }
+
+    @Test
+    void singleTagUsesHeadingIsStoredOnTheSharedDeclaration() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+        PhotonVisionPoseSignal signal = device.pose().multiTagOnCoprocessor().singleTagUsesHeading();
+
+        assertTrue(signal.headingSolveEnabled());
+        assertTrue(device.singleTagHeadingEnabled());
+        assertTrue(device.mount(ca.frc6390.athena.vision.device.CameraMountPose.identity()).singleTagHeadingEnabled());
+        assertEquals(true, signal.metadata().get("singleTagUsesHeading"));
+        assertEquals("multi-tag-coprocessor", signal.metadata().get("strategy"));
+    }
+
+    @Test
+    void poseStrategyOptionsReachTheAdapterThroughTheSharedDeclaration() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+
+        device.pose().lowestAmbiguity();
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+        // A copy of the declaration (as bind() produces) sees the same choice.
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.poseStrategyFor(device.mount(
+                        ca.frc6390.athena.vision.device.CameraMountPose.identity())));
+
+        device.pose().multiTagOnCoprocessor();
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(device));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.poseStrategyFor(null));
+    }
+
+    @Test
+    void singleTagHeadingOnlyChangesMultiTagConfiguredFrames() {
+        PhotonVisionDevice multi = Cameras.photonVision("multi").pose().multiTagOnCoprocessor()
+                .singleTagUsesHeading().camera();
+        PhotonVisionDevice lowest = Cameras.photonVision("lowest").pose().lowestAmbiguity()
+                .singleTagUsesHeading().camera();
+
+        assertEquals(PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(multi), multi.singleTagHeadingEnabled(), 1));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(multi), multi.singleTagHeadingEnabled(), 2));
+        assertEquals(PhotonPoseEstimator.PoseStrategy.LOWEST_AMBIGUITY,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonVisionCameraAdapter.poseStrategyFor(lowest), lowest.singleTagHeadingEnabled(), 1));
+    }
+
+    @Test
+    void singleTagFrameUsesTrigSolveAndMultiTagFrameKeepsCoprocessor() {
+        assertEquals(
+                PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, true, 1));
+        assertEquals(
+                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, true, 2));
+        assertEquals(
+                PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.strategyForFrame(
+                        PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR, false, 1));
+    }
+
+    @Test
+    void singleTagFrameReportsOnlyTheSingleTagFromTrigSolve() {
+        Pose3d robot = new Pose3d(2.0, 0.0, 0.0, new Rotation3d());
+        Pose3d tagOne = new Pose3d(5.0, 0.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        Pose3d tagTwo = new Pose3d(5.0, 1.0, 1.0, new Rotation3d(0.0, 0.0, Math.PI));
+        EstimatedRobotPose trig = new EstimatedRobotPose(
+                robot,
+                1.0,
+                List.of(target(1, new Transform3d(robot, tagOne), 0.30)),
+                PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE);
+
+        PhotonVisionCameraAdapter.PhotonVisionPoseEstimate estimate =
+                PhotonVisionCameraAdapter.PhotonPoseEstimatorClient.toEstimate(
+                        trig, layout(tagOne, tagTwo), new Transform3d());
+
+        assertEquals(1, estimate.targetCount());
+        assertEquals(0.30, estimate.ambiguity(), 1.0e-9);
+    }
+
+    @Test
+    void singleTagHeadingFallsBackToLowestAmbiguityWhenTrigSolveHasNoHeading() {
+        // PNP_DISTANCE_TRIG_SOLVE returns empty when the heading buffer has no sample for the frame.
+        AtomicBoolean fallbackRead = new AtomicBoolean();
+
+        Optional<String> estimate = PhotonVisionCameraAdapter.multiTagThenSingleTag(
+                Optional.empty(),
+                () -> {
+                    fallbackRead.set(true);
+                    return Optional.of("lowest-ambiguity");
+                });
+
+        assertEquals(Optional.of("lowest-ambiguity"), estimate);
+        assertTrue(fallbackRead.get());
+    }
+
+    @Test
+    void clockStatusDistinguishesFreshPongFromStaleOrAheadFrames() {
+        // Pong age at read time plus time since the read; frame capture compared to refresh time.
+        assertTrue(PhotonVisionCameraAdapter.clockStatus(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty(), 0.2),
+                10.0, 10.5).synced());
+        assertFalse(PhotonVisionCameraAdapter.clockStatus(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty(), 0.9),
+                10.0, 11.0).synced());
+        assertFalse(PhotonVisionCameraAdapter.clockStatus(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(11.0, 0.0, List.of(), Optional.empty(), 0.1),
+                11.0, 10.5).synced());
+        assertEquals(0.7, PhotonVisionCameraAdapter.clockStatus(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty(), 0.2),
+                10.0, 10.5).secondsSinceSync(), 1.0e-9);
+        assertTrue(PhotonVisionCameraAdapter.clockStatus(null, Double.NaN, Double.NaN).isUnknown());
+        assertTrue(PhotonVisionCameraAdapter.clockStatus(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty()),
+                10.0, 10.5).isUnknown());
+        assertEquals(CameraClockStatus.unknown(), new PhotonVisionCameraAdapter().clockStatus());
+    }
+
+    @Test
+    void boundAdapterPublishesClockStatusThroughTheDeclaration() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+        FakePhotonClient client = new FakePhotonClient(List.of(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(
+                        10.0, 0.0, List.of(), Optional.empty(), 0.2)));
+        PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter(device, client, null, () -> 10.5);
+
+        PhotonVisionDevice bound = adapter.bind();
+        assertTrue(bound.clockStatus().isUnknown());
+
+        adapter.targetSignal().measurements();
+
+        assertTrue(bound.clockStatus().synced());
+        assertEquals(0.2, bound.clockStatus().secondsSinceSync(), 1.0e-9);
+        assertTrue(device.clockStatus().synced());
+        assertTrue(adapter.clockStatus().synced());
     }
 
     private static AprilTagFieldLayout layout(Pose3d... tags) {

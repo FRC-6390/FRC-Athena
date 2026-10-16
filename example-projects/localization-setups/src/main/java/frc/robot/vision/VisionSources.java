@@ -29,8 +29,9 @@ public final class VisionSources {
             .singleTagStdDevs(0.8, 0.8, Units.degreesToRadians(30.0))
             .multiTagStdDevs(0.25, 0.25, Units.degreesToRadians(6.0))
             .distanceStdDevScaling(2.0, 2.0);
+    // Single-tag frames are solved with the robot heading (needs PhotonVisionCameraAdapter.defaultRobotHeading).
     public final PoseSignal photonPose = rearPhoton.pose()
-            .multiTagOnCoprocessor()
+            .multiTagOnCoprocessor().singleTagUsesHeading()
             .singleTagStdDevs(0.7, 0.7, Units.degreesToRadians(25.0))
             .multiTagStdDevs(0.18, 0.18, Units.degreesToRadians(4.0))
             .distanceStdDevScaling(2.0, 2.0);
