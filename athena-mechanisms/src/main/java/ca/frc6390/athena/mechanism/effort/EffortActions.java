@@ -73,7 +73,8 @@ public final class EffortActions {
             return new Actions.Timeout(limit(a.action(), limit), a.seconds());
         }
         if (action instanceof Actions.WithinTolerance a) {
-            return new Actions.WithinTolerance(limit(a.action(), limit), a.tolerance());
+            return new Actions.WithinTolerance(
+                    limit(a.action(), limit), a.tolerance(), a.settleSeconds(), a.maxVelocity());
         }
         throw new IllegalArgumentException("effort(...) applies to control position, velocity, percent and "
                 + "voltage Actions, not " + action.getClass().getSimpleName() + ".");

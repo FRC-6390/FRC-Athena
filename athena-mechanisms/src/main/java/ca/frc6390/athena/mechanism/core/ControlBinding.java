@@ -751,6 +751,12 @@ public record ControlBinding<U extends Unit>(
                 : UnitConversions.value(measure, unit);
     }
 
+    /** Converts a rate measure into this binding's unit per second (typed velocity limits). */
+    double rateValue(Measure<?> measure) {
+        requireUnit("Typed velocity limits");
+        return UnitConversions.rate(measure, unit);
+    }
+
     private static List<MotorDevice> motorList(MotorDevice output, List<MotorDevice> followers) {
         List<MotorDevice> motors = new ArrayList<>();
         if (output != null) {

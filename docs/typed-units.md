@@ -93,6 +93,7 @@ pick the right formulas.
 | Typed target | `position(Measure)`, `velocity(Measure)` |
 | Primitive supplier with unit | `position(DoubleSupplier, unit)`, `velocity(DoubleSupplier, unit)` |
 | Typed tolerance | `Action.untilWithin(Measure)` |
+| Settled tolerance | `untilWithin(t).settled(seconds)`, `untilWithin(t).maxVelocity(Measure)`, `untilSettled(t, seconds)` |
 | Typed limits | `Constraints.range(Measure, Measure)`, `Constraints.motion(Measure, Measure)` |
 | Typed interpolation | `interpolate(model, input, inputUnit)` and `at(Measure, Measure)` |
 | Rotary or linear | `ControlBinding.motionKind()` |

@@ -502,6 +502,113 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void plainUntilWithinCompletesOnTheFirstInWindowCycleEvenWhileSwingingThrough() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilWithin(0.25))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        // Documents the legacy behaviour: the arm is inside the window while moving at full speed.
+        actions.encoder(ENCODER).position = 9.9;
+        actions.encoder(ENCODER).velocity = 15.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void maxVelocityKeepsTheToleranceOpenWhileSwingingThrough() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilWithin(0.25).maxVelocity(5.0))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 9.9;
+        actions.encoder(ENCODER).velocity = 15.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        actions.encoder(ENCODER).position = 10.0;
+        runtime.periodic(contextAt(0.02), EventContext.empty());
+        assertEquals(10.0, actions.motor(MOTOR).positionTarget, 1.0e-9);
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+
+        actions.encoder(ENCODER).velocity = 4.0;
+        runtime.periodic(contextAt(0.04), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void settledToleranceCompletesOnlyAfterHoldingTheWindowForTheSettleTime() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilSettled(0.25, 0.1))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 10.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        runtime.periodic(contextAt(0.05), EventContext.empty());
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+
+        runtime.periodic(contextAt(0.1), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void leavingTheWindowRestartsTheSettleTimer() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilWithin(0.25).settled(0.1))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 10.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        actions.encoder(ENCODER).position = 11.0;
+        runtime.periodic(contextAt(0.04), EventContext.empty());
+        actions.encoder(ENCODER).position = 10.0;
+        runtime.periodic(contextAt(0.06), EventContext.empty());
+        // 0.12 s after the first entry, but only 0.06 s after re-entering the window.
+        runtime.periodic(contextAt(0.12), EventContext.empty());
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+
+        runtime.periodic(contextAt(0.16), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
+    void velocityLimitedToleranceRestartsSettleTimerWhenSpeedExceedsLimit() {
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
+        TestMechanism mechanism = new TestMechanism(Actions.sequence()
+                .run(position.position(10.0).untilWithin(0.25).settled(0.1).maxVelocity(5.0))
+                .then(MOTOR.percent(0.7)));
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(mechanism.initial);
+
+        actions.encoder(ENCODER).position = 10.0;
+        actions.encoder(ENCODER).velocity = 1.0;
+        runtime.periodic(contextAt(0.0), EventContext.empty());
+        actions.encoder(ENCODER).velocity = 9.0;
+        runtime.periodic(contextAt(0.05), EventContext.empty());
+        actions.encoder(ENCODER).velocity = 1.0;
+        runtime.periodic(contextAt(0.1), EventContext.empty());
+        runtime.periodic(contextAt(0.15), EventContext.empty());
+        assertTrue(Double.isNaN(actions.motor(MOTOR).percent));
+
+        runtime.periodic(contextAt(0.2), EventContext.empty());
+        assertEquals(0.7, actions.motor(MOTOR).percent, 1.0e-9);
+    }
+
+    @Test
     void cycleRunsSelfCompletingControlStepsRepeatedly() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
