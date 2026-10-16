@@ -6,7 +6,6 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import ca.frc6390.athena.auto.PathProvider;
-import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.mechanism.core.MechanismContext;
 import ca.frc6390.athena.mechanism.core.PathRuntime;
 import ca.frc6390.athena.mechanism.core.PathAction;
@@ -42,15 +41,16 @@ public final class PathPlannerPathProvider implements PathProvider {
         return KEY;
     }
 
-    public CommandAction load(String pathName) {
-        String normalized = normalize(pathName);
-        Command command = command(normalized);
-        return CommandAction.create(KEY + ":" + normalized)
-                .onInitialize(command::initialize)
-                .onExecute(command::execute)
-                .until(command::isFinished)
-                .onEnd(() -> command.end(false))
-                .build();
+    /**
+     * Returns the PathPlanner auto as a path Action. It composes like any path Action: it can be placed in an
+     * AutoChooser, a sequence, a binding, or a race, and the auto's command runs through {@link #runtime()}.
+     * The auto is built when the Action starts, so an unknown name fails then, not here.
+     *
+     * @param pathName PathPlanner auto name
+     * @return PathPlanner path Action
+     */
+    public PathAction load(String pathName) {
+        return new PathAction(KEY, normalize(pathName));
     }
 
     /**

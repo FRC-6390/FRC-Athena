@@ -5,8 +5,6 @@ import ca.frc6390.athena.auto.AutoPlan;
 import ca.frc6390.athena.auto.AutoPreview;
 import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.auto.PathPreview;
-import ca.frc6390.athena.commands.CommandGraph;
-import ca.frc6390.athena.commands.CommandAction;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
@@ -61,13 +59,12 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
- * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, commands, and sim.
+ * Root Athena runtime that composes hardware, mechanisms, drivetrain, vision, localization, autos, and sim.
  */
 public final class RobotRuntime implements AutoCloseable {
     private final HardwareGraph hardwareGraph;
     private final SimulationSession simulationSession;
     private final MechanismScheduler mechanisms;
-    private final CommandGraph commands = new CommandGraph();
     private final List<AutoChooser> autoChoosers = new ArrayList<>();
     private final List<PathProvider> pathProviders = new ArrayList<>();
     private List<AutoPreview> cachedAutoPreviews = List.of();
@@ -251,15 +248,6 @@ public final class RobotRuntime implements AutoCloseable {
                 RuntimeWorker.every("signals", periodSeconds, mechanisms::sampleSignals))).startWorkers();
     }
 
-    /**
-     * Returns the command graph.
-     *
-     * @return command graph
-     */
-    public CommandGraph commands() {
-        ensureOpen();
-        return commands;
-    }
 
     /**
      * Registers a mechanism.
@@ -625,18 +613,6 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     /**
-     * Schedules a command Action.
-     *
-     * @param Action command Action
-     * @return this runtime
-     */
-    public RobotRuntime schedule(CommandAction Action) {
-        ensureOpen();
-        commands.schedule(Action);
-        return this;
-    }
-
-    /**
      * Requests an Action owned by a registered mechanism.
      *
      * @param Action Action
@@ -820,7 +796,6 @@ public final class RobotRuntime implements AutoCloseable {
      */
     public List<ResolvedOutput> disabledPeriodic(double nowSeconds, double dtSeconds) {
         endAutos();
-        commands.cancelAll();
         return periodic(nowSeconds, dtSeconds, LifecycleMode.DISABLED, false, false, false);
     }
 
@@ -871,11 +846,6 @@ public final class RobotRuntime implements AutoCloseable {
                 || safeEventContext.phase() == LifecyclePhase.EXIT
                 || (safeEventContext.mode() != LifecycleMode.AUTONOMOUS
                         && safeEventContext.phase() == LifecyclePhase.INIT)) endAutos();
-        if (!safeEventContext.enabled()) {
-            commands.cancelAll();
-        } else {
-            commands.periodic();
-        }
         List<ResolvedOutput> outputs = runMechanisms(safeMechanismContext, safeEventContext);
         if (safeMechanismContext.simulation()
                 && simulationSession != null
@@ -905,7 +875,6 @@ public final class RobotRuntime implements AutoCloseable {
         HardwareCycleSnapshot mechanismInputs = replayRecorder == null ? null : hardwareGraph.cycleSnapshot();
         refreshFailures(nowSeconds);
         refreshLocalizations(mechanismContext);
-        commands.periodic();
         EventContext eventContext = new EventContext(
                 nowSeconds,
                 dtSeconds,
@@ -1147,7 +1116,7 @@ public final class RobotRuntime implements AutoCloseable {
             failure = exception;
         }
         try {
-            commands.cancelAll();
+            mechanisms.cancelAll();
         } catch (RuntimeException exception) {
             failure = appendFailure(failure, exception);
         }

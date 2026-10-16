@@ -114,7 +114,6 @@ The vendordep provides the standard Athena robot stack for teams using WPILib's 
 - `athena-vision`
 - `athena-localization`
 - `athena-auto`
-- `athena-commands`
 - `athena-robot`
 - `athena-simulation`
 - `athena-wpilib`
@@ -291,9 +290,8 @@ The roboRIO bus exposes CAN, DIO, analog, SPI, I2C, serial, and USB. Named CAN b
 - `athena-api`: shared kind catalogs such as motor, encoder, IMU, and camera kinds.
 - `athena-runtime`: common runtime values, measurements, signals, and control helpers.
 - `athena-hardware`: hardware declarations, backend SPI, hardware graph, and simulation declarations.
-- `athena-mechanisms`: mechanism/Action/output/control/event model.
+- `athena-mechanisms`: mechanism/Action/output/control/event model, including `LifecycleAction` for external imperative behaviour (WPILib commands, custom callbacks) and `NamedResource` lease keys.
 - `athena-drivetrain`: drivetrain helper values and swerve module presets.
-- `athena-commands`: command-style Action lifecycle.
 - `athena-auto`: autonomous routines, path providers, and marker graphs.
 - `athena-vision`: camera declarations, pose/target signals, and camera adapter runtime.
 - `athena-localization`: localization pipelines, filters, and estimators.

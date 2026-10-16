@@ -44,7 +44,7 @@ This is the current public API Rebuilt actually imports.
 - Runtime helpers: `ModifiedAxis`, `RobotVelocity`, `PoseSnapshot`, `Measurement`, `Measurements`, `MeasurementStdDevs`.
 - Localization: `PoseSignal`, `Localization`, `Localizations`, shared `Geometry2d` shapes, and `LocalizationFilters`.
 - Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
-- Commands: `CommandAction`.
+- Commands: removed. External imperative behaviour is `LifecycleAction` (`Actions.lifecycle`), and WPILib interop lives in `WpilibCommands`.
 - Drivetrain geometry: `WheelBase`, `TrackWidth`.
 
 Everything else is required implementation behind these APIs. Old public surface is deleted.
@@ -341,7 +341,7 @@ The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations 
 | `SwerveModuleSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `SwerveDrivetrainSpec` | removed | REMOVE | Replace with swerve graph/runtime. |
 | `DifferentialDrivetrainSpec` | removed | REMOVE | Rebuilt is swerve-only. |
-| `CommandSpec` | `CommandAction` | RENAME | Rebuilt experimental controls import it as command behavior descriptor. |
+| `CommandSpec` | `LifecycleAction` | REPLACE | Command behavior is an Athena `Action` built with `Actions.lifecycle`; the second command scheduler was removed. |
 | `AutoChooserSpec` | removed | REMOVE | Old chooser DTO. |
 | `AutoRoutineSpec` | removed | REMOVE | Old routine DTO; final autos are ordinary Actions selected by `AutoChooser`. |
 | `RobotLifecycleSpec` | removed | REMOVE | `AthenaRobot` and `RobotRuntime` own lifecycle. |
@@ -509,7 +509,7 @@ These modules need old public surface removed. Feature support stays when it can
 - `athena-telemetry`: remove public API. Rebuilt does not publish through Athena telemetry yet.
 - `athena-arcp`: keep source only as isolated tooling/transport. It is absent from `settings.gradle`, `athenaPublishedArtifacts`, and the vendordep, so ARCP is not part of the active 2027 library deliverable. Reintroduce only as an optional transport behind a final `Signal`/`Sink` extension point.
 - `athena-auto`: remove public chooser/spec/registry API. Add named auto `Action` routines and selected-auto runtime support.
-- `athena-commands`: keep only the renamed `CommandAction` concept if the local controls wrapper still needs it.
+- `athena-commands`: removed. Its lifecycle concept is `LifecycleAction` in `athena-mechanisms`, scheduled by the mechanism scheduler.
 - `athena-vendor-photonvision`: keep camera backend support behind `PhotonVisionDevice`.
 - `athena-vendor-pathplanner`: keep path provider support behind `Paths.pathPlanner`.
 - `athena-vendor-choreo`: keep path provider support behind `Paths.choreo`.

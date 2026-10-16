@@ -11,7 +11,7 @@ path provider. Selectable autos remain ordinary Athena `Action` trees and each a
 | `PathPlannerAuto` | Run a PathPlanner `.auto` through `PathPlannerPathProvider` and `AutoBuilder` |
 | `GeneratedPathAuto` | Run and preview a vendor-neutral path owned by a team `PathProvider` |
 | `PathPlannerSetup` | Convert PathPlanner chassis-speed callbacks into normal Athena drive Actions |
-| `CommandInteropExamples` | Wrap and schedule a WPILib command through Athena's `CommandGraph` |
+| `CommandInteropExamples` | Wrap a WPILib command as an Athena Action with `WpilibCommands.action(...)` and request it |
 
 `AutoContext` passes `AllianceTransform::isRedAlliance` to the Choreo provider, so mirrored paths follow the Driver
 Station alliance without alliance checks in each auto.

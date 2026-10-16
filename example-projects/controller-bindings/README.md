@@ -17,7 +17,7 @@ This project shows the current Athena controller flow without WPILib command-bas
 `AdvancedControls` uses a second gamepad to keep the gesture examples independent from the driver bindings.
 It demonstrates shared single/double/triple/ranged click recognition, debounced buttons, long and short holds,
 key-repeat behavior, axis hysteresis, explicitly controlled toggle state, `allOf`/`anyOf`/`noneOf`, timed chords,
-ordered input sequences, `CommandAction` requirements, and WPILib command wrapping.
+ordered input sequences, Action requirements (`requires(...)` on lifecycle Actions), and WPILib command wrapping.
 
 Service mode is a binding set. `operator.in(() -> serviceMode, pad -> ...)` gates the POV bindings inside it:
 they fire only while the condition is true, and a held POV releases its action when the set turns off. Bindings

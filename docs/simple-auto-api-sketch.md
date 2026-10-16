@@ -118,7 +118,7 @@ Use one lifecycle implementation for both auto and teleop. It must carry an inte
 enum EndReason { FINISHED, DRIVER_OVERRIDE, DISABLED, TIMEOUT, FAULT, REPLACED }
 ```
 
-That fixes a current limitation where `CommandAction.onEnd()` cannot distinguish completion from
+That fixes a former limitation where command `onEnd()` could not distinguish completion from
 interruption. Vendor commands can be leaf steps adapted into this runner until their integrations are
 migrated.
 

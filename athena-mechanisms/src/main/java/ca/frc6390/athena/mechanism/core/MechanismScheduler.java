@@ -578,9 +578,10 @@ public final class MechanismScheduler {
             releaseLease(key);
         }
         CompiledAction compiled = compiledAction(Objects.requireNonNull(action, "action"));
+        preemptExclusiveLeases(key, compiled.resources());
         List<LeaseRegistration> registrations = new ArrayList<>(compiled.partitions().size());
         long recency = ++requestSequence;
-        leaseReservations.put(key, new LeaseReservation(recency, compiled.resources()));
+        leaseReservations.put(key, new LeaseReservation(recency, compiled.resources(), compiled.exclusive()));
         for (Map.Entry<Mechanism, CompiledPartition> entry : compiled.partitions().entrySet()) {
             CompiledPartition partition = entry.getValue();
             MechanismRuntime runtime = runtimeFor(entry.getKey());
@@ -597,6 +598,31 @@ public final class MechanismScheduler {
         }
         leaseTargets.put(key, List.copyOf(registrations));
         activeLeaseKeys.add(key);
+    }
+
+    /**
+     * Ends running lifecycle Actions whose resources overlap a newer request. Lifecycle Actions follow WPILib
+     * command semantics, where a conflicting command ends rather than continuing without its resource, so
+     * they are cancelled (onEnd(true)) instead of being starved like motor-output leases.
+     */
+    private void preemptExclusiveLeases(Object key, Set<Object> resources) {
+        if (resources.isEmpty()) return;
+        for (Object running : List.copyOf(activeLeaseKeys)) {
+            if (running == key) continue;
+            LeaseReservation reservation = leaseReservations.get(running);
+            if (reservation == null || !reservation.exclusive()) continue;
+            if (!overlaps(reservation.resources(), resources) || !leaseRunning(running)) continue;
+            cancelSpawned(running, Collections.newSetFromMap(new IdentityHashMap<>()));
+        }
+    }
+
+    private boolean leaseRunning(Object key) {
+        List<LeaseRegistration> registrations = leaseTargets.get(key);
+        if (registrations == null) return false;
+        for (LeaseRegistration registration : registrations) {
+            if (!registration.runtime().leaseComplete(registration.runtimeKey())) return true;
+        }
+        return false;
     }
 
     private void releaseLease(Object key) {
@@ -657,7 +683,7 @@ public final class MechanismScheduler {
             compiledPartitions.put(entry.getKey(), compiled);
             allResources.addAll(resources);
         }
-        return new CompiledAction(compiledPartitions, allResources);
+        return new CompiledAction(compiledPartitions, allResources, LifecycleAction.present(action));
     }
 
     private void validateConcurrentResourceConflicts(Action action, String path, Set<Action> visited) {
@@ -801,6 +827,8 @@ public final class MechanismScheduler {
         }
         if (declaration instanceof MotorDevice motor) {
             resources.add(motor);
+        } else if (declaration instanceof NamedResource named) {
+            resources.add(named);
         } else if (declaration instanceof ControlBinding<?> control) {
             resources.addAll(control.motors());
         } else if (declaration instanceof Mechanism mechanism) {
@@ -966,6 +994,20 @@ public final class MechanismScheduler {
     public MechanismScheduler cancel(Action action) {
         cancelSpawned(rootAction(Objects.requireNonNull(action, "action")),
                 Collections.newSetFromMap(new IdentityHashMap<>()));
+        return this;
+    }
+
+    /**
+     * Cancels every running lease and held request, ending lifecycle Actions with onEnd(true). Used when
+     * the owning robot runtime closes.
+     *
+     * @return this scheduler
+     */
+    public MechanismScheduler cancelAll() {
+        pendingRequests.clear();
+        for (Object key : List.copyOf(activeLeaseKeys)) {
+            cancelSpawned(key, Collections.newSetFromMap(new IdentityHashMap<>()));
+        }
         return this;
     }
 
@@ -1662,11 +1704,19 @@ public final class MechanismScheduler {
             return new RequestTarget(sharedRoot, sharedRoot);
         }
         if (!targets.isEmpty()) return targets.iterator().next();
-        if (declarations.isEmpty() && runtimes.size() == 1) {
+        if (!hasOwnedDeclaration(declarations) && runtimes.size() == 1) {
             Mechanism root = runtimes.keySet().iterator().next();
             return new RequestTarget(root, root);
         }
         return null;
+    }
+
+    /** Named resources arbitrate leases but do not select a mechanism root. */
+    private static boolean hasOwnedDeclaration(Set<Object> declarations) {
+        for (Object declaration : declarations) {
+            if (!(declaration instanceof NamedResource)) return true;
+        }
+        return false;
     }
 
     private static Set<Object> actionDeclarations(Action action) {
@@ -1677,6 +1727,10 @@ public final class MechanismScheduler {
 
     private static void collectActionDeclarations(Action action, Set<Object> declarations) {
         if (action == null) {
+            return;
+        }
+        if (action instanceof LifecycleAction lifecycle) {
+            declarations.addAll(lifecycle.requirements());
             return;
         }
         if (action instanceof Actions.Computed computed) {
@@ -1848,7 +1902,7 @@ public final class MechanismScheduler {
     private record LeaseRegistration(Object runtimeKey, MechanismRuntime runtime) {
     }
 
-    private record LeaseReservation(long recency, Set<Object> resources) {
+    private record LeaseReservation(long recency, Set<Object> resources, boolean exclusive) {
         private LeaseReservation {
             resources = Set.copyOf(resources);
         }
@@ -1856,7 +1910,8 @@ public final class MechanismScheduler {
 
     private record CompiledAction(
             Map<Mechanism, CompiledPartition> partitions,
-            Set<Object> resources) {
+            Set<Object> resources,
+            boolean exclusive) {
         private CompiledAction {
             partitions = Collections.unmodifiableMap(new IdentityHashMap<>(partitions));
             resources = Set.copyOf(resources);

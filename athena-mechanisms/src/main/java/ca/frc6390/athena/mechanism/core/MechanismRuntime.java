@@ -253,6 +253,17 @@ final class MechanismRuntime {
         }
     }
 
+    /**
+     * Ends running lifecycle Actions (onEnd(true)) in the base tree and every lease while the robot is
+     * disabled. Other Actions keep their state; lifecycle Actions restart with onStart when enabled again.
+     */
+    private void interruptLifecycles() {
+        scheduler.interruptLifecycles();
+        for (ActiveLease lease : activeLeases.values()) {
+            lease.scheduler.interruptLifecycles();
+        }
+    }
+
     void releaseLease(Object key) {
         ActiveLease removed = activeLeases.remove(key);
         if (removed != null) {
@@ -313,6 +324,7 @@ final class MechanismRuntime {
         List<CandidateOutput> candidates = candidateScratch;
         candidates.clear();
         if (!safeMechanismContext.enabled()) {
+            interruptLifecycles();
             return;
         }
         if (Double.isNaN(stateStartSeconds)) {
@@ -1254,6 +1266,12 @@ final class MechanismRuntime {
             }
         }
 
+        void interruptLifecycles() {
+            if (root != null) {
+                root.interruptLifecycles();
+            }
+        }
+
         Result evaluate(Action action, MechanismContext context) {
             if (root == null || root.action() != action) {
                 root = SchedulerNode.lower(action);
@@ -1576,6 +1594,30 @@ final class MechanismRuntime {
                     node.entered = true;
                 }
                 return schedule.result(null, true, local);
+            }
+            if (action instanceof LifecycleAction lifecycle) {
+                if (node.terminal) return schedule.result(null, true, local);
+                if (!context.enabled()) {
+                    // Disabled robots do not run external code. Ending here matches cancellation on disable;
+                    // the Action restarts with onStart when the robot is enabled again.
+                    if (node.entered) {
+                        node.entered = false;
+                        lifecycle.end(true);
+                    }
+                    return schedule.result(null, false, local);
+                }
+                if (!node.entered) {
+                    node.entered = true;
+                    lifecycle.initialize();
+                }
+                lifecycle.execute();
+                if (lifecycle.finished()) {
+                    node.entered = false;
+                    node.terminal = true;
+                    lifecycle.end(false);
+                    return schedule.result(null, true, local);
+                }
+                return schedule.result(null, false, local);
             }
             if (action instanceof Actions.WaitSeconds wait) {
                 return schedule.result(null, wait.complete(local), local);
@@ -2082,6 +2124,11 @@ final class MechanismRuntime {
                 if (action instanceof Actions.VelocityContribution contribution) {
                     contribution.channel().clear();
                 }
+                if (runtime != null && runtime.entered && action instanceof LifecycleAction lifecycle) {
+                    // Cancellation, replacement, timeout, or a lost race before the Action finished.
+                    runtime.entered = false;
+                    lifecycle.end(true);
+                }
                 if (runtime != null && runtime.entered && runtime.pathRuntime != null && runtime.pathState != null) {
                     runtime.pathRuntime.end(
                             runtime.pathState,
@@ -2095,6 +2142,17 @@ final class MechanismRuntime {
                     }
                 }
                 namedChildren.values().forEach(SchedulerNode::reset);
+            }
+
+            private void interruptLifecycles() {
+                if (runtime != null && runtime.entered && action instanceof LifecycleAction lifecycle) {
+                    runtime.entered = false;
+                    lifecycle.end(true);
+                }
+                for (SchedulerNode child : indexedChildren) {
+                    if (child != null) child.interruptLifecycles();
+                }
+                namedChildren.values().forEach(SchedulerNode::interruptLifecycles);
             }
 
             private void resetChildren() {
