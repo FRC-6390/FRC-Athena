@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import ca.frc6390.athena.vision.device.RobotHeadingAware;
 import java.util.function.BooleanSupplier;
 
 /** One inspectable pose-processing node in a localization graph. */
@@ -282,6 +283,7 @@ public final class Localization implements PoseSignal {
             }
             refreshInputs(context, timestampSeconds, dtSeconds);
             evaluate(timestampSeconds);
+            reportHeadingToCameras(timestampSeconds);
             publishPose();
             state.lastRefreshTimestamp = timestampSeconds;
             state.runtimeOwned = true;
@@ -415,6 +417,52 @@ public final class Localization implements PoseSignal {
         return state.refreshables;
     }
 
+    /**
+     * A Kalman node gives its heading to every upstream camera that solves with the robot heading
+     * (PhotonVision's heading-constrained single-tag solve), so robot code does not wire a heading source.
+     */
+    private void reportHeadingToCameras(double timestampSeconds) {
+        if (strategy != Strategy.KALMAN) {
+            return;
+        }
+        List<RobotHeadingAware> cameras = state.headingCameras;
+        if (cameras == null) {
+            List<RobotHeadingAware> found = new ArrayList<>();
+            collectHeadingCameras(this, found, java.util.Collections.newSetFromMap(new IdentityHashMap<>()));
+            cameras = state.headingCameras = List.copyOf(found);
+        }
+        if (cameras.isEmpty()) {
+            return;
+        }
+        double heading = pose().headingRadians();
+        if (!Double.isFinite(heading)) {
+            return;
+        }
+        for (RobotHeadingAware camera : cameras) {
+            camera.reportRobotHeading(timestampSeconds, heading);
+        }
+    }
+
+    private static void collectHeadingCameras(
+            MeasurementSignal signal, List<RobotHeadingAware> found, Set<Object> visited) {
+        if (signal == null || !visited.add(signal)) {
+            return;
+        }
+        if (signal instanceof ca.frc6390.athena.vision.signal.PoseSignal vision
+                && vision.camera() instanceof RobotHeadingAware camera
+                && visited.add(camera)) {
+            found.add(camera);
+        }
+        if (signal instanceof Localization localization) {
+            for (PoseSignal input : localization.inputs) {
+                collectHeadingCameras(input, found, visited);
+            }
+        }
+        for (MeasurementSignal source : signal.sources()) {
+            collectHeadingCameras(source, found, visited);
+        }
+    }
+
     private static void collectRefreshable(
             MeasurementSignal signal,
             List<MeasurementSignal> found,
@@ -546,7 +594,7 @@ public final class Localization implements PoseSignal {
 
     private void observeRejection(Rejection rejection, double nowSeconds) {
         if (rejection.measurement() instanceof PoseMeasurementSample sample) {
-            state.vision.observe(VisionDiagnostics.sourceName(sample.source()), sample.timestampSeconds(),
+            state.vision.observe(sample.source(), sample.timestampSeconds(),
                     nowSeconds, Verdict.reject(rejection.reason()), sample.targetCount());
         }
     }
@@ -869,8 +917,11 @@ public final class Localization implements PoseSignal {
         private final DoublePublisher frameAgeMs;
         private final IntegerPublisher tagCount;
         private final DoublePublisher secondsSinceAccepted;
+        private final String camera;
+        private edu.wpi.first.networktables.BooleanPublisher timeSync;
 
         private VisionTopics(String camera) {
+            this.camera = camera;
             NetworkTableInstance nt = NetworkTableInstance.getDefault();
             state = nt.getStringTopic(VisionSourceStatus.path(camera, "State")).publish();
             reason = nt.getStringTopic(VisionSourceStatus.path(camera, "Reason")).publish();
@@ -879,7 +930,6 @@ public final class Localization implements PoseSignal {
             frameAgeMs = nt.getDoubleTopic(VisionSourceStatus.path(camera, "FrameAgeMs")).publish();
             tagCount = nt.getIntegerTopic(VisionSourceStatus.path(camera, "TagCount")).publish();
             secondsSinceAccepted = nt.getDoubleTopic(VisionSourceStatus.path(camera, "SecondsSinceAccepted")).publish();
-            // TODO: TimeSync (bool) goes here once the camera clock sync status is available.
         }
 
         private void publish(VisionSourceStatus status) {
@@ -893,6 +943,14 @@ public final class Localization implements PoseSignal {
             tagCount.set(status.tagCount());
             if (Double.isFinite(status.secondsSinceAccepted())) {
                 secondsSinceAccepted.set(status.secondsSinceAccepted());
+            }
+            // Only cameras that can tell whether their clock is synced get a TimeSync topic.
+            if (status.timeSync() != null) {
+                if (timeSync == null) {
+                    timeSync = NetworkTableInstance.getDefault()
+                            .getBooleanTopic(VisionSourceStatus.path(camera, "TimeSync")).publish();
+                }
+                timeSync.set(status.timeSync());
             }
         }
     }
@@ -911,6 +969,7 @@ public final class Localization implements PoseSignal {
         private KalmanEngine kalman;
         private StructPublisher<Pose2d> posePublisher;
         private List<MeasurementSignal> refreshables;
+        private List<RobotHeadingAware> headingCameras;
         private double evaluatingTimestamp = Double.NaN;
     }
 
@@ -1088,7 +1147,7 @@ public final class Localization implements PoseSignal {
             for (PoseMeasurementSample sample : samples) {
                 Verdict verdict = addVision(sample, timestampSeconds, innovationGate, maxHeadingResidualRadians,
                         odometrySpeeds, heading, positions, tuning, seeding);
-                diagnostics.observe(VisionDiagnostics.sourceName(sample.source()), sample.timestampSeconds(),
+                diagnostics.observe(sample.source(), sample.timestampSeconds(),
                         timestampSeconds, verdict, sample.targetCount());
             }
             return fromWpilib(estimator.getEstimatedPosition());

@@ -162,6 +162,7 @@ final class ArcpSystemSignals {
         final long frameAgeId;
         final long tagCountId;
         final long secondsId;
+        final long timeSyncId;
         String lastState;
         String lastReason;
         double lastAccepted = Double.NaN;
@@ -169,6 +170,7 @@ final class ArcpSystemSignals {
         double lastFrameAgeMs = Double.NaN;
         Long lastTagCount;
         double lastSeconds = Double.NaN;
+        Boolean lastTimeSync;
 
         VisionChannel(long firstId) {
             stateId = firstId;
@@ -178,10 +180,11 @@ final class ArcpSystemSignals {
             frameAgeId = firstId + 4;
             tagCountId = firstId + 5;
             secondsId = firstId + 6;
+            timeSyncId = firstId + 7;
         }
     }
 
-    private static final int VISION_SIGNALS_PER_CAMERA = 7;
+    private static final int VISION_SIGNALS_PER_CAMERA = 8;
     private static final String POWER_PREFIX = "athena/power/";
     private static final String VISION_PREFIX = "athena/vision/";
     private final Map<String, VisionChannel> vision = new HashMap<>();
@@ -234,7 +237,7 @@ final class ArcpSystemSignals {
     }
 
     /**
-     * Adds the seven signals of every camera the Kalman localizations report that is not known yet. Returns true when
+     * Adds the eight signals of every camera the Kalman localizations report that is not known yet. Returns true when
      * the dictionary grew. Reads the vision statuses, so call it at the export cadence, not every cycle.
      *
      * @return true when entries were added
@@ -256,7 +259,8 @@ final class ArcpSystemSignals {
             dictionary.add(entry(channel.frameAgeId, prefix + "FrameAgeMs", TYPE_F64, "ms"));
             dictionary.add(entry(channel.tagCountId, prefix + "TagCount", TYPE_I64, ""));
             dictionary.add(entry(channel.secondsId, prefix + "SecondsSinceAccepted", TYPE_F64, "s"));
-            // TODO: TimeSync (bool, camera clock synced to robot time) goes here once the status exists.
+            // Camera clock synced to robot time; never sent for cameras that cannot tell.
+            dictionary.add(entry(channel.timeSyncId, prefix + "TimeSync", TYPE_BOOL, ""));
             grew = true;
         }
         return grew;
@@ -381,6 +385,10 @@ final class ArcpSystemSignals {
             }
             channel.lastSeconds = publishIfChanged(cycle, channel.secondsId, status.secondsSinceAccepted(),
                     channel.lastSeconds);
+            if (status.timeSync() != null && !status.timeSync().equals(channel.lastTimeSync)) {
+                cycle.setBoolean(channel.timeSyncId, status.timeSync());
+                channel.lastTimeSync = status.timeSync();
+            }
         }
     }
 

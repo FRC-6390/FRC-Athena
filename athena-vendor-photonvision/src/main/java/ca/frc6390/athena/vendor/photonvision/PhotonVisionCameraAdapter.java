@@ -193,7 +193,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 device,
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
                 new PhotonPoseEstimatorClient(
-                        poseEstimator, poseStrategy, device::mountPose, referencePose, device::singleTagHeadingEnabled),
+                        poseEstimator, poseStrategy, device::mountPose, referencePose, device::singleTagHeadingEnabled,
+                        device::reportedRobotHeadingRadians),
                 Timer::getFPGATimestamp);
     }
 
@@ -536,6 +537,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final PhotonPoseEstimator.PoseStrategy strategy;
         private final Supplier<CameraMountPose> mountPose;
         private final Supplier<Pose2d> referencePose;
+        /** Heading the localization reports to the camera declaration every cycle (NaN before the first). */
+        private final java.util.function.DoubleSupplier reportedHeadingRadians;
         private final BooleanSupplier singleTagUsesHeading;
 
         private PhotonPoseEstimatorClient(
@@ -559,6 +562,17 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 Supplier<CameraMountPose> mountPose,
                 Supplier<Pose2d> referencePose,
                 BooleanSupplier singleTagUsesHeading) {
+            this(estimator, strategy, mountPose, referencePose, singleTagUsesHeading, () -> Double.NaN);
+        }
+
+        PhotonPoseEstimatorClient(
+                PhotonPoseEstimator estimator,
+                PhotonPoseEstimator.PoseStrategy strategy,
+                Supplier<CameraMountPose> mountPose,
+                Supplier<Pose2d> referencePose,
+                BooleanSupplier singleTagUsesHeading,
+                java.util.function.DoubleSupplier reportedHeadingRadians) {
+            this.reportedHeadingRadians = reportedHeadingRadians == null ? () -> Double.NaN : reportedHeadingRadians;
             this.estimator = Objects.requireNonNull(estimator, "estimator");
             this.strategy = strategy == null
                     ? PhotonPoseEstimator.PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR
@@ -589,6 +603,10 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 if (reference != null) {
                     return reference.getRotation();
                 }
+            }
+            double reported = reportedHeadingRadians.getAsDouble();
+            if (Double.isFinite(reported)) {
+                return new Rotation2d(reported);
             }
             Supplier<Rotation2d> source = robotHeadingSource;
             return source == null ? null : source.get();
@@ -798,7 +816,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 poseStrategyFor(device),
                 device::mountPose,
                 null,
-                device::singleTagHeadingEnabled);
+                device::singleTagHeadingEnabled,
+                device::reportedRobotHeadingRadians);
     }
 
     /**

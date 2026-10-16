@@ -17,7 +17,7 @@ import ca.frc6390.athena.vision.signal.TargetSignal;
  * object, so options set through {@link #pose()} and the clock status published by a bound adapter
  * are visible from every copy of the declaration.</p>
  */
-public final class PhotonVisionDevice implements CameraDevice, CameraClock {
+public final class PhotonVisionDevice implements RobotHeadingAware, CameraDevice, CameraClock {
     private final GenericCameraDevice camera;
     private final State state;
 
@@ -190,9 +190,25 @@ public final class PhotonVisionDevice implements CameraDevice, CameraClock {
     }
 
     /** Runtime options shared by all copies of one declaration. */
+    /** Latest robot heading reported by the localization (see {@link RobotHeadingAware}). */
+    @Override
+    public void reportRobotHeading(double timestampSeconds, double headingRadians) {
+        state.robotHeadingRadians = headingRadians;
+    }
+
+    /**
+     * Returns the latest robot heading reported to this camera, or NaN before the first report.
+     *
+     * @return heading in radians
+     */
+    public double reportedRobotHeadingRadians() {
+        return state.robotHeadingRadians;
+    }
+
     private static final class State {
         private volatile boolean singleTagUsesHeading;
         private volatile PhotonVisionPoseStrategy poseStrategy = PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR;
         private volatile Supplier<CameraClockStatus> clockStatus = CameraClockStatus::unknown;
+        private volatile double robotHeadingRadians = Double.NaN;
     }
 }

@@ -11,6 +11,7 @@ package ca.frc6390.athena.localization.pipeline;
  * @param frameAgeSeconds robot time minus the capture time of the newest frame; NaN when no frame was seen
  * @param tagCount tag count of the newest frame
  * @param secondsSinceAccepted robot time since the last accepted frame; NaN when none was accepted
+ * @param timeSync whether the camera's clock is synced to robot time; null when the camera cannot tell
  */
 public record VisionSourceStatus(
         String name,
@@ -20,7 +21,15 @@ public record VisionSourceStatus(
         double rejectedPerSecond,
         double frameAgeSeconds,
         int tagCount,
-        double secondsSinceAccepted) {
+        double secondsSinceAccepted,
+        Boolean timeSync) {
+
+    /** Status of a source whose clock sync is unknown. */
+    public VisionSourceStatus(String name, State state, String reason, double acceptedPerSecond,
+            double rejectedPerSecond, double frameAgeSeconds, int tagCount, double secondsSinceAccepted) {
+        this(name, state, reason, acceptedPerSecond, rejectedPerSecond, frameAgeSeconds, tagCount,
+                secondsSinceAccepted, null);
+    }
 
     /**
      * Source state. Priority, highest first: UNSYNCED, STALE, OK, RECOVERING, REJECTED. NO_TARGETS is reserved:

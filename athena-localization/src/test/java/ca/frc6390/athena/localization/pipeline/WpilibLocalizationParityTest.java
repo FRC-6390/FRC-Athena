@@ -485,6 +485,21 @@ class WpilibLocalizationParityTest {
         assertEquals(2.0, rig.athena.pose().yMeters(), 0.2);
     }
 
+    @Test
+    void kalmanReportsItsHeadingToUpstreamCamerasThatSolveWithIt() {
+        ParityRig rig = new ParityRig();
+        ca.frc6390.athena.vision.device.PhotonVisionDevice camera =
+                new ca.frc6390.athena.vision.device.PhotonVisionDevice("front");
+        rig.visionSource.camera = camera;
+        assertTrue(Double.isNaN(camera.reportedRobotHeadingRadians()));
+
+        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        rig.stepAthenaOnly(0.02);
+
+        assertEquals(rig.athena.pose().headingRadians(), camera.reportedRobotHeadingRadians(), 1.0e-12);
+        assertTrue(camera.reportedRobotHeadingRadians() > 0.0);
+    }
+
     private static VisionSample vision(
             double xMeters,
             double yMeters,
@@ -737,8 +752,14 @@ class WpilibLocalizationParityTest {
         assertEquals(0.0, headingError, PARITY_TOLERANCE, "heading at t=" + timestampSeconds);
     }
 
-    private static final class MutablePoseSignal implements PoseSignal {
+    private static final class MutablePoseSignal implements ca.frc6390.athena.vision.signal.PoseSignal {
         private List<Measurement> measurements = List.of();
+        private ca.frc6390.athena.vision.device.CameraDevice camera;
+
+        @Override
+        public ca.frc6390.athena.vision.device.CameraDevice camera() {
+            return camera;
+        }
 
         @Override
         public List<Measurement> measurements() {

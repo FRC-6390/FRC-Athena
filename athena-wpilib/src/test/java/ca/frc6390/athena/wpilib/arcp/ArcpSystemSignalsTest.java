@@ -208,13 +208,15 @@ class ArcpSystemSignalsTest {
                 "athena/vision/Intake/RejectedPerSecond",
                 "athena/vision/Intake/FrameAgeMs",
                 "athena/vision/Intake/TagCount",
-                "athena/vision/Intake/SecondsSinceAccepted"),
+                "athena/vision/Intake/SecondsSinceAccepted",
+                "athena/vision/Intake/TimeSync"),
                 signals.dictionary().stream().map(ArcpDictEntry::path)
                         .filter(path -> path.startsWith("athena/vision/")).toList());
         assertEquals(4, entries.get("athena/vision/Intake/State").typeTag());
         assertEquals(4, entries.get("athena/vision/Intake/Reason").typeTag());
         assertEquals(3, entries.get("athena/vision/Intake/AcceptedPerSecond").typeTag());
         assertEquals(2, entries.get("athena/vision/Intake/TagCount").typeTag(), "TagCount is i64");
+        assertEquals(1, entries.get("athena/vision/Intake/TimeSync").typeTag(), "TimeSync is bool");
         assertEquals("ms", entries.get("athena/vision/Intake/FrameAgeMs").unit());
         assertEquals("Hz", entries.get("athena/vision/Intake/AcceptedPerSecond").unit());
         for (String path : entries.keySet()) {
@@ -223,6 +225,25 @@ class ArcpSystemSignalsTest {
                 assertFalse(entries.get(path).writable(), path);
             }
         }
+    }
+
+    @Test
+    void timeSyncIsSentOnlyForCamerasThatKnowTheirClockAndOnlyOnChange() {
+        FakeSource source = new FakeSource();
+        source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.UNSYNCED, "frame 3.0 s in the future",
+                0.0, 5.0, -3.0, 1, Double.NaN, false));
+        ArcpSystemSignals signals = new ArcpSystemSignals(1, source);
+        signals.discoverVision();
+        long timeSync = byPath(signals).get("athena/vision/Intake/TimeSync").signalId();
+
+        assertEquals(false, sampled(signals).get(timeSync));
+        assertFalse(sampled(signals).containsKey(timeSync), "unchanged");
+        source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.OK, "",
+                5.0, 0.0, 0.02, 2, 0.0, true));
+        assertEquals(true, sampled(signals).get(timeSync));
+        source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.OK, "",
+                5.0, 0.0, 0.02, 2, 0.0));
+        assertFalse(sampled(signals).containsKey(timeSync), "unknown clock sends nothing");
     }
 
     @Test
@@ -268,7 +289,7 @@ class ArcpSystemSignalsTest {
 
         Map<String, ArcpDictEntry> entries = byPath(signals);
         assertEquals(intakeState, entries.get("athena/vision/Intake/State").signalId());
-        assertEquals(intakeState + 7, entries.get("athena/vision/Turret/State").signalId());
-        assertEquals(intakeState + 14, signals.nextId(), "the second camera takes the next seven ids");
+        assertEquals(intakeState + 8, entries.get("athena/vision/Turret/State").signalId());
+        assertEquals(intakeState + 16, signals.nextId(), "the second camera takes the next eight ids");
     }
 }

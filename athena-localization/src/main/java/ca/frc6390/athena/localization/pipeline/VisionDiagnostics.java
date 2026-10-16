@@ -42,6 +42,8 @@ final class VisionDiagnostics {
         Verdict newestVerdict = Verdict.reject("");
         int newestTagCount;
         double lastAccepted = Double.NaN;
+        /** Camera clock, when the source can report whether it is synced to robot time. */
+        ca.frc6390.athena.vision.device.CameraClock clock;
 
         Track(String name) {
             this.name = name;
@@ -54,8 +56,11 @@ final class VisionDiagnostics {
      * Records the verdict for one frame. A frame whose capture timestamp was already recorded for this source is
      * ignored, so re-reported frames do not count twice.
      */
-    void observe(String source, double frameTimestampSeconds, double nowSeconds, Verdict verdict, int tagCount) {
-        Track track = tracks.computeIfAbsent(source, Track::new);
+    void observe(Object source, double frameTimestampSeconds, double nowSeconds, Verdict verdict, int tagCount) {
+        Track track = tracks.computeIfAbsent(sourceName(source), Track::new);
+        if (source instanceof ca.frc6390.athena.vision.device.CameraClock clock) {
+            track.clock = clock;
+        }
         for (Double seen : track.remembered) {
             if (seen == frameTimestampSeconds) {
                 return;
@@ -113,9 +118,18 @@ final class VisionDiagnostics {
                     track.rejected.size() / WINDOW_SECONDS,
                     age,
                     track.newestTagCount,
-                    since));
+                    since,
+                    timeSync(track)));
         }
         return out;
+    }
+
+    private static Boolean timeSync(Track track) {
+        if (track.clock == null) {
+            return null;
+        }
+        ca.frc6390.athena.vision.device.CameraClockStatus status = track.clock.clockStatus();
+        return status == null || status.isUnknown() ? null : status.synced();
     }
 
     private static void prune(ArrayDeque<Double> events, double nowSeconds) {
