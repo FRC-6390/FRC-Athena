@@ -79,7 +79,9 @@ export const ROBOT_PATHS = {
   /** Total requested current from the power pass, amps. */
   busDemandAmps: 'athena/power/bus/demandAmps',
   /** True while the power budget is shedding current. */
-  busShedding: 'athena/power/bus/shedding'
+  busShedding: 'athena/power/bus/shedding',
+  /** Prefix of the per-camera vision telemetry (`athena/vision/<camera>/<field>`). */
+  visionPrefix: 'athena/vision/'
 } as const;
 
 /**

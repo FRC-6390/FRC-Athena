@@ -177,6 +177,25 @@ describe('driver state', () => {
     expect(deriveDriverState(storeWithReal({})).alerts).toEqual([]);
   });
 
+  test('a camera stuck UNSYNCED for over 2 s warns only while the robot is enabled', () => {
+    const build = (mode: string) => {
+      const store = new ValueStore();
+      store.apply({
+        kind: 'dictionary',
+        entries: [
+          desc(1, 'athena/vision/front/State', { type: 'string', typeTag: TYPE_TAG.string, role: 'value' }),
+          desc(2, ROBOT_PATHS.mode, { type: 'string', typeTag: TYPE_TAG.string, role: 'system' })
+        ]
+      });
+      store.apply(frame(1_000_000, [{ signalId: 1, typeTag: TYPE_TAG.string, value: 'UNSYNCED' }, { signalId: 2, typeTag: TYPE_TAG.string, value: mode }]));
+      store.apply(frame(5_000_000, [{ signalId: 1, typeTag: TYPE_TAG.string, value: 'UNSYNCED' }, { signalId: 2, typeTag: TYPE_TAG.string, value: mode }]));
+      return deriveDriverState(store).alerts.map((a) => [a.level, a.text]);
+    };
+    expect(build('Teleop')).toEqual([['warn', 'front camera: UNSYNCED']]);
+    expect(build('Autonomous')).toEqual([['warn', 'front camera: UNSYNCED']]);
+    expect(build('Disabled')).toEqual([]);
+  });
+
   test('formatClock pads seconds and handles idle', () => {
     expect(formatClock(null)).toBe('--:--');
     expect(formatClock(9.2)).toBe('0:10');
