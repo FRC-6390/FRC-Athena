@@ -135,7 +135,9 @@ export function visionRow(camera: string, read: (field: string) => SignalValue |
   const reason = typeof reasonValue === 'string' ? reasonValue : '--';
   const sinceValue = numberOf(read('SecondsSinceAccepted'));
   const frameValue = numberOf(read('FrameAgeMs'));
-  const stalled = notAcceptedWarning(sinceValue, frameValue);
+  // Only a camera that sees tags but keeps having them thrown out is a problem; one that sees no tags is not.
+  const usingTags = state.toUpperCase() === 'REJECTED' || state.toUpperCase() === 'RECOVERING';
+  const stalled = usingTags && notAcceptedWarning(sinceValue, frameValue);
   const tagValue = numberOf(read('TagCount'));
   return {
     camera,

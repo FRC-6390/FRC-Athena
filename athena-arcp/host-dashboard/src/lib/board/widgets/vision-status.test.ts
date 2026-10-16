@@ -64,11 +64,13 @@ describe('not accepted warning', () => {
     expect(notAcceptedWarning(null, 40)).toBe(false);
   });
 
-  test('a stalled OK camera is shown as warn; a stalled NO_TARGETS camera too', () => {
-    const stalled = visionRow('front', values({ State: 'OK', SecondsSinceAccepted: 3, FrameAgeMs: 30 }));
+  test('a camera recovering for too long warns; one that simply sees no tags does not', () => {
+    const stalled = visionRow('front', values({ State: 'RECOVERING', SecondsSinceAccepted: 3, FrameAgeMs: 30 }));
     expect(stalled.tone).toBe('warn');
     expect(stalled.stalled).toBe(true);
-    expect(visionRow('front', values({ State: 'NO_TARGETS', SecondsSinceAccepted: 3, FrameAgeMs: 30 })).tone).toBe('warn');
+    const idle = visionRow('front', values({ State: 'NO_TARGETS', SecondsSinceAccepted: 30, FrameAgeMs: 30 }));
+    expect(idle.tone).toBe('stale');
+    expect(idle.stalled).toBe(false);
     const fine = visionRow('front', values({ State: 'OK', SecondsSinceAccepted: 0.2, FrameAgeMs: 30 }));
     expect(fine.tone).toBe('ok');
     expect(fine.stalled).toBe(false);
