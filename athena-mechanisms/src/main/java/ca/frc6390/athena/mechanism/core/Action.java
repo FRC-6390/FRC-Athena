@@ -5,6 +5,7 @@ import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.mechanism.effort.EffortActions;
 import ca.frc6390.athena.mechanism.staging.Staging;
 import edu.wpi.first.units.Measure;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
@@ -15,6 +16,45 @@ public interface Action extends DeviceAction {
     @Override
     default void apply(ActionContext context) {
         request();
+    }
+
+    /**
+     * Structural children of this Action in declaration order. Read-only walkers (auto plan listing,
+     * path discovery, ownership and resource scans) traverse the Action tree through this method, so a
+     * new composite implements it once instead of being added to every instanceof chain. Leaves have no
+     * children. Null children are never reported.
+     *
+     * @return labelled children; empty for leaves
+     */
+    default List<Child> children() {
+        return List.of();
+    }
+
+    /**
+     * Short human label for this node, such as {@code TIMEOUT 2.0s} or {@code WITHIN 1.5 settled 0.1s}.
+     * Pure sequencing glue returns an empty label and has no line of its own. Defaults to the simple
+     * class name.
+     *
+     * @return one-line label
+     */
+    default String describe() {
+        String name = getClass().getSimpleName();
+        return name == null || name.isBlank() ? getClass().getName() : name;
+    }
+
+    /**
+     * A structural child of an Action.
+     *
+     * @param role how the parent uses the child: {@code step}, {@code branch}, {@code body}, {@code first},
+     *             {@code then}, {@code primary}, {@code with}, {@code true}, {@code false}, {@code drive},
+     *             or {@code marker:<name>} for a path marker
+     * @param action the child Action
+     */
+    record Child(String role, Action action) {
+        public Child {
+            Objects.requireNonNull(role, "role");
+            Objects.requireNonNull(action, "action");
+        }
     }
 
     /**
@@ -41,7 +81,7 @@ public interface Action extends DeviceAction {
     }
 
     default Action until(ActionCondition condition) {
-        return new Conditional(this, condition, null);
+        return Actions.until(condition, this);
     }
 
     default Action until(BooleanSupplier condition) {
@@ -141,7 +181,7 @@ public interface Action extends DeviceAction {
     }
 
     default Action then(Action next) {
-        return new Then(this, next);
+        return Actions.then(this, next);
     }
 
     default Action timeout(double seconds) {
@@ -186,26 +226,6 @@ public interface Action extends DeviceAction {
      */
     default Action interruptible(Interrupt interrupt) {
         return Actions.interruptible(this, Objects.requireNonNull(interrupt, "interrupt"));
-    }
-
-
-    record Conditional(Action action, ActionCondition condition, Action next) implements Action {
-        public Conditional {
-            Objects.requireNonNull(action, "action");
-            Objects.requireNonNull(condition, "condition");
-        }
-
-        @Override
-        public Action then(Action next) {
-            return new Conditional(action, condition, Objects.requireNonNull(next, "next"));
-        }
-    }
-
-    record Then(Action action, Action next) implements Action {
-        public Then {
-            Objects.requireNonNull(action, "action");
-            Objects.requireNonNull(next, "next");
-        }
     }
 
 }

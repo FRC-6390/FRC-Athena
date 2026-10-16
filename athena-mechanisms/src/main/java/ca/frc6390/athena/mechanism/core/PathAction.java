@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalDouble;
 import java.util.LinkedHashMap;
@@ -59,6 +61,19 @@ public record PathAction(
             throw new IllegalArgumentException("Duplicate path marker '" + key + "'.");
         }
         return copy(splitIndex, expectedSeconds, resetsOdometry, onlyResetsPose, updated);
+    }
+
+    /** Markers are the structural children; each is started when its named path marker is crossed. */
+    @Override
+    public List<Child> children() {
+        List<Child> out = new ArrayList<>();
+        markers.forEach((name, marker) -> out.add(new Child("marker:" + name, marker)));
+        return List.copyOf(out);
+    }
+
+    @Override
+    public String describe() {
+        return "PATH " + key() + (onlyResetsPose ? " [reset pose only]" : resetsOdometry ? " [reset pose]" : "");
     }
 
     public OptionalDouble expectedDurationSeconds() {

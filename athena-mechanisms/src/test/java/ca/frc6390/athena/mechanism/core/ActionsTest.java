@@ -80,7 +80,7 @@ class ActionsTest {
         assertEquals(0.5, ((Actions.Timeout) timedDeviceAction).seconds());
         Actions.Timeout timeout = (Actions.Timeout) timedComposition;
         assertEquals(1.0, timeout.seconds());
-        assertEquals(Action.Then.class, timeout.action().getClass());
+        assertEquals(Actions.Then.class, timeout.action().getClass());
     }
 
     @Test

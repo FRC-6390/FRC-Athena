@@ -55,13 +55,6 @@ public final class EffortActions {
         if (action instanceof Actions.DynamicControlVoltage a) {
             return new Actions.DynamicControlVoltage(a.control(), a.voltsSupplier(), request(a.control(), limit));
         }
-        if (action instanceof Action.Conditional a) {
-            return new Action.Conditional(limit(a.action(), limit), a.condition(),
-                    a.next() == null ? null : limit(a.next(), limit));
-        }
-        if (action instanceof Action.Then a) {
-            return new Action.Then(limit(a.action(), limit), limit(a.next(), limit));
-        }
         if (action instanceof Actions.Conditional a) {
             return new Actions.Conditional(limit(a.action(), limit), a.condition(),
                     a.next() == null ? null : limit(a.next(), limit));

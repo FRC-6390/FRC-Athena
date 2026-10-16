@@ -1336,15 +1336,7 @@ final class MechanismRuntime {
                 collectConditional(schedule, node, conditional.action(), conditional.next(), resources, out);
                 return;
             }
-            if (action instanceof Action.Conditional conditional) {
-                collectConditional(schedule, node, conditional.action(), conditional.next(), resources, out);
-                return;
-            }
             if (action instanceof Actions.Then then) {
-                collectThen(schedule, node, then.action(), then.next(), resources, out);
-                return;
-            }
-            if (action instanceof Action.Then then) {
                 collectThen(schedule, node, then.action(), then.next(), resources, out);
                 return;
             }
@@ -1539,20 +1531,7 @@ final class MechanismRuntime {
                         local,
                         node);
             }
-            if (action instanceof Action.Conditional conditional) {
-                return evaluateConditional(
-                        conditional.action(),
-                        conditional.condition(),
-                        conditional.next(),
-                        schedule,
-                        context,
-                        local,
-                        node);
-            }
             if (action instanceof Actions.Then then) {
-                return evaluateThen(then.action(), then.next(), schedule, context, node);
-            }
-            if (action instanceof Action.Then then) {
                 return evaluateThen(then.action(), then.next(), schedule, context, node);
             }
             if (action instanceof Actions.RuntimeAction runtimeAction) {
@@ -2175,11 +2154,7 @@ final class MechanismRuntime {
                     named("velocityDrive", contribution.driveAction());
                 } else if (action instanceof Actions.Conditional conditional) {
                     lowerConditional(conditional.action(), conditional.next());
-                } else if (action instanceof Action.Conditional conditional) {
-                    lowerConditional(conditional.action(), conditional.next());
                 } else if (action instanceof Actions.Then then) {
-                    lowerThen(then.action(), then.next());
-                } else if (action instanceof Action.Then then) {
                     lowerThen(then.action(), then.next());
                 }
             }
