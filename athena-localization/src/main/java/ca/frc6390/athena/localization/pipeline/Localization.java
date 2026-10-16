@@ -753,6 +753,8 @@ public final class Localization implements PoseSignal {
     private static final class KalmanEngine {
         private static final Object UNKNOWN_VISION_SOURCE = new Object();
         private static final int RECOVERY_SAMPLE_COUNT = 3;
+        /** Clock skew allowed before a vision frame counts as coming from the future. */
+        private static final double FUTURE_TOLERANCE_SECONDS = 0.1;
         private static final int SINGLE_TAG_RECOVERY_SAMPLE_COUNT = 5;
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
@@ -803,14 +805,22 @@ public final class Localization implements PoseSignal {
                     .filter(PoseMeasurementSample.class::isInstance)
                     .map(PoseMeasurementSample.class::cast)
                     .sorted(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                    .forEach(sample -> addVision(sample, innovationGate, maxHeadingResidualRadians));
+                    .forEach(sample -> addVision(sample, timestampSeconds, innovationGate, maxHeadingResidualRadians));
             return fromWpilib(estimator.getEstimatedPosition());
         }
 
         private void addVision(
                 PoseMeasurementSample sample,
+                double nowSeconds,
                 double innovationGate,
                 double maxHeadingResidualRadians) {
+            // A frame from the future means the camera clock is not synced to the robot yet (PhotonVision
+            // and Limelight both report robot time only after time sync). Ignore it without remembering
+            // its timestamp: one such frame would otherwise make every later, correct frame look old and
+            // lock the camera out until the next reset.
+            if (Double.isFinite(nowSeconds) && sample.timestampSeconds() > nowSeconds + FUTURE_TOLERANCE_SECONDS) {
+                return;
+            }
             Object source = sample.source() == null ? UNKNOWN_VISION_SOURCE : sample.source();
             double previous = lastSeenVisionTimestamps.getOrDefault(source, Double.NEGATIVE_INFINITY);
             if (sample.timestampSeconds() <= previous) {
@@ -818,11 +828,14 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
-            if (trustsHeading(sample) && headingResidual(sample) > maxHeadingResidualRadians) {
-                visionRecovery.remove(source);
-                return;
-            }
-            if (Double.isFinite(innovationGate) && innovation(sample, stdDevs) > innovationGate) {
+            // Heading-residual and innovation gates share one recovery path: a source whose samples
+            // are rejected but stay self-consistent for several frames (e.g. after a gyro slip or a
+            // reset to the wrong heading) is re-admitted instead of being locked out forever.
+            boolean headingRejected = trustsHeading(sample)
+                    && headingResidual(sample) > maxHeadingResidualRadians;
+            boolean innovationRejected = Double.isFinite(innovationGate)
+                    && innovation(sample, stdDevs) > innovationGate;
+            if (headingRejected || innovationRejected) {
                 VisionRecovery recovery = visionRecovery.computeIfAbsent(source, ignored -> new VisionRecovery());
                 if (!recovery.accepts(sample)) {
                     return;

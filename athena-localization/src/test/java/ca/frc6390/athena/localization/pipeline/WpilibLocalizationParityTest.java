@@ -125,6 +125,26 @@ class WpilibLocalizationParityTest {
     }
 
     @Test
+    void headingResidualGateRecoversFromConsistentCameraHeading() {
+        ParityRig rig = new ParityRig(
+                Double.POSITIVE_INFINITY,
+                false,
+                Math.toRadians(35.0));
+        Object camera = new Object();
+
+        rig.stepAthenaOnly(0.00, vision(1.0, 0.0, Math.PI / 2.0, 0.00,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        rig.stepAthenaOnly(0.02, vision(1.0, 0.0, Math.PI / 2.0, 0.02,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+
+        rig.stepAthenaOnly(0.04, vision(1.0, 0.0, Math.PI / 2.0, 0.04,
+                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+
+        assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+    }
+
+    @Test
     void headingOnlyRecoveryIgnoresSyntheticTranslationChanges() {
         ParityRig rig = new ParityRig(
                 9.0,
@@ -151,6 +171,45 @@ class WpilibLocalizationParityTest {
 
     private static double[] angles(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
+    }
+
+    /** Robot stationary at boot on red: gyro reads 0, the camera sees the field pose facing 180 degrees. */
+    @Test
+    void startupSingleTagOnRedConvergesWithRealisticNoise() {
+        ParityRig rig = new ParityRig(9.0, false, Math.toRadians(35.0));
+        Object camera = new Object();
+        java.util.Random noise = new java.util.Random(6390);
+        MeasurementStdDevs singleTag = MeasurementStdDevs.of(0.9, 0.9, Math.toRadians(12.0));
+        for (int i = 0; i < 100; i++) {
+            double t = i * 0.05;
+            rig.stepAthenaOnly(t, vision(
+                    13.0 + noise.nextGaussian() * 0.15,
+                    4.0 + noise.nextGaussian() * 0.15,
+                    Math.PI + noise.nextGaussian() * Math.toRadians(3.0),
+                    t - 0.03, singleTag, camera));
+        }
+        PoseSnapshot pose = rig.athena.pose();
+        assertEquals(13.0, pose.xMeters(), 0.3, "x after 5 s of single-tag vision");
+        assertEquals(4.0, pose.yMeters(), 0.3, "y after 5 s of single-tag vision");
+        assertEquals(0.0, Math.abs(Math.cos(pose.headingRadians()) + 1.0), 0.05, "heading after 5 s: " + Math.toDegrees(pose.headingRadians()));
+    }
+
+    /**
+     * A camera whose clock is not synced yet can report a capture time in the future. One such frame must not
+     * lock that camera out once its timestamps become correct.
+     */
+    @Test
+    void oneFutureTimestampDoesNotLockOutACamera() {
+        ParityRig rig = new ParityRig(9.0);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.0, 4000.0, multiTag, camera));
+        for (int i = 1; i <= 50; i++) {
+            double t = i * 0.05;
+            rig.stepAthenaOnly(t, vision(5.0, 2.0, 0.0, t - 0.03, multiTag, camera));
+        }
+        assertEquals(5.0, rig.athena.pose().xMeters(), 0.2);
+        assertEquals(2.0, rig.athena.pose().yMeters(), 0.2);
     }
 
     private static VisionSample vision(
