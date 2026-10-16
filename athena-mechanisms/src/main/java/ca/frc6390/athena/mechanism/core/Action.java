@@ -93,11 +93,6 @@ public interface Action extends DeviceAction {
         return Actions.timeout(this, seconds);
     }
 
-    /** Runs this action for the supplied duration, then completes it. */
-    default Action forTime(double seconds) {
-        return Actions.timeout(this, seconds);
-    }
-
     /**
      * Bounds this action to the supplied duration, then completes it. Required to make a continuous
      * action eligible for {@link #interruptible(Interrupt) AFTER_COMPLETE} policies.

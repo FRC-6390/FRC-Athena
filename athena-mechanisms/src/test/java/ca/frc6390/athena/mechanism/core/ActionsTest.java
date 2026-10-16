@@ -81,8 +81,10 @@ class ActionsTest {
     }
 
     @Test
-    void forTimeIsAFluentFiniteActionAlias() {
-        Actions.Timeout timed = (Actions.Timeout) MOTOR.percent(0.2).forTime(0.5);
+    void timeoutBoundsAFluentAction() {
+        // Action.forTime(seconds) was removed: it read like Sequence.forTime(seconds, action) but meant
+        // "time out after". Timed sequence steps use forTime(seconds, action); single actions use timeout.
+        Actions.Timeout timed = (Actions.Timeout) MOTOR.percent(0.2).timeout(0.5);
 
         assertEquals(0.5, timed.seconds());
         assertEquals(MOTOR.percent(0.2).getClass(), timed.action().getClass());
