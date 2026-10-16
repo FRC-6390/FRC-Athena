@@ -13,6 +13,7 @@ import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.measurement.TargetMeasurementSample;
 import ca.frc6390.athena.vision.config.Cameras;
 import ca.frc6390.athena.vision.device.CameraDevice;
+import ca.frc6390.athena.vision.runtime.VisionSimNoise;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 import ca.frc6390.athena.vision.runtime.VisionSimulationProvider;
@@ -91,7 +92,8 @@ class PhotonVisionSimulationProviderTest {
         CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera),
-                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 3.0, 0.0, 1.0, 0.0)));
+                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 3.0, 0.0, 1.0, 0.0))
+                        .noise(VisionSimNoise.perfect()));
         CameraDevice bound = simulation.bind(camera);
 
         simulation.update(new PoseSnapshot(0.0, 0.0, 0.0), 1.25);
@@ -113,7 +115,8 @@ class PhotonVisionSimulationProviderTest {
         Localization localization = Localizations.latestValid().input(declaredPose);
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera),
-                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 5.0, 2.0, 1.0, 0.0)));
+                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 5.0, 2.0, 1.0, 0.0))
+                        .noise(VisionSimNoise.perfect()));
         CameraDevice bound = simulation.bind(camera);
         VisionGraph graph = VisionGraph.of(bound);
 
