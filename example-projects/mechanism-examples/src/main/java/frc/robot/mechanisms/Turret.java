@@ -3,10 +3,12 @@ package frc.robot.mechanisms;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
+import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
+import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
@@ -19,12 +21,25 @@ import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import frc.robot.Constants;
 
 public final class Turret implements Mechanism {
+    /** 100:1 turret reduction from the Kraken X44 pinion to the ring gear. */
+    private static final GearRatio GEARING = GearRatio.reduction(100.0, 1.0);
+
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(25);
     private final EncoderDevice angle = motor.encoder()
+            .gearing(GEARING)
             .conversion(360.0)
             .units(EncoderUnit.DEGREES);
     private final ImuDevice chassisImu = Constants.RIO.imu(ImuKinds.PIGEON_2, 17);
     private final Range travel = Range.degrees(-270.0, 270.0);
+
+    /**
+     * Simulated plant: the geared X44 with about 0.5 kg m^2 of turret inertia. The range is in mechanism
+     * rotations, so the +/-270 degree travel is +/-0.75 rotations.
+     */
+    private final SimModel simulation = SimModel.motor(motor)
+            .gearRatio(GEARING)
+            .momentOfInertia(0.5)
+            .range(Range.rotations(-0.75, 0.75));
 
     private final ControlBinding fieldHeading = Controls.position(motor)
             .feedback(angle)

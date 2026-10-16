@@ -213,9 +213,17 @@ public final class SimModel {
                 directMotors, updated, range, directLimits, directDigitalInputs);
     }
 
+    /**
+     * Limits the simulated mechanism's travel. Plants work in mechanism rotations, so a degree range
+     * ({@link Range#degrees}) is converted; rotation and unitless ranges are used as given.
+     */
     public SimModel range(Range range) {
+        Objects.requireNonNull(range, "range");
+        Range plantRange = "deg".equals(range.unit())
+                ? Range.rotations(range.minimum() / 360.0, range.maximum() / 360.0)
+                : range;
         return copy(momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
-                directMotors, directEncoders, Objects.requireNonNull(range, "range"), directLimits, directDigitalInputs);
+                directMotors, directEncoders, plantRange, directLimits, directDigitalInputs);
     }
 
     public SimModel limit(DigitalInputDevice sensor, double position) {

@@ -654,6 +654,16 @@ class HardwareGraphTest {
     }
 
     @Test
+    void simModelDegreeRangesBecomeMechanismRotations() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16);
+        Range plant = SimModel.motor(motor).range(Range.degrees(-270.0, 270.0)).range();
+        assertEquals(-0.75, plant.minimum(), 1e-12);
+        assertEquals(0.75, plant.maximum(), 1e-12);
+        assertEquals("rot", plant.unit());
+        assertEquals(Range.of(-2.0, 2.0), SimModel.motor(motor).range(Range.of(-2.0, 2.0)).range());
+    }
+
+    @Test
     void simModelsComposeMotorsEncodersRangesLimitsAndDependencies() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
