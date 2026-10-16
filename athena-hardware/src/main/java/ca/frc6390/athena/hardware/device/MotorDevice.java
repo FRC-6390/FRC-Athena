@@ -10,6 +10,7 @@ import ca.frc6390.athena.api.hardware.MotorControllerKind;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.vendor.VendorOptions;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.runtime.DeviceActionFactories;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.runtime.RuntimeBindings;
 import ca.frc6390.athena.hardware.runtime.RuntimeScope;
@@ -206,25 +207,30 @@ public record MotorDevice(
         return EncoderDevice.motorAbsolute(this);
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T percent(double percent) {
-        return action("percent", new Class<?>[] {MotorDevice.class, double.class}, this, percent);
+        return (T) DeviceActionFactories.get().motorPercent(this, percent);
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T percent(DoubleSupplier percent) {
-        return action("percent", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, percent);
+        return (T) DeviceActionFactories.get().motorPercent(this, percent);
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T voltage(double volts) {
-        return action("voltage", new Class<?>[] {MotorDevice.class, double.class}, this, volts);
+        return (T) DeviceActionFactories.get().motorVoltage(this, volts);
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T voltage(DoubleSupplier volts) {
-        return action("voltage", new Class<?>[] {MotorDevice.class, DoubleSupplier.class}, this, volts);
+        return (T) DeviceActionFactories.get().motorVoltage(this, volts);
     }
 
     /** Stops commanding this motor and applies its configured neutral mode. */
+    @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T neutral() {
-        return action("neutral", new Class<?>[] {MotorDevice.class}, this);
+        return (T) DeviceActionFactories.get().motorNeutral(this);
     }
 
     /**
@@ -511,19 +517,5 @@ public record MotorDevice(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T extends DeviceAction> T action(String method, Class<?>[] parameterTypes, Object... args) {
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod(method, parameterTypes);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (T) factory.invoke(null, args);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("Motor action factories require athena-mechanisms on the classpath.", exception);
-        }
     }
 }

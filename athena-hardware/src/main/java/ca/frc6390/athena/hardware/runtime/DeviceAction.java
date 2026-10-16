@@ -24,16 +24,7 @@ public interface DeviceAction extends ActionBinding, Runnable {
      */
     @SuppressWarnings("unchecked")
     default <T extends DeviceAction> T then(DeviceAction next) {
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod("then", DeviceAction.class, DeviceAction.class);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (T) factory.invoke(null, this, next);
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("Device action composition requires athena-mechanisms on the classpath.", exception);
-        }
+        return (T) DeviceActionFactories.get().then(this, next);
     }
 
     /**
@@ -45,16 +36,7 @@ public interface DeviceAction extends ActionBinding, Runnable {
      */
     @SuppressWarnings("unchecked")
     default <T extends DeviceAction> T timeout(Number seconds) {
-        try {
-            Class<?> actions = Class.forName("ca.frc6390.athena.mechanism.core.Actions");
-            var factory = actions.getDeclaredMethod("timeout", DeviceAction.class, double.class);
-            if (!factory.canAccess(null)) {
-                factory.setAccessible(true);
-            }
-            return (T) factory.invoke(null, this, seconds.doubleValue());
-        } catch (ReflectiveOperationException exception) {
-            throw new IllegalStateException("Device action composition requires athena-mechanisms on the classpath.", exception);
-        }
+        return (T) DeviceActionFactories.get().timeout(this, seconds.doubleValue());
     }
 
     /**

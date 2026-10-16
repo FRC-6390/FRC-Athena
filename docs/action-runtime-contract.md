@@ -164,6 +164,22 @@ interrupt. Nesting a root-only policy in another Action fails when the tree is c
 - Lifecycle hooks are mode-scoped. For example, `Events.teleopPeriodic().whileActive(...)`
   releases its lease outside teleop and reacquires it when teleop periodic resumes.
 
+## Structure
+
+- Every Action describes its shape once. `Action.children()` returns the labelled structural
+  children (`step`, `branch`, `body`, `first`, `then`, `primary`, `with`, `true`, `false`, `drive`,
+  or `marker:<name>` for a path marker). `Action.describe()` returns a one-line label such as
+  `TIMEOUT 2.0s`; pure sequencing glue (`then`) returns an empty label.
+- Read-only walkers (`AutoPlan`, `PathIntrospector`, the scheduler's declaration and opaque-graph
+  scans) traverse through `children()`. Evaluation stays type-specific because it depends on runtime
+  state.
+- `Actions.Then` and `Actions.Conditional` are the only sequencing and until types. Fluent
+  (`action.then(...)`, `action.until(...)`) and static (`Actions.then(...)`, `Actions.until(...)`) forms
+  build the same types, and a chained continuation after an existing one sequences after it.
+- Hardware declarations (`MotorDevice.percent(...)`, encoder and IMU actions, power profile actions)
+  create their Actions through `DeviceActionFactories`, which athena-mechanisms supplies through
+  `ServiceLoader`. athena-hardware has no reflective reference to the mechanism types.
+
 ## Related Contracts
 
 - Control state reset, constraints, and repeated closed-loop requests are covered by
