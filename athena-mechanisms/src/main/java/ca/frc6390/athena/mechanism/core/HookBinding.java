@@ -35,10 +35,6 @@ public record HookBinding(EventBinding event, List<HookAction> actions, boolean 
         return onStart((ActionBinding) action);
     }
 
-    public HookBinding onStart(Action action) {
-        return onStart((ActionBinding) action);
-    }
-
     public HookBinding whileActive(Runnable action) {
         return whileActive(ActionBinding.run(action));
     }
@@ -48,10 +44,6 @@ public record HookBinding(EventBinding event, List<HookAction> actions, boolean 
     }
 
     public HookBinding whileActive(DeviceAction action) {
-        return whileActive((ActionBinding) action);
-    }
-
-    public HookBinding whileActive(Action action) {
         return whileActive((ActionBinding) action);
     }
 
@@ -67,10 +59,6 @@ public record HookBinding(EventBinding event, List<HookAction> actions, boolean 
         return onEnd((ActionBinding) action);
     }
 
-    public HookBinding onEnd(Action action) {
-        return onEnd((ActionBinding) action);
-    }
-
     public HookBinding onInactive(Runnable action) {
         return onInactive(ActionBinding.run(action));
     }
@@ -83,10 +71,6 @@ public record HookBinding(EventBinding event, List<HookAction> actions, boolean 
         return onInactive((ActionBinding) action);
     }
 
-    public HookBinding onInactive(Action action) {
-        return onInactive((ActionBinding) action);
-    }
-
     public HookBinding whileInactive(Runnable action) {
         return whileInactive(ActionBinding.run(action));
     }
@@ -96,10 +80,6 @@ public record HookBinding(EventBinding event, List<HookAction> actions, boolean 
     }
 
     public HookBinding whileInactive(DeviceAction action) {
-        return whileInactive((ActionBinding) action);
-    }
-
-    public HookBinding whileInactive(Action action) {
         return whileInactive((ActionBinding) action);
     }
 
