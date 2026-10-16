@@ -3,7 +3,7 @@ package ca.frc6390.athena.localization.pipeline;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 
-/** Filters for camera-derived pose measurements. */
+/** Filters for camera-derived pose measurements. Each names its rejection in diagnostics. */
 public final class VisionFilters {
     private VisionFilters() {
     }
@@ -23,8 +23,15 @@ public final class VisionFilters {
      */
     public static LocalizationFilter maxLatencySeconds(double seconds) {
         double maximum = nonNegative(seconds, "Maximum latency");
-        return (localization, measurement, pose) -> measurement == null
-                || (measurement.latencySeconds() <= maximum && ageWithin(ageSeconds(localization, measurement), maximum));
+        return new ReasonedFilter("maxLatencySeconds", (localization, measurement, pose) -> {
+            if (measurement == null) {
+                return null;
+            }
+            if (!(measurement.latencySeconds() <= maximum)) {
+                return LocalizationFilters.format("latency %.3f s > %.3f s", measurement.latencySeconds(), maximum);
+            }
+            return ageReason(ageSeconds(localization, measurement), maximum);
+        });
     }
 
     /**
@@ -37,19 +44,26 @@ public final class VisionFilters {
      */
     public static LocalizationFilter maxAgeSeconds(double seconds) {
         double maximum = nonNegative(seconds, "Maximum age");
-        return (localization, measurement, pose) -> measurement == null
-                || ageWithin(ageSeconds(localization, measurement), maximum);
+        return new ReasonedFilter("maxAgeSeconds", (localization, measurement, pose) -> measurement == null
+                ? null
+                : ageReason(ageSeconds(localization, measurement), maximum));
     }
 
     /** Clock skew allowed before a frame counts as coming from the future. */
     private static final double FUTURE_TOLERANCE_SECONDS = 0.1;
 
     /**
-     * True when the frame age is unknown (NaN), or between "slightly in the future" and the maximum. A
+     * Null when the frame age is unknown (NaN), or between "slightly in the future" and the maximum. A
      * clearly negative age means the camera clock is not synced to the robot yet, so the frame is rejected.
      */
-    private static boolean ageWithin(double age, double maximum) {
-        return Double.isNaN(age) || (age >= -FUTURE_TOLERANCE_SECONDS && age <= maximum);
+    private static String ageReason(double age, double maximum) {
+        if (Double.isNaN(age)) {
+            return null;
+        }
+        if (age < -FUTURE_TOLERANCE_SECONDS) {
+            return LocalizationFilters.format("frame %.1f s in the future", -age);
+        }
+        return age <= maximum ? null : LocalizationFilters.format("frame age %.3f s > %.3f s", age, maximum);
     }
 
     private static double ageSeconds(Localization localization, Measurement measurement) {
@@ -63,35 +77,47 @@ public final class VisionFilters {
 
     public static LocalizationFilter maxAmbiguity(double ambiguity) {
         double maximum = nonNegative(ambiguity, "Maximum ambiguity");
-        return (localization, measurement, pose) -> !(measurement instanceof PoseMeasurementSample sample)
-                || sample.targetCount() > 1
-                || sample.ambiguity() <= maximum;
+        return new ReasonedFilter("maxAmbiguity", (localization, measurement, pose) ->
+                !(measurement instanceof PoseMeasurementSample sample)
+                        || sample.targetCount() > 1
+                        || sample.ambiguity() <= maximum
+                        ? null
+                        : LocalizationFilters.format("ambiguity %.2f > %.2f",
+                                ((PoseMeasurementSample) measurement).ambiguity(), maximum));
     }
 
     public static LocalizationFilter maxAverageTagDistanceMeters(double meters) {
         double maximum = nonNegative(meters, "Maximum average tag distance");
-        return (localization, measurement, pose) -> {
+        return new ReasonedFilter("maxAverageTagDistanceMeters", (localization, measurement, pose) -> {
             if (!(measurement instanceof PoseMeasurementSample sample)) {
-                return true;
+                return null;
             }
             double distance = sample.averageTargetDistanceMeters();
-            return !Double.isFinite(distance) || distance <= maximum;
-        };
+            return !Double.isFinite(distance) || distance <= maximum
+                    ? null
+                    : LocalizationFilters.format("tag distance %.2f m > %.2f m", distance, maximum);
+        });
     }
 
     public static LocalizationFilter minimumTagCount(int count) {
         int minimum = Math.max(0, count);
-        return (localization, measurement, pose) -> !(measurement instanceof PoseMeasurementSample sample)
-                || sample.targetCount() >= minimum;
+        return new ReasonedFilter("minimumTagCount", (localization, measurement, pose) ->
+                !(measurement instanceof PoseMeasurementSample sample) || sample.targetCount() >= minimum
+                        ? null
+                        : LocalizationFilters.format("tags %d < %d",
+                                ((PoseMeasurementSample) measurement).targetCount(), minimum));
     }
 
     public static LocalizationFilter finitePoseAndTimestamp() {
-        return (localization, measurement, pose) -> measurement != null
-                && pose != null
-                && Double.isFinite(measurement.timestampSeconds())
-                && Double.isFinite(pose.xMeters())
-                && Double.isFinite(pose.yMeters())
-                && Double.isFinite(pose.headingRadians());
+        return new ReasonedFilter("finitePoseAndTimestamp", (localization, measurement, pose) -> {
+            boolean finite = measurement != null
+                    && pose != null
+                    && Double.isFinite(measurement.timestampSeconds())
+                    && Double.isFinite(pose.xMeters())
+                    && Double.isFinite(pose.yMeters())
+                    && Double.isFinite(pose.headingRadians());
+            return finite ? null : "non-finite pose or timestamp";
+        });
     }
 
     private static double nonNegative(double value, String name) {
