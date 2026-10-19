@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot.explore;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
@@ -128,7 +130,7 @@ final class ExplorationRun {
             });
             // Starvation and control findings need per-cycle candidates and controls, which only CAPTURE builds.
             runtime.mechanismTraceLevel(MechanismTraceLevel.CAPTURE);
-            runtime.mechanismTracePeriodSeconds(DT);
+            runtime.mechanismTracePeriod(Seconds.of(DT));
             runtime.inputs(() -> current);
             if (config.recordDirectory() != null) {
                 runtime.replay(ReplayPolicy.of(), config.recordDirectory());
@@ -145,8 +147,8 @@ final class ExplorationRun {
             for (int cycle = 0; cycle < steps; cycle++) {
                 now = cycle * DT;
                 while (segmentIndex < modes.size() - 1
-                        && now >= segmentStart + modes.get(segmentIndex).seconds() - 1e-9) {
-                    segmentStart += modes.get(segmentIndex).seconds();
+                        && now >= segmentStart + modes.get(segmentIndex).duration().in(Seconds) - 1e-9) {
+                    segmentStart += modes.get(segmentIndex).duration().in(Seconds);
                     segmentIndex++;
                 }
                 LifecycleMode mode = modes.get(segmentIndex).mode();

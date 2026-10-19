@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot.explore;
 
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -18,11 +20,12 @@ import java.util.Random;
  */
 public final class ModeSchedule {
     /** One mode and how long it lasts. */
-    public record Segment(LifecycleMode mode, double seconds) {
+    public record Segment(LifecycleMode mode, Time duration) {
         public Segment {
             Objects.requireNonNull(mode, "mode");
+            double seconds = Objects.requireNonNull(duration, "duration").in(Seconds);
             if (!(seconds > 0.0) || !Double.isFinite(seconds)) {
-                throw new IllegalArgumentException("Segment seconds must be positive and finite.");
+                throw new IllegalArgumentException("Segment duration must be positive and finite.");
             }
         }
     }
@@ -41,10 +44,10 @@ public final class ModeSchedule {
     /** Disabled 1 s, autonomous 15 s, disabled 3 s, teleop 135 s; then disabled. */
     public static ModeSchedule matchPlay() {
         return new ModeSchedule(List.of(
-                new Segment(LifecycleMode.DISABLED, 1.0),
-                new Segment(LifecycleMode.AUTONOMOUS, 15.0),
-                new Segment(LifecycleMode.DISABLED, 3.0),
-                new Segment(LifecycleMode.TELEOP, 135.0)), null);
+                new Segment(LifecycleMode.DISABLED, Seconds.of(1.0)),
+                new Segment(LifecycleMode.AUTONOMOUS, Seconds.of(15.0)),
+                new Segment(LifecycleMode.DISABLED, Seconds.of(3.0)),
+                new Segment(LifecycleMode.TELEOP, Seconds.of(135.0))), null);
     }
 
     /** A fixed sequence of segments; the robot stays disabled after the last one. */
@@ -67,10 +70,12 @@ public final class ModeSchedule {
      *
      * @return a new schedule
      */
-    public ModeSchedule dwell(LifecycleMode mode, double minSeconds, double maxSeconds) {
+    public ModeSchedule dwell(LifecycleMode mode, Time min, Time max) {
         if (dwell == null) {
             throw new IllegalStateException("dwell applies only to random schedules");
         }
+        double minSeconds = Objects.requireNonNull(min, "min").in(Seconds);
+        double maxSeconds = Objects.requireNonNull(max, "max").in(Seconds);
         if (!(minSeconds > 0.0) || maxSeconds < minSeconds) {
             throw new IllegalArgumentException("Dwell range must be positive and ordered.");
         }
@@ -90,7 +95,7 @@ public final class ModeSchedule {
             for (Segment segment : fixed) {
                 if (elapsed >= durationSeconds) break;
                 out.add(segment);
-                elapsed += segment.seconds();
+                elapsed += segment.duration().in(Seconds);
             }
         } else {
             Random random = new Random(seed * 0x9E3779B97F4A7C15L + 0x5DEECE66DL);
@@ -98,7 +103,7 @@ public final class ModeSchedule {
             while (elapsed < durationSeconds) {
                 double[] range = dwell.get(mode);
                 double seconds = range[0] + (range[1] - range[0]) * random.nextDouble();
-                out.add(new Segment(mode, seconds));
+                out.add(new Segment(mode, Seconds.of(seconds)));
                 elapsed += seconds;
                 mode = mode == LifecycleMode.DISABLED
                         ? ENABLED[random.nextInt(ENABLED.length)]
@@ -106,7 +111,7 @@ public final class ModeSchedule {
             }
         }
         if (elapsed < durationSeconds) {
-            out.add(new Segment(LifecycleMode.DISABLED, durationSeconds - elapsed));
+            out.add(new Segment(LifecycleMode.DISABLED, Seconds.of(durationSeconds - elapsed)));
         }
         return List.copyOf(out);
     }

@@ -1,5 +1,8 @@
 package ca.frc6390.athena.robot;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Degrees;
@@ -52,8 +55,8 @@ class RebuiltVisionLocalizationSimulationTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
         double initialError = Math.hypot(
-                mechanism.estimatedFieldPose.pose().xMeters() - 2.0,
-                mechanism.estimatedFieldPose.pose().yMeters() - 4.0);
+                mechanism.estimatedFieldPose.pose().getX() - 2.0,
+                mechanism.estimatedFieldPose.pose().getY() - 4.0);
         // Cameras deliver at their own frame rate (30 fps on a 50 Hz loop), so count frames over the run.
         int filteredAccepted = 0;
         int fusedAccepted = 0;
@@ -64,8 +67,8 @@ class RebuiltVisionLocalizationSimulationTest {
             fusedAccepted += mechanism.fusedVision.acceptedMeasurements().size();
         }
         double correctedError = Math.hypot(
-                mechanism.estimatedFieldPose.pose().xMeters() - 2.0,
-                mechanism.estimatedFieldPose.pose().yMeters() - 4.0);
+                mechanism.estimatedFieldPose.pose().getX() - 2.0,
+                mechanism.estimatedFieldPose.pose().getY() - 4.0);
 
         assertTrue(filteredAccepted > 0, "no frame passed the filters");
         assertTrue(fusedAccepted > 0, "no frame reached the fused stage");
@@ -93,8 +96,8 @@ class RebuiltVisionLocalizationSimulationTest {
         }
 
         PoseSnapshot truth = simulation.pose();
-        PoseSnapshot odometry = mechanism.odometry.pose();
-        PoseSnapshot estimate = mechanism.estimatedFieldPose.pose();
+        PoseSnapshot odometry = mechanism.odometry.poseSnapshot();
+        PoseSnapshot estimate = mechanism.estimatedFieldPose.poseSnapshot();
         assertTrue(Math.hypot(truth.xMeters() - 2.0, truth.yMeters() - 4.0) > 0.5,
                 () -> "Simulation truth barely moved: " + truth);
         assertTrue(Math.hypot(odometry.xMeters() - truth.xMeters(), odometry.yMeters() - truth.yMeters()) < 0.25,
@@ -112,7 +115,7 @@ class RebuiltVisionLocalizationSimulationTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation)
                 .register(drivetrain)
                 .register(localization);
-        drivetrain.driver.set(RobotVelocity.robot(0.0, 0.0, Math.PI));
+        drivetrain.driver.set(RobotVelocity.robot(MetersPerSecond.of(0.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(Math.PI)));
         runtime.request(drivetrain.drive);
 
         for (int cycle = 1; cycle <= 50; cycle++) {
@@ -123,9 +126,9 @@ class RebuiltVisionLocalizationSimulationTest {
 
         assertTrue(Math.abs(simulation.pose().headingRadians()) > 3.0,
                 () -> "Offseason simulation did not rotate: " + simulation.pose());
-        assertTrue(Math.abs(drivetrain.odometry.pose().headingRadians()) > 3.0,
+        assertTrue(Math.abs(drivetrain.odometry.pose().getRotation().getRadians()) > 3.0,
                 () -> "Offseason odometry did not rotate: " + drivetrain.odometry.pose());
-        assertTrue(Math.abs(localization.estimated.pose().headingRadians()) > 3.0,
+        assertTrue(Math.abs(localization.estimated.pose().getRotation().getRadians()) > 3.0,
                 () -> "Offseason localization did not rotate: " + localization.estimated.pose());
     }
 
@@ -139,7 +142,7 @@ class RebuiltVisionLocalizationSimulationTest {
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 Meters.of(0.5588), Meters.of(0.5588), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         private final SwerveOdometry odometry = kinematics.odometry(imu);
-        private final Action drive = kinematics.drive(() -> RobotVelocity.robot(0.8, 0.0, 0.35));
+        private final Action drive = kinematics.drive(() -> RobotVelocity.robot(MetersPerSecond.of(0.8), MetersPerSecond.of(0.0), RadiansPerSecond.of(0.35)));
 
         private final CameraDevice intakeCamera = Cameras.photonVision("Intake")
                 .mount(new CameraMountPose(Meters.of(0.2413), Meters.of(-0.32), Meters.of(0.38989), Degrees.of(0.0), Degrees.of(10.0), Degrees.of(0.0)))
@@ -164,7 +167,7 @@ class RebuiltVisionLocalizationSimulationTest {
                 .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistance(Meters.of(5.0)))
-                .filter(LocalizationFilters.inside(Rectangle2d.field(16.541, 8.0692)))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.541), Meters.of(8.0692))))
                 .name("filteredVision");
         private final Localization fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision.translationOnly())
@@ -188,9 +191,9 @@ class RebuiltVisionLocalizationSimulationTest {
 
         private static PoseSignal configured(CameraDevice camera) {
             return camera.pose()
-                    .multiTagStdDevs(0.25, 0.25, Math.toRadians(5.0))
-                    .singleTagStdDevs(0.9, 0.9, Math.toRadians(12.0))
-                    .distanceStdDevScaling(2.0, 2.0);
+                    .multiTagStdDevs(Meters.of(0.25), Meters.of(0.25), Radians.of(Math.toRadians(5.0)))
+                    .singleTagStdDevs(Meters.of(0.9), Meters.of(0.9), Radians.of(Math.toRadians(12.0)))
+                    .distanceStdDevScaling(Meters.of(2.0), 2.0);
         }
 
         private static SwerveModule module(int driveId, int steerId, int encoderId) {
@@ -222,7 +225,7 @@ class RebuiltVisionLocalizationSimulationTest {
         public final SwerveOdometry odometry = kinematics.odometry(imu);
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.Channel driver = pool.channel();
-        private final Action drive = kinematics.drive(pool, () -> Math.toRadians(imu.yawDegrees()));
+        private final Action drive = kinematics.drive(pool, () -> Rotation2d.fromDegrees(imu.yawDegrees()));
 
         private static SwerveModule offseasonModule(
                 int driveId,

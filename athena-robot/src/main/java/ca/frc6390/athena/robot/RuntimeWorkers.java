@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Seconds;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -103,7 +104,7 @@ public final class RuntimeWorkers implements AutoCloseable {
             return this;
         }
         for (RuntimeWorker worker : workers) {
-            long periodNanos = Math.max(1L, Math.round(worker.periodSeconds() * 1_000_000_000.0));
+            long periodNanos = Math.max(1L, Math.round(worker.period().in(Seconds) * 1_000_000_000.0));
             futures.add(executor.scheduleAtFixedRate(
                     () -> runWorker(worker),
                     0L,
@@ -126,7 +127,7 @@ public final class RuntimeWorkers implements AutoCloseable {
         for (int i = 0; i < workers.size(); i++) {
             RuntimeWorker worker = workers.get(i);
             double lastRun = lastRunSeconds[i];
-            if (Double.isNaN(lastRun) || nowSeconds - lastRun >= worker.periodSeconds()) {
+            if (Double.isNaN(lastRun) || nowSeconds - lastRun >= worker.period().in(Seconds)) {
                 lastRunSeconds[i] = nowSeconds;
                 runWorker(worker);
             }

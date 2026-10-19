@@ -1,5 +1,10 @@
 package ca.frc6390.athena.robot.explore;
 
+import java.util.Objects;
+import edu.wpi.first.units.measure.Frequency;
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.robot.RuntimeInputSnapshot;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,14 +59,14 @@ public final class InputModel {
     }
 
     /** Sets the Poisson rate of new button presses per port. */
-    public InputModel buttonPressesPerSecond(double rate) {
-        return new InputModel(buttons, rate, meanHoldSeconds, axes, axisUpdatesPerSecond, axisStep,
+    public InputModel buttonPresses(Frequency rate) {
+        return new InputModel(buttons, Objects.requireNonNull(rate, "rate").in(Hertz), meanHoldSeconds, axes, axisUpdatesPerSecond, axisStep,
                 povChangesPerSecond);
     }
 
     /** Sets the mean hold time of a button press. */
-    public InputModel meanHoldSeconds(double seconds) {
-        return new InputModel(buttons, buttonPressesPerSecond, seconds, axes, axisUpdatesPerSecond, axisStep,
+    public InputModel meanHold(Time hold) {
+        return new InputModel(buttons, buttonPressesPerSecond, Objects.requireNonNull(hold, "hold").in(Seconds), axes, axisUpdatesPerSecond, axisStep,
                 povChangesPerSecond);
     }
 
@@ -72,15 +77,16 @@ public final class InputModel {
     }
 
     /** Sets the axis update rate and the standard deviation of each step. */
-    public InputModel axisWalk(double updatesPerSecond, double stepStandardDeviation) {
-        return new InputModel(buttons, buttonPressesPerSecond, meanHoldSeconds, axes, updatesPerSecond,
+    public InputModel axisWalk(Frequency updates, double stepStandardDeviation) {
+        return new InputModel(buttons, buttonPressesPerSecond, meanHoldSeconds, axes,
+                Objects.requireNonNull(updates, "updates").in(Hertz),
                 stepStandardDeviation, povChangesPerSecond);
     }
 
     /** Sets the Poisson rate of POV changes per port. */
-    public InputModel povChangesPerSecond(double rate) {
+    public InputModel povChanges(Frequency rate) {
         return new InputModel(buttons, buttonPressesPerSecond, meanHoldSeconds, axes, axisUpdatesPerSecond,
-                axisStep, rate);
+                axisStep, Objects.requireNonNull(rate, "rate").in(Hertz));
     }
 
     /**

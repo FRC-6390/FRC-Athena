@@ -107,7 +107,7 @@ class VisionLocalizationConvergenceSimulationTest {
         assertTrue(convergence.worstHeadingDegreesAfterConverged() < 2.0 * HEADING_TOLERANCE_DEGREES,
                 () -> "Heading excursion after convergence: " + convergence.worstHeadingDegreesAfterConverged()
                         + " deg");
-        assertWithinTolerance(robot.estimate.pose(), simulation.pose());
+        assertWithinTolerance(robot.estimate.poseSnapshot(), simulation.pose());
 
         VisionSourceStatus front = status(robot.estimate, "Front");
         VisionSourceStatus rear = status(robot.estimate, "Rear");
@@ -135,7 +135,7 @@ class VisionLocalizationConvergenceSimulationTest {
 
         assertTrue(convergence.firstConvergedSeconds() <= CONVERGENCE_DEADLINE_SECONDS,
                 () -> "Perfect vision did not converge: first converged at " + convergence.firstConvergedSeconds());
-        assertWithinTolerance(robot.estimate.pose(), simulation.pose());
+        assertWithinTolerance(robot.estimate.poseSnapshot(), simulation.pose());
     }
 
     @Test
@@ -161,7 +161,7 @@ class VisionLocalizationConvergenceSimulationTest {
         assertTrue(convergence.firstConvergedSeconds() <= CONVERGENCE_DEADLINE_SECONDS,
                 () -> "Future frame locked the estimate out: first converged at "
                         + convergence.firstConvergedSeconds() + " s");
-        assertWithinTolerance(robot.estimate.pose(), simulation.pose());
+        assertWithinTolerance(robot.estimate.poseSnapshot(), simulation.pose());
         VisionSourceStatus front2 = status(robot.estimate, "Front");
         assertTrue(front2.acceptedRate().in(Hertz) > 0.0, () -> "Front camera stayed locked out: " + front2);
         assertEquals(2, stamped.stampedCameras(), "both cameras must have delivered a future-stamped frame");
@@ -188,7 +188,7 @@ class VisionLocalizationConvergenceSimulationTest {
             simulation.step(DT);
             runtime.robotPeriodic(now, DT);
             PoseSnapshot truth = simulation.pose();
-            PoseSnapshot estimate = robot.estimate.pose();
+            PoseSnapshot estimate = robot.estimate.poseSnapshot();
             finalError = positionError(estimate, truth);
             if (converged(estimate, truth)) {
                 if (Double.isNaN(firstConverged)) {
@@ -328,7 +328,7 @@ class VisionLocalizationConvergenceSimulationTest {
             }
             return frames.stream()
                     .map(measurement -> measurement instanceof PoseMeasurementSample pose
-                            ? (Measurement) pose.timing(pose.timestampSeconds() + futureSeconds, pose.latencySeconds())
+                            ? (Measurement) pose.timing(Seconds.of(pose.timestampSeconds() + futureSeconds), Seconds.of(pose.latencySeconds()))
                             : measurement)
                     .toList();
         }
@@ -353,7 +353,7 @@ class VisionLocalizationConvergenceSimulationTest {
         final Localization estimate;
 
         private LocalizationRobot(PhotonVisionDevice front, PhotonVisionDevice rear, boolean frontStaged) {
-            frontPose = configured(front.pose()).multiTagStdDevs(0.25, 0.25, Math.toRadians(5.0));
+            frontPose = configured(front.pose()).multiTagStdDevs(Meters.of(0.25), Meters.of(0.25), Radians.of(Math.toRadians(5.0)));
             // Single-tag frames from the rear camera are solved with the robot heading.
             rearPose = configured(rear.pose().singleTagUsesHeading());
             frontStage = stage(frontPose, "frontStage");
@@ -367,8 +367,8 @@ class VisionLocalizationConvergenceSimulationTest {
         }
 
         private static PoseSignal configured(PoseSignal pose) {
-            return pose.singleTagStdDevs(0.9, 0.9, Math.toRadians(12.0))
-                    .distanceStdDevScaling(2.0, 2.0);
+            return pose.singleTagStdDevs(Meters.of(0.9), Meters.of(0.9), Radians.of(Math.toRadians(12.0)))
+                    .distanceStdDevScaling(Meters.of(2.0), 2.0);
         }
 
         private static Localization stage(PoseSignal camera, String name) {
@@ -378,7 +378,7 @@ class VisionLocalizationConvergenceSimulationTest {
                     .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                     .filter(VisionFilters.maxAmbiguity(0.20))
                     .filter(VisionFilters.maxAverageTagDistance(Meters.of(5.0)))
-                    .filter(LocalizationFilters.inside(Rectangle2d.field(16.541, 8.0692)))
+                    .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.541), Meters.of(8.0692))))
                     .name(name);
         }
 

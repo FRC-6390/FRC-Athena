@@ -1,5 +1,8 @@
 package ca.frc6390.athena.robot;
 
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.auto.AutoChooser;
@@ -227,27 +230,27 @@ public final class RobotRuntime implements AutoCloseable {
     /**
      * Samples declared signal inputs from the main runtime loop on the requested period.
      *
-     * @param periodSeconds period in seconds
+     * @param period sampling period
      * @return this runtime
      */
-    public RobotRuntime fastSignalSampling(double periodSeconds) {
+    public RobotRuntime fastSignalSampling(Time period) {
         return workers(RuntimeWorkers.inline(RuntimeWorker.every(
                 "signals",
-                periodSeconds,
+                period,
                 mechanisms::sampleSignals)));
     }
 
     /**
      * Samples declared signal inputs from a caller-owned scheduler.
      *
-     * @param periodSeconds period in seconds
+     * @param period sampling period
      * @param executor scheduler
      * @return this runtime
      */
-    public RobotRuntime fastSignalSampling(double periodSeconds, ScheduledExecutorService executor) {
+    public RobotRuntime fastSignalSampling(Time period, ScheduledExecutorService executor) {
         return workers(RuntimeWorkers.async(
                 executor,
-                RuntimeWorker.every("signals", periodSeconds, mechanisms::sampleSignals))).startWorkers();
+                RuntimeWorker.every("signals", period, mechanisms::sampleSignals))).startWorkers();
     }
 
 
@@ -450,11 +453,12 @@ public final class RobotRuntime implements AutoCloseable {
     /**
      * Sets the max age applied to root-owned localization refresh snapshots.
      *
-     * @param seconds max age in seconds
+     * @param maxAge max age
      * @return this runtime
      */
-    public RobotRuntime localizationMaxAge(double seconds) {
+    public RobotRuntime localizationMaxAge(Time maxAge) {
         ensureOpen();
+        double seconds = Objects.requireNonNull(maxAge, "maxAge").in(Seconds);
         localizationMaxAgeSeconds = Double.isFinite(seconds) && seconds >= 0.0 ? seconds : Double.POSITIVE_INFINITY;
         return this;
     }
@@ -675,9 +679,9 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     /** Sets the minimum interval between materialized mechanism trace snapshots. */
-    public RobotRuntime mechanismTracePeriodSeconds(double periodSeconds) {
+    public RobotRuntime mechanismTracePeriod(Time period) {
         ensureOpen();
-        mechanisms.tracePeriodSeconds(periodSeconds);
+        mechanisms.tracePeriodSeconds(Objects.requireNonNull(period, "period").in(Seconds));
         return this;
     }
 
@@ -704,11 +708,11 @@ public final class RobotRuntime implements AutoCloseable {
      * Tells persisted characterizations the robot was disabled after an enabled period. Snapshots the running
      * estimate into the history when the period was longer than 30 seconds.
      *
-     * @param enabledSeconds length of the enabled period that just ended
+     * @param enabled length of the enabled period that just ended
      */
-    public void recordDisable(double enabledSeconds) {
+    public void recordDisable(Time enabled) {
         ensureOpen();
-        mechanisms.recordDisable(enabledSeconds);
+        mechanisms.recordDisable(Objects.requireNonNull(enabled, "enabled").in(Seconds));
     }
 
     /** Tells persisted characterizations that the match ended (FMS). Snapshots the running estimate. */
@@ -1100,7 +1104,7 @@ public final class RobotRuntime implements AutoCloseable {
                     context.nowSeconds(),
                     context.dtSeconds());
             if (localizationMaxAgeSeconds != Double.POSITIVE_INFINITY) {
-                signal = signal.maxAge(context.nowSeconds(), localizationMaxAgeSeconds);
+                signal = signal.maxAge(Seconds.of(context.nowSeconds()), Seconds.of(localizationMaxAgeSeconds));
             }
             localizationSnapshots.get(i).refresh(signal);
         }
