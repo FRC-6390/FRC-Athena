@@ -116,14 +116,14 @@ class MeasurementSignalPolicyTest {
     void robotVelocityConvertsFieldRelativeAndClampsMagnitude() {
         RobotVelocity robot = RobotVelocity.field(MetersPerSecond.of(2.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(3.0)).fieldToRobot(Rotation2d.fromRadians(Math.PI / 2.0));
 
-        assertEquals(0.0, robot.xMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(-2.0, robot.yMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(3.0, robot.angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(0.0, robot.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(-2.0, robot.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(3.0, robot.raw().angularRadiansPerSecond(), 1.0e-9);
 
         RobotVelocity clamped = RobotVelocity.robot(MetersPerSecond.of(3.0), MetersPerSecond.of(4.0), RadiansPerSecond.of(-5.0)).clamp(MetersPerSecond.of(2.5), RadiansPerSecond.of(1.25));
-        assertEquals(1.5, clamped.xMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(2.0, clamped.yMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(-1.25, clamped.angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(1.5, clamped.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(2.0, clamped.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(-1.25, clamped.raw().angularRadiansPerSecond(), 1.0e-9);
     }
 
     private static Measurement timedPose(double timestampSeconds, double latencySeconds) {

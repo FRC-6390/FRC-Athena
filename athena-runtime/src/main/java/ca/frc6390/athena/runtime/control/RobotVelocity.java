@@ -12,7 +12,7 @@ import java.util.Objects;
  * Immutable planar chassis velocity with an explicit coordinate frame.
  *
  * <p>Team-facing factories and accessors use WPILib units. Components are stored as primitives so
- * that per-cycle math does not allocate measures; the {@code ...Primitive} members exist for runtime
+ * that per-cycle math does not allocate measures; the {@code raw()} view exists for runtime
  * hot paths (kinematics, localization, path followers) and are not meant for robot code.
  */
 public final class RobotVelocity {
@@ -40,18 +40,6 @@ public final class RobotVelocity {
     /** Creates a field-relative velocity from WPILib-typed components. */
     public static RobotVelocity field(LinearVelocity x, LinearVelocity y, AngularVelocity angular) {
         return new RobotVelocity(mps(x), mps(y), rps(angular), VelocityFrame.FIELD);
-    }
-
-    /**
-     * Creates a velocity from primitive components in meters per second and radians per second.
-     * Runtime hot paths only; robot code uses {@link #robot} or {@link #field}.
-     */
-    public static RobotVelocity ofPrimitives(
-            double xMetersPerSecond,
-            double yMetersPerSecond,
-            double angularRadiansPerSecond,
-            VelocityFrame frame) {
-        return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, angularRadiansPerSecond, frame);
     }
 
     public static RobotVelocity zero() {
@@ -96,21 +84,6 @@ public final class RobotVelocity {
     /** Returns counter-clockwise angular velocity. */
     public AngularVelocity angular() {
         return RadiansPerSecond.of(angularRadiansPerSecond);
-    }
-
-    /** Primitive forward component in meters per second. Runtime hot paths only. */
-    public double xMetersPerSecondPrimitive() {
-        return xMetersPerSecond;
-    }
-
-    /** Primitive lateral component in meters per second. Runtime hot paths only. */
-    public double yMetersPerSecondPrimitive() {
-        return yMetersPerSecond;
-    }
-
-    /** Primitive angular component in radians per second. Runtime hot paths only. */
-    public double angularRadiansPerSecondPrimitive() {
-        return angularRadiansPerSecond;
     }
 
     public RobotVelocity plus(RobotVelocity other) {
@@ -278,6 +251,11 @@ public final class RobotVelocity {
                 + " m/s, angular=" + angularRadiansPerSecond + " rad/s, frame=" + frame + ']';
     }
 
+    /** Returns an internal, primitive view of this velocity. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
     private RobotVelocity requireSameFrame(RobotVelocity other) {
         RobotVelocity safe = Objects.requireNonNull(other, "other");
         if (frame != safe.frame) {
@@ -307,5 +285,41 @@ public final class RobotVelocity {
 
     private static double finiteOrZero(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    /**
+     * Internal, not for robot code: primitive access for runtime hot paths (localization, odometry,
+     * kinematics, path followers). Units are meters per second and radians per second.
+     */
+    public static final class Raw {
+        private final RobotVelocity velocity;
+
+        private Raw(RobotVelocity velocity) {
+            this.velocity = velocity;
+        }
+
+        /** Internal: builds a velocity from primitives without allocating measures. Not for robot code. */
+        public static RobotVelocity of(
+                double xMetersPerSecond,
+                double yMetersPerSecond,
+                double angularRadiansPerSecond,
+                VelocityFrame frame) {
+            return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, angularRadiansPerSecond, frame);
+        }
+
+        /** Internal: forward component in meters per second. */
+        public double xMetersPerSecond() {
+            return velocity.xMetersPerSecond;
+        }
+
+        /** Internal: lateral component in meters per second. */
+        public double yMetersPerSecond() {
+            return velocity.yMetersPerSecond;
+        }
+
+        /** Internal: angular component in radians per second. */
+        public double angularRadiansPerSecond() {
+            return velocity.angularRadiansPerSecond;
+        }
     }
 }

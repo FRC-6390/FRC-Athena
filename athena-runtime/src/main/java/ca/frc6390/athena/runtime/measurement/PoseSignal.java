@@ -27,7 +27,15 @@ public interface PoseSignal extends MeasurementSignal {
 
     /** Returns the newest pose, or the origin when no pose is available. */
     default Pose2d pose() {
-        return value().orElseGet(Pose2d::new);
+        return PoseSignals.toPose2d(poseSnapshot());
+    }
+
+    /**
+     * Returns the newest pose in the runtime's internal snapshot form, or the origin when none is
+     * available. Framework code uses this; robot code uses {@link #pose()}.
+     */
+    default PoseSnapshot poseSnapshot() {
+        return measurement().map(PoseMeasurementSample::pose).orElseGet(() -> new PoseSnapshot(0.0, 0.0, 0.0));
     }
 
     /** Returns speeds from the newest pose sample. */

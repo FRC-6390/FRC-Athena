@@ -95,16 +95,16 @@ public final class PoseSignals {
 
     static Measurement withStdDevs(PoseMeasurementSample sample, MeasurementStdDevs stdDevs) {
         if (sample instanceof TranslationOnlyPoseMeasurement) {
-            return new TranslationOnlyPoseMeasurement(sample, MeasurementStdDevs.ofPrimitives(
-                    stdDevs.xStdDevMeters(),
-                    stdDevs.yStdDevMeters(),
+            return new TranslationOnlyPoseMeasurement(sample, MeasurementStdDevs.Raw.of(
+                    stdDevs.raw().xMeters(),
+                    stdDevs.raw().yMeters(),
                     UNTRUSTED_HEADING_STD_DEV_RADIANS));
         }
         if (sample instanceof HeadingOnlyPoseMeasurement) {
-            return new HeadingOnlyPoseMeasurement(sample, MeasurementStdDevs.ofPrimitives(
+            return new HeadingOnlyPoseMeasurement(sample, MeasurementStdDevs.Raw.of(
                     UNTRUSTED_TRANSLATION_STD_DEV_METERS,
                     UNTRUSTED_TRANSLATION_STD_DEV_METERS,
-                    stdDevs.headingStdDevRadians()));
+                    stdDevs.raw().headingRadians()));
         }
         return new ConfiguredPoseMeasurement(sample, stdDevs);
     }
@@ -133,10 +133,10 @@ public final class PoseSignals {
             return measurement;
         }
         double scale = Math.max(1.0, Math.pow(distance / referenceMeters, exponent));
-        return withStdDevs(sample, MeasurementStdDevs.ofPrimitives(
-                stdDevs.xStdDevMeters() * scale,
-                stdDevs.yStdDevMeters() * scale,
-                stdDevs.headingStdDevRadians() * scale));
+        return withStdDevs(sample, MeasurementStdDevs.Raw.of(
+                stdDevs.raw().xMeters() * scale,
+                stdDevs.raw().yMeters() * scale,
+                stdDevs.raw().headingRadians() * scale));
     }
 
     private static Measurement withoutHeading(Measurement measurement) {
@@ -145,11 +145,11 @@ public final class PoseSignals {
         }
         MeasurementStdDevs configured = sample.stdDevs();
         MeasurementStdDevs stdDevs = configured == null
-                ? MeasurementStdDevs.ofPrimitives(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
+                ? MeasurementStdDevs.Raw.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
                         UNTRUSTED_HEADING_STD_DEV_RADIANS)
-                : MeasurementStdDevs.ofPrimitives(
-                        configured.xStdDevMeters(),
-                        configured.yStdDevMeters(),
+                : MeasurementStdDevs.Raw.of(
+                        configured.raw().xMeters(),
+                        configured.raw().yMeters(),
                         UNTRUSTED_HEADING_STD_DEV_RADIANS);
         return new TranslationOnlyPoseMeasurement(sample, stdDevs);
     }
@@ -159,10 +159,10 @@ public final class PoseSignals {
             return measurement;
         }
         MeasurementStdDevs configured = sample.stdDevs();
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.ofPrimitives(
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.Raw.of(
                 UNTRUSTED_TRANSLATION_STD_DEV_METERS,
                 UNTRUSTED_TRANSLATION_STD_DEV_METERS,
-                configured == null ? Double.POSITIVE_INFINITY : configured.headingStdDevRadians());
+                configured == null ? Double.POSITIVE_INFINITY : configured.raw().headingRadians());
         return new HeadingOnlyPoseMeasurement(sample, stdDevs);
     }
 

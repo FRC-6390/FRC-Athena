@@ -37,11 +37,6 @@ public final class MeasurementStdDevs {
                 Objects.requireNonNull(headingStdDev, "headingStdDev").in(Radians));
     }
 
-    /** Creates standard deviations from primitives in meters and radians. Runtime hot paths only. */
-    static MeasurementStdDevs ofPrimitives(double xMeters, double yMeters, double headingRadians) {
-        return new MeasurementStdDevs(xMeters, yMeters, headingRadians);
-    }
-
     /** Returns the x standard deviation. */
     public Distance xStdDev() {
         return Meters.of(xMeters);
@@ -57,27 +52,9 @@ public final class MeasurementStdDevs {
         return Radians.of(headingRadians);
     }
 
-    /** Primitive x standard deviation in meters, for runtime measurement math. */
-    double xStdDevMeters() {
-        return xMeters;
-    }
-
-    /** Primitive y standard deviation in meters, for runtime measurement math. */
-    double yStdDevMeters() {
-        return yMeters;
-    }
-
-    /** Primitive heading standard deviation in radians, for runtime measurement math. */
-    double headingStdDevRadians() {
-        return headingRadians;
-    }
-
-    /**
-     * Returns the average translation variance in square meters. This is an internal quantity used
-     * by the localization filter; WPILib has no variance unit.
-     */
-    public double translationVarianceMetersSquared() {
-        return (xMeters * xMeters + yMeters * yMeters) / 2.0;
+    /** Returns an internal, primitive view of these standard deviations. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
     }
 
     @Override
@@ -103,5 +80,42 @@ public final class MeasurementStdDevs {
             return Double.POSITIVE_INFINITY;
         }
         return Math.max(1.0e-9, value);
+    }
+
+    /**
+     * Internal, not for robot code: primitive access for runtime and localization math. Units are
+     * meters and radians.
+     */
+    public static final class Raw {
+        private final MeasurementStdDevs stdDevs;
+
+        private Raw(MeasurementStdDevs stdDevs) {
+            this.stdDevs = stdDevs;
+        }
+
+        /** Internal: builds standard deviations from primitives without allocating measures. */
+        public static MeasurementStdDevs of(double xMeters, double yMeters, double headingRadians) {
+            return new MeasurementStdDevs(xMeters, yMeters, headingRadians);
+        }
+
+        /** Internal: x standard deviation in meters. */
+        public double xMeters() {
+            return stdDevs.xMeters;
+        }
+
+        /** Internal: y standard deviation in meters. */
+        public double yMeters() {
+            return stdDevs.yMeters;
+        }
+
+        /** Internal: heading standard deviation in radians. */
+        public double headingRadians() {
+            return stdDevs.headingRadians;
+        }
+
+        /** Internal: average translation variance in square meters. */
+        public double translationVarianceMetersSquared() {
+            return (stdDevs.xMeters * stdDevs.xMeters + stdDevs.yMeters * stdDevs.yMeters) / 2.0;
+        }
     }
 }

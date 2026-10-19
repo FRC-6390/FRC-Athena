@@ -40,7 +40,7 @@ record PoseMeasurement(
                 ? Math.max(0.0, averageTargetDistanceMeters)
                 : Double.NaN;
         stdDevs = stdDevs == null
-                ? MeasurementStdDevs.ofPrimitives(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
+                ? MeasurementStdDevs.Raw.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
                 : stdDevs;
     }
 

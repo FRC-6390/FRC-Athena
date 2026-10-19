@@ -34,9 +34,9 @@ class RobotVelocityTest {
         RobotVelocity field = RobotVelocity.field(MetersPerSecond.of(2.0), MetersPerSecond.of(-0.5), RadiansPerSecond.of(0.25));
         RobotVelocity robot = field.fieldToRobot(Rotation2d.fromRadians(1.2));
 
-        assertEquals(field.xMetersPerSecondPrimitive(), robot.robotToField(Rotation2d.fromRadians(1.2)).xMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(field.yMetersPerSecondPrimitive(), robot.robotToField(Rotation2d.fromRadians(1.2)).yMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(field.angularRadiansPerSecondPrimitive(), robot.angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(field.raw().xMetersPerSecond(), robot.robotToField(Rotation2d.fromRadians(1.2)).raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(field.raw().yMetersPerSecond(), robot.robotToField(Rotation2d.fromRadians(1.2)).raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(field.raw().angularRadiansPerSecond(), robot.raw().angularRadiansPerSecond(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> field.plus(robot));
         assertThrows(IllegalStateException.class, () -> field.robotToField(Rotation2d.fromRadians(0.0)));
     }
@@ -54,17 +54,17 @@ class RobotVelocityTest {
                 .enabled(() -> assistEnabled[0]);
 
         RobotVelocity combined = pool.robotRelative(Rotation2d.fromRadians(Math.PI / 2.0));
-        assertEquals(0.0, combined.xMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(-2.0, combined.yMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(0.5, combined.angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(0.0, combined.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(-2.0, combined.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(0.5, combined.raw().angularRadiansPerSecond(), 1.0e-9);
         assertTrue(driver.isActive());
         assertTrue(assist.isActive());
 
         driverX[0] = 3.0;
         assistEnabled[0] = false;
         combined = pool.robotRelative(Rotation2d.fromRadians(Math.PI / 2.0));
-        assertEquals(-3.0, combined.yMetersPerSecondPrimitive(), 1.0e-9);
-        assertEquals(0.0, combined.angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(-3.0, combined.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(0.0, combined.raw().angularRadiansPerSecond(), 1.0e-9);
         assertFalse(assist.isActive());
 
         driver.clear();
@@ -105,10 +105,10 @@ class RobotVelocityTest {
 
         first.apply(1.0);
         second.apply(2.0);
-        assertEquals(2.0, pool.robotRelative(Rotation2d.fromRadians(0.0)).angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(2.0, pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
 
         first.apply(3.0);
-        assertEquals(3.0, pool.robotRelative(Rotation2d.fromRadians(0.0)).angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(3.0, pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -129,9 +129,9 @@ class RobotVelocityTest {
         aim.apply(1.25);
         assertTrue(aim.isInverted());
         assertEquals(-1.25, aim.angularVelocity().in(RadiansPerSecond), 1.0e-9);
-        assertEquals(-1.25, pool.robotRelative(Rotation2d.fromRadians(0.0)).angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(-1.25, pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
 
         aim.inverted(false);
-        assertEquals(1.25, pool.robotRelative(Rotation2d.fromRadians(0.0)).angularRadiansPerSecondPrimitive(), 1.0e-9);
+        assertEquals(1.25, pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
     }
 }
