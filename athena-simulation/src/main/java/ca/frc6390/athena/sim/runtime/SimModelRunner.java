@@ -263,7 +263,9 @@ final class SimModelRunner implements SimPhysicsEngine {
      * approximates a typical FRC axis (a flywheel or a motor-driven shaft, an arm, a 25 mm drum elevator).
      */
     static double momentOfInertia(SimModel simulation) {
-        double declared = simulation.momentOfInertia().orElse(defaultMomentOfInertia(simulation.kind()));
+        double declared = simulation.momentOfInertia()
+                .map(inertia -> inertia.in(edu.wpi.first.units.Units.KilogramSquareMeters))
+                .orElse(defaultMomentOfInertia(simulation.kind()));
         return Math.max(1.0e-6, declared);
     }
 

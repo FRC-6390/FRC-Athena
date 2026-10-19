@@ -31,6 +31,11 @@ import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
 import ca.frc6390.athena.sim.hardware.SimImuHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorBackend;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearVelocity;
+import edu.wpi.first.units.measure.Time;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 
@@ -304,41 +309,42 @@ final class SimulationCoordinator implements SimModel.Context {
     }
 
     @Override
-    public double motorPosition(MotorDevice motor) {
-        return motor(motor).integratedPositionRotations();
+    public Angle motorPosition(MotorDevice motor) {
+        return Units.Rotations.of(motor(motor).integratedPositionRotations());
     }
 
     @Override
-    public double motorVelocity(MotorDevice motor) {
-        return motor(motor).integratedVelocityRotationsPerSecond();
+    public AngularVelocity motorVelocity(MotorDevice motor) {
+        return Units.RotationsPerSecond.of(motor(motor).integratedVelocityRotationsPerSecond());
     }
 
     @Override
-    public void motorState(MotorDevice motor, double position, double velocity) {
-        motor(motor).state(position, velocity);
+    public void motorState(MotorDevice motor, Angle position, AngularVelocity velocity) {
+        motor(motor).state(position.in(Units.Rotations), velocity.in(Units.RotationsPerSecond));
     }
 
     @Override
-    public double encoderPosition(EncoderDevice encoder) {
-        return encoder(encoder).positionRotations();
+    public Angle encoderPosition(EncoderDevice encoder) {
+        return Units.Rotations.of(encoder(encoder).positionRotations());
     }
 
     @Override
-    public double encoderAbsolutePosition(EncoderDevice encoder) {
-        return encoder(encoder).absolutePositionRotations();
+    public Angle encoderAbsolutePosition(EncoderDevice encoder) {
+        return Units.Rotations.of(encoder(encoder).absolutePositionRotations());
     }
 
     @Override
-    public double encoderVelocity(EncoderDevice encoder) {
-        return encoder(encoder).velocityRotationsPerSecond();
+    public AngularVelocity encoderVelocity(EncoderDevice encoder) {
+        return Units.RotationsPerSecond.of(encoder(encoder).velocityRotationsPerSecond());
     }
 
     @Override
-    public void encoderState(EncoderDevice encoder, double position, double absolutePosition, double velocity) {
+    public void encoderState(EncoderDevice encoder, Angle position, Angle absolutePosition,
+            AngularVelocity velocity) {
         encoder(encoder)
-                .positionRotations(position)
-                .absolutePositionRotations(absolutePosition)
-                .velocityRotationsPerSecond(velocity);
+                .positionRotations(position.in(Units.Rotations))
+                .absolutePositionRotations(absolutePosition.in(Units.Rotations))
+                .velocityRotationsPerSecond(velocity.in(Units.RotationsPerSecond));
     }
 
     @Override
@@ -348,11 +354,15 @@ final class SimulationCoordinator implements SimModel.Context {
 
     @Override
     public void advancePose(
-            double fieldXVelocity,
-            double fieldYVelocity,
-            double angularVelocity,
-            double seconds) {
-        drivePose(fieldXVelocity, fieldYVelocity, angularVelocity, seconds);
+            LinearVelocity fieldXVelocity,
+            LinearVelocity fieldYVelocity,
+            AngularVelocity angularVelocity,
+            Time seconds) {
+        drivePose(
+                fieldXVelocity.in(Units.MetersPerSecond),
+                fieldYVelocity.in(Units.MetersPerSecond),
+                angularVelocity.in(Units.RadiansPerSecond),
+                seconds.in(Units.Seconds));
     }
 
     private void syncImuYaw() {

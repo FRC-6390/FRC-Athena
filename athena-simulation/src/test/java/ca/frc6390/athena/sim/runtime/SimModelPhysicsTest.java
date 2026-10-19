@@ -1,5 +1,6 @@
 package ca.frc6390.athena.sim.runtime;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,7 +42,7 @@ class SimModelPhysicsTest {
         session.motor(motor).setVoltage(12.0);
 
         for (int cycle = 0; cycle < 1000; cycle++) {
-            session.step(0.02);
+            session.step(edu.wpi.first.units.Units.Seconds.of(0.02));
         }
 
         double freeSpeedRotations = KRAKEN_X44_FREE_SPEED_RAD_PER_SECOND / (2.0 * Math.PI);
@@ -58,7 +59,7 @@ class SimModelPhysicsTest {
         session.motor(motor).setVoltage(12.0);
 
         for (int cycle = 0; cycle < 1000; cycle++) {
-            session.step(0.02);
+            session.step(edu.wpi.first.units.Units.Seconds.of(0.02));
         }
 
         double motorRotationsPerSecond = session.motor(motor).integratedVelocityRotationsPerSecond();
@@ -89,10 +90,10 @@ class SimModelPhysicsTest {
         EncoderDevice encoder = motor.encoder();
         SimulationSession session = SimulationSession.create().model("axis", SimModel.motor(motor)
                 .gearRatio(GearRatio.reduction(100.0, 1.0))
-                .momentOfInertia(0.5));
+                .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.5)));
         session.encoder(encoder).positionRotations(0.0).velocityRotationsPerSecond(50.0);
         session.motor(motor).stop();
-        session.step(0.05);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.05));
         double after = session.encoder(encoder).velocityRotationsPerSecond();
         return -Math.log(after / 50.0) / 0.05;
     }
