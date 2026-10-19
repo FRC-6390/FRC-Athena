@@ -37,6 +37,7 @@ code for each feature is in [`example-projects`](../example-projects/README.md),
 - **Power, thermal, and staging** ([power-thermal-staging.md](power-thermal-staging.md)). `PowerProfile` shares a battery budget
   between motors, `Thermal.derate` scales current limits as the motor heats, and `Staging` moves a mechanism through
   team-defined health stages. Example: `mechanism-examples/StagedArm`, `VelocityShooter`.
+- **Driver orientation** ([driver-orientation.md](driver-orientation.md)). `DriverOrientation` derives the driver's forward from the localized pose and the alliance, so field-oriented teleop needs no hand-written re-alignment after auto and no teleop-start binding.
 - **Alliance transforms** (`AllianceTransform`, see [localization-setups](../example-projects/localization-setups/README.md#alliance-geometry)
   and [auto-following](../example-projects/auto-following/README.md)). Field geometry and path mirroring resolve for the
   current alliance at call time.
