@@ -129,7 +129,7 @@ final class RuntimeOverrides {
     }
 
     double requestedImuYaw(ImuDevice imu) {
-        return requestedImuYaw.computeIfAbsent(imu, ignored -> safeRead(imu::yawDegrees));
+        return requestedImuYaw.computeIfAbsent(imu, ignored -> safeRead(imu.raw()::yawDegrees));
     }
 
     void requestedImuYaw(ImuDevice imu, double yawDegrees) {
@@ -287,8 +287,8 @@ final class RuntimeOverrides {
                     ? Constraints.motionProfile(control.constraints())
                     : control.profile();
             return new ControlTuning(
-                    range.minimumInUnit(),
-                    range.maximumInUnit(),
+                    range.raw().minimumInUnit(),
+                    range.raw().maximumInUnit(),
                     profile == null ? Double.MAX_VALUE : profile.maxVelocity(),
                     profile == null ? Double.MAX_VALUE : profile.maxAcceleration());
         }

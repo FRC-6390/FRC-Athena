@@ -83,8 +83,8 @@ class RobotRuntimeTest {
         simulation.imu(imu).yawDegrees(72.5);
         runtime.robotPeriodic(0.0, 0.02);
 
-        assertEquals(72.5, imu.yawDegrees(), 1.0e-9);
-        assertEquals(72.5, imu.angleDegrees(), 1.0e-9);
+        assertEquals(72.5, imu.raw().yawDegrees(), 1.0e-9);
+        assertEquals(72.5, imu.raw().angleDegrees(), 1.0e-9);
     }
 
     @Test

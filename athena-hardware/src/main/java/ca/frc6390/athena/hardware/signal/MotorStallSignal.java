@@ -172,13 +172,13 @@ public final class MotorStallSignal {
                 Objects.requireNonNull(rearm, "rearm").in(Units.Seconds), constants);
     }
 
-    /** Per-cycle primitive: debounce time in seconds. Teams should use {@link #duration()}. */
-    public double durationSeconds() {
+    /** Per-cycle primitive: debounce time in seconds. Robot code should use {@link #duration()}. */
+    double durationSeconds() {
         return durationSeconds;
     }
 
-    /** Per-cycle primitive: rearm time in seconds. Teams should use {@link #rearmAfter()}. */
-    public double rearmSeconds() {
+    /** Per-cycle primitive: rearm time in seconds. Robot code should use {@link #rearmAfter()}. */
+    double rearmSeconds() {
         return rearmSeconds;
     }
 
@@ -194,16 +194,16 @@ public final class MotorStallSignal {
 
     /** Returns the motor's measured velocity used by this detector. */
     public AngularVelocity velocity() {
-        return Units.RotationsPerSecond.of(motor.velocityRotationsPerSecond());
+        return Units.RotationsPerSecond.of(motor.raw().velocityRotationsPerSecond());
     }
 
     /**
      * Per-cycle primitive: current threshold in amps. Athena's hot paths use this to avoid allocating
-     * measures; teams should use {@link #currentThreshold()}.
+     * measures; robot code should use {@link #currentThreshold()}.
      *
      * @return current threshold in amps
      */
-    public double currentThresholdAmps() {
+    double currentThresholdAmps() {
         return stallDetectionAmps * currentLimitFraction;
     }
 
@@ -212,8 +212,8 @@ public final class MotorStallSignal {
      *
      * @return current in amps
      */
-    public double currentAmps() {
-        return statorChannel ? motor.statorCurrentAmps() : motor.supplyCurrentAmps();
+    double currentAmps() {
+        return statorChannel ? motor.raw().statorCurrentAmps() : motor.raw().supplyCurrentAmps();
     }
 
     /** Evaluates the detector against the current motor state, without debounce. */
@@ -223,14 +223,14 @@ public final class MotorStallSignal {
         }
         return commanded()
                 && currentAmps() >= currentThresholdAmps()
-                && Math.abs(motor.velocityRotationsPerSecond()) <= velocityThresholdRotationsPerSecond;
+                && Math.abs(motor.raw().velocityRotationsPerSecond()) <= velocityThresholdRotationsPerSecond;
     }
 
     private boolean modelStalled() {
         double volts;
         double amps;
         try {
-            volts = motor.appliedVoltageVolts();
+            volts = motor.raw().appliedVoltageVolts();
             amps = currentAmps();
         } catch (UnsupportedOperationException unavailable) {
             return false;
@@ -241,18 +241,55 @@ public final class MotorStallSignal {
         double freeSpeedRps = constants.freeSpeed().in(Units.RotationsPerSecond);
         // The motor model is symmetric: driving in reverse (homing usually does) expects the same
         // speed magnitude, so compare magnitudes rather than signed values.
-        double expectedRps = constants.expectedUnloadedSpeedRadPerSec(Math.abs(volts)) / (2.0 * Math.PI);
+        double expectedRps = constants.raw().expectedUnloadedSpeedRadPerSec(Math.abs(volts)) / (2.0 * Math.PI);
         if (expectedRps < MODEL_MIN_EXPECTED_FRACTION * freeSpeedRps) {
             return false;
         }
         if (Math.abs(amps) < MODEL_LOADED_CURRENT_MULTIPLE * constants.freeCurrent().in(Units.Amps)) {
             return false;
         }
-        return Math.abs(motor.velocityRotationsPerSecond()) < MODEL_STALLED_SPEED_FRACTION * expectedRps;
+        return Math.abs(motor.raw().velocityRotationsPerSecond()) < MODEL_STALLED_SPEED_FRACTION * expectedRps;
     }
 
     /** Returns whether Athena's latest command requests movement. */
     public boolean commanded() {
         return motor.command().requestsMovement(commandedVoltageThresholdVolts, velocityThresholdRotationsPerSecond);
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive stall thresholds in the units the names state. Robot code uses
+     * the typed accessors (current(), duration(), rearmAfter(), ...).
+     */
+    public static final class Raw {
+        private final MotorStallSignal owner;
+
+        private Raw(MotorStallSignal owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see MotorStallSignal#durationSeconds. */
+        public double durationSeconds() {
+            return owner.durationSeconds();
+        }
+
+        /** Internal: see MotorStallSignal#rearmSeconds. */
+        public double rearmSeconds() {
+            return owner.rearmSeconds();
+        }
+
+        /** Internal: see MotorStallSignal#currentThresholdAmps. */
+        public double currentThresholdAmps() {
+            return owner.currentThresholdAmps();
+        }
+
+        /** Internal: see MotorStallSignal#currentAmps. */
+        public double currentAmps() {
+            return owner.currentAmps();
+        }
     }
 }

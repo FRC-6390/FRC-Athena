@@ -29,7 +29,7 @@ public final class TwoJointArm implements Mechanism {
     private final SimModel shoulderSimulation = SimModel.arm(shoulderMotor)
             .encoder(shoulderEncoder)
             .range(shoulderTravel)
-            .limit(homeSwitch, shoulderTravel.minimumInUnit())
+            .limit(homeSwitch, shoulderTravel.minimum().magnitude())
             .length(edu.wpi.first.units.Units.Meters.of(Units.inchesToMeters(22.0)))
             .gearRatio(GearRatio.reduction(60.0, 1.0));
     @SuppressWarnings("unused")

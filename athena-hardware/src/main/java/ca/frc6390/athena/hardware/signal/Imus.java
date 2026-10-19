@@ -62,42 +62,42 @@ public final class Imus {
 
     private abstract static class DerivedSource implements ImuSource {
         @Override
-        public double pitchDegrees() {
+        public double readPitchDegrees() {
             throw unsupported("pitch");
         }
 
         @Override
-        public double rollDegrees() {
+        public double readRollDegrees() {
             throw unsupported("roll");
         }
 
         @Override
-        public double yawRateDegreesPerSecond() {
+        public double readYawRateDegreesPerSecond() {
             throw unsupported("yaw rate");
         }
 
         @Override
-        public double pitchRateDegreesPerSecond() {
+        public double readPitchRateDegreesPerSecond() {
             throw unsupported("pitch rate");
         }
 
         @Override
-        public double rollRateDegreesPerSecond() {
+        public double readRollRateDegreesPerSecond() {
             throw unsupported("roll rate");
         }
 
         @Override
-        public double linearAccelerationXG() {
+        public double readLinearAccelerationXG() {
             throw unsupported("X acceleration");
         }
 
         @Override
-        public double linearAccelerationYG() {
+        public double readLinearAccelerationYG() {
             throw unsupported("Y acceleration");
         }
 
         @Override
-        public double linearAccelerationZG() {
+        public double readLinearAccelerationZG() {
             throw unsupported("Z acceleration");
         }
 
@@ -116,55 +116,55 @@ public final class Imus {
         }
 
         @Override
-        public double yawDegrees() {
+        public double readYawDegrees() {
             initializeOffsets();
-            return source.yawDegrees() - yawOffset;
+            return source.readYawDegrees() - yawOffset;
         }
 
         @Override
-        public double pitchDegrees() {
-            return source.pitchDegrees();
+        public double readPitchDegrees() {
+            return source.readPitchDegrees();
         }
 
         @Override
-        public double rollDegrees() {
-            return source.rollDegrees();
+        public double readRollDegrees() {
+            return source.readRollDegrees();
         }
 
         @Override
-        public double angleDegrees() {
+        public double readAngleDegrees() {
             initializeOffsets();
-            return source.angleDegrees() - angleOffset;
+            return source.readAngleDegrees() - angleOffset;
         }
 
         @Override
-        public double yawRateDegreesPerSecond() {
-            return source.yawRateDegreesPerSecond();
+        public double readYawRateDegreesPerSecond() {
+            return source.readYawRateDegreesPerSecond();
         }
 
         @Override
-        public double pitchRateDegreesPerSecond() {
-            return source.pitchRateDegreesPerSecond();
+        public double readPitchRateDegreesPerSecond() {
+            return source.readPitchRateDegreesPerSecond();
         }
 
         @Override
-        public double rollRateDegreesPerSecond() {
-            return source.rollRateDegreesPerSecond();
+        public double readRollRateDegreesPerSecond() {
+            return source.readRollRateDegreesPerSecond();
         }
 
         @Override
-        public double linearAccelerationXG() {
-            return source.linearAccelerationXG();
+        public double readLinearAccelerationXG() {
+            return source.readLinearAccelerationXG();
         }
 
         @Override
-        public double linearAccelerationYG() {
-            return source.linearAccelerationYG();
+        public double readLinearAccelerationYG() {
+            return source.readLinearAccelerationYG();
         }
 
         @Override
-        public double linearAccelerationZG() {
-            return source.linearAccelerationZG();
+        public double readLinearAccelerationZG() {
+            return source.readLinearAccelerationZG();
         }
 
         @Override
@@ -174,18 +174,18 @@ public final class Imus {
 
         @Override public boolean isConnected() { return source.isConnected(); }
         @Override public boolean isCalibrating() { return source.isCalibrating(); }
-        @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
+        @Override public double readLastUpdateSeconds() { return source.readLastUpdateSeconds(); }
 
         @Override
-        public void applyYawDegrees(ActionContext context, double yawDegrees) {
-            yawOffset = source.yawDegrees() - yawDegrees;
-            angleOffset = source.angleDegrees() - yawDegrees;
+        public void writeYawDegrees(ActionContext context, double yawDegrees) {
+            yawOffset = source.readYawDegrees() - yawDegrees;
+            angleOffset = source.readAngleDegrees() - yawDegrees;
         }
 
         private void initializeOffsets() {
             if (!Double.isFinite(yawOffset)) {
-                yawOffset = source.yawDegrees();
-                angleOffset = source.angleDegrees();
+                yawOffset = source.readYawDegrees();
+                angleOffset = source.readAngleDegrees();
             }
         }
     }
@@ -198,53 +198,53 @@ public final class Imus {
         }
 
         @Override
-        public double yawDegrees() {
-            return -source.yawDegrees();
+        public double readYawDegrees() {
+            return -source.readYawDegrees();
         }
 
         @Override
-        public double pitchDegrees() {
-            return -source.pitchDegrees();
+        public double readPitchDegrees() {
+            return -source.readPitchDegrees();
         }
 
         @Override
-        public double rollDegrees() {
-            return -source.rollDegrees();
+        public double readRollDegrees() {
+            return -source.readRollDegrees();
         }
 
         @Override
-        public double angleDegrees() {
-            return -source.angleDegrees();
+        public double readAngleDegrees() {
+            return -source.readAngleDegrees();
         }
 
         @Override
-        public double yawRateDegreesPerSecond() {
-            return -source.yawRateDegreesPerSecond();
+        public double readYawRateDegreesPerSecond() {
+            return -source.readYawRateDegreesPerSecond();
         }
 
         @Override
-        public double pitchRateDegreesPerSecond() {
-            return -source.pitchRateDegreesPerSecond();
+        public double readPitchRateDegreesPerSecond() {
+            return -source.readPitchRateDegreesPerSecond();
         }
 
         @Override
-        public double rollRateDegreesPerSecond() {
-            return -source.rollRateDegreesPerSecond();
+        public double readRollRateDegreesPerSecond() {
+            return -source.readRollRateDegreesPerSecond();
         }
 
         @Override
-        public double linearAccelerationXG() {
-            return -source.linearAccelerationXG();
+        public double readLinearAccelerationXG() {
+            return -source.readLinearAccelerationXG();
         }
 
         @Override
-        public double linearAccelerationYG() {
-            return -source.linearAccelerationYG();
+        public double readLinearAccelerationYG() {
+            return -source.readLinearAccelerationYG();
         }
 
         @Override
-        public double linearAccelerationZG() {
-            return -source.linearAccelerationZG();
+        public double readLinearAccelerationZG() {
+            return -source.readLinearAccelerationZG();
         }
 
         @Override
@@ -254,11 +254,11 @@ public final class Imus {
 
         @Override public boolean isConnected() { return source.isConnected(); }
         @Override public boolean isCalibrating() { return source.isCalibrating(); }
-        @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
+        @Override public double readLastUpdateSeconds() { return source.readLastUpdateSeconds(); }
 
         @Override
-        public void applyYawDegrees(ActionContext context, double yawDegrees) {
-            source.applyYawDegrees(context, -yawDegrees);
+        public void writeYawDegrees(ActionContext context, double yawDegrees) {
+            source.writeYawDegrees(context, -yawDegrees);
         }
     }
 
@@ -272,57 +272,57 @@ public final class Imus {
             this.transform = transform;
         }
 
-        @Override public double yawDegrees() { return orientation(transform.z()); }
-        @Override public double pitchDegrees() { return orientation(transform.y()); }
-        @Override public double rollDegrees() { return orientation(transform.x()); }
+        @Override public double readYawDegrees() { return orientation(transform.z()); }
+        @Override public double readPitchDegrees() { return orientation(transform.y()); }
+        @Override public double readRollDegrees() { return orientation(transform.x()); }
 
         @Override
-        public double angleDegrees() {
+        public double readAngleDegrees() {
             return transform.preservesYawAxis()
-                    ? source.angleDegrees() * transform.z().sign()
-                    : angle.update(yawDegrees());
+                    ? source.readAngleDegrees() * transform.z().sign()
+                    : angle.update(readYawDegrees());
         }
 
-        @Override public double yawRateDegreesPerSecond() { return rate(transform.z()); }
-        @Override public double pitchRateDegreesPerSecond() { return rate(transform.y()); }
-        @Override public double rollRateDegreesPerSecond() { return rate(transform.x()); }
-        @Override public double linearAccelerationXG() { return acceleration(transform.x()); }
-        @Override public double linearAccelerationYG() { return acceleration(transform.y()); }
-        @Override public double linearAccelerationZG() { return acceleration(transform.z()); }
+        @Override public double readYawRateDegreesPerSecond() { return rate(transform.z()); }
+        @Override public double readPitchRateDegreesPerSecond() { return rate(transform.y()); }
+        @Override public double readRollRateDegreesPerSecond() { return rate(transform.x()); }
+        @Override public double readLinearAccelerationXG() { return acceleration(transform.x()); }
+        @Override public double readLinearAccelerationYG() { return acceleration(transform.y()); }
+        @Override public double readLinearAccelerationZG() { return acceleration(transform.z()); }
         @Override public List<?> dependencies() { return source.dependencies(); }
         @Override public boolean isConnected() { return source.isConnected(); }
         @Override public boolean isCalibrating() { return source.isCalibrating(); }
-        @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
+        @Override public double readLastUpdateSeconds() { return source.readLastUpdateSeconds(); }
 
         @Override
-        public void applyYawDegrees(ActionContext context, double yawDegrees) {
-            source.applyYawDegrees(context, transform.sourceYaw(yawDegrees));
+        public void writeYawDegrees(ActionContext context, double yawDegrees) {
+            source.writeYawDegrees(context, transform.sourceYaw(yawDegrees));
             angle.reset(yawDegrees);
         }
 
         private double orientation(ImuDirection direction) {
             double value = switch (direction.axis()) {
-                case X -> source.rollDegrees();
-                case Y -> source.pitchDegrees();
-                case Z -> source.yawDegrees();
+                case X -> source.readRollDegrees();
+                case Y -> source.readPitchDegrees();
+                case Z -> source.readYawDegrees();
             };
             return value * direction.sign();
         }
 
         private double rate(ImuDirection direction) {
             double value = switch (direction.axis()) {
-                case X -> source.rollRateDegreesPerSecond();
-                case Y -> source.pitchRateDegreesPerSecond();
-                case Z -> source.yawRateDegreesPerSecond();
+                case X -> source.readRollRateDegreesPerSecond();
+                case Y -> source.readPitchRateDegreesPerSecond();
+                case Z -> source.readYawRateDegreesPerSecond();
             };
             return value * direction.sign();
         }
 
         private double acceleration(ImuDirection direction) {
             double value = switch (direction.axis()) {
-                case X -> source.linearAccelerationXG();
-                case Y -> source.linearAccelerationYG();
-                case Z -> source.linearAccelerationZG();
+                case X -> source.readLinearAccelerationXG();
+                case Y -> source.readLinearAccelerationYG();
+                case Z -> source.readLinearAccelerationZG();
             };
             return value * direction.sign();
         }
@@ -338,53 +338,53 @@ public final class Imus {
             this.mount = mount;
         }
 
-        @Override public double yawDegrees() { return orientation().yawDegrees(); }
-        @Override public double pitchDegrees() { return orientation().pitchDegrees(); }
-        @Override public double rollDegrees() { return orientation().rollDegrees(); }
+        @Override public double readYawDegrees() { return orientation().yawDegrees(); }
+        @Override public double readPitchDegrees() { return orientation().pitchDegrees(); }
+        @Override public double readRollDegrees() { return orientation().rollDegrees(); }
         @Override
-        public double angleDegrees() {
-            double robotYaw = yawDegrees();
+        public double readAngleDegrees() {
+            double robotYaw = readYawDegrees();
             return angle.update(
                     robotYaw,
-                    mount.initialContinuousYaw(source.yawDegrees(), source.angleDegrees(), robotYaw));
+                    mount.initialContinuousYaw(source.readYawDegrees(), source.readAngleDegrees(), robotYaw));
         }
-        @Override public double yawRateDegreesPerSecond() { return rates().z(); }
-        @Override public double pitchRateDegreesPerSecond() { return rates().y(); }
-        @Override public double rollRateDegreesPerSecond() { return rates().x(); }
-        @Override public double linearAccelerationXG() { return acceleration().x(); }
-        @Override public double linearAccelerationYG() { return acceleration().y(); }
-        @Override public double linearAccelerationZG() { return acceleration().z(); }
+        @Override public double readYawRateDegreesPerSecond() { return rates().z(); }
+        @Override public double readPitchRateDegreesPerSecond() { return rates().y(); }
+        @Override public double readRollRateDegreesPerSecond() { return rates().x(); }
+        @Override public double readLinearAccelerationXG() { return acceleration().x(); }
+        @Override public double readLinearAccelerationYG() { return acceleration().y(); }
+        @Override public double readLinearAccelerationZG() { return acceleration().z(); }
         @Override public List<?> dependencies() { return source.dependencies(); }
         @Override public boolean isConnected() { return source.isConnected(); }
         @Override public boolean isCalibrating() { return source.isCalibrating(); }
-        @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
+        @Override public double readLastUpdateSeconds() { return source.readLastUpdateSeconds(); }
 
         @Override
-        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+        public void writeYawDegrees(ActionContext context, double yawDegrees) {
             ImuMount.Orientation robot = orientation();
             ImuMount.Orientation sensor = mount.sensorOrientation(
                     robot.rollDegrees(), robot.pitchDegrees(), yawDegrees);
-            source.applyYawDegrees(context, sensor.yawDegrees());
+            source.writeYawDegrees(context, sensor.yawDegrees());
             angle.reset(yawDegrees);
         }
 
         private ImuMount.Orientation orientation() {
             return mount.robotOrientation(
-                    source.rollDegrees(), source.pitchDegrees(), source.yawDegrees());
+                    source.readRollDegrees(), source.readPitchDegrees(), source.readYawDegrees());
         }
 
         private ImuMount.Vector rates() {
             return mount.rotateVector(
-                    source.rollRateDegreesPerSecond(),
-                    source.pitchRateDegreesPerSecond(),
-                    source.yawRateDegreesPerSecond());
+                    source.readRollRateDegreesPerSecond(),
+                    source.readPitchRateDegreesPerSecond(),
+                    source.readYawRateDegreesPerSecond());
         }
 
         private ImuMount.Vector acceleration() {
             return mount.rotateVector(
-                    source.linearAccelerationXG(),
-                    source.linearAccelerationYG(),
-                    source.linearAccelerationZG());
+                    source.readLinearAccelerationXG(),
+                    source.readLinearAccelerationYG(),
+                    source.readLinearAccelerationZG());
         }
     }
 
@@ -423,17 +423,17 @@ public final class Imus {
         }
 
         @Override
-        public double yawDegrees() {
+        public double readYawDegrees() {
             return source.get().in(Units.Degrees) - offset;
         }
 
         @Override
-        public double angleDegrees() {
-            return yawDegrees();
+        public double readAngleDegrees() {
+            return readYawDegrees();
         }
 
         @Override
-        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+        public void writeYawDegrees(ActionContext context, double yawDegrees) {
             offset = source.get().in(Units.Degrees) - yawDegrees;
         }
     }

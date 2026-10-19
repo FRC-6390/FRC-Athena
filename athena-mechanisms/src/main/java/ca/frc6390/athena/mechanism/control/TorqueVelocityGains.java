@@ -313,7 +313,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
             double resistance = 0.0;
             for (int index = 0; index < devices.length; index++) {
                 double speed = Double.isFinite(omega[index]) ? omega[index] : omega[0];
-                emf += speed / constants[index].speedConstantRadPerSecPerVolt();
+                emf += speed / constants[index].raw().speedConstantRadPerSecPerVolt();
                 resistance += constants[index].resistance().in(edu.wpi.first.units.Units.Ohms);
             }
             emf /= count;

@@ -75,7 +75,7 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
             angleReadings[index] = RuntimeHardwareAccess.call(context, angleEncoder.raw()::absolutePosition);
         }
 
-        double rawHeading = Math.toRadians(imu.yawDegrees());
+        double rawHeading = Math.toRadians(imu.raw().yawDegrees());
         if (pendingReset != null) {
             pose = pendingReset;
             headingOffsetRadians = pose.headingRadians() - rawHeading;

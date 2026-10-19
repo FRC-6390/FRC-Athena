@@ -66,7 +66,7 @@ class PowerCapOutputTest {
     /** Predicted stator current of a voltage at a speed, the quantity the clamp bounds. */
     private static double currentAt(double volts, double rotationsPerSecond) {
         double omega = rotationsPerSecond * 2.0 * Math.PI;
-        return (volts - omega / KRAKEN.speedConstantRadPerSecPerVolt()) / KRAKEN.resistance().in(Units.Ohms);
+        return (volts - omega / KRAKEN.raw().speedConstantRadPerSecPerVolt()) / KRAKEN.resistance().in(Units.Ohms);
     }
 
     /** Runs the power pass on the motors, then applies one output through the applier with the pass installed. */
@@ -131,7 +131,7 @@ class PowerCapOutputTest {
         Rig rig = new Rig(motor);
         Motor handle = rig.hardware.motor(motor);
         // Back-EMF of 6 V: the command of 12 V would drive about (12 - 6) / R amps, far above the cap.
-        handle.rotationsPerSecond = 6.0 * KRAKEN.speedConstantRadPerSecPerVolt() / (2.0 * Math.PI);
+        handle.rotationsPerSecond = 6.0 * KRAKEN.raw().speedConstantRadPerSecPerVolt() / (2.0 * Math.PI);
         rig.cycle(0.0);
 
         rig.apply(motor, Outputs.voltage(12.0));

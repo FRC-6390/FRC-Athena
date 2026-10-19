@@ -92,8 +92,8 @@ public final class FeedbackSignals {
 
         private ModularPosition(Range range, double maxPhaseError, ModularInput... inputs) {
             this.range = Objects.requireNonNull(range, "range");
-            if (!Double.isFinite(range.minimumInUnit()) || !Double.isFinite(range.maximumInUnit())
-                    || range.maximumInUnit() <= range.minimumInUnit()) {
+            if (!Double.isFinite(range.minimum().magnitude()) || !Double.isFinite(range.maximum().magnitude())
+                    || range.maximum().magnitude() <= range.minimum().magnitude()) {
                 throw new IllegalArgumentException("Modular range must be finite and non-empty.");
             }
             if (!Double.isFinite(maxPhaseError) || maxPhaseError <= 0.0 || maxPhaseError >= 0.5) {
@@ -119,8 +119,8 @@ public final class FeedbackSignals {
 
             ModularInput reference = inputs.get(0);
             double referenceRatio = reference.encoderTurnsPerMechanismTurn();
-            double scaledA = referenceRatio * range.minimumInUnit();
-            double scaledB = referenceRatio * range.maximumInUnit();
+            double scaledA = referenceRatio * range.minimum().magnitude();
+            double scaledB = referenceRatio * range.maximum().magnitude();
             double lower = Math.min(scaledA, scaledB) - measured[0];
             double upper = Math.max(scaledA, scaledB) - measured[0];
             // Include one candidate beyond each boundary. Circular sensor noise
@@ -151,7 +151,7 @@ public final class FeedbackSignals {
                     correctionDenominator += ratio * ratio;
                 }
                 candidate += correctionNumerator / correctionDenominator;
-                if (candidate < range.minimumInUnit() - EPSILON || candidate >= range.maximumInUnit() - EPSILON) {
+                if (candidate < range.minimum().magnitude() - EPSILON || candidate >= range.maximum().magnitude() - EPSILON) {
                     continue;
                 }
 

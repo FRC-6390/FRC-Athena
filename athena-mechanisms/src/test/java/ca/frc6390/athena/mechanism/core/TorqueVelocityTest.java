@@ -80,11 +80,11 @@ class TorqueVelocityTest {
         void step(double dt) {
             double h = dt / SUBSTEPS;
             for (int s = 0; s < SUBSTEPS; s++) {
-                current = (volts - omega / K.speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
-                double torque = motors * K.torqueConstantNmPerAmp() * current - loadTorque - DAMPING * omega;
+                current = (volts - omega / K.raw().speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
+                double torque = motors * K.raw().torqueConstantNmPerAmp() * current - loadTorque - DAMPING * omega;
                 omega += torque / INERTIA * h;
             }
-            current = (volts - omega / K.speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
+            current = (volts - omega / K.raw().speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
         }
     }
 
@@ -189,13 +189,13 @@ class TorqueVelocityTest {
      * {@code Kt kP / (2 pi J)}; the voltage gain is the same loop with the resistance folded in.
      */
     private static final class Tuning {
-        final double kpAmps = 2.0 * Math.PI * INERTIA * BANDWIDTH / K.torqueConstantNmPerAmp();
+        final double kpAmps = 2.0 * Math.PI * INERTIA * BANDWIDTH / K.raw().torqueConstantNmPerAmp();
         final double kiAmps = kpAmps * BANDWIDTH / 4.0;
-        final double kaAmps = 2.0 * Math.PI * INERTIA / K.torqueConstantNmPerAmp();
+        final double kaAmps = 2.0 * Math.PI * INERTIA / K.raw().torqueConstantNmPerAmp();
         final double kpVolts = kpAmps * K.resistance().in(Units.Ohms);
         final double kiVolts = kiAmps * K.resistance().in(Units.Ohms);
         final double kaVolts = kaAmps * K.resistance().in(Units.Ohms);
-        final double kvVolts = TWO_PI / K.speedConstantRadPerSecPerVolt();
+        final double kvVolts = TWO_PI / K.raw().speedConstantRadPerSecPerVolt();
     }
 
     private static final Tuning TUNING = new Tuning();
@@ -229,7 +229,7 @@ class TorqueVelocityTest {
             double amps = rig.telemetry("CurrentCommandAmps");
             if (Math.abs(volts) < 12.0 - 1e-9) {
                 // The command is I R + omega / Kv with the speed measured at the start of the cycle.
-                assertEquals(amps * K.resistance().in(Units.Ohms) + omegaBefore / K.speedConstantRadPerSecPerVolt(), volts, 1e-9,
+                assertEquals(amps * K.resistance().in(Units.Ohms) + omegaBefore / K.raw().speedConstantRadPerSecPerVolt(), volts, 1e-9,
                         "cycle " + cycle);
                 assertEquals(volts, rig.telemetry("VoltageCommand"), 1e-12);
                 checked++;
@@ -326,7 +326,7 @@ class TorqueVelocityTest {
             rig.cycle();
         }
         // Load current from the plant: the load torque plus the damping torque at the speed, over Kt.
-        double expected = (LOAD + DAMPING * plant.omega) / K.torqueConstantNmPerAmp();
+        double expected = (LOAD + DAMPING * plant.omega) / K.raw().torqueConstantNmPerAmp();
         double estimate = rig.telemetry("LoadEstimateAmps");
         assertEquals(expected, estimate, 0.25 * expected, "load estimate " + estimate + " A, expected " + expected);
     }
@@ -383,7 +383,7 @@ class TorqueVelocityTest {
 
     /** Current the commanded voltage drives at the speed the cycle started from. */
     private static double startOfCycleCurrent(Flywheel plant) {
-        return (plant.volts - plant.omega / K.speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
+        return (plant.volts - plant.omega / K.raw().speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
     }
 
     @Test

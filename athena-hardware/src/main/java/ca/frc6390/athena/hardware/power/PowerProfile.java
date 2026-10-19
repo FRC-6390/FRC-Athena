@@ -128,17 +128,17 @@ public final class PowerProfile {
     /** Returns the interval the {@link #rampStep()} applies over, or zero when not ramp limited. */
     public Time rampInterval() { return Units.Seconds.of(rampIntervalSeconds); }
 
-    /** Per-cycle primitive: sustained cap in amps. Teams should use {@link #sustainedCurrent()}. */
-    public double sustainedAmps() { return sustainedAmps; }
+    /** Per-cycle primitive: sustained cap in amps. Robot code should use {@link #sustainedCurrent()}. */
+    double sustainedAmps() { return sustainedAmps; }
 
-    /** Per-cycle primitive: burst cap in amps. Teams should use {@link #burstCurrent()}. */
-    public double burstAmps() { return burstAmps; }
+    /** Per-cycle primitive: burst cap in amps. Robot code should use {@link #burstCurrent()}. */
+    double burstAmps() { return burstAmps; }
 
-    /** Per-cycle primitive: burst budget in seconds. Teams should use {@link #burstDuration()}. */
-    public double burstSeconds() { return burstSeconds; }
+    /** Per-cycle primitive: burst budget in seconds. Robot code should use {@link #burstDuration()}. */
+    double burstSeconds() { return burstSeconds; }
 
     /** Per-cycle primitive: ramp rate in amps per second. */
-    public double rampAmpsPerSecond() { return rampAmpsPerSecond; }
+    double rampAmpsPerSecond() { return rampAmpsPerSecond; }
 
     /** Returns the relative share weight. */
     public double share() { return share; }
@@ -225,5 +225,42 @@ public final class PowerProfile {
         return "PowerProfile[sustainedAmps=" + sustainedAmps + ", burstAmps=" + burstAmps
                 + ", burstSeconds=" + burstSeconds + ", rampAmpsPerSecond=" + rampAmpsPerSecond
                 + ", share=" + share + ", sag=" + sag + "]";
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive profile values in the units the names state. Robot code uses the
+     * typed accessors (sustainedCurrent(), burstCurrent(), burstDuration(), rampStep(), ...).
+     */
+    public static final class Raw {
+        private final PowerProfile owner;
+
+        private Raw(PowerProfile owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see PowerProfile#sustainedAmps. */
+        public double sustainedAmps() {
+            return owner.sustainedAmps();
+        }
+
+        /** Internal: see PowerProfile#burstAmps. */
+        public double burstAmps() {
+            return owner.burstAmps();
+        }
+
+        /** Internal: see PowerProfile#burstSeconds. */
+        public double burstSeconds() {
+            return owner.burstSeconds();
+        }
+
+        /** Internal: see PowerProfile#rampAmpsPerSecond. */
+        public double rampAmpsPerSecond() {
+            return owner.rampAmpsPerSecond();
+        }
     }
 }

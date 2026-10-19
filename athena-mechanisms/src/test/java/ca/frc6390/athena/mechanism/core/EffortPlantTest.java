@@ -53,8 +53,8 @@ class EffortPlantTest {
         void step(double dt) {
             double h = dt / SUBSTEPS;
             for (int i = 0; i < SUBSTEPS; i++) {
-                current = (volts - omega / K.speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
-                double torque = K.torqueConstantNmPerAmp() * current;
+                current = (volts - omega / K.raw().speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
+                double torque = K.raw().torqueConstantNmPerAmp() * current;
                 omega += (torque - tauExt - damping * omega) / inertia * h;
                 theta += omega * h / (2.0 * Math.PI);
                 if (!Double.isNaN(stopMin) && theta < stopMin) {
@@ -64,7 +64,7 @@ class EffortPlantTest {
                     }
                 }
             }
-            current = (volts - omega / K.speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
+            current = (volts - omega / K.raw().speedConstantRadPerSecPerVolt()) / K.resistance().in(Units.Ohms);
         }
     }
 
@@ -179,8 +179,8 @@ class EffortPlantTest {
 
     /** Feedforward that matches the plant's back-EMF, so the model's load and blocked checks are exact. */
     static MechanismModel model() {
-        return new MechanismModel(MotionKind.ROTARY, 0.0, 0.0, 2.0 * Math.PI / K.speedConstantRadPerSecPerVolt(), 0.0, 0.0,
-                0.0, FrictionTable.EMPTY, Double.NaN, Double.NaN, 0.0, K.torqueConstantNmPerAmp(), K.resistance().in(Units.Ohms), 1,
+        return new MechanismModel(MotionKind.ROTARY, 0.0, 0.0, 2.0 * Math.PI / K.raw().speedConstantRadPerSecPerVolt(), 0.0, 0.0,
+                0.0, FrictionTable.EMPTY, Double.NaN, Double.NaN, 0.0, K.raw().torqueConstantNmPerAmp(), K.resistance().in(Units.Ohms), 1,
                 List.of(), 1.0, Map.of(), 0.0, 0);
     }
 
@@ -277,7 +277,7 @@ class EffortPlantTest {
 
     @Test
     void torqueCeilingTranslatesToTheSameCurrentLimitAsAmps() {
-        double torque = K.torqueConstantNmPerAmp() * 5.0;
+        double torque = K.raw().torqueConstantNmPerAmp() * 5.0;
         Plant plant = new Plant();
         ControlBinding<?> angle = Controls.position(MOTOR, Units.Rotations)
                 .feedback(plantPosition(plant), plantVelocity(plant))

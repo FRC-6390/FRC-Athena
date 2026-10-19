@@ -448,16 +448,16 @@ final class RobotGraph {
         values.put(config + "/Restore", TelemetryValue.command(() -> overrides.restore(motor)));
         values.put(config + "/Status", TelemetryValue.string(() -> overrides.motorStatus(motor)));
         values.put(state + "/PositionRotations", safeNumber(() -> motor.position().in(edu.wpi.first.units.Units.Rotations)));
-        values.put(state + "/VelocityRotationsPerSecond", safeNumber(motor::velocityRotationsPerSecond));
-        values.put(state + "/AppliedVoltage", safeNumber(motor::appliedVoltageVolts));
-        values.put(state + "/SupplyCurrentAmps", safeNumber(motor::supplyCurrentAmps));
-        values.put(state + "/StatorCurrentAmps", safeNumber(motor::statorCurrentAmps));
+        values.put(state + "/VelocityRotationsPerSecond", safeNumber(motor.raw()::velocityRotationsPerSecond));
+        values.put(state + "/AppliedVoltage", safeNumber(motor.raw()::appliedVoltageVolts));
+        values.put(state + "/SupplyCurrentAmps", safeNumber(motor.raw()::supplyCurrentAmps));
+        values.put(state + "/StatorCurrentAmps", safeNumber(motor.raw()::statorCurrentAmps));
         values.put(state + "/CommandMode", TelemetryValue.string(() -> motor.command().mode().name()));
         values.put(state + "/CommandValue", TelemetryValue.number(() -> motor.command().value()));
         // Thermal and power state. The temperature is the thermal model's estimate, the derate is the curve applied
         // to it, and the cap is the effective limit of the latest power cycle (0 when none). No hardware is read.
-        values.put(state + "/TemperatureCelsius", safeNumber(motor::fusedTemperatureCelsius));
-        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().derateFractionCelsius(motor.fusedTemperatureCelsius())));
+        values.put(state + "/TemperatureCelsius", safeNumber(motor.raw()::fusedTemperatureCelsius));
+        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius())));
         values.put(state + "/PowerCapAmps", safeNumber(() -> overrides.powerCapAmps(motor)));
     }
 
@@ -497,19 +497,19 @@ final class RobotGraph {
         values.put(path + "/Info/Kind", TelemetryValue.constant(imu.kind().key()));
         values.put(path + "/Info/Id", TelemetryValue.constant(imu.id()));
         values.put(path + "/Info/Bus", TelemetryValue.constant(imu.canbus()));
-        values.put(path + "/State/YawDegrees", safeNumber(imu::yawDegrees));
-        values.put(path + "/State/AngleDegrees", safeNumber(imu::angleDegrees));
-        values.put(path + "/State/PitchDegrees", safeNumber(imu::pitchDegrees));
-        values.put(path + "/State/RollDegrees", safeNumber(imu::rollDegrees));
-        values.put(path + "/State/YawRateDegreesPerSecond", safeNumber(imu::yawRateDegreesPerSecond));
-        values.put(path + "/State/PitchRateDegreesPerSecond", safeNumber(imu::pitchRateDegreesPerSecond));
-        values.put(path + "/State/RollRateDegreesPerSecond", safeNumber(imu::rollRateDegreesPerSecond));
-        values.put(path + "/State/LinearAccelerationXG", safeNumber(imu::linearAccelerationXG));
-        values.put(path + "/State/LinearAccelerationYG", safeNumber(imu::linearAccelerationYG));
-        values.put(path + "/State/LinearAccelerationZG", safeNumber(imu::linearAccelerationZG));
+        values.put(path + "/State/YawDegrees", safeNumber(imu.raw()::yawDegrees));
+        values.put(path + "/State/AngleDegrees", safeNumber(imu.raw()::angleDegrees));
+        values.put(path + "/State/PitchDegrees", safeNumber(imu.raw()::pitchDegrees));
+        values.put(path + "/State/RollDegrees", safeNumber(imu.raw()::rollDegrees));
+        values.put(path + "/State/YawRateDegreesPerSecond", safeNumber(imu.raw()::yawRateDegreesPerSecond));
+        values.put(path + "/State/PitchRateDegreesPerSecond", safeNumber(imu.raw()::pitchRateDegreesPerSecond));
+        values.put(path + "/State/RollRateDegreesPerSecond", safeNumber(imu.raw()::rollRateDegreesPerSecond));
+        values.put(path + "/State/LinearAccelerationXG", safeNumber(imu.raw()::linearAccelerationXG));
+        values.put(path + "/State/LinearAccelerationYG", safeNumber(imu.raw()::linearAccelerationYG));
+        values.put(path + "/State/LinearAccelerationZG", safeNumber(imu.raw()::linearAccelerationZG));
         values.put(path + "/Health/Connected", TelemetryValue.bool(imu::isConnected));
         values.put(path + "/Health/Calibrating", TelemetryValue.bool(imu::isCalibrating));
-        values.put(path + "/Health/LastUpdateSeconds", safeNumber(imu::lastUpdateSeconds));
+        values.put(path + "/Health/LastUpdateSeconds", safeNumber(imu.raw()::lastUpdateSeconds));
         values.put(path + "/Health/Fresh100ms", TelemetryValue.bool(() -> imu.isFresh(edu.wpi.first.units.Units.Seconds.of(0.1))));
         values.put(path + "/Setup/RequestedYawDegrees", TelemetryValue.writableNumber(
                 () -> overrides.requestedImuYaw(imu), value -> overrides.requestedImuYaw(imu, value)));

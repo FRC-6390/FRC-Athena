@@ -131,7 +131,7 @@ class MechanismTelemetryTest {
                 .get("tunedMechanism/Devices/imu/Setup/RequestedYawDegrees").set(42.0);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/imu/Setup/SetYaw").set(true);
-        assertEquals(42.0, mechanism.imu.yawDegrees(), 1e-9);
+        assertEquals(42.0, mechanism.imu.raw().yawDegrees(), 1e-9);
 
         runtime.mechanismTelemetrySchema().values().get("tunedMechanism/Controls/control/Config/Disabled").set(true);
         runtime.robotPeriodic(0.02, 0.02);

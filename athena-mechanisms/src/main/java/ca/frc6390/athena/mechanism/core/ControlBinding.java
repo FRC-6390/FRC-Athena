@@ -770,7 +770,7 @@ public record ControlBinding<U extends Unit>(
                 return 0.0;
             }
             try {
-                return Math.abs(motor.statorCurrentAmps());
+                return Math.abs(motor.raw().statorCurrentAmps());
             } catch (RuntimeException unavailable) {
                 return Double.NaN;
             }
@@ -814,7 +814,7 @@ public record ControlBinding<U extends Unit>(
 
     private static double appliedVoltage(MotorDevice motor) {
         try {
-            return motor.appliedVoltageVolts();
+            return motor.raw().appliedVoltageVolts();
         } catch (RuntimeException unavailable) {
             return Double.NaN;
         }

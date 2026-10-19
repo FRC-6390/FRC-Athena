@@ -559,7 +559,7 @@ public final class Characterization implements TelemetrySource {
         if (output != null) {
             MotorConstants constants = MotorConstants.forKind(output.kind()).orElse(null);
             if (constants != null) {
-                torque = constants.torqueConstantNmPerAmp();
+                torque = constants.raw().torqueConstantNmPerAmp();
                 resistance = constants.resistance().in(Units.Ohms);
             }
         }

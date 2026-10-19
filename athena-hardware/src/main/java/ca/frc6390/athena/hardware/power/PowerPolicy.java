@@ -90,11 +90,11 @@ public final class PowerPolicy {
     /** Returns the stagger spacing (zero when disabled). */
     public Time staggerStarts() { return Units.Seconds.of(staggerSeconds); }
 
-    /** Per-cycle primitive: bus-voltage floor in volts. Teams should use {@link #floor()}. */
-    public double floorVolts() { return floorVolts; }
+    /** Per-cycle primitive: bus-voltage floor in volts. Robot code should use {@link #floor()}. */
+    double floorVolts() { return floorVolts; }
 
-    /** Per-cycle primitive: stagger spacing in seconds. Teams should use {@link #staggerStarts()}. */
-    public double staggerSeconds() { return staggerSeconds; }
+    /** Per-cycle primitive: stagger spacing in seconds. Robot code should use {@link #staggerStarts()}. */
+    double staggerSeconds() { return staggerSeconds; }
 
     /** Returns whether battery resistance is estimated online. */
     public boolean estimateBatteryResistance() { return estimateBatteryResistance; }
@@ -102,6 +102,38 @@ public final class PowerPolicy {
     /** Returns the battery resistance used before estimation is available. */
     public Resistance defaultBatteryResistance() { return DEFAULT_BATTERY_RESISTANCE; }
 
-    /** Per-cycle primitive: default battery resistance in ohms. Teams should use {@link #defaultBatteryResistance()}. */
-    public double defaultBatteryOhms() { return DEFAULT_BATTERY_RESISTANCE.in(Units.Ohms); }
+    /** Per-cycle primitive: default battery resistance in ohms. Robot code should use {@link #defaultBatteryResistance()}. */
+    double defaultBatteryOhms() { return DEFAULT_BATTERY_RESISTANCE.in(Units.Ohms); }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive policy values in the units the names state. Robot code uses the
+     * typed accessors (floor(), staggerStarts(), defaultBatteryResistance()).
+     */
+    public static final class Raw {
+        private final PowerPolicy owner;
+
+        private Raw(PowerPolicy owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see PowerPolicy#floorVolts. */
+        public double floorVolts() {
+            return owner.floorVolts();
+        }
+
+        /** Internal: see PowerPolicy#staggerSeconds. */
+        public double staggerSeconds() {
+            return owner.staggerSeconds();
+        }
+
+        /** Internal: see PowerPolicy#defaultBatteryOhms. */
+        public double defaultBatteryOhms() {
+            return owner.defaultBatteryOhms();
+        }
+    }
 }

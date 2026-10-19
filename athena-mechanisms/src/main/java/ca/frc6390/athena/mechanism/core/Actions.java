@@ -947,7 +947,7 @@ public final class Actions {
 
         @Override
         default void apply(ActionContext context) {
-            imu().applyYawDegrees(context, requestedYawDegrees());
+            imu().raw().applyYawDegrees(context, requestedYawDegrees());
         }
     }
 

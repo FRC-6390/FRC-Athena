@@ -189,14 +189,14 @@ class SwerveOdometryTest {
     private static final class TestImu implements ImuSource {
         private double yawDegrees;
 
-        @Override public double yawDegrees() { return yawDegrees; }
-        @Override public double pitchDegrees() { return 0.0; }
-        @Override public double rollDegrees() { return 0.0; }
-        @Override public double angleDegrees() { return yawDegrees; }
-        @Override public double yawRateDegreesPerSecond() { return 0.0; }
-        @Override public double linearAccelerationXG() { return 0.0; }
-        @Override public double linearAccelerationYG() { return 0.0; }
-        @Override public double linearAccelerationZG() { return 0.0; }
-        @Override public void applyYawDegrees(ActionContext context, double value) { yawDegrees = value; }
+        @Override public double readYawDegrees() { return yawDegrees; }
+        @Override public double readPitchDegrees() { return 0.0; }
+        @Override public double readRollDegrees() { return 0.0; }
+        @Override public double readAngleDegrees() { return yawDegrees; }
+        @Override public double readYawRateDegreesPerSecond() { return 0.0; }
+        @Override public double readLinearAccelerationXG() { return 0.0; }
+        @Override public double readLinearAccelerationYG() { return 0.0; }
+        @Override public double readLinearAccelerationZG() { return 0.0; }
+        @Override public void writeYawDegrees(ActionContext context, double value) { yawDegrees = value; }
     }
 }
