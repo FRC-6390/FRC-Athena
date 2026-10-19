@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Radians;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,8 +38,8 @@ class PhotonVisionSimulationProviderTest {
                 .findFirst()
                 .orElseThrow();
         List<CameraDevice> cameras = List.of(
-                Cameras.photonVision("photon-front").mount(0.25, 0.0, 0.5, 0.0, -10.0, 0.0),
-                Cameras.limelight("limelight-front").mount(0.2, 0.1, 0.45, 5.0, -8.0, 0.0),
+                Cameras.photonVision("photon-front").mount(Meters.of(0.25), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(-10.0), Degrees.of(0.0)),
+                Cameras.limelight("limelight-front").mount(Meters.of(0.2), Meters.of(0.1), Meters.of(0.45), Degrees.of(5.0), Degrees.of(-8.0), Degrees.of(0.0)),
                 Cameras.helios("helios-front"));
 
         assertTrue(provider.supports(cameras));
@@ -57,7 +60,7 @@ class PhotonVisionSimulationProviderTest {
 
     @Test
     void simulatedTargetConversionProducesAthenaTargetMeasurementsWhenTargetIsInView() {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
 
         List<Measurement> measurements = PhotonVisionSimulationProvider.PhotonVisionSimulation.simulatedTargets(
                 new PoseSnapshot(0.0, 0.0, 0.0),
@@ -72,10 +75,10 @@ class PhotonVisionSimulationProviderTest {
 
     @Test
     void simulatedTargetConversionUsesConfiguredFieldTargets() {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         VisionSimulationField field = VisionSimulationField.of(
-                VisionSimulationTarget.aprilTag(4, 2.0, 0.0, 1.0, 0.0),
-                VisionSimulationTarget.aprilTag(7, -2.0, 0.0, 1.0, 0.0));
+                VisionSimulationTarget.aprilTag(4, Meters.of(2.0), Meters.of(0.0), Meters.of(1.0), Radians.of(0.0)),
+                VisionSimulationTarget.aprilTag(7, Meters.of(-2.0), Meters.of(0.0), Meters.of(1.0), Radians.of(0.0)));
 
         List<Measurement> measurements = PhotonVisionSimulationProvider.PhotonVisionSimulation.simulatedTargets(
                 new PoseSnapshot(0.0, 0.0, 0.0),
@@ -89,10 +92,10 @@ class PhotonVisionSimulationProviderTest {
 
     @Test
     void simulationBindsTargetAndPoseMeasurementsFromConfiguredField() {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera),
-                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 3.0, 0.0, 1.0, 0.0))
+                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, Meters.of(3.0), Meters.of(0.0), Meters.of(1.0), Radians.of(0.0)))
                         .noise(VisionSimNoise.perfect()));
         CameraDevice bound = simulation.bind(camera);
 
@@ -110,12 +113,12 @@ class PhotonVisionSimulationProviderTest {
     @Test
     void simulatedCameraCapturedBeforeBindingFeedsLocalizationThroughRuntimeCache() {
         CameraDevice camera = Cameras.photonVision("localization-front")
-                .mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+                .mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         var declaredPose = camera.pose().singleTagStdDevs(0.2, 0.2, 0.1);
         Localization localization = Localizations.latestValid().input(declaredPose);
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera),
-                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, 5.0, 2.0, 1.0, 0.0))
+                VisionSimulationField.of(VisionSimulationTarget.aprilTag(11, Meters.of(5.0), Meters.of(2.0), Meters.of(1.0), Radians.of(0.0)))
                         .noise(VisionSimNoise.perfect()));
         CameraDevice bound = simulation.bind(camera);
         VisionGraph graph = VisionGraph.of(bound);

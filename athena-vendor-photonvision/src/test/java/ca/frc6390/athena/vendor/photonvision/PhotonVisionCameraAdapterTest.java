@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -378,7 +379,7 @@ class PhotonVisionCameraAdapterTest {
                 11.0, 10.5).synced());
         assertEquals(0.7, PhotonVisionCameraAdapter.clockStatus(
                 new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty(), 0.2),
-                10.0, 10.5).secondsSinceSync(), 1.0e-9);
+                10.0, 10.5).timeSinceSync().in(Seconds), 1.0e-9);
         assertTrue(PhotonVisionCameraAdapter.clockStatus(null, Double.NaN, Double.NaN).isUnknown());
         assertTrue(PhotonVisionCameraAdapter.clockStatus(
                 new PhotonVisionCameraAdapter.PhotonVisionResult(10.0, 0.0, List.of(), Optional.empty()),
@@ -400,7 +401,7 @@ class PhotonVisionCameraAdapterTest {
         adapter.targetSignal().measurements();
 
         assertTrue(bound.clockStatus().synced());
-        assertEquals(0.2, bound.clockStatus().secondsSinceSync(), 1.0e-9);
+        assertEquals(0.2, bound.clockStatus().timeSinceSync().in(Seconds), 1.0e-9);
         assertTrue(device.clockStatus().synced());
         assertTrue(adapter.clockStatus().synced());
     }
