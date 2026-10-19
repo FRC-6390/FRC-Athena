@@ -1624,7 +1624,7 @@ final class MechanismRuntime {
                 if (!node.entered) {
                     try {
                         actionContext.encoder(setPosition.encoder()).setPositionRotations(
-                                setPosition.encoder().rotationsFromPosition(setPosition.position()));
+                                setPosition.encoder().rotationsFromPosition(setPosition.encoder().measure(setPosition.position())));
                         encoderSet.accept(setPosition.encoder(), setPosition.position());
                     } catch (RuntimeException exception) {
                         handleHardwareMutationFailure(

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Rotations;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.signal.ImuSource;
@@ -247,8 +249,8 @@ public final class SwerveKinematics implements SimModel.Source {
             SwerveModule module = modules.get(index).module();
             SwerveModuleTarget state = states.get(index);
             EncoderDevice driveDistance = distanceEncoder(module);
-            double rawDriveVelocity = driveDistance.rotationsFromPosition(state.speedMetersPerSecond())
-                    - driveDistance.rotationsFromPosition(0.0);
+            double rawDriveVelocity = driveDistance.rotationsFromPosition(Meters.of(state.speedMetersPerSecond()))
+                    - driveDistance.rotationsFromPosition(Meters.of(0.0));
             drivePositions[index] += rawDriveVelocity * seconds;
             context.motorState(module.drive.get(), drivePositions[index], rawDriveVelocity);
             context.encoderState(
@@ -258,7 +260,7 @@ public final class SwerveKinematics implements SimModel.Source {
                     rawDriveVelocity);
 
             EncoderDevice angle = module.angle.get();
-            double rawAngle = angle.rotationsFromPosition(state.angleRotations());
+            double rawAngle = angle.rotationsFromPosition(Rotations.of(state.angleRotations()));
             double previousAngle = context.encoderPosition(angle);
             context.encoderState(angle, rawAngle, rawAngle, (rawAngle - previousAngle) / seconds);
             double steerPosition = rawAngle * module.model().steerReduction();

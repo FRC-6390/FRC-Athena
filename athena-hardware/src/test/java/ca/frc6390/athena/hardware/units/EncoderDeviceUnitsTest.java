@@ -2,7 +2,6 @@ package ca.frc6390.athena.hardware.units;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import edu.wpi.first.units.Units;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +19,6 @@ class EncoderDeviceUnitsTest {
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).measures(Units.Degrees);
 
         assertSame(Units.Degrees, encoder.measuresUnit());
-        assertEquals(EncoderUnit.DEGREES, encoder.units());
         assertEquals(360.0, encoder.conversion(), 1e-9);
         assertEquals(90.0, encoder.positionFromRotations(0.25), 1e-9);
     }
@@ -51,7 +48,6 @@ class EncoderDeviceUnitsTest {
                 .travelPerRevolution(Units.Inches.of(12.0));
 
         assertSame(Units.Meters, encoder.measuresUnit());
-        assertEquals(EncoderUnit.METERS, encoder.units());
         assertEquals(0.3048, encoder.conversion(), 1e-9);
     }
 
@@ -64,12 +60,34 @@ class EncoderDeviceUnitsTest {
     }
 
     @Test
-    void legacyDeclarationsHaveNoMeasuredUnitAndKeepOldConversions() {
-        EncoderDevice legacy = EncoderDevice.of(EncoderKinds.CANCODER, 2).reduction(0.2).conversion(360.0);
+    void defaultDeclarationMeasuresRotationsOneToOne() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2);
 
-        assertNull(legacy.measuresUnit());
-        assertEquals(EncoderUnit.RAW, legacy.units());
-        assertEquals(1800.0, legacy.positionFromRotations(1.0), 1e-9);
+        assertSame(Units.Rotations, encoder.measuresUnit());
+        assertEquals(1.0, encoder.conversion(), 0.0);
+        assertEquals(-1.5, encoder.positionFromRotations(-1.5), 0.0);
+    }
+
+    @Test
+    void degreesWithReductionScalesOneRawTurnTo360OverTheReduction() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).measures(Units.Degrees).reduction(0.2);
+
+        assertEquals(1800.0, encoder.positionFromRotations(1.0), 1e-9);
+    }
+
+    @Test
+    void rotationsFromPositionAcceptsAnyMeasureInTheEncoderDimension() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).measures(Units.Degrees).reduction(100.0);
+
+        assertEquals(25.0, encoder.rotationsFromPosition(Units.Degrees.of(90.0)), 1e-9);
+        assertEquals(25.0, encoder.rotationsFromPosition(encoder.measure(90.0)), 1e-9);
+    }
+
+    @Test
+    void rotationsFromPositionRejectsAMeasureOfAnotherDimension() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).measures(Units.Degrees);
+
+        assertThrows(IllegalArgumentException.class, () -> encoder.rotationsFromPosition(Units.Meters.of(1.0)));
     }
 
     @Test
@@ -87,10 +105,11 @@ class EncoderDeviceUnitsTest {
     }
 
     @Test
-    void primitiveConstructorRejectsNonAngleOrDistanceUnits() {
+    void canonicalConstructorRejectsMissingOrNonAngleOrDistanceUnits() {
+        EncoderDevice template = EncoderDevice.of(EncoderKinds.CANCODER, 2);
         assertThrows(IllegalArgumentException.class, () -> new EncoderDevice(
-                new ca.frc6390.athena.hardware.device.EncoderDevice.EncoderSource.Standalone(
-                        EncoderKinds.CANCODER, "rio", new ca.frc6390.athena.hardware.device.HardwareAddress.Can(2)),
-                false, 1.0, 1.0, 0.0, EncoderUnit.RAW, null, false, Units.Volts));
+                template.source(), false, 1.0, 1.0, 0.0, null, false, null));
+        assertThrows(IllegalArgumentException.class, () -> new EncoderDevice(
+                template.source(), false, 1.0, 1.0, 0.0, null, false, Units.Volts));
     }
 }

@@ -473,7 +473,7 @@ final class RobotGraph {
         values.put(path + "/Info/GearRatio", TelemetryValue.number(encoder::gearRatio));
         values.put(path + "/Info/Conversion", TelemetryValue.number(encoder::conversion));
         values.put(path + "/Info/Offset", TelemetryValue.number(encoder::offset));
-        values.put(path + "/Info/Units", TelemetryValue.string(() -> encoder.units().name()));
+        values.put(path + "/Info/Units", TelemetryValue.string(() -> encoder.measuresUnit().name()));
         values.put(path + "/State/Position", safeNumber(encoder::position));
         values.put(path + "/State/AbsolutePosition", safeNumber(encoder::absolutePosition));
         values.put(path + "/State/Velocity", safeNumber(encoder::velocity));

@@ -6,7 +6,6 @@ import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import edu.wpi.first.units.Units;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -31,7 +30,7 @@ class SwerveDriveEncoderEquivalenceTest {
             MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
             EncoderDevice legacy = new EncoderDevice(motor.encoder().source(), false,
                     1.0 / model.driveReduction(), Math.PI * model.wheelDiameterMeters(), 0.0,
-                    EncoderUnit.METERS, FailurePolicy.DISABLE_MECHANISM);
+                    FailurePolicy.DISABLE_MECHANISM, false, Units.Meters);
             EncoderDevice typed = motor.encoder()
                     .reduction(model.driveReduction())
                     .measures(Units.Meters)

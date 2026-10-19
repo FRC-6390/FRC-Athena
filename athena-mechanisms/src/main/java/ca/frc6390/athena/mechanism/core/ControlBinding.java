@@ -8,7 +8,6 @@ import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import ca.frc6390.athena.mechanism.constraint.Constraint;
@@ -407,7 +406,7 @@ public record ControlBinding<U extends Unit>(
      * Adds arm feedforward: static and velocity terms plus {@code kG * cos(angle)}, where the angle is the
      * mechanism position in radians. The angle unit is taken from this binding: a typed binding such as
      * {@code Controls.position(motor, Degrees)}, or an encoder declared with {@code measures(...)} in an angle
-     * unit or with {@link EncoderUnit#DEGREES}, {@link EncoderUnit#ROTATIONS} or {@link EncoderUnit#RADIANS}.
+     * unit (for example {@code measures(Units.Degrees)}).
      * Declare {@link #feedback(EncoderDevice)} before this call.
      *
      * @param staticGain static gain in volts
@@ -489,19 +488,8 @@ public record ControlBinding<U extends Unit>(
             if (measured instanceof AngleUnit angle) {
                 return angle;
             }
-            if (measured != null) {
-                throw new IllegalArgumentException("Arm feedforward needs an angle, but encoder "
-                        + encoder.defaultName() + " measures " + measured.name() + ".");
-            }
-            return switch (encoder.units()) {
-                case DEGREES -> Units.Degrees;
-                case RADIANS -> Units.Radians;
-                case ROTATIONS -> Units.Rotations;
-                case RAW, METERS -> throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of "
-                        + "encoder " + encoder.defaultName() + " (" + encoder.units()
-                        + "). Declare it with measures(Degrees), measures(Radians) or measures(Rotations), "
-                        + "or use a typed control such as Controls.position(motor, Degrees).");
-            };
+            throw new IllegalArgumentException("Arm feedforward needs an angle, but encoder "
+                    + encoder.defaultName() + " measures " + measured.name() + ".");
         }
         throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of this feedback. Use an "
                 + "encoder declared with measures(...) or a typed control such as Controls.position(motor, Degrees).");

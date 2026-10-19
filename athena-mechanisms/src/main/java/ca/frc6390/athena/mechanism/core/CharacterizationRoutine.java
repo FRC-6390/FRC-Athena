@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Unit;
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.mechanism.sysid.SysIdLog;
@@ -165,15 +167,24 @@ public final class CharacterizationRoutine {
     }
 
     private static SysIdUnit inferUnit(ControlBinding<?> control) {
-        if (control.feedback().position() instanceof EncoderDevice encoder) {
-            return switch (encoder.units()) {
-                case DEGREES -> SysIdUnit.DEGREES;
-                case RADIANS -> SysIdUnit.RADIANS;
-                case METERS -> SysIdUnit.METERS;
-                case RAW, ROTATIONS -> SysIdUnit.ROTATIONS;
-            };
+        if (!(control.feedback().position() instanceof EncoderDevice encoder)) {
+            return SysIdUnit.ROTATIONS;
         }
-        return SysIdUnit.ROTATIONS;
+        Unit measured = encoder.measuresUnit();
+        if (measured == Units.Degrees) {
+            return SysIdUnit.DEGREES;
+        }
+        if (measured == Units.Radians) {
+            return SysIdUnit.RADIANS;
+        }
+        if (measured == Units.Rotations) {
+            return SysIdUnit.ROTATIONS;
+        }
+        if (measured == Units.Meters) {
+            return SysIdUnit.METERS;
+        }
+        throw new IllegalStateException("Characterization needs encoder feedback in degrees, radians, rotations or "
+                + "meters, but " + encoder.defaultName() + " measures " + measured.name() + ".");
     }
 
     private static double readOrFallback(DoubleRead read, double fallback) {

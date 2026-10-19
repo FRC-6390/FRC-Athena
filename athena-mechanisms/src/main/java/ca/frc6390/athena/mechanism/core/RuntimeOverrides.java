@@ -104,7 +104,7 @@ final class RuntimeOverrides {
 
     void encoderPosition(EncoderDevice encoder, double position) {
         try {
-            actionContext.encoder(encoder).setPositionRotations(encoder.rotationsFromPosition(position));
+            actionContext.encoder(encoder).setPositionRotations(encoder.rotationsFromPosition(encoder.measure(position)));
             setupStatus.put(encoder, "Applied");
         } catch (RuntimeException exception) {
             setupStatus.put(encoder, "Error: " + exception.getMessage());

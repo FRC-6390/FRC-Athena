@@ -9,7 +9,6 @@ import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.measure.Velocity;
@@ -31,8 +30,7 @@ class CharacterizationRoutineTest {
     private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final MotorDevice FOLLOWER = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 2)
-            .conversion(360.0)
-            .units(EncoderUnit.DEGREES);
+            .measures(Units.Degrees);
 
     @Test
     void heldQuasistaticActionRampsLogsNormalizedFeedbackAndEndsOnRelease() {

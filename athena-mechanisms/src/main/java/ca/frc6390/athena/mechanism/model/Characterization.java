@@ -4,7 +4,6 @@ import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -189,19 +188,10 @@ public final class Characterization implements TelemetrySource {
         if (control.feedback() == null || !(control.feedback().position() instanceof EncoderDevice encoder)) {
             return 1.0;
         }
-        double unitsPerRevolution;
-        if (encoder.measuresUnit() instanceof AngleUnit) {
-            unitsPerRevolution = encoder.measuresUnit() == Units.Degrees ? 360.0
-                    : encoder.measuresUnit() == Units.Radians ? 2.0 * Math.PI : 1.0;
-        } else if (encoder.units() == EncoderUnit.DEGREES) {
-            unitsPerRevolution = 360.0;
-        } else if (encoder.units() == EncoderUnit.ROTATIONS) {
-            unitsPerRevolution = 1.0;
-        } else if (encoder.units() == EncoderUnit.RADIANS) {
-            unitsPerRevolution = 2.0 * Math.PI;
-        } else {
+        if (!(encoder.measuresUnit() instanceof AngleUnit angle)) {
             return 1.0;
         }
+        double unitsPerRevolution = angle.fromBaseUnits(2.0 * Math.PI);
         double mechanismTurnsPerRawTurn = encoder.gearRatio() * encoder.conversion() / unitsPerRevolution;
         if (!(mechanismTurnsPerRawTurn > 0.0) || !Double.isFinite(mechanismTurnsPerRawTurn)) {
             return 1.0;

@@ -11,7 +11,6 @@ import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.model.Identification;
@@ -97,9 +96,9 @@ class ArmFeedforwardTest {
 
     @Test
     void untypedEncoderDeclaredInDegreesRotationsAndRadiansIsUsed() {
-        assertEquals(Units.Degrees, boundAngle(EncoderUnit.DEGREES));
-        assertEquals(Units.Rotations, boundAngle(EncoderUnit.ROTATIONS));
-        assertEquals(Units.Radians, boundAngle(EncoderUnit.RADIANS));
+        assertEquals(Units.Degrees, boundAngle(Units.Degrees));
+        assertEquals(Units.Rotations, boundAngle(Units.Rotations));
+        assertEquals(Units.Radians, boundAngle(Units.Radians));
     }
 
     @Test
@@ -125,12 +124,20 @@ class ArmFeedforwardTest {
     }
 
     @Test
-    void armFfRejectsEncodersWithUnknownAngleUnits() {
-        ControlBinding<?> raw = Controls.position(motor())
-                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 7));
+    void armFfRejectsEncodersThatMeasureADistance() {
+        ControlBinding<?> linear = Controls.position(motor())
+                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 7).measures(Units.Meters));
         IllegalArgumentException raised = assertThrows(IllegalArgumentException.class,
-                () -> raw.armFf(0.0, 0.0, KG));
-        assertTrue(raised.getMessage().contains("cannot tell the angle unit"));
+                () -> linear.armFf(0.0, 0.0, KG));
+        assertTrue(raised.getMessage().contains("needs an angle"));
+    }
+
+    @Test
+    void armFfUsesRotationsForAnEncoderThatDeclaresNoAngleUnit() {
+        ControlBinding<?> rotations = Controls.position(motor())
+                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 7))
+                .armFf(0.0, 0.0, KG);
+        assertEquals(Units.Rotations, feedforward(rotations).gravityAngle());
     }
 
     @Test
@@ -177,10 +184,10 @@ class ArmFeedforwardTest {
         assertThrows(IllegalStateException.class, () -> FeedforwardGains.of(0.0, 0.0, KG).withGravityAngle(Units.Degrees));
     }
 
-    /** Angle unit the arm form binds to for an untyped binding whose encoder declares {@code units}. */
-    private static AngleUnit boundAngle(EncoderUnit units) {
+    /** Angle unit the arm form binds to for an untyped binding whose encoder declares {@code measures(...)}. */
+    private static AngleUnit boundAngle(AngleUnit units) {
         ControlBinding<?> control = Controls.position(motor())
-                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 10).units(units))
+                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 10).measures(units))
                 .armFf(0.0, 0.0, KG);
         return feedforward(control).gravityAngle();
     }

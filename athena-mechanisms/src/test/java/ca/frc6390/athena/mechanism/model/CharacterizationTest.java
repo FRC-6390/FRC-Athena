@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.model;
 
+import edu.wpi.first.units.Units;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,7 +17,6 @@ import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -36,8 +36,7 @@ import org.junit.jupiter.api.Test;
 class CharacterizationTest {
     private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 2)
-            .conversion(360.0)
-            .units(EncoderUnit.DEGREES);
+            .measures(Units.Degrees);
 
     // Plant used by the closed-loop tests: kA * a = V - friction - kV * v, with Coulomb friction.
     private static final double PLANT_KS = 0.4;

@@ -505,7 +505,7 @@ class HardwareGraphTest {
         assertThrows(NullPointerException.class, () -> EncoderDevice.of(null, 1));
         assertThrows(NullPointerException.class, () -> ImuDevice.of(null, 1));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).reduction(0.0));
-        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).conversion(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).measures(Units.Meters).travelPerRevolution(Units.Meters.of(Double.NaN)));
         EncoderDevice dioEncoder = HardwareBus.rio()
                 .dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
         assertThrows(IllegalStateException.class, dioEncoder::id);
@@ -520,7 +520,7 @@ class HardwareGraphTest {
                 .reduction(2.0)
                 .measures(Units.Degrees);
 
-        double rawRotations = encoder.rotationsFromPosition(-90.0);
+        double rawRotations = encoder.rotationsFromPosition(Units.Degrees.of(-90.0));
 
         assertEquals(0.25, rawRotations, 1.0e-9);
         assertEquals(-90.0, encoder.positionFromRotations(rawRotations), 1.0e-9);

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -83,7 +84,7 @@ class LimitHookIntegrationTest {
     @Test
     void homeZeroingResetsDerivativeStateBeforeControlResumes() {
         Rig rig = new Rig();
-        rig.motorState(rig.arm.encoder.rotationsFromPosition(0.2));
+        rig.motorState(rig.arm.encoder.rotationsFromPosition(Units.Rotations.of(0.2)));
         rig.runtime.request(rig.arm.derivativeTarget);
         rig.runtime.teleopPeriodic(0.0, 0.02);
         assertEquals(0.0, rig.motor().commandValue(), 1.0e-9);
@@ -98,7 +99,7 @@ class LimitHookIntegrationTest {
     @Test
     void disableResetsDerivativeStateBeforeControlResumes() {
         Rig rig = new Rig();
-        rig.motorState(rig.arm.encoder.rotationsFromPosition(0.2));
+        rig.motorState(rig.arm.encoder.rotationsFromPosition(Units.Rotations.of(0.2)));
         rig.runtime.request(rig.arm.derivativeTarget);
         rig.runtime.teleopPeriodic(0.0, 0.02);
         rig.runtime.disabledPeriodic(0.02, 0.02);
@@ -127,7 +128,7 @@ class LimitHookIntegrationTest {
     @Test
     void rangeConstraintBlocksMotionPastUpperLimitButAllowsRecovery() {
         Rig rig = new Rig();
-        rig.motorState(rig.arm.encoder.rotationsFromPosition(0.35));
+        rig.motorState(rig.arm.encoder.rotationsFromPosition(Units.Rotations.of(0.35)));
         assertEquals(0.35, rig.encoderPosition(), 1.0e-9);
         rig.runtime.request(rig.arm.manualOut);
         rig.runtime.teleopPeriodic(0.0, 0.02);
@@ -142,7 +143,7 @@ class LimitHookIntegrationTest {
     @Test
     void rangeConstraintClampsPositionGoalBeforePidCalculatesVoltage() {
         Rig rig = new Rig();
-        rig.motorState(rig.arm.encoder.rotationsFromPosition(0.1));
+        rig.motorState(rig.arm.encoder.rotationsFromPosition(Units.Rotations.of(0.1)));
         assertEquals(0.1, rig.encoderPosition(), 1.0e-9);
         rig.runtime.request(rig.arm.outsideRange);
 

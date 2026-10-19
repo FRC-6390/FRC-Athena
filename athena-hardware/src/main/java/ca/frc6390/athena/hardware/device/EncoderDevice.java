@@ -7,7 +7,6 @@ import ca.frc6390.athena.api.hardware.EncoderKind;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.runtime.DeviceActionFactories;
@@ -19,6 +18,7 @@ import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import ca.frc6390.athena.hardware.units.UnitConversions;
 import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.DistanceUnit;
+import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
 import edu.wpi.first.units.measure.Distance;
@@ -27,9 +27,9 @@ import edu.wpi.first.units.measure.Distance;
  * Reusable encoder declaration for robot constants.
  *
  * <p>{@link #measuresUnit()} is the WPILib unit the encoder's {@link #position()} and
- * {@link #velocity()} are expressed in, set by {@link #measures(AngleUnit)} or
- * {@link #measures(DistanceUnit)}. It is null for legacy declarations, which keep the
- * {@link EncoderUnit} / conversion contract. Typed bindings check it at declaration time.</p>
+ * {@link #velocity()} are expressed in. It is always set: a declaration starts as rotations
+ * ({@link #of(EncoderKind, int)}) and changes with {@link #measures(AngleUnit)} or
+ * {@link #measures(DistanceUnit)}. Typed bindings check it at declaration time.</p>
  */
 public record EncoderDevice(
         EncoderSource source,
@@ -37,44 +37,10 @@ public record EncoderDevice(
         double gearRatio,
         double conversion,
         double offset,
-        EncoderUnit units,
         FailurePolicy failurePolicy,
         boolean baselineConfigApplied,
         Unit measuresUnit) implements PositionSignal, VelocitySignal {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
-
-    public EncoderDevice(
-            EncoderSource source,
-            boolean isInverted,
-            double gearRatio,
-            double conversion,
-            double offset,
-            EncoderUnit units,
-            FailurePolicy failurePolicy,
-            boolean baselineConfigApplied) {
-        this(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, baselineConfigApplied, null);
-    }
-
-    public EncoderDevice(
-            EncoderSource source,
-            boolean isInverted,
-            double gearRatio,
-            double conversion,
-            double offset,
-            EncoderUnit units,
-            FailurePolicy failurePolicy) {
-        this(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, false);
-    }
-
-    public EncoderDevice(
-            EncoderSource source,
-            boolean isInverted,
-            double gearRatio,
-            double conversion,
-            double offset,
-            EncoderUnit units) {
-        this(source, isInverted, gearRatio, conversion, offset, units, FailurePolicy.DISABLE_MECHANISM);
-    }
 
     public static EncoderDevice of(EncoderKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
@@ -87,8 +53,9 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW,
-                FailurePolicy.DISABLE_MECHANISM);
+                FailurePolicy.DISABLE_MECHANISM,
+                false,
+                Units.Rotations);
     }
 
     static EncoderDevice integratedMotor(MotorDevice motor) {
@@ -98,8 +65,9 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW,
-                motor.failurePolicy());
+                motor.failurePolicy(),
+                false,
+                Units.Rotations);
     }
 
     static EncoderDevice motorAbsolute(MotorDevice motor) {
@@ -109,8 +77,9 @@ public record EncoderDevice(
                 1.0,
                 1.0,
                 0.0,
-                EncoderUnit.RAW,
-                motor.failurePolicy());
+                motor.failurePolicy(),
+                false,
+                Units.Rotations);
     }
 
     public EncoderDevice {
@@ -124,9 +93,11 @@ public record EncoderDevice(
         if (!Double.isFinite(offset)) {
             throw new IllegalArgumentException("Encoder offset must be finite.");
         }
-        units = units == null ? EncoderUnit.RAW : units;
         failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
-        if (measuresUnit != null && !(measuresUnit instanceof AngleUnit) && !(measuresUnit instanceof DistanceUnit)) {
+        if (measuresUnit == null) {
+            throw new IllegalArgumentException("Encoder must declare its unit with measures(...).");
+        }
+        if (!(measuresUnit instanceof AngleUnit) && !(measuresUnit instanceof DistanceUnit)) {
             throw new IllegalArgumentException("Encoder measures must be an angle or distance unit.");
         }
     }
@@ -177,7 +148,6 @@ public record EncoderDevice(
                     gearRatio,
                     conversion,
                     offset,
-                    units,
                     failurePolicy,
                     baselineConfigApplied,
                     measuresUnit);
@@ -190,7 +160,7 @@ public record EncoderDevice(
     }
 
     public EncoderDevice inverted(boolean inverted) {
-        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, units, failurePolicy,
+        return new EncoderDevice(source, inverted, gearRatio, conversion, offset, failurePolicy,
                 baselineConfigApplied, measuresUnit);
     }
 
@@ -221,31 +191,22 @@ public record EncoderDevice(
     }
 
     private EncoderDevice withGearRatio(double gearRatio) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, failurePolicy,
                 baselineConfigApplied, measuresUnit);
     }
 
     /**
      * Declares that {@link #position()} and {@link #velocity()} are expressed in {@code unit} and
-     * sets the conversion to one full revolution of the encoder in that unit (360 for
-     * {@link Units#Degrees}, 1 for {@link Units#Rotations}). Call {@link #conversion(double)} after
-     * this to override it.
+     * sets one full revolution of the encoder in that unit (360 for {@link Units#Degrees}, 1 for
+     * {@link Units#Rotations}).
      *
      * @param unit angle unit reported by this encoder
      * @return updated declaration
      */
     public EncoderDevice measures(AngleUnit unit) {
         Objects.requireNonNull(unit, "unit");
-        EncoderUnit encoderUnit = units;
-        if (unit.equals(Units.Degrees)) {
-            encoderUnit = EncoderUnit.DEGREES;
-        } else if (unit.equals(Units.Radians)) {
-            encoderUnit = EncoderUnit.RADIANS;
-        } else if (unit.equals(Units.Rotations)) {
-            encoderUnit = EncoderUnit.ROTATIONS;
-        }
         double oneRevolution = unit.fromBaseUnits(2.0 * Math.PI);
-        return new EncoderDevice(source, isInverted, gearRatio, oneRevolution, offset, encoderUnit,
+        return new EncoderDevice(source, isInverted, gearRatio, oneRevolution, offset,
                 failurePolicy, baselineConfigApplied, unit);
     }
 
@@ -259,9 +220,8 @@ public record EncoderDevice(
      */
     public EncoderDevice measures(DistanceUnit unit) {
         Objects.requireNonNull(unit, "unit");
-        EncoderUnit encoderUnit = unit.equals(Units.Meters) ? EncoderUnit.METERS : units;
-        return new EncoderDevice(source, isInverted, gearRatio, 1.0, offset, encoderUnit,
-                failurePolicy, baselineConfigApplied, unit);
+        return new EncoderDevice(source, isInverted, gearRatio, 1.0, offset, failurePolicy, baselineConfigApplied,
+                unit);
     }
 
     /**
@@ -276,28 +236,22 @@ public record EncoderDevice(
         if (!(measuresUnit instanceof DistanceUnit distance)) {
             throw new IllegalStateException("travelPerRevolution requires measures(DistanceUnit) first.");
         }
-        return conversion(UnitConversions.value(travel, distance));
+        return withConversion(UnitConversions.value(travel, distance));
     }
 
-    public EncoderDevice conversion(double conversion) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied, measuresUnit);
-    }
-
-    public EncoderDevice units(EncoderUnit units) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+    private EncoderDevice withConversion(double conversion) {
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, failurePolicy,
                 baselineConfigApplied, measuresUnit);
     }
 
     public EncoderDevice offset(double offset) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, failurePolicy,
                 baselineConfigApplied, measuresUnit);
     }
 
     /** Selects how Athena responds if this encoder cannot be created or stops responding. */
     public EncoderDevice failurePolicy(FailurePolicy policy) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units,
-                Objects.requireNonNull(policy, "policy"), baselineConfigApplied, measuresUnit);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, Objects.requireNonNull(policy, "policy"), baselineConfigApplied, measuresUnit);
     }
 
     /**
@@ -323,7 +277,8 @@ public record EncoderDevice(
      * @return updated declaration
      */
     public EncoderDevice applyBaselineConfig(boolean apply) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy, apply);
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, failurePolicy, apply,
+                measuresUnit);
     }
 
     /**
@@ -406,16 +361,37 @@ public record EncoderDevice(
     }
 
     /**
-     * Converts configured mechanism position into raw sensor rotations.
+     * Wraps a value in this encoder's configured unit ({@link #measuresUnit()}) as a WPILib measure, so it can be
+     * passed to the typed conversions. Use it for values read from the configured position, such as a stored
+     * {@link #setPosition(double)} target.
      *
-     * @param position configured position
-     * @return raw sensor rotations
+     * @param value value in {@link #measuresUnit()}
+     * @return the same value as a measure
      */
-    public double rotationsFromPosition(double position) {
-        if (!Double.isFinite(position)) {
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public Measure<?> measure(double value) {
+        if (!Double.isFinite(value)) {
             throw new IllegalArgumentException("Encoder position must be finite.");
         }
-        double directed = position / (gearRatio * conversion) + offset;
+        return measuresUnit.of(value);
+    }
+
+    /**
+     * Converts a configured mechanism position into raw sensor rotations. The measure must be in this encoder's
+     * dimension (an angle for {@link #measures(AngleUnit)}, a distance for {@link #measures(DistanceUnit)}); it is
+     * converted to {@link #measuresUnit()} before the inverse.
+     *
+     * @param position configured position, for example {@code Degrees.of(90)}
+     * @return raw sensor rotations
+     * @throws IllegalArgumentException when the measure is not in this encoder's dimension or is not finite
+     */
+    public double rotationsFromPosition(Measure<?> position) {
+        Objects.requireNonNull(position, "position");
+        double value = UnitConversions.value(position, measuresUnit);
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException("Encoder position must be finite.");
+        }
+        double directed = value / (gearRatio * conversion) + offset;
         return isInverted ? -directed : directed;
     }
 

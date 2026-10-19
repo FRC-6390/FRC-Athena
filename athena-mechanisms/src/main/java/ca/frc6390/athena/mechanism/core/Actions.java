@@ -932,7 +932,7 @@ public final class Actions {
 
         @Override
         public void apply(ActionContext context) {
-            context.encoder(encoder).setPositionRotations(encoder.rotationsFromPosition(position));
+            context.encoder(encoder).setPositionRotations(encoder.rotationsFromPosition(encoder.measure(position)));
         }
     }
 

@@ -31,8 +31,8 @@ class TurretMotionSimulationTest {
         TurretMechanism turret = new TurretMechanism();
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(turret);
-        simulation.encoder(turret.angle).positionRotations(turret.angle.rotationsFromPosition(0.0))
-                .velocityRotationsPerSecond(turret.angle.rotationsFromPosition(180.0));
+        simulation.encoder(turret.angle).positionRotations(turret.angle.rotationsFromPosition(Units.Degrees.of(0.0)))
+                .velocityRotationsPerSecond(turret.angle.rotationsFromPosition(Units.Degrees.of(180.0)));
 
         runtime.request(turret.neutral);
         for (int cycle = 0; cycle < 50; cycle++) {

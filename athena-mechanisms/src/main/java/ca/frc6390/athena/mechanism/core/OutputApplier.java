@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.backend.ControlRoute;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
@@ -11,7 +12,6 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.MotorCommandSnapshot;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
@@ -1360,7 +1360,7 @@ final class OutputApplier {
     private static boolean isNativeFeedback(MotorDevice output, EncoderDevice feedback) {
         if (output == null || feedback == null || feedback.isInverted()
                 || feedback.gearRatio() != 1.0 || feedback.conversion() != 1.0
-                || feedback.offset() != 0.0 || feedback.units() != EncoderUnit.RAW) {
+                || feedback.offset() != 0.0 || feedback.measuresUnit() != Units.Rotations) {
             return false;
         }
         return feedback.equals(output.encoder());

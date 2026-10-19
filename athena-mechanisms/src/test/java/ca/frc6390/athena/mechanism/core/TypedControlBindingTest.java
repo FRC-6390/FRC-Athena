@@ -123,7 +123,7 @@ class TypedControlBindingTest {
 
         assertThrows(IllegalArgumentException.class, () -> control.feedback(degrees()));
         assertThrows(IllegalArgumentException.class, () -> control.feedback(
-                EncoderDevice.of(EncoderKinds.CANCODER, 4)));
+                EncoderDevice.of(EncoderKinds.CANCODER, 4).measures(Units.Meters)));
         assertEquals(Units.Rotations, control.feedback(rotations()).unit());
     }
 

@@ -68,7 +68,7 @@ class ConstructorDeclaredPositionActionTest {
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
         simulation.encoder(mechanism.encoder)
-                .positionRotations(mechanism.encoder.rotationsFromPosition(0.0));
+                .positionRotations(mechanism.encoder.rotationsFromPosition(Units.Degrees.of(0.0)));
 
         runtime.request(mechanism.trackTarget);
         runtime.teleopPeriodic(0.0, 0.02);
