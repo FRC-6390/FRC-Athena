@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -35,7 +37,7 @@ public final class Conveyor implements Mechanism {
             .otherwise(stop);
     public final Action indexOneBall = Actions.sequence()
             .until(beamBreak::active, motor.percent(0.35))
-            .forTime(0.18, motor.percent(0.2))
+            .forTime(Seconds.of(0.18), motor.percent(0.2))
             .then(stop);
 
     private boolean armAtScore() {

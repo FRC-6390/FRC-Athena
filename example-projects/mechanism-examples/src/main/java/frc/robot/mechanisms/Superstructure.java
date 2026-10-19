@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
@@ -28,7 +30,7 @@ public final class Superstructure implements Mechanism {
         collectFloor = Actions.parallel(shooter.stop, arm.floorPickup, intake.intake, elevator.low);
         scoreHigh = Actions.sequence()
                 .run(Actions.parallel(shooter.podium, arm.trapScore, elevator.high))
-                .timeout(2.0)
+                .timeout(Seconds.of(2.0))
                 .then(Actions.parallel(shooter.podium, arm.trapScore, intake.eject, elevator.high));
         ejectAll = Actions.parallel(shooter.reverse, arm.ampScore, intake.eject, elevator.low);
     }

@@ -1,5 +1,7 @@
 package frc.robot.auto;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 
@@ -14,10 +16,10 @@ public final class ExampleMechanisms {
         prepareToScore = Actions.doOnce(() -> System.out.println("prepare score"));
         score = Actions.sequence()
                 .run(Actions.doOnce(() -> System.out.println("score")))
-                .then(Actions.waitSeconds(0.20))
+                .then(Actions.waitSeconds(Seconds.of(0.20)))
                 .then(Actions.doOnce(() -> state.setHasGamePiece(false)));
         intakeUntilCaptured = Actions.timeout(
-                Actions.waitUntil(state::hasGamePiece), 1.5);
+                Actions.waitUntil(state::hasGamePiece), Seconds.of(1.5));
         stow = Actions.doOnce(() -> System.out.println("stow"));
     }
 }

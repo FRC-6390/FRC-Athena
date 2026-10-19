@@ -96,9 +96,9 @@ public final class SingleJointArm implements Mechanism {
      * fault if neither reaches the pickup angle.
      */
     public final Action pickupOrFault = Actions.attempt(control.position(Degrees.of(35.0)).untilWithin(Degrees.of(1.0)))
-            .within(2.0)
+            .within(Seconds.of(2.0))
             .orTry(control.position(Degrees.of(35.0)).untilWithin(Degrees.of(4.0)))
-            .within(2.0)
+            .within(Seconds.of(2.0))
             .orElse(Actions.fault("arm did not reach the pickup angle"));
 
     /** Back off to stow when the arm meets an obstruction and the check stays true. */

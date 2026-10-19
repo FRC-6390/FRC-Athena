@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -45,5 +47,5 @@ public final class GuardedArm implements Mechanism {
     public final BooleanSupplier atScore = position.at(90.0, 2.0);
     public final Action score = position.position(90.0).untilWithin(2.0);
     public final Action nudgeUp = position.percent(0.2).until(hardStop::active);
-    public final Action timedManualEscape = Actions.timeout(position.percent(-0.15), 0.4).then(stop);
+    public final Action timedManualEscape = Actions.timeout(position.percent(-0.15), Seconds.of(0.4)).then(stop);
 }

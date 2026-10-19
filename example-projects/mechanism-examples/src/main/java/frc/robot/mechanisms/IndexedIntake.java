@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -19,7 +21,7 @@ public final class IndexedIntake implements Mechanism {
     public final Action stop = roller.neutral();
     public final Action collect = Actions.sequence()
             .until(beamBreak::active, roller.percent(0.7))
-            .forTime(0.15, roller.percent(0.2))
+            .forTime(Seconds.of(0.15), roller.percent(0.2))
             .then(stop);
     public final Action reject = roller.percent(-0.6);
     public final HookBinding stopOnStall = Events.when(roller.stall()
