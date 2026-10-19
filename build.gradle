@@ -192,6 +192,12 @@ project(':athena-api') {
 project(':athena-runtime') {
     dependencies {
         api project(':athena-api')
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        api "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        compileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        testCompileOnly "com.fasterxml.jackson.core:jackson-annotations:2.19.4"
+        api "us.hebi.quickbuf:quickbuf-runtime:1.4"
     }
 }
 

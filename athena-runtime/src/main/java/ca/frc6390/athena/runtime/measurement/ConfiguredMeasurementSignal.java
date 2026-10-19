@@ -1,5 +1,6 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import edu.wpi.first.units.measure.Time;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -68,15 +69,15 @@ final class ConfiguredMeasurementSignal implements MeasurementSignal {
     }
 
     @Override
-    public MeasurementSignal latencyLimit(double seconds) {
-        return new ConfiguredMeasurementSignal(delegate, stdDevs, seconds, maxAgeSeconds, enabled, debugName,
-                nowSeconds);
+    public MeasurementSignal latencyLimit(Time limit) {
+        return new ConfiguredMeasurementSignal(delegate, stdDevs, PoseSignals.seconds(limit), maxAgeSeconds, enabled,
+                debugName, nowSeconds);
     }
 
     @Override
-    public MeasurementSignal maxAge(double nowSeconds, double seconds) {
-        return new ConfiguredMeasurementSignal(delegate, stdDevs, latencyLimitSeconds, seconds, enabled, debugName,
-                nowSeconds);
+    public MeasurementSignal maxAge(Time now, Time maxAge) {
+        return new ConfiguredMeasurementSignal(delegate, stdDevs, latencyLimitSeconds, PoseSignals.seconds(maxAge),
+                enabled, debugName, PoseSignals.seconds(now));
     }
 
     @Override
