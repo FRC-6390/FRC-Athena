@@ -335,7 +335,8 @@ public final class SwerveKinematics implements SimModel.Source {
             case PERCENT -> command.value() * maxSpeedMetersPerSecond;
             case VOLTAGE -> command.value() / 12.0 * maxSpeedMetersPerSecond;
             case POSITION, NEUTRAL -> context.motorVelocity(module.drive.get())
-                    * module.model().wheelCircumference().in(Meters);
+                    * Math.PI
+                    * module.model().wheelDiameter().in(Meters);
         };
     }
 
