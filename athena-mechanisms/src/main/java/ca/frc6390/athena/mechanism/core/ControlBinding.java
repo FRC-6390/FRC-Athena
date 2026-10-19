@@ -4,8 +4,11 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.hardware.units.UnitConversions;
+import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
+import edu.wpi.first.units.Units;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import ca.frc6390.athena.mechanism.constraint.Constraint;
@@ -332,9 +335,49 @@ public record ControlBinding<U extends Unit>(
         return replaceLoop(PidGains.class, Objects.requireNonNull(pid, "pid"));
     }
 
-    /** Adds static, velocity, and gravity feedforward contributions measured in volts. */
+    /**
+     * Adds static, velocity, and gravity feedforward contributions measured in volts. Gravity is a
+     * <b>constant</b> voltage {@code kG}, which is right for an elevator, a turret or any mechanism whose
+     * load does not change with position. A single-jointed arm's gravity torque follows
+     * {@code cos(angle)}, so use {@link #armFf(double, double, double)} for an arm.
+     */
     public ControlBinding<U> ff(double staticGain, double velocityGain, double gravityGain) {
         return feedforward(FeedforwardGains.of(staticGain, velocityGain, gravityGain));
+    }
+
+    /**
+     * Adds arm feedforward: static and velocity terms plus {@code kG * cos(angle)}, where the angle is the
+     * mechanism position in radians. The angle unit is taken from this binding: a typed binding such as
+     * {@code Controls.position(motor, Degrees)}, or an encoder declared with {@code measures(...)} in an angle
+     * unit or with {@link EncoderUnit#DEGREES}, {@link EncoderUnit#ROTATIONS} or {@link EncoderUnit#RADIANS}.
+     * Declare {@link #feedback(EncoderDevice)} before this call.
+     *
+     * @param staticGain static gain in volts
+     * @param velocityGain velocity gain in volts per unit per second
+     * @param gravityGain gravity amplitude in volts, reached where the arm is most loaded
+     * @return binding with arm feedforward
+     * @throws IllegalArgumentException when this is a velocity control or the angle unit cannot be known
+     */
+    public ControlBinding<U> armFf(double staticGain, double velocityGain, double gravityGain) {
+        return armFf(staticGain, velocityGain, gravityGain, 0.0);
+    }
+
+    /**
+     * Arm feedforward with a phase offset: {@code kG * cos(angle + gravityOffsetRadians)}. The offset is in
+     * radians and follows the convention of {@code MechanismModel.gravityVolts}. Use it when the encoder's zero
+     * is not horizontal: if the encoder reads {@code h} radians when the arm is horizontal, pass {@code -h}.
+     * The same rules as {@link #armFf(double, double, double)} apply to the angle unit.
+     *
+     * @param staticGain static gain in volts
+     * @param velocityGain velocity gain in volts per unit per second
+     * @param gravityGain gravity amplitude in volts
+     * @param gravityOffsetRadians phase added to the angle, in radians; must be finite
+     * @return binding with arm feedforward
+     * @throws IllegalArgumentException when this is a velocity control or the angle unit cannot be known
+     */
+    public ControlBinding<U> armFf(double staticGain, double velocityGain, double gravityGain,
+            double gravityOffsetRadians) {
+        return feedforward(FeedforwardGains.arm(staticGain, velocityGain, gravityGain, gravityOffsetRadians));
     }
 
     /** Adds static, velocity, acceleration, and gravity feedforward contributions measured in volts. */
@@ -350,9 +393,59 @@ public record ControlBinding<U extends Unit>(
                 gravityGain));
     }
 
-    /** Adds a feedforward contribution measured in volts. */
+    /**
+     * Adds a feedforward contribution measured in volts. Arm gains ({@link FeedforwardGains#arm}) are bound
+     * here to this binding's angle unit, so they are rejected now if that unit cannot be known.
+     */
     public ControlBinding<U> feedforward(FeedforwardGains feedforward) {
-        return replaceLoop(FeedforwardGains.class, Objects.requireNonNull(feedforward, "feedforward"));
+        Objects.requireNonNull(feedforward, "feedforward");
+        if (feedforward.isArm() && feedforward.gravityAngle() == null) {
+            feedforward = feedforward.withGravityAngle(armGravityAngle());
+        }
+        return replaceLoop(FeedforwardGains.class, feedforward);
+    }
+
+    /**
+     * Returns the angle unit that the arm position is expressed in. The position is the one the control
+     * loop reads, so a typed binding uses its own unit and an untyped one uses its encoder's declaration.
+     */
+    private AngleUnit armGravityAngle() {
+        if (mode != ControlMode.POSITION) {
+            throw new IllegalArgumentException("Arm feedforward needs a position control binding; a velocity "
+                    + "control does not hold the arm angle as its feedback. Use ff(...) for other mechanisms.");
+        }
+        if (feedback == null) {
+            throw new IllegalArgumentException("Arm feedforward needs feedback(...) declared before it, so the "
+                    + "angle unit is known. Motor-integrated position is not an angle in this binding's unit.");
+        }
+        if (unit != null) {
+            if (unit instanceof AngleUnit angle) {
+                return angle;
+            }
+            throw new IllegalArgumentException("Arm feedforward needs an angle unit (Degrees, Radians or "
+                    + "Rotations), but this control measures " + unit.name() + ".");
+        }
+        if (feedback.position() instanceof EncoderDevice encoder) {
+            Unit measured = encoder.measuresUnit();
+            if (measured instanceof AngleUnit angle) {
+                return angle;
+            }
+            if (measured != null) {
+                throw new IllegalArgumentException("Arm feedforward needs an angle, but encoder "
+                        + encoder.defaultName() + " measures " + measured.name() + ".");
+            }
+            return switch (encoder.units()) {
+                case DEGREES -> Units.Degrees;
+                case RADIANS -> Units.Radians;
+                case ROTATIONS -> Units.Rotations;
+                case RAW, METERS -> throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of "
+                        + "encoder " + encoder.defaultName() + " (" + encoder.units()
+                        + "). Declare it with measures(Degrees), measures(Radians) or measures(Rotations), "
+                        + "or use a typed control such as Controls.position(motor, Degrees).");
+            };
+        }
+        throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of this feedback. Use an "
+                + "encoder declared with measures(...) or a typed control such as Controls.position(motor, Degrees).");
     }
 
     public ControlBinding<U> constraint(Constraint<Double> constraint) {

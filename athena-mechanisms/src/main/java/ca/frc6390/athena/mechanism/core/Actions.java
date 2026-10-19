@@ -222,6 +222,16 @@ public final class Actions {
         return new RuntimeAction(action);
     }
 
+    /**
+     * Hardware declaration actions ({@code encoder.setPosition(0.0)}, {@code motor.neutral()}) are
+     * mechanism Actions. They are scheduled as that Action inside the enclosing composition, not run as
+     * a plain Runnable. This overload also resolves a declaration argument that would otherwise be
+     * ambiguous between {@link #doOnce(Runnable)} and {@link #doOnce(ActionBinding)}.
+     */
+    public static Action doOnce(DeviceAction action) {
+        return mechanismAction(action);
+    }
+
     public static Action run(Runnable action) {
         return doOnce(action);
     }
@@ -240,6 +250,11 @@ public final class Actions {
 
     public static Action run(ActionBinding action) {
         return doOnce(action);
+    }
+
+    /** Declaration overload of {@link #run(ActionBinding)}; see {@link #doOnce(DeviceAction)}. */
+    public static Action run(DeviceAction action) {
+        return mechanismAction(action);
     }
 
     public static Action waitSeconds(double seconds) {
@@ -1388,6 +1403,11 @@ public final class Actions {
             return target;
         }
 
+        /** Declaration overload of {@link #run(Action)}, for {@code encoder.setPosition(...)} and similar. */
+        public Sequence run(DeviceAction action) {
+            return run(mechanismAction(action));
+        }
+
         public Sequence forTime(double seconds, Action action) {
             requireDuration(seconds, "Sequence stage duration");
             Sequence target = mutable();
@@ -1423,21 +1443,22 @@ public final class Actions {
         }
 
         public Sequence doOnce(Runnable action) {
-            Sequence target = mutable();
-            target.steps.add(new SequenceStep(
-                    target.withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
-            return target;
+            return addOnce(Actions.doOnce(action));
         }
 
         public Sequence doOnce(ActionBinding action) {
-            Sequence target = mutable();
-            target.steps.add(new SequenceStep(
-                    target.withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
-            return target;
+            return addOnce(Actions.doOnce(action));
         }
 
+        /** Scheduled as the Action itself, so its leases and ownership apply within this sequence. */
         public Sequence doOnce(DeviceAction action) {
-            return doOnce((ActionBinding) action);
+            return addOnce(Actions.doOnce(action));
+        }
+
+        private Sequence addOnce(Action once) {
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(target.withStartedUntilComplete(once), ctx -> true, true));
+            return target;
         }
 
         public Sequence waitSeconds(double seconds) {

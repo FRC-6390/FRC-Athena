@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 import ca.frc6390.athena.mechanism.effort.EffortActions;
 import ca.frc6390.athena.mechanism.staging.Staging;
 import edu.wpi.first.units.Measure;
@@ -12,6 +13,9 @@ import java.util.function.BooleanSupplier;
 /**
  * Robot intent for a mechanism.
  */
+// The overrides of DeviceAction's generic <T> then/untilStalled return Action, which is a T by the
+// DeviceAction bound; javac reports the erasure as unchecked at the override, so it is suppressed here.
+@SuppressWarnings("unchecked")
 public interface Action extends DeviceAction {
     @Override
     default void apply(ActionContext context) {
@@ -182,6 +186,25 @@ public interface Action extends DeviceAction {
 
     default Action then(Action next) {
         return Actions.then(this, next);
+    }
+
+    /**
+     * Runs a hardware declaration action (for example {@code encoder.setPosition(0.0)} or
+     * {@code motor.neutral()}) after this Action and returns the composed Action. Overrides the generic
+     * {@code DeviceAction.then} so the result stays an {@code Action} and chains with Action methods.
+     */
+    @Override
+    default Action then(DeviceAction next) {
+        return Actions.then(this, Objects.requireNonNull(next, "next"));
+    }
+
+    /**
+     * Runs this Action until the stall detector reports a commanded motor that is not moving. Overrides
+     * the generic {@code DeviceAction.untilStalled} so the result stays an {@code Action}.
+     */
+    @Override
+    default Action untilStalled(MotorStallSignal signal) {
+        return Actions.untilStalled(signal, this);
     }
 
     default Action timeout(double seconds) {
