@@ -323,8 +323,7 @@ public final class Localization implements PoseSignal {
      * Returns whether this estimate has been seeded: a {@link #reset(PoseSnapshot)} has been applied, or, for
      * Kalman nodes, a vision frame has passed this node's filters. False at boot. Once true it stays true.
      *
-     * <p>Robot code uses this to decide whether the field heading can be trusted before the driver heading is
-     * set; see {@code DriverOrientation}.</p>
+     * <p>Robot code uses this to decide whether the field pose can be trusted yet.</p>
      *
      * @return true once the pose has been seeded
      */

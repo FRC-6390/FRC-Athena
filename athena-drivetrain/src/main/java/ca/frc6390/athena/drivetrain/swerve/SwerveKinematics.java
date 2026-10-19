@@ -107,11 +107,6 @@ public final class SwerveKinematics implements SimModel.Source {
         return drive(() -> safeVelocities.robotRelative(safeHeading.getAsDouble()));
     }
 
-    /** Drives one pooled request in the driver's frame. See {@link ca.frc6390.athena.drivetrain.DriverOrientation}. */
-    public Action drive(RobotVelocityPool velocities, ca.frc6390.athena.drivetrain.DriverOrientation orientation) {
-        return drive(velocities, Objects.requireNonNull(orientation, "orientation").headingRadians());
-    }
-
     /** Converts robot-relative velocity into ordered module targets. */
     public List<SwerveModuleTarget> targets(RobotVelocity velocity) {
         RobotVelocity safe = velocity == null ? RobotVelocity.zero() : velocity;
