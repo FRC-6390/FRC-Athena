@@ -1,5 +1,6 @@
 package ca.frc6390.athena.wpilib.arcp;
 
+import edu.wpi.first.units.measure.Current;
 import ca.frc6390.athena.arcp.ArcpCycle;
 import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.arcp.WriteResult;
