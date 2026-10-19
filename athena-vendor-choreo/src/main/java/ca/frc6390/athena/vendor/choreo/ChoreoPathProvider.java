@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vendor.choreo;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.drivetrain.swerve.FollowerBackend;
@@ -116,17 +119,17 @@ public final class ChoreoPathProvider implements PathProvider {
         Trajectory<? extends TrajectorySample<?>> previewTrajectory = value;
         List<PathPreview.Pose> poses = Arrays.stream(previewTrajectory.getPoses())
                 .map(pose -> new PathPreview.Pose(
-                        pose.getX(), pose.getY(), pose.getRotation().getRadians()))
+                        Meters.of(pose.getX()), Meters.of(pose.getY()), Radians.of(pose.getRotation().getRadians())))
                 .toList();
         List<PathPreview.Event> events = previewTrajectory.events().stream()
                 .filter(marker -> path.markers().containsKey(marker.event))
                 .map(marker -> previewTrajectory.sampleAt(marker.timestamp, false)
                         .map(sample -> new PathPreview.Event(
                                 marker.event,
-                                marker.timestamp,
+                                Seconds.of(marker.timestamp),
                                 new PathPreview.Pose(
-                                        sample.getPose().getX(), sample.getPose().getY(),
-                                        sample.getPose().getRotation().getRadians())))
+                                        Meters.of(sample.getPose().getX()), Meters.of(sample.getPose().getY()),
+                                        Radians.of(sample.getPose().getRotation().getRadians()))))
                         .orElse(null))
                 .filter(Objects::nonNull)
                 .toList();
