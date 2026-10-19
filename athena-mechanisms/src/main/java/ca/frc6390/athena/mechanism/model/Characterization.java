@@ -185,9 +185,11 @@ public final class Characterization implements TelemetrySource {
      * measures a distance, the default of 1 is used; {@link #gearRatio(double)} overrides it either way.
      */
     static double gearFromFeedback(ControlBinding<?> control) {
-        if (control.feedback() == null || !(control.feedback().position() instanceof EncoderDevice encoder)) {
+        if (control.feedback() == null
+                || !(control.feedback().position() instanceof EncoderDevice.PositionFeedback feedback)) {
             return 1.0;
         }
+        EncoderDevice encoder = feedback.encoder();
         if (!(encoder.measuresUnit() instanceof AngleUnit angle)) {
             return 1.0;
         }

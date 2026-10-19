@@ -30,6 +30,30 @@ revolution is one rotation); `measures(...)` changes it.
   the encoder's dimension; it is converted to the declared unit first. `measure(double)` wraps a value in the
   declared unit when a stored double is all there is.
 
+## Reading an encoder
+
+Encoder reads are typed to match the declaration. Use the accessor for the dimension you declared:
+
+```java
+Angle turretAngle = turretEncoder.positionAngle();               // measures(Degrees): an angle
+AngularVelocity turretRate = turretEncoder.velocityAngular();
+Angle turretAbsolute = turretEncoder.absolutePositionAngle();
+
+Distance travel = elevatorEncoder.positionDistance();            // measures(Meters): a distance
+LinearVelocity speed = elevatorEncoder.velocityLinear();
+```
+
+- `positionAngle()`, `absolutePositionAngle()` and `velocityAngular()` require an angle declaration.
+- `positionDistance()`, `absolutePositionDistance()` and `velocityLinear()` require a distance declaration.
+- A read in the other dimension throws `IllegalStateException`, naming the accessor to use. The check runs
+  on every read, so a mistake fails at the first call instead of returning a number in the wrong unit.
+- The returned measure has the same magnitude as the value in the declared unit, so `positionAngle().in(Units.Degrees)`
+  is the configured position in degrees with no extra rounding beyond the unit conversion.
+
+To feed a control, pass the encoder itself (`ControlBinding.feedback(encoder)`). `positionSignal()`,
+`velocitySignal()` and `absoluteSignal()` return the feedback signal types for the mixed case, such as a
+position from one encoder and a velocity from another.
+
 ## Declaring a unit-typed control
 
 ```java
@@ -96,6 +120,9 @@ The encoder declaration is typed-only. These members are gone:
 | `EncoderDevice.rotationsFromPosition(double)` | `rotationsFromPosition(Measure)`, for example `Degrees.of(90)`; or `rotationsFromPosition(encoder.measure(value))` for a stored double |
 | `EncoderUnit.RAW` | the default declaration (rotations, one revolution per raw turn) |
 | `EncoderUnit.METERS` | `measures(Units.Meters)` |
+| `EncoderDevice.position()`, `absolutePosition()`, `velocity()` (`double`) | `positionAngle()` / `positionDistance()`, `absolutePositionAngle()` / `absolutePositionDistance()`, `velocityAngular()` / `velocityLinear()` |
+| `EncoderDevice.positionFromRotations(double)`, `velocityFromRotationsPerSecond(double)` (`double`) | `encoder.raw().positionFromRotations(...)` for Athena internals; robot code reads the typed accessors |
+| `EncoderDevice` as a `PositionSignal` or `VelocitySignal` | `encoder.positionSignal()`, `encoder.velocitySignal()`, `encoder.absoluteSignal()`; `feedback(encoder)` still works |
 
 ## Removed timing API
 

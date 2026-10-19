@@ -102,8 +102,8 @@ class ControlBindingTest {
 
         ControlBinding<?> control = Controls.position(motor).feedback(encoder);
 
-        assertSame(encoder, control.feedback().position());
-        assertSame(encoder, control.feedback().velocity());
+        assertSame(encoder, ((EncoderDevice.PositionFeedback) control.feedback().position()).encoder());
+        assertSame(encoder, ((EncoderDevice.VelocityFeedback) control.feedback().velocity()).encoder());
         assertEquals(java.util.Set.of(encoder), control.feedback().encoders());
     }
 

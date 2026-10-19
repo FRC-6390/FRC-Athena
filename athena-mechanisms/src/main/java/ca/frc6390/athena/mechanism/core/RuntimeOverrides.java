@@ -112,7 +112,7 @@ final class RuntimeOverrides {
     }
 
     double requestedEncoderPosition(EncoderDevice encoder) {
-        return requestedEncoderPositions.computeIfAbsent(encoder, ignored -> safeRead(encoder::position));
+        return requestedEncoderPositions.computeIfAbsent(encoder, ignored -> safeRead(encoder.raw()::position));
     }
 
     void requestedEncoderPosition(EncoderDevice encoder, double position) {

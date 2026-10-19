@@ -20,7 +20,7 @@ class EncoderDeviceUnitsTest {
 
         assertSame(Units.Degrees, encoder.measuresUnit());
         assertEquals(360.0, encoder.conversion(), 1e-9);
-        assertEquals(90.0, encoder.positionFromRotations(0.25), 1e-9);
+        assertEquals(90.0, encoder.raw().positionFromRotations(0.25), 1e-9);
     }
 
     @Test
@@ -38,7 +38,7 @@ class EncoderDeviceUnitsTest {
 
         assertEquals(0.1, byDouble.gearRatio(), 0.0);
         assertEquals(0.1, byGearing.gearRatio(), 0.0);
-        assertEquals(1.0, byDouble.positionFromRotations(10.0), 1e-9);
+        assertEquals(1.0, byDouble.raw().positionFromRotations(10.0), 1e-9);
     }
 
     @Test
@@ -65,14 +65,14 @@ class EncoderDeviceUnitsTest {
 
         assertSame(Units.Rotations, encoder.measuresUnit());
         assertEquals(1.0, encoder.conversion(), 0.0);
-        assertEquals(-1.5, encoder.positionFromRotations(-1.5), 0.0);
+        assertEquals(-1.5, encoder.raw().positionFromRotations(-1.5), 0.0);
     }
 
     @Test
     void degreesWithReductionScalesOneRawTurnTo360OverTheReduction() {
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 2).measures(Units.Degrees).reduction(0.2);
 
-        assertEquals(1800.0, encoder.positionFromRotations(1.0), 1e-9);
+        assertEquals(1800.0, encoder.raw().positionFromRotations(1.0), 1e-9);
     }
 
     @Test

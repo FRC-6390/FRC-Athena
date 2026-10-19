@@ -41,7 +41,7 @@ class TurretMotionSimulationTest {
             runtime.simulationPeriodic(now, 0.02);
         }
 
-        double travelled = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+        double travelled = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
         assertTrue(Math.abs(travelled) < 5.0,
                 () -> "a braked turret released at 180 deg/s should stop within a few degrees, travelled "
                         + travelled);
@@ -70,13 +70,13 @@ class TurretMotionSimulationTest {
                 }
                 lastSign = sign;
             }
-            double degrees = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+            double degrees = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
             if (firstWithinHalfDegree < 0.0 && degrees >= 89.5) {
                 firstWithinHalfDegree = now;
             }
         }
 
-        double finalDegrees = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+        double finalDegrees = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
         int changes = signChanges;
         assertTrue(changes <= 2, () -> "the geared turret's voltage should not bang-bang, sign changes " + changes);
         double reached = firstWithinHalfDegree;

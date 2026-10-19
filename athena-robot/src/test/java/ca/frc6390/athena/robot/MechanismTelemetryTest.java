@@ -126,7 +126,7 @@ class MechanismTelemetryTest {
                 .get("tunedMechanism/Devices/encoder/Setup/RequestedPosition").set(3.0);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/encoder/Setup/SetPosition").set(true);
-        assertEquals(3.0, mechanism.encoder.position(), 1e-9);
+        assertEquals(3.0, mechanism.encoder.raw().position(), 1e-9);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/imu/Setup/RequestedYawDegrees").set(42.0);
         runtime.mechanismTelemetrySchema().values()
@@ -242,7 +242,7 @@ class MechanismTelemetryTest {
         final FeedforwardGains feedforward = FeedforwardGains.of(0.0, 1.0, 0.0, 0.0);
         final ControlBinding<?> control = Controls.position(motor)
                 .feedback(encoder).pid(pid).feedforward(feedforward);
-        final TelemetryValue position = TelemetryValue.number(encoder::position);
+        final TelemetryValue position = TelemetryValue.number(encoder.raw()::position);
         final Action run = control.percent(0.5);
     }
 

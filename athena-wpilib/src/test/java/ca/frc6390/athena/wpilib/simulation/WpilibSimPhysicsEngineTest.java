@@ -50,7 +50,7 @@ class WpilibSimPhysicsEngineTest {
         session.hardwareGraph().motor(motor).setVoltage(12.0);
         session.step(Units.Seconds.of(1.0));
 
-        double wheelMetersPerSecond = driveDistance.velocityFromRotationsPerSecond(
+        double wheelMetersPerSecond = driveDistance.raw().velocityFromRotationsPerSecond(
                 session.encoder(driveDistance).velocityRotationsPerSecond());
         assertTrue(wheelMetersPerSecond > 4.0,
                 "MK5N R3 wheel speed was incorrectly reduced twice: " + wheelMetersPerSecond);

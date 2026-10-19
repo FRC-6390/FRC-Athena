@@ -21,15 +21,23 @@ import edu.wpi.first.units.DistanceUnit;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
 import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.LinearVelocity;
 
 /**
  * Reusable encoder declaration for robot constants.
  *
- * <p>{@link #measuresUnit()} is the WPILib unit the encoder's {@link #position()} and
- * {@link #velocity()} are expressed in. It is always set: a declaration starts as rotations
- * ({@link #of(EncoderKind, int)}) and changes with {@link #measures(AngleUnit)} or
- * {@link #measures(DistanceUnit)}. Typed bindings check it at declaration time.</p>
+ * <p>{@link #measuresUnit()} is the WPILib unit the encoder's readings are expressed in. It is always set: a
+ * declaration starts as rotations ({@link #of(EncoderKind, int)}) and changes with
+ * {@link #measures(AngleUnit)} or {@link #measures(DistanceUnit)}. Typed bindings check it at declaration time.</p>
+ *
+ * <p>Team code reads the encoder with the typed accessors: {@link #positionAngle()} for an angle declaration,
+ * {@link #positionDistance()} for a distance declaration, and the matching {@link #velocityAngular()} or
+ * {@link #velocityLinear()}. Each one throws {@link IllegalStateException} when the declaration measures the other
+ * dimension, so a mismatch fails at the read instead of returning a number in the wrong unit. Feed a control with
+ * {@link #positionSignal()} and {@link #velocitySignal()} (or pass the encoder to {@code ControlBinding.feedback}).</p>
  */
 public record EncoderDevice(
         EncoderSource source,
@@ -39,7 +47,7 @@ public record EncoderDevice(
         double offset,
         FailurePolicy failurePolicy,
         boolean baselineConfigApplied,
-        Unit measuresUnit) implements PositionSignal, VelocitySignal {
+        Unit measuresUnit) {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
 
     public static EncoderDevice of(EncoderKind kind, int id) {
@@ -295,37 +303,102 @@ public record EncoderDevice(
     }
 
     /**
-     * Reads configured mechanism position from the runtime's latest cached snapshot.
+     * Configured angle, for an encoder declared with {@link #measures(AngleUnit)}. Read from the runtime's latest
+     * cached snapshot.
      *
-     * @return configured mechanism position
+     * @return configured angle
+     * @throws IllegalStateException when this encoder measures a distance, or is not bound to a runtime
      */
-    @Override
-    public double position() {
-        return positionFromRotations(runtimeHandle().positionRotations());
+    public Angle positionAngle() {
+        return angleUnit("positionAngle", "positionDistance()").of(rawPosition());
     }
 
     /**
-     * Returns the current absolute position in configured mechanism units.
+     * Configured linear position, for an encoder declared with {@link #measures(DistanceUnit)}. Read from the
+     * runtime's latest cached snapshot.
      *
-     * @return absolute position
+     * @return configured distance
+     * @throws IllegalStateException when this encoder measures an angle, or is not bound to a runtime
      */
-    public double absolutePosition() {
-        return positionFromRotations(runtimeHandle().absolutePositionRotations());
+    public Distance positionDistance() {
+        return distanceUnit("positionDistance", "positionAngle()").of(rawPosition());
     }
 
-    /** Returns a feedback signal backed by this encoder's absolute-position channel. */
+    /**
+     * Absolute angle, for an encoder declared with {@link #measures(AngleUnit)}.
+     *
+     * @return absolute angle
+     * @throws IllegalStateException when this encoder measures a distance
+     */
+    public Angle absolutePositionAngle() {
+        return angleUnit("absolutePositionAngle", "absolutePositionDistance()").of(rawAbsolutePosition());
+    }
+
+    /**
+     * Absolute linear position, for an encoder declared with {@link #measures(DistanceUnit)}.
+     *
+     * @return absolute distance
+     * @throws IllegalStateException when this encoder measures an angle
+     */
+    public Distance absolutePositionDistance() {
+        return distanceUnit("absolutePositionDistance", "absolutePositionAngle()").of(rawAbsolutePosition());
+    }
+
+    /**
+     * Configured angular velocity, for an encoder declared with {@link #measures(AngleUnit)}.
+     *
+     * @return configured angular velocity
+     * @throws IllegalStateException when this encoder measures a distance
+     */
+    public AngularVelocity velocityAngular() {
+        return angleUnit("velocityAngular", "velocityLinear()").per(Units.Seconds).of(rawVelocity());
+    }
+
+    /**
+     * Configured linear velocity, for an encoder declared with {@link #measures(DistanceUnit)}.
+     *
+     * @return configured linear velocity
+     * @throws IllegalStateException when this encoder measures an angle
+     */
+    public LinearVelocity velocityLinear() {
+        return distanceUnit("velocityLinear", "velocityAngular()").per(Units.Seconds).of(rawVelocity());
+    }
+
+    /**
+     * Returns a feedback position signal for this encoder's configured position. Pass it to
+     * {@code ControlBinding.feedback} with a velocity signal, or use {@code feedback(encoder)} instead.
+     *
+     * @return position feedback
+     */
+    public PositionSignal positionSignal() {
+        return new PositionFeedback(this);
+    }
+
+    /**
+     * Returns a feedback position signal backed by this encoder's absolute-position channel.
+     *
+     * @return absolute position feedback
+     */
     public PositionSignal absoluteSignal() {
-        return new AbsolutePositionSignal(this);
+        return new AbsolutePositionFeedback(this);
     }
 
     /**
-     * Reads configured mechanism velocity from the runtime's latest cached snapshot.
+     * Returns a feedback velocity signal for this encoder's configured velocity.
      *
-     * @return configured mechanism velocity
+     * @return velocity feedback
      */
-    @Override
-    public double velocity() {
-        return velocityFromRotationsPerSecond(runtimeHandle().velocityRotationsPerSecond());
+    public VelocitySignal velocitySignal() {
+        return new VelocityFeedback(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive reads in {@link #measuresUnit()}, used by Athena's own per-cycle code
+     * (mechanism runtime, control feedback, odometry, simulation) so that no measure is allocated each cycle.
+     * Use the typed accessors such as {@link #positionAngle()} in robot code.
+     */
+    public Raw raw() {
+        return new Raw(this);
     }
 
     /** Binds this declaration to one runtime-owned cached encoder handle. */
@@ -333,31 +406,47 @@ public record EncoderDevice(
         return RUNTIMES.bind(this, scope, handle);
     }
 
-    @Override
+    /** Returns this declaration as its own dependency, for hardware graph ordering. */
     public java.util.List<?> dependencies() {
         return java.util.List.of(this);
     }
 
-    /**
-     * Converts raw sensor rotations into configured mechanism position.
-     *
-     * @param rotations raw sensor rotations
-     * @return configured position
-     */
-    public double positionFromRotations(double rotations) {
+    private double rawPosition() {
+        return toPosition(runtimeHandle().positionRotations());
+    }
+
+    private double rawAbsolutePosition() {
+        return toPosition(runtimeHandle().absolutePositionRotations());
+    }
+
+    private double rawVelocity() {
+        return toVelocity(runtimeHandle().velocityRotationsPerSecond());
+    }
+
+    private double toPosition(double rotations) {
         double directed = isInverted ? -rotations : rotations;
         return (directed - offset) * gearRatio * conversion;
     }
 
-    /**
-     * Converts raw sensor velocity into configured mechanism velocity.
-     *
-     * @param rotationsPerSecond raw sensor rotations per second
-     * @return configured velocity
-     */
-    public double velocityFromRotationsPerSecond(double rotationsPerSecond) {
+    private double toVelocity(double rotationsPerSecond) {
         double directed = isInverted ? -rotationsPerSecond : rotationsPerSecond;
         return directed * gearRatio * conversion;
+    }
+
+    private AngleUnit angleUnit(String read, String alternative) {
+        if (measuresUnit instanceof AngleUnit angle) {
+            return angle;
+        }
+        throw new IllegalStateException(read + " requires an angle declaration; this encoder measures "
+                + measuresUnit.name() + ". Use " + alternative + " instead.");
+    }
+
+    private DistanceUnit distanceUnit(String read, String alternative) {
+        if (measuresUnit instanceof DistanceUnit distance) {
+            return distance;
+        }
+        throw new IllegalStateException(read + " requires a distance declaration; this encoder measures "
+                + measuresUnit.name() + ". Use " + alternative + " instead.");
     }
 
     /**
@@ -433,15 +522,85 @@ public record EncoderDevice(
         }
     }
 
-    private record AbsolutePositionSignal(EncoderDevice encoder) implements PositionSignal {
+    /** Position feedback of an encoder's configured position; see {@link EncoderDevice#positionSignal()}. */
+    public record PositionFeedback(EncoderDevice encoder) implements PositionSignal {
+        public PositionFeedback {
+            Objects.requireNonNull(encoder, "encoder");
+        }
+
         @Override
         public double position() {
-            return encoder.absolutePosition();
+            return encoder.raw().position();
         }
 
         @Override
         public java.util.List<?> dependencies() {
             return java.util.List.of(encoder);
+        }
+    }
+
+    /** Velocity feedback of an encoder's configured velocity; see {@link EncoderDevice#velocitySignal()}. */
+    public record VelocityFeedback(EncoderDevice encoder) implements VelocitySignal {
+        public VelocityFeedback {
+            Objects.requireNonNull(encoder, "encoder");
+        }
+
+        @Override
+        public double velocity() {
+            return encoder.raw().velocity();
+        }
+
+        @Override
+        public java.util.List<?> dependencies() {
+            return java.util.List.of(encoder);
+        }
+    }
+
+    private record AbsolutePositionFeedback(EncoderDevice encoder) implements PositionSignal {
+        @Override
+        public double position() {
+            return encoder.raw().absolutePosition();
+        }
+
+        @Override
+        public java.util.List<?> dependencies() {
+            return java.util.List.of(encoder);
+        }
+    }
+
+    /**
+     * Internal, not for robot code: primitive reads of one encoder declaration in its {@link #measuresUnit()}.
+     */
+    public static final class Raw {
+        private final EncoderDevice encoder;
+
+        private Raw(EncoderDevice encoder) {
+            this.encoder = encoder;
+        }
+
+        /** Internal: configured mechanism position in {@link #measuresUnit()}. */
+        public double position() {
+            return encoder.rawPosition();
+        }
+
+        /** Internal: configured absolute position in {@link #measuresUnit()}. */
+        public double absolutePosition() {
+            return encoder.rawAbsolutePosition();
+        }
+
+        /** Internal: configured velocity in {@link #measuresUnit()} per second. */
+        public double velocity() {
+            return encoder.rawVelocity();
+        }
+
+        /** Internal: converts raw sensor rotations into configured mechanism position. */
+        public double positionFromRotations(double rotations) {
+            return encoder.toPosition(rotations);
+        }
+
+        /** Internal: converts raw sensor velocity into configured mechanism velocity. */
+        public double velocityFromRotationsPerSecond(double rotationsPerSecond) {
+            return encoder.toVelocity(rotationsPerSecond);
         }
     }
 

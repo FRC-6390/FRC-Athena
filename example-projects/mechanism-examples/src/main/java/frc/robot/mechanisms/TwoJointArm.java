@@ -44,7 +44,7 @@ public final class TwoJointArm implements Mechanism {
             .constraints(
                     Constraints.range(shoulderTravel),
                     Constraints.require(context -> context.requested() >= 5.0
-                            || wristEncoder.position() <= 45.0),
+                            || wristEncoder.positionAngle().in(edu.wpi.first.units.Units.Rotations) <= 45.0),
                     Constraints.motion(80.0, 180.0));
     private final ControlBinding wrist = Controls.position(wristMotor)
             .feedback(wristEncoder)
@@ -52,7 +52,7 @@ public final class TwoJointArm implements Mechanism {
             .constraints(
                     Constraints.range(wristTravel),
                     Constraints.require(context -> context.requested() <= 45.0
-                            || shoulderEncoder.position() >= 5.0),
+                            || shoulderEncoder.positionAngle().in(edu.wpi.first.units.Units.Rotations) >= 5.0),
                     Constraints.motion(120.0, 280.0));
 
     public final Action stow = Actions.sequence()

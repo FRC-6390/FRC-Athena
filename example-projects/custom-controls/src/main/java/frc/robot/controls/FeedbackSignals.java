@@ -75,7 +75,7 @@ public final class FeedbackSignals {
     private record AbsolutePhase(EncoderDevice encoder) implements PositionSignal {
         @Override
         public double position() {
-            return wrap(encoder.absolutePosition());
+            return wrap(encoder.absolutePositionAngle().in(edu.wpi.first.units.Units.Rotations));
         }
 
         @Override
