@@ -289,8 +289,8 @@ public final ReplayPolicy replay = ReplayPolicy.of()
 
 ## D. Alliance transforms
 ```java
-static final AllianceTransform ROTATED = AllianceTransform.rotate180(fieldLength, fieldWidth);
-static final AllianceTransform MIRRORED = AllianceTransform.mirrorX(fieldLength);
+static final AllianceTransform ROTATED = AllianceTransform.rotate180(fieldLength, fieldWidth); // Distance
+static final AllianceTransform MIRRORED = AllianceTransform.mirrorX(fieldLength); // Distance
 AllianceTransform.identity(); AllianceTransform.of(UnaryOperator<Pose2d>);
 ROTATED.pose(Pose2d); ROTATED.translation(Translation2d); ROTATED.rotation(Rotation2d);
 ROTATED.region(Rectangle2d); ROTATED.poseSupplier(Pose2d);

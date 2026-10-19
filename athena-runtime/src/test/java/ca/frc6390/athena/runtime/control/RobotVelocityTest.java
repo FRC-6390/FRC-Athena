@@ -1,6 +1,7 @@
 package ca.frc6390.athena.runtime.control;
 
 import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.DegreesPerSecond;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.RadiansPerSecond;
 
@@ -39,6 +40,38 @@ class RobotVelocityTest {
         assertEquals(field.raw().angularRadiansPerSecond(), robot.raw().angularRadiansPerSecond(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> field.plus(robot));
         assertThrows(IllegalStateException.class, () -> field.robotToField(Rotation2d.fromRadians(0.0)));
+    }
+
+    @Test
+    void typedFactoriesMatchRawPrimitiveConstruction() {
+        // Typed WPILib factories must store the same primitives as the raw hot-path builder.
+        // Degrees per second must become radians per second (90 deg/s = pi/2 rad/s).
+        RobotVelocity typed = RobotVelocity.field(
+                MetersPerSecond.of(1.2), MetersPerSecond.of(-0.5), DegreesPerSecond.of(90.0));
+        RobotVelocity raw = RobotVelocity.Raw.of(1.2, -0.5, Math.toRadians(90.0), VelocityFrame.FIELD);
+
+        assertEquals(VelocityFrame.FIELD, typed.frame());
+        assertEquals(raw.raw().xMetersPerSecond(), typed.raw().xMetersPerSecond(), 1.0e-12);
+        assertEquals(raw.raw().yMetersPerSecond(), typed.raw().yMetersPerSecond(), 1.0e-12);
+        assertEquals(raw.raw().angularRadiansPerSecond(), typed.raw().angularRadiansPerSecond(), 1.0e-12);
+        assertEquals(Math.PI / 2.0, typed.angular().in(RadiansPerSecond), 1.0e-12);
+        assertEquals(1.2, typed.x().in(MetersPerSecond), 1.0e-12);
+    }
+
+    @Test
+    void typedHeadingConversionMatchesPrimitiveRotation() {
+        // Rotation2d.fromDegrees(30) must rotate exactly like the primitive field-to-robot formula at 30 degrees.
+        RobotVelocity field = RobotVelocity.field(MetersPerSecond.of(2.0), MetersPerSecond.of(-0.5), RadiansPerSecond.of(0.25));
+        double heading = Math.toRadians(30.0);
+        double expectedX = 2.0 * Math.cos(heading) + -0.5 * Math.sin(heading);
+        double expectedY = -2.0 * Math.sin(heading) + -0.5 * Math.cos(heading);
+
+        RobotVelocity robot = field.fieldToRobot(Rotation2d.fromDegrees(30.0));
+
+        assertEquals(VelocityFrame.ROBOT, robot.frame());
+        assertEquals(expectedX, robot.raw().xMetersPerSecond(), 1.0e-12);
+        assertEquals(expectedY, robot.raw().yMetersPerSecond(), 1.0e-12);
+        assertEquals(0.25, robot.angular().in(RadiansPerSecond), 1.0e-12);
     }
 
     @Test

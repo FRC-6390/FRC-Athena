@@ -169,7 +169,7 @@ double armVelocity = armEncoder.velocity();
 double moduleAngle = moduleEncoder.absolutePosition();
 Angle heading = imu.yaw();
 boolean atHome = homeSwitch.active();
-Optional<PoseSnapshot> cameraPose = camera.pose().value();
+Optional<Pose2d> cameraPose = camera.pose().value();
 Optional<TargetMeasurementSample> target = camera.targets().latest();
 ```
 

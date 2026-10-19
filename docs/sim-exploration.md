@@ -11,11 +11,11 @@ sequence and can be saved as a replay.
 ```java
 ExplorationReport report = SimExplorer.of(session -> RobotRuntime.simulated(session).register(new Robot()))
         .seed(7)                                  // fixes the mode sequence and the input script
-        .duration(150)                            // seconds
+        .duration(Seconds.of(150))                 // Time
         .controllers(0)                           // joystick ports, 0 to 5
         .modes(ModeSchedule.random())             // or ModeSchedule.matchPlay()
         .inputs(InputModel.standard())            // button, axis and POV rates
-        .starvationSeconds(2.0)                   // default
+        .starvation(Seconds.of(2.0))              // default
         .save(Path.of("build/explore"))           // optional: write minimal replays here
         .run();
 
@@ -38,7 +38,7 @@ The robot is disabled after the last segment until the duration ends.
 
 `InputModel.standard()` gives eight buttons pressed about 0.6 times a second, held 1.2 s on average, four axes
 random-walking at 4 Hz, and POVs changing about 0.1 times a second. The model is adjusted with `buttons`,
-`buttonPressesPerSecond`, `meanHoldSeconds`, `axes`, `axisWalk` and `povChangesPerSecond`. Each controller port has
+`buttonPresses(Frequency)`, `meanHold(Time)`, `axes`, `axisWalk(Frequency, double)` and `povChanges(Frequency)`. Each controller port has
 its own generator, so adding a port does not change the events of the others.
 
 Inputs are fixed events, not live decisions. Each event is `InputEvent(time, port, kind, index, value)`, and the
@@ -62,7 +62,7 @@ time counts from the start of the current segment.
 
 | Category | Source | Meaning |
 | --- | --- | --- |
-| `STARVATION` | Trace candidates (`MechanismTraceSnapshot.candidates`) | A lease's output request is rejected with "resource reserved by newer action" for at least `starvationSeconds` without output. |
+| `STARVATION` | Trace candidates (`MechanismTraceSnapshot.candidates`) | A lease's output request is rejected with "resource reserved by newer action" for at least the `starvation(Time)` limit without output. |
 | `COMMITMENT_TIMEOUT` | `RuntimeEvents.TIMEOUT` | An `atMost` or `Actions.timeout` bound expired before its Action completed. |
 | `AUTO_MARKER_PENDING` | `RuntimeEvents.PATH_MARKERS_PENDING` | A path finished while some of its markers had not triggered. |
 | `EFFORT_CEILING` | `RuntimeEvents.EFFORT_CEILING` | An effort ceiling clamped a command (see below). |
