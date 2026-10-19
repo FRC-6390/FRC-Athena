@@ -10,7 +10,6 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
@@ -23,6 +22,7 @@ import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 /** The mechanism-examples turret, run headless through the robot runtime and the simulation. */
 class TurretMotionSimulationTest {
@@ -89,8 +89,7 @@ class TurretMotionSimulationTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(25);
         private final EncoderDevice angle = motor.encoder()
                 .gearing(GearRatio.reduction(100.0, 1.0))
-                .conversion(360.0)
-                .units(EncoderUnit.DEGREES);
+                .measures(Units.Degrees);
         private final SimModel simulation = SimModel.motor(motor)
                 .gearRatio(GearRatio.reduction(100.0, 1.0))
                 .momentOfInertia(0.5)

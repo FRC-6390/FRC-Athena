@@ -13,7 +13,6 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModuleModel;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveOdometry;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
@@ -35,6 +34,7 @@ import ca.frc6390.athena.vision.device.CameraMountPose;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
 import ca.frc6390.athena.vision.runtime.VisionSimulationTarget;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 class RebuiltVisionLocalizationSimulationTest {
     @Test
@@ -192,7 +192,7 @@ class RebuiltVisionLocalizationSimulationTest {
             TestModule module = new TestModule();
             module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId));
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
-            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).units(EncoderUnit.ROTATIONS));
+            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).measures(Units.Rotations));
             return module
                     .driveMaxSpeedMetersPerSecond(5.0)
                     .steerPid(12.0, 0.0, 0.0);
@@ -228,7 +228,7 @@ class RebuiltVisionLocalizationSimulationTest {
             module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId).brake());
             module.steer.fill(MotorDevice.of(MotorKinds.FALCON_500, steerId).inverted());
             module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId)
-                    .units(EncoderUnit.ROTATIONS)
+                    .measures(Units.Rotations)
                     .offset(offset));
             return module
                     .driveMaxSpeedMetersPerSecond(4.0)

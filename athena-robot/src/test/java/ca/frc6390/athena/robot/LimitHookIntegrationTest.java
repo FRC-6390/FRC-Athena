@@ -185,7 +185,7 @@ class LimitHookIntegrationTest {
 
     private static final class HomeLimitedArm implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 58);
-        private final EncoderDevice encoder = motor.encoder().gearRatio(1.0 / 9.0);
+        private final EncoderDevice encoder = motor.encoder().reduction(9.0);
         private final DigitalInputDevice home = DigitalInputDevice.rio(8).inverted();
         private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)

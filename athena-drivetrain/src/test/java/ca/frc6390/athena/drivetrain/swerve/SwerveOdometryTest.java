@@ -10,7 +10,6 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -19,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 class SwerveOdometryTest {
     @Test
@@ -172,7 +172,7 @@ class SwerveOdometryTest {
             TestModule module = new TestModule();
             module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId));
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
-            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, angleId).units(EncoderUnit.ROTATIONS));
+            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, angleId).measures(Units.Rotations));
             return module;
         }
     }
