@@ -15,6 +15,7 @@ import ca.frc6390.athena.mechanism.constraint.Constraint;
 import ca.frc6390.athena.mechanism.constraint.UnitConstraint;
 import ca.frc6390.athena.mechanism.control.FeedforwardGains;
 import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.control.TorqueVelocityGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
@@ -30,6 +31,7 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.mechanism.staging.StageModifier;
 import ca.frc6390.athena.mechanism.effort.Effort;
 import ca.frc6390.athena.mechanism.effort.EffortLimit;
+import ca.frc6390.athena.mechanism.effort.EffortUnits;
 import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
@@ -332,7 +334,64 @@ public record ControlBinding<U extends Unit>(
 
     /** Adds PID gains whose resulting control effort is measured in volts. */
     public ControlBinding<U> pid(PidGains pid) {
+        requireNoTorqueVelocity("PID");
         return replaceLoop(PidGains.class, Objects.requireNonNull(pid, "pid"));
+    }
+
+    /**
+     * Replaces the voltage loops of a velocity control with a torque-based velocity loop. The loop turns the
+     * velocity error into a motor current and then into a voltage with the motor model
+     * ({@code V = I R + omega / Kv}, measured speed), so the current follows the command on any controller that
+     * accepts a voltage. It replaces {@link #pid(PidGains)}, {@link #ff(double, double, double)} and any other
+     * feedforward declared earlier on this binding. Declare the motor constants (MotorSpec) for every motor. Motor
+     * kinds without constants are rejected. See {@link TorqueVelocityGains} and {@code docs/torque-velocity-control.md}.
+     *
+     * <p>Effort ceilings, power caps and the voltage limit still bound the output. The loop runs in software,
+     * like an effort ceiling.</p>
+     *
+     * @param gains torque-based velocity gains
+     * @return binding with the torque-based velocity loop
+     * @throws IllegalStateException when this is not a velocity control, has no output, or has a model loop
+     * @throws IllegalArgumentException when a motor has no built-in constants
+     */
+    public ControlBinding<U> torqueVelocity(TorqueVelocityGains gains) {
+        Objects.requireNonNull(gains, "gains");
+        if (mode != ControlMode.VELOCITY) {
+            throw new IllegalStateException("Torque velocity control needs a velocity control binding "
+                    + "(Controls.velocity(...)), not a position control.");
+        }
+        requireOutput();
+        for (MotorDevice motor : motors) {
+            if (EffortUnits.constants(motor).isEmpty()) {
+                throw new IllegalArgumentException("Torque velocity control needs the motor constants of "
+                        + motor.defaultName() + ", and motor kind " + motor.kind() + " has none. Use a motor kind "
+                        + "with built-in constants, or use pid(...) and ff(...) for this binding.");
+            }
+        }
+        for (ControlLoop loop : loops) {
+            if (loop instanceof ModelFeedforward) {
+                throw new IllegalStateException("Torque velocity control computes its own feedforward from the motor "
+                        + "constants; remove model(...) from this binding. Effort load responses that need a model "
+                        + "must be declared with a model on a voltage control.");
+            }
+        }
+        List<ControlLoop> updated = new ArrayList<>(loops.size() + 1);
+        for (ControlLoop loop : loops) {
+            if (!(loop instanceof PidGains) && !(loop instanceof FeedforwardGains)) {
+                updated.add(loop);
+            }
+        }
+        updated.add(gains);
+        return copy(output, slot, followers, feedback, dependencies, updated, constraints, profile, planner);
+    }
+
+    private void requireNoTorqueVelocity(String feature) {
+        for (ControlLoop loop : loops) {
+            if (loop instanceof TorqueVelocityGains) {
+                throw new IllegalStateException(feature + " adds a voltage loop, but this binding uses torque velocity "
+                        + "control. Remove it, or use torqueVelocity(...) alone.");
+            }
+        }
     }
 
     /**
@@ -399,6 +458,7 @@ public record ControlBinding<U extends Unit>(
      */
     public ControlBinding<U> feedforward(FeedforwardGains feedforward) {
         Objects.requireNonNull(feedforward, "feedforward");
+        requireNoTorqueVelocity("Feedforward");
         if (feedforward.isArm() && feedforward.gravityAngle() == null) {
             feedforward = feedforward.withGravityAngle(armGravityAngle());
         }
@@ -645,6 +705,7 @@ public record ControlBinding<U extends Unit>(
     }
 
     private ControlBinding<U> replaceModelLoop(ModelFeedforward model) {
+        requireNoTorqueVelocity("model(...)");
         List<ControlLoop> updated = new ArrayList<>(loops.size() + 1);
         for (ControlLoop existing : loops) {
             if (!(existing instanceof FeedforwardGains) && !(existing instanceof ModelFeedforward)) {

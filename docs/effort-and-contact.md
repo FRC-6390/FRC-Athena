@@ -3,6 +3,9 @@
 Status: implemented for offseason stream B5 (effort) and B6 (model-based current control) of
 `docs/2027-offseason-design.md`. Depends on the model and checks in `docs/characterization-and-models.md` (B3).
 
+For a velocity control that holds its speed under load with a motor current command, see
+`docs/torque-velocity-control.md` (`torqueVelocity`). It uses the same effort path described here.
+
 Every control Action can carry an effort limit: the largest torque, force or current its motors may draw.
 The limit is enforced on the software output path as a voltage clamp, so it works with any controller.
 
