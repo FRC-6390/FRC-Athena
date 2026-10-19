@@ -4,7 +4,6 @@ import { createMockSource } from '../data/mock';
 import { buildMechanismTree, flattenMechanisms } from '../data/tree';
 import { MOCK_SPECS } from '../data/mock-robot';
 import { controlSections, deviceHealth, deviceSections, summarize } from './model';
-import { toSvgPoints, windowSeries, yDomain } from './plot';
 import { describePath } from '../data/path';
 import { TYPE_TAG, type SignalDescriptor } from '../data/types';
 
@@ -105,39 +104,5 @@ describe('live session smoke test', () => {
       'robot/turret/hood'
     ]);
     session.stop();
-  });
-});
-
-describe('plot math', () => {
-  test('window keeps recent numeric samples and expresses time relative to now', () => {
-    const samples = [
-      { timestampMicros: 0, value: 1 },
-      { timestampMicros: 5_000_000, value: 2 },
-      { timestampMicros: 9_000_000, value: 'x' as unknown as number },
-      { timestampMicros: 10_000_000, value: 3 }
-    ];
-    const points = windowSeries(samples, 10_000_000, 6);
-    expect(points).toEqual([
-      { seconds: -5, value: 2 },
-      { seconds: 0, value: 3 }
-    ]);
-  });
-
-  test('y domain pads flat ranges and honours fixed bounds', () => {
-    expect(yDomain([[{ seconds: 0, value: 4 }]], { min: null, max: null })).toEqual({ min: 3.5, max: 4.5 });
-    expect(yDomain([[{ seconds: 0, value: 4 }]], { min: 0, max: 10 })).toEqual({ min: 0, max: 10 });
-  });
-
-  test('svg points map the window onto the box', () => {
-    const svg = toSvgPoints(
-      [
-        { seconds: -10, value: 0 },
-        { seconds: 0, value: 10 }
-      ],
-      { width: 100, height: 100, padding: 0 },
-      10,
-      { min: 0, max: 10 }
-    );
-    expect(svg).toBe('0,100 100,0');
   });
 });

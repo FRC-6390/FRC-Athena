@@ -26,6 +26,7 @@
     class:on
     role="switch"
     aria-checked={on}
+    aria-label={signal ? signal.name : 'Toggle'}
     disabled={ctx.editing || !signal}
     onclick={() => signal && ctx.write(signal, !on)}
   >

@@ -28,13 +28,6 @@
     {/each}
   </section>
 
-  <section class="ui-panel">
-    <header class="ui-panel-head"><h3 class="ui-panel-title">Classic dashboard</h3></header>
-    <div class="ui-panel-body">
-      <p class="text">The previous dashboard is still available while its layouts move into Dashboards.</p>
-      <a class="ui-btn" href="?ui=classic">Open classic dashboard</a>
-    </div>
-  </section>
 </div>
 
 <style>
@@ -43,18 +36,10 @@
     gap: var(--sp-3);
     max-width: 760px;
   }
-  .empty,
-  .text {
-    margin: 0 0 var(--sp-3);
-    padding: 0;
-    color: var(--text-soft);
-    font-size: var(--fs-sm);
-  }
   .empty {
     padding: var(--sp-3);
     margin: 0;
-  }
-  a.ui-btn {
-    text-decoration: none;
+    color: var(--text-soft);
+    font-size: var(--fs-sm);
   }
 </style>
