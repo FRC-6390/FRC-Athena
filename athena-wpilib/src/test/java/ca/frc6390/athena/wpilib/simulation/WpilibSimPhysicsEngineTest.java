@@ -1,5 +1,8 @@
 package ca.frc6390.athena.wpilib.simulation;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -256,7 +259,7 @@ class WpilibSimPhysicsEngineTest {
             SwerveModule backLeft,
             SwerveModule backRight) {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5, 0.5, 4.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5), Meters.of(0.5), MetersPerSecond.of(4.0), frontLeft, frontRight, backLeft, backRight);
         return SimulationSession.create()
                 .physicsEngine(new WpilibSimPhysicsEngine())
                 .model("swerve", kinematics.simulationModel());
@@ -273,7 +276,7 @@ class WpilibSimPhysicsEngineTest {
                 .drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, driveMotorId))
                 .steer.fill(canivore.motor(MotorKinds.KRAKEN_X44, steerMotorId))
                 .angle.fill(canivore.encoder(EncoderKinds.CANCODER, encoderId))
-                .driveMaxSpeedMetersPerSecond(4.0)
+                .driveMaxSpeed(MetersPerSecond.of(4.0))
                 .steerPid(1.9, 0.0, 0.0);
     }
 
@@ -296,9 +299,9 @@ class WpilibSimPhysicsEngineTest {
         private final SwerveModule backRight = module(87, 88, 94);
         @SuppressWarnings("unused")
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5,
-                0.5,
-                4.0,
+                Meters.of(0.5),
+                Meters.of(0.5),
+                MetersPerSecond.of(4.0),
                 frontLeft,
                 frontRight,
                 backLeft,

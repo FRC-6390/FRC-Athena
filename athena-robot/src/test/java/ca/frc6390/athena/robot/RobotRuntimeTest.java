@@ -1,5 +1,8 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -1040,7 +1043,7 @@ class RobotRuntimeTest {
         private final SwerveModule backLeft = module(63, 73, 83);
         private final SwerveModule backRight = module(64, 74, 84);
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5, 0.5, 5.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5), Meters.of(0.5), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         private final SwerveOdometry odometry = kinematics.odometry(imu);
         private final Localization estimatedPose = Localizations.kalman().input(odometry);
 
@@ -1064,7 +1067,7 @@ class RobotRuntimeTest {
 
     private static final class TestSwerveModule extends SwerveModule {
         private TestSwerveModule() {
-            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+            super(SwerveModuleModel.custom(2.0, 1.0, Meters.of(1.0 / Math.PI)));
         }
     }
 }

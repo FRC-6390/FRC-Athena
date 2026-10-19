@@ -79,7 +79,7 @@
 - [x] Runtime cleanup: removed the separate swerve runtime, module node graph, root drivetrain mount, and direct `MotorHandle` write path. Swerve control belongs in mechanism Action composition.
 - [x] Template API: restored reusable module presets through generic mechanism-core `MechanismTemplate` and `Slot` APIs. `SwerveModules` now consumes that pattern, but slots are not a drivetrain-only concept.
 - [x] Test surfaces needed: production surfaces now exist for drivetrain behavior tests to target after the repo-wide test reset.
-  - [x] `TrackWidth`, `WheelBase`, and `SwerveModuleModel` validate finite/positive conversion inputs.
+  - [x] `SwerveModuleModel` validates finite/positive wheel diameter, and kinematics validates finite/positive wheelbase and track width (WPILib `Distance`).
   - [x] `SwerveModulesTest` covers preset availability and filling template slots into runtime controls.
   - [x] WPILib sim tests cover root-discovered `SwerveKinematics` moving `SimulationSession.pose()` through `RobotRuntime.simulationPeriodic(...)` without a swerve-specific sim descriptor.
   - [x] Runtime graph/introspection tests were removed with the deleted runtime path.

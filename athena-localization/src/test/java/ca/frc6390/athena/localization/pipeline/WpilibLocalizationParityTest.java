@@ -1,5 +1,8 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -549,7 +552,7 @@ class WpilibLocalizationParityTest {
         private final SwerveModule backLeft = module(3, 13, 23);
         private final SwerveModule backRight = module(4, 14, 24);
         private final SwerveKinematics athenaKinematics = SwerveKinematics.rectangular(
-                0.5, 0.5, 5.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5), Meters.of(0.5), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         private final SwerveDriveKinematics wpilibKinematics = new SwerveDriveKinematics(
                 new Translation2d(0.25, 0.25),
                 new Translation2d(0.25, -0.25),
@@ -664,7 +667,7 @@ class WpilibLocalizationParityTest {
             visionSource.measurements = List.of(vision);
             athena.refresh(context, timestampSeconds, 0.02);
 
-            Rotation2d heading = new Rotation2d(odometry.headingRadians());
+            Rotation2d heading = new Rotation2d(odometry.heading().in(edu.wpi.first.units.Units.Radians));
             SwerveModulePosition[] positions = wpilibPositions();
             if (wpilib == null || pendingReset != null) {
                 PoseSnapshot initial = pendingReset == null ? odometry.pose() : pendingReset;
@@ -714,8 +717,8 @@ class WpilibLocalizationParityTest {
         private SwerveModulePosition[] wpilibPositions() {
             return odometry.modulePositions().stream()
                     .map(position -> new SwerveModulePosition(
-                            position.distanceMeters(),
-                            Rotation2d.fromRotations(position.angleRotations())))
+                            position.distance().in(edu.wpi.first.units.Units.Meters),
+                            Rotation2d.fromRotations(position.angle().in(edu.wpi.first.units.Units.Rotations))))
                     .toArray(SwerveModulePosition[]::new);
         }
 
@@ -802,7 +805,7 @@ class WpilibLocalizationParityTest {
 
     private static final class TestModule extends SwerveModule {
         private TestModule() {
-            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+            super(SwerveModuleModel.custom(2.0, 1.0, Meters.of(1.0 / Math.PI)));
         }
     }
 

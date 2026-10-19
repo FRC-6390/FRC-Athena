@@ -29,12 +29,12 @@ class SwerveDriveEncoderEquivalenceTest {
             SwerveModuleModel model = module.model();
             MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
             EncoderDevice legacy = new EncoderDevice(motor.encoder().source(), false,
-                    1.0 / model.driveReduction(), Math.PI * model.wheelDiameterMeters(), 0.0,
+                    1.0 / model.driveReduction(), Math.PI * model.wheelDiameter().in(Units.Meters), 0.0,
                     FailurePolicy.DISABLE_MECHANISM, false, Units.Meters);
             EncoderDevice typed = motor.encoder()
                     .reduction(model.driveReduction())
                     .measures(Units.Meters)
-                    .travelPerRevolution(Units.Meters.of(Math.PI * model.wheelDiameterMeters()));
+                    .travelPerRevolution(Units.Meters.of(Math.PI * model.wheelDiameter().in(Units.Meters)));
             for (double rotations : new double[] {0.0, 1.0, -2.5, 13.75}) {
                 assertEquals(legacy.positionFromRotations(rotations), typed.positionFromRotations(rotations), 0.0,
                         model.name() + " position");

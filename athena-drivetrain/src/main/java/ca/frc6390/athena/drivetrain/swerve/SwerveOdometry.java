@@ -13,7 +13,14 @@ import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.ResettablePoseSignal;
 import java.util.List;
 import java.util.Objects;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Rotations;
 
 /** Runtime-refreshed odometry derived from measured swerve module travel and IMU heading. */
 public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSignal, ResettablePoseSignal {
@@ -138,8 +145,13 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
     }
 
     /** Returns the latest gyro-backed heading used by odometry. */
-    public synchronized double headingRadians() {
-        return pose.headingRadians();
+    public synchronized Angle heading() {
+        return Radians.of(pose.headingRadians());
+    }
+
+    /** Returns the latest odometry pose as a WPILib pose. */
+    public synchronized Pose2d pose2d() {
+        return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
     }
 
     /** Returns the latest measured module positions in kinematic order. */
@@ -150,7 +162,9 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         if (snapshottedModulePositionVersion != modulePositionVersion) {
             ModulePosition[] positions = new ModulePosition[previousDistances.length];
             for (int index = 0; index < positions.length; index++) {
-                positions[index] = new ModulePosition(previousDistances[index], previousAngles[index]);
+                positions[index] = new ModulePosition(
+                        Meters.of(previousDistances[index]),
+                        Rotations.of(previousAngles[index]));
             }
             modulePositionSnapshot = List.of(positions);
             snapshottedModulePositionVersion = modulePositionVersion;
@@ -241,14 +255,19 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         return module.drive.get().encoder()
                 .reduction(module.model().driveReduction())
                 .measures(Units.Meters)
-                .travelPerRevolution(Units.Meters.of(Math.PI * module.model().wheelDiameterMeters()));
+                .travelPerRevolution(module.model().wheelCircumference());
     }
 
     private static double wrapRadians(double radians) {
         return radians - Math.floor((radians + Math.PI) / TWO_PI) * TWO_PI;
     }
 
-    /** Measured wheel travel and azimuth for one positioned module. */
-    public record ModulePosition(double distanceMeters, double angleRotations) {
+    /**
+     * Measured wheel travel and azimuth for one positioned module.
+     *
+     * @param distance wheel travel since the odometry started
+     * @param angle module azimuth, in rotations of the steer mechanism
+     */
+    public record ModulePosition(Distance distance, Angle angle) {
     }
 }
