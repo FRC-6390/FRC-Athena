@@ -1,6 +1,7 @@
 package ca.frc6390.athena.localization.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
@@ -275,6 +276,26 @@ class WpilibLocalizationParityTest {
         double scaledX = scaled.athena.pose().xMeters();
         assertTrue(plainX > 0.0 && scaledX > 0.0, "both pull toward the vision pose");
         assertTrue(scaledX < plainX, "scaled=" + scaledX + " plain=" + plainX);
+    }
+
+    /** A Kalman estimate is unseeded at boot, stays unseeded without vision, and is seeded by a reset or a vision frame. */
+    @Test
+    void seededTracksResetAndAcceptedVisionOnly() {
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        ParityRig idle = new ParityRig();
+        idle.stepAthenaOnly(0.00, new VisionSample[0]);
+        idle.stepAthenaOnly(0.02, new VisionSample[0]);
+        assertFalse(idle.athena.seeded(), "no reset and no vision: unseeded");
+
+        ParityRig reset = new ParityRig();
+        reset.athena.reset(new PoseSnapshot(1.0, 2.0, 0.5)).apply(reset.context);
+        assertTrue(reset.athena.seeded(), "a reset seeds the pose");
+
+        ParityRig vision = new ParityRig();
+        vision.stepAthenaOnly(0.00, new VisionSample[] {multiTagWithSpeed(5.0, 2.0, 0.3, 0.00, stdDevs, "Intake",
+                RobotVelocity.zero())});
+        assertTrue(vision.athena.seeded(), "an accepted vision frame seeds the pose");
     }
 
     /**

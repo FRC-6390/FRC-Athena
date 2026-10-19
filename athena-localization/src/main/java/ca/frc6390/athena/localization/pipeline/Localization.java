@@ -319,11 +319,27 @@ public final class Localization implements PoseSignal {
         return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
     }
 
+    /**
+     * Returns whether this estimate has been seeded: a {@link #reset(PoseSnapshot)} has been applied, or, for
+     * Kalman nodes, a vision frame has passed this node's filters. False at boot. Once true it stays true.
+     *
+     * <p>Robot code uses this to decide whether the field heading can be trusted before the driver heading is
+     * set; see {@code DriverOrientation}.</p>
+     *
+     * @return true once the pose has been seeded
+     */
+    public boolean seeded() {
+        synchronized (state) {
+            return state.seeded;
+        }
+    }
+
     public ActionBinding reset(PoseSnapshot pose) {
         Objects.requireNonNull(pose, "pose");
         return context -> {
             synchronized (state) {
                 resetInputs(pose);
+                state.seeded = true;
                 state.pendingReset = pose;
                 state.output = CycleResult.of(List.of(outputMeasurement(
                         pose, RobotVelocity.zero(), 0.0, stateStdDevs, this)));
@@ -507,6 +523,10 @@ public final class Localization implements PoseSignal {
             }
         }
         state.accepted = List.copyOf(accepted);
+        if (strategy == Strategy.KALMAN && !accepted.isEmpty()) {
+            // Kalman inputs are vision only (odometry is skipped above), so an accepted frame seeds the pose.
+            state.seeded = true;
+        }
         state.rejections = List.copyOf(rejections);
         state.rejected = rejections.stream().map(Rejection::measurement).toList();
         List<Measurement> output = switch (strategy) {
@@ -964,6 +984,7 @@ public final class Localization implements PoseSignal {
         private double visionNow = Double.NaN;
         private final Map<String, VisionTopics> visionTopics = new HashMap<>();
         private PoseSnapshot pendingReset;
+        private boolean seeded;
         private double lastRefreshTimestamp = Double.NaN;
         private boolean runtimeOwned;
         private KalmanEngine kalman;
