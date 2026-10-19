@@ -1,5 +1,10 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -177,9 +182,9 @@ class WpilibLocalizationParityTest {
         var status = statusOf(rig, "Intake");
         assertEquals(VisionSourceStatus.State.REJECTED, status.state());
         assertEquals("ambiguity 0.31 > 0.20", status.reason());
-        assertEquals(0.0, status.acceptedPerSecond(), 1e-12);
-        assertEquals(1.0, status.rejectedPerSecond(), 1e-12);
-        assertTrue(Double.isNaN(status.secondsSinceAccepted()), "never accepted");
+        assertEquals(0.0, status.acceptedRate().in(Hertz), 1e-12);
+        assertEquals(1.0, status.rejectedRate().in(Hertz), 1e-12);
+        assertTrue(Double.isNaN(status.sinceAccepted().in(Seconds)), "never accepted");
     }
 
     /** An innovation-gated frame is held back by the recovery path; the status names the gate and the progress. */
@@ -203,7 +208,7 @@ class WpilibLocalizationParityTest {
         var recovered = statusOf(rig, camera);
         assertEquals(VisionSourceStatus.State.OK, recovered.state());
         assertEquals("", recovered.reason());
-        assertTrue(recovered.acceptedPerSecond() > 0.0);
+        assertTrue(recovered.acceptedRate().in(Hertz) > 0.0);
     }
 
     /** A frame whose clock runs ahead of robot time is UNSYNCED with the amount of skew in its reason. */
@@ -217,7 +222,7 @@ class WpilibLocalizationParityTest {
         var status = statusOf(rig, camera);
         assertEquals(VisionSourceStatus.State.UNSYNCED, status.state());
         assertEquals("frame 3.2 s in the future", status.reason());
-        assertTrue(status.frameAgeSeconds() < -3.0);
+        assertTrue(status.frameAge().in(Seconds) < -3.0);
 
         rig.stepAthenaOnly(0.02, multiTag(5.0, 2.0, 0.0, 0.01, stdDevs, camera));
         assertEquals(VisionSourceStatus.State.OK, statusOf(rig, camera).state(),
@@ -240,14 +245,14 @@ class WpilibLocalizationParityTest {
         var stale = statusOf(rig, camera);
         assertEquals(VisionSourceStatus.State.STALE, stale.state());
         assertEquals("no frame for 0.6 s", stale.reason());
-        assertEquals(0.6, stale.frameAgeSeconds(), 1e-9);
-        assertEquals(0.6, stale.secondsSinceAccepted(), 1e-9);
+        assertEquals(0.6, stale.frameAge().in(Seconds), 1e-9);
+        assertEquals(0.6, stale.sinceAccepted().in(Seconds), 1e-9);
     }
 
     /** A rotating robot's frame is refused past the spin limit and the reason gives the rate. */
     @Test
     void frameTakenWhileSpinningIsRejectedWithItsRate() {
-        ParityRig rig = new ParityRig(kalman -> kalman.maxVisionAngularVelocity(3.0));
+        ParityRig rig = new ParityRig(kalman -> kalman.maxVisionAngularVelocity(RadiansPerSecond.of(3.0)));
         String camera = "Intake";
         MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
 
@@ -512,13 +517,13 @@ class WpilibLocalizationParityTest {
         ca.frc6390.athena.vision.device.PhotonVisionDevice camera =
                 new ca.frc6390.athena.vision.device.PhotonVisionDevice("front");
         rig.visionSource.camera = camera;
-        assertTrue(Double.isNaN(camera.reportedRobotHeadingRadians()));
+        assertTrue(Double.isNaN(camera.reportedRobotHeading().in(Radians)));
 
         rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
         rig.stepAthenaOnly(0.02);
 
-        assertEquals(rig.athena.pose().headingRadians(), camera.reportedRobotHeadingRadians(), 1.0e-12);
-        assertTrue(camera.reportedRobotHeadingRadians() > 0.0);
+        assertEquals(rig.athena.pose().headingRadians(), camera.reportedRobotHeading().in(Radians), 1.0e-12);
+        assertTrue(camera.reportedRobotHeading().in(Radians) > 0.0);
     }
 
     private static VisionSample vision(
@@ -581,8 +586,8 @@ class WpilibLocalizationParityTest {
             visionStage = Localizations.filter().input(visionSource).filter(visionFilters);
             athena = kalmanTuning.apply(Localizations.kalman()
                     .input(odometry, visionStage)
-                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
-                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians()));
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians())));
         }
 
         /**
@@ -600,8 +605,8 @@ class WpilibLocalizationParityTest {
                     : Localizations.kalman().input(odometry, Localizations.covarianceIntersection()
                             .input(inputs.toArray(PoseSignal[]::new)));
             athena = athena
-                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
-                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians());
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians()));
         }
 
         private ParityRig(double innovationGate) {
@@ -630,9 +635,9 @@ class WpilibLocalizationParityTest {
             visionStage = Localizations.filter().input(configuredVision);
             athena = Localizations.kalman()
                     .input(odometry, visionStage)
-                    .stateStdDevs(STATE_STD_DEVS.xMeters(), STATE_STD_DEVS.headingRadians())
-                    .defaultVisionStdDevs(DEFAULT_VISION_STD_DEVS.xMeters(), DEFAULT_VISION_STD_DEVS.headingRadians())
-                    .maxHeadingDisagreementRadians(maxHeadingResidualRadians)
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians()))
+                    .maxHeadingDisagreement(Radians.of(maxHeadingResidualRadians))
                     .maxNormalizedVisionResidual(innovationGate);
         }
 

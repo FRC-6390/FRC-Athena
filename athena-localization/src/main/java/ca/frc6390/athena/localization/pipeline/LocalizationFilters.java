@@ -1,5 +1,10 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Seconds;
+
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
 import java.util.Locale;
 import java.util.Objects;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
@@ -13,7 +18,8 @@ public final class LocalizationFilters {
     private LocalizationFilters() {
     }
 
-    public static LocalizationFilter latencyLessThan(double seconds) {
+    public static LocalizationFilter latencyLessThan(Time limitTime) {
+        double seconds = limitTime.in(Seconds);
         double limit = Double.isFinite(seconds) ? seconds : Double.POSITIVE_INFINITY;
         return new ReasonedFilter("latencyLessThan", (pipeline, measurement, pose) -> measurement == null
                 || measurement.latencySeconds() < limit
@@ -21,14 +27,16 @@ public final class LocalizationFilters {
                 : format("latency %.3f s >= %.3f s", measurement.latencySeconds(), limit));
     }
 
-    public static LocalizationFilter maxAge(double nowSeconds, double seconds) {
-        double now = Double.isFinite(nowSeconds) ? nowSeconds : 0.0;
+    public static LocalizationFilter maxAge(Time now, Time maximumAge) {
+        double nowSeconds = now.in(Seconds);
+        double seconds = maximumAge.in(Seconds);
+        double nowValue = Double.isFinite(nowSeconds) ? nowSeconds : 0.0;
         double limit = Double.isFinite(seconds) ? seconds : Double.POSITIVE_INFINITY;
         return new ReasonedFilter("maxAge", (pipeline, measurement, pose) -> {
             if (measurement == null) {
                 return null;
             }
-            double age = now - measurement.timestampSeconds();
+            double age = nowValue - measurement.timestampSeconds();
             return age <= limit ? null : format("age %.3f s > %.3f s", age, limit);
         });
     }
@@ -41,8 +49,9 @@ public final class LocalizationFilters {
                         : format("tags %d < %d", ((PoseMeasurementSample) measurement).targetCount(), minimum));
     }
 
-    public static LocalizationFilter maxPoseJump(PoseSignal baseline, double meters) {
+    public static LocalizationFilter maxPoseJump(PoseSignal baseline, Distance maximumJump) {
         Objects.requireNonNull(baseline, "baseline");
+        double meters = maximumJump.in(Meters);
         double max = Double.isFinite(meters) ? Math.max(0.0, meters) : Double.POSITIVE_INFINITY;
         return new ReasonedFilter("maxPoseJump", (pipeline, measurement, pose) -> {
             if (pose != null) {

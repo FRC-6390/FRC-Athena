@@ -1,5 +1,8 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Seconds;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -114,11 +117,11 @@ final class VisionDiagnostics {
                     track.name,
                     state,
                     reason,
-                    track.accepted.size() / WINDOW_SECONDS,
-                    track.rejected.size() / WINDOW_SECONDS,
-                    age,
+                    Hertz.of(track.accepted.size() / WINDOW_SECONDS),
+                    Hertz.of(track.rejected.size() / WINDOW_SECONDS),
+                    Seconds.of(age),
                     track.newestTagCount,
-                    since,
+                    Seconds.of(since),
                     timeSync(track)));
         }
         return out;

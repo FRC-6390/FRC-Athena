@@ -1,7 +1,12 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
 
 /** Filters for camera-derived pose measurements. Each names its rejection in diagnostics. */
 public final class VisionFilters {
@@ -18,12 +23,12 @@ public final class VisionFilters {
      * rejected too: they come from a camera whose clock is not synced to the robot yet. When no runtime
      * timestamp is available only the reported latency is checked.</p>
      *
-     * @param seconds maximum latency in seconds
+     * @param limit maximum latency
      * @return filter
      */
-    public static LocalizationFilter maxLatencySeconds(double seconds) {
-        double maximum = nonNegative(seconds, "Maximum latency");
-        return new ReasonedFilter("maxLatencySeconds", (localization, measurement, pose) -> {
+    public static LocalizationFilter maxLatency(Time limit) {
+        double maximum = nonNegative(limit.in(Seconds), "Maximum latency");
+        return new ReasonedFilter("maxLatency", (localization, measurement, pose) -> {
             if (measurement == null) {
                 return null;
             }
@@ -39,12 +44,12 @@ public final class VisionFilters {
      * runtime cycle timestamp, or captured more than 0.1 s in the future (camera clock not synced yet).
      * Measurements pass when no runtime timestamp is available.
      *
-     * @param seconds maximum frame age in seconds
+     * @param limit maximum frame age
      * @return filter
      */
-    public static LocalizationFilter maxAgeSeconds(double seconds) {
-        double maximum = nonNegative(seconds, "Maximum age");
-        return new ReasonedFilter("maxAgeSeconds", (localization, measurement, pose) -> measurement == null
+    public static LocalizationFilter maxAge(Time limit) {
+        double maximum = nonNegative(limit.in(Seconds), "Maximum age");
+        return new ReasonedFilter("maxAge", (localization, measurement, pose) -> measurement == null
                 ? null
                 : ageReason(ageSeconds(localization, measurement), maximum));
     }
@@ -70,7 +75,7 @@ public final class VisionFilters {
         if (localization == null) {
             return Double.NaN;
         }
-        double now = localization.cycleTimestampSeconds();
+        double now = localization.evaluatingSeconds();
         double captured = measurement.timestampSeconds();
         return Double.isFinite(now) && Double.isFinite(captured) ? now - captured : Double.NaN;
     }
@@ -86,9 +91,9 @@ public final class VisionFilters {
                                 ((PoseMeasurementSample) measurement).ambiguity(), maximum));
     }
 
-    public static LocalizationFilter maxAverageTagDistanceMeters(double meters) {
-        double maximum = nonNegative(meters, "Maximum average tag distance");
-        return new ReasonedFilter("maxAverageTagDistanceMeters", (localization, measurement, pose) -> {
+    public static LocalizationFilter maxAverageTagDistance(Distance limit) {
+        double maximum = nonNegative(limit.in(Meters), "Maximum average tag distance");
+        return new ReasonedFilter("maxAverageTagDistance", (localization, measurement, pose) -> {
             if (!(measurement instanceof PoseMeasurementSample sample)) {
                 return null;
             }

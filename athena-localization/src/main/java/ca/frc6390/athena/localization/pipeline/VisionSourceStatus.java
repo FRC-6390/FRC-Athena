@@ -1,34 +1,39 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Seconds;
+
+import edu.wpi.first.units.measure.Frequency;
+import edu.wpi.first.units.measure.Time;
+
 /**
  * Diagnostic status of one vision source (camera) as seen by a Kalman localization, recomputed every refresh.
  *
  * @param name camera name, from the camera device; a generated name for sources without one
  * @param state what the source is doing now
  * @param reason short human text naming the rejection, for example {@code ambiguity 0.31 > 0.20}; empty when OK
- * @param acceptedPerSecond frames accepted in the last second
- * @param rejectedPerSecond frames rejected in the last second, by any stage
- * @param frameAgeSeconds robot time minus the capture time of the newest frame; NaN when no frame was seen
+ * @param acceptedRate frames accepted in the last second
+ * @param rejectedRate frames rejected in the last second, by any stage
+ * @param frameAge robot time minus the capture time of the newest frame; NaN when no frame was seen
  * @param tagCount tag count of the newest frame
- * @param secondsSinceAccepted robot time since the last accepted frame; NaN when none was accepted
+ * @param sinceAccepted robot time since the last accepted frame; NaN when none was accepted
  * @param timeSync whether the camera's clock is synced to robot time; null when the camera cannot tell
  */
 public record VisionSourceStatus(
         String name,
         State state,
         String reason,
-        double acceptedPerSecond,
-        double rejectedPerSecond,
-        double frameAgeSeconds,
+        Frequency acceptedRate,
+        Frequency rejectedRate,
+        Time frameAge,
         int tagCount,
-        double secondsSinceAccepted,
+        Time sinceAccepted,
         Boolean timeSync) {
 
     /** Status of a source whose clock sync is unknown. */
-    public VisionSourceStatus(String name, State state, String reason, double acceptedPerSecond,
-            double rejectedPerSecond, double frameAgeSeconds, int tagCount, double secondsSinceAccepted) {
-        this(name, state, reason, acceptedPerSecond, rejectedPerSecond, frameAgeSeconds, tagCount,
-                secondsSinceAccepted, null);
+    public VisionSourceStatus(String name, State state, String reason, Frequency acceptedRate,
+            Frequency rejectedRate, Time frameAge, int tagCount, Time sinceAccepted) {
+        this(name, state, reason, acceptedRate, rejectedRate, frameAge, tagCount, sinceAccepted, null);
     }
 
     /**
@@ -54,6 +59,10 @@ public record VisionSourceStatus(
         name = name == null ? "" : name;
         state = state == null ? State.STALE : state;
         reason = reason == null ? "" : reason;
+        acceptedRate = acceptedRate == null ? Hertz.of(0.0) : acceptedRate;
+        rejectedRate = rejectedRate == null ? Hertz.of(0.0) : rejectedRate;
+        frameAge = frameAge == null ? Seconds.of(Double.NaN) : frameAge;
+        sinceAccepted = sinceAccepted == null ? Seconds.of(Double.NaN) : sinceAccepted;
     }
 
     /** Dashboard path of one field, for example {@code athena/vision/Intake/State}. */
