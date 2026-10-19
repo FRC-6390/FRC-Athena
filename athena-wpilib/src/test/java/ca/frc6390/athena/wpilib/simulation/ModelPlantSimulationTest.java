@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.simulation;
 
+import ca.frc6390.athena.mechanism.sysid.SysIdLog;
+import ca.frc6390.athena.mechanism.sysid.SysIdSample;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -162,12 +164,24 @@ class ModelPlantSimulationTest {
         final Action dynamicForward;
         final Action dynamicReverse;
 
+        /** The test reads samples through the model, so nothing is written to the robot log. */
+        private static final SysIdLog NO_EXPORT = new SysIdLog() {
+            @Override
+            public void record(SysIdSample sample) {
+            }
+
+            @Override
+            public void end() {
+            }
+        };
+
         ArmMechanism(double[] clock) {
             // A rotations-typed binding makes the characterization rotary, so gravity is fitted.
             ControlBinding<?> angle = Controls.position(motor, Units.Rotations).feedback(encoder);
             characterization = angle.characterization()
                     .rampRate(Volts.per(Seconds).of(0.5))
                     .maxVoltage(Volts.of(4.0))
+                    .exportTo(NO_EXPORT)   // keep the test off the global WPILib DataLog
                     .clock(() -> clock[0]);
             quasistaticForward = characterization.quasistaticForward();
             quasistaticReverse = characterization.quasistaticReverse();
