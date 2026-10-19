@@ -1,5 +1,6 @@
 package ca.frc6390.athena.hardware.signal;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,36 +17,36 @@ class MotorStallSignalTest {
     @Test
     void revCurrentLimitsAreExposedAsTheMappedPhaseCurrentLimit() {
         MotorCurrentLimits portable = MotorDevice.of(MotorKinds.NEO, 1)
-                .currentLimit(40)
+                .currentLimit(Units.Amps.of(40))
                 .currentLimits();
         MotorCurrentLimits both = MotorDevice.of(MotorKinds.NEO, 2)
-                .supplyCurrentLimit(50)
-                .statorCurrentLimit(60)
+                .supplyCurrentLimit(Units.Amps.of(50))
+                .statorCurrentLimit(Units.Amps.of(60))
                 .currentLimits();
         MotorCurrentLimits statorOnly = MotorDevice.of(MotorKinds.NEO, 3)
-                .currentLimit(0)
-                .statorCurrentLimit(55)
+                .currentLimit(Units.Amps.of(0))
+                .statorCurrentLimit(Units.Amps.of(55))
                 .currentLimits();
 
-        assertEquals(new MotorCurrentLimits(0, 40), portable);
-        assertEquals(new MotorCurrentLimits(0, 50), both);
-        assertEquals(new MotorCurrentLimits(0, 55), statorOnly);
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(40)), portable);
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(50)), both);
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(55)), statorOnly);
 
         MotorKind customRev = () -> "rev:spark-max/custom";
         MotorKind customOther = () -> "custom:motor";
-        assertEquals(new MotorCurrentLimits(0, 25),
-                MotorDevice.of(customRev, 4).currentLimit(25).currentLimits());
-        assertEquals(new MotorCurrentLimits(25, 0),
-                MotorDevice.of(customOther, 5).currentLimit(25).currentLimits());
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(25)),
+                MotorDevice.of(customRev, 4).currentLimit(Units.Amps.of(25)).currentLimits());
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(25), Units.Amps.of(0)),
+                MotorDevice.of(customOther, 5).currentLimit(Units.Amps.of(25)).currentLimits());
     }
 
     @Test
     void currentLimitedAppliedVoltageDoesNotHideACommandedStall() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(40);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(Units.Amps.of(40));
         FakeMotorHandle handle = new FakeMotorHandle(motor);
         AutoCloseable binding = motor.bindRuntime(new RuntimeScope("stall-test"), handle);
         try {
-            MotorStallSignal stall = motor.stall().atCurrentLimit(0.9).velocityBelow(1.0);
+            MotorStallSignal stall = motor.stall().atCurrentLimit(0.9).velocityBelow(Units.RotationsPerSecond.of(1.0));
 
             motor.recordCommand(new MotorCommandSnapshot(MotorCommandSnapshot.Mode.PERCENT, 0.8));
             handle.statorCurrent = 38.0;
@@ -63,7 +64,7 @@ class MotorStallSignalTest {
 
     @Test
     void eachPhysicalPredicateCanPreventAFalseStall() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).supplyCurrentLimit(30);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).supplyCurrentLimit(Units.Amps.of(30));
         FakeMotorHandle handle = new FakeMotorHandle(motor);
         AutoCloseable binding = motor.bindRuntime(new RuntimeScope("stall-predicates"), handle);
         try {

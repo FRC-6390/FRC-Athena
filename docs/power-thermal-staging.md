@@ -14,7 +14,7 @@ public static final PowerProfile SHOOT = PowerProfile.of()
         .share(3.0)
         .onSag(Sag.shed(0.5).below(Volts.of(9)));  // remove half the cap while the bus is below 9 V
 
-MotorDevice shooter = MotorDevice.of(MotorKinds.KRAKEN_X60, 43).currentLimit(120).power(SHOOT);
+MotorDevice shooter = MotorDevice.of(MotorKinds.KRAKEN_X60, 43).currentLimit(Amps.of(120)).power(SHOOT);
 public final Action endgame = SHOOT.update(p -> p.share(0.5));   // applied from the next cycle
 public final Action normal  = SHOOT.restore();                   // back to the declared values
 ```
@@ -124,7 +124,7 @@ Use a software loop (for example, declare an effort ceiling on the binding) if t
 ## Thermal (B8)
 
 ```java
-MotorDevice arm = MotorDevice.of(MotorKinds.KRAKEN_X60, 44).currentLimit(80)
+MotorDevice arm = MotorDevice.of(MotorKinds.KRAKEN_X60, 44).currentLimit(Amps.of(80))
         .thermal(Thermal.derate(Celsius.of(100), Celsius.of(130), 0.4));
 ```
 
@@ -138,7 +138,7 @@ MotorDevice arm = MotorDevice.of(MotorKinds.KRAKEN_X60, 44).currentLimit(80)
 
 ### Temperature estimate
 
-`motor.temperatureCelsius()` returns the fused estimate:
+`motor.temperature()` returns the fused estimate as a `Temperature`:
 
 - **Model.** `dT/dt = I^2 R / C - (T - T_ambient) / tau`, with `I` the stator current. Constants come
   from `MotorThermalSpec`.

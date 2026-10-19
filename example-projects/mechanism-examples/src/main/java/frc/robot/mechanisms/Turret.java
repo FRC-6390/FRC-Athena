@@ -27,12 +27,12 @@ public final class Turret implements Mechanism {
     /** 100:1 turret reduction from the Kraken X44 pinion to the ring gear. */
     private static final GearRatio GEARING = GearRatio.reduction(100.0, 1.0);
 
-    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(25);
+    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(edu.wpi.first.units.Units.Amps.of(25));
     private final EncoderDevice angle = motor.encoder()
             .gearing(GEARING)
             .measures(Units.Degrees);
     private final ImuDevice chassisImu = Constants.RIO.imu(ImuKinds.PIGEON_2, 17);
-    private final Range travel = Range.degrees(-270.0, 270.0);
+    private final Range travel = Range.of(edu.wpi.first.units.Units.Degrees.of(-270.0), edu.wpi.first.units.Units.Degrees.of(270.0));
 
     /**
      * Simulated plant: the geared X44 with about 0.5 kg m^2 of turret inertia. The range is in mechanism
@@ -40,8 +40,8 @@ public final class Turret implements Mechanism {
      */
     private final SimModel simulation = SimModel.motor(motor)
             .gearRatio(GEARING)
-            .momentOfInertia(0.5)
-            .range(Range.rotations(-0.75, 0.75));
+            .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.5))
+            .range(Range.of(edu.wpi.first.units.Units.Rotations.of(-0.75), edu.wpi.first.units.Units.Rotations.of(0.75)));
 
     private final ControlBinding fieldHeading = Controls.position(motor)
             .feedback(angle)

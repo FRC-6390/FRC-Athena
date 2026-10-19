@@ -48,7 +48,7 @@ public final class VelocityShooter implements Mechanism {
     @SuppressWarnings("unused")
     private final SimModel simulation = SimModel.flywheel(leader, follower)
             .encoder(velocity)
-            .momentOfInertia(0.006);
+            .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.006));
     private final ControlBinding wheel = Controls.velocity(leader)
             .feedback(velocity)
             .slot(0)

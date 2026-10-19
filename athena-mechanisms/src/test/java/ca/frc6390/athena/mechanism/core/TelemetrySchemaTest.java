@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -234,7 +235,7 @@ class TelemetrySchemaTest {
         private final ControlBinding<?> control = Controls.position(motor)
                 .feedback(motor.encoder())
                 .constraints(
-                        Constraints.range(Range.of(-1.0, 2.0)),
+                        Constraints.range(Range.of(Units.Value.of(-1.0), Units.Value.of(2.0))),
                         Constraints.motion(5.0, 3.0),
                         Constraints.clamp(9.0));
     }

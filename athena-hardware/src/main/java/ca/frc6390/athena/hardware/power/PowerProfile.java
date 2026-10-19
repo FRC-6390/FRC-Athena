@@ -29,6 +29,8 @@ public final class PowerProfile {
     private double sustainedAmps;
     private double burstAmps;
     private double burstSeconds;
+    private double rampStepAmps;
+    private double rampIntervalSeconds;
     private double rampAmpsPerSecond;
     private double share = 1.0;
     private Sag sag;
@@ -80,6 +82,8 @@ public final class PowerProfile {
         if (stepAmps <= 0.0 || seconds <= 0.0) {
             throw new IllegalArgumentException("Ramp step and interval must be positive.");
         }
+        rampStepAmps = stepAmps;
+        rampIntervalSeconds = seconds;
         rampAmpsPerSecond = stepAmps / seconds;
         return this;
     }
@@ -109,16 +113,31 @@ public final class PowerProfile {
         return this;
     }
 
-    /** Returns the sustained cap in amps, or zero when uncapped. */
+    /** Returns the sustained cap, or zero when uncapped. */
+    public Current sustainedCurrent() { return Units.Amps.of(sustainedAmps); }
+
+    /** Returns the burst cap, or zero when no burst is declared. */
+    public Current burstCurrent() { return Units.Amps.of(burstAmps); }
+
+    /** Returns the burst time budget, or zero when no burst is declared. */
+    public Time burstDuration() { return Units.Seconds.of(burstSeconds); }
+
+    /** Returns the maximum cap increase per {@link #rampInterval()}, or zero when not ramp limited. */
+    public Current rampStep() { return Units.Amps.of(rampStepAmps); }
+
+    /** Returns the interval the {@link #rampStep()} applies over, or zero when not ramp limited. */
+    public Time rampInterval() { return Units.Seconds.of(rampIntervalSeconds); }
+
+    /** Per-cycle primitive: sustained cap in amps. Teams should use {@link #sustainedCurrent()}. */
     public double sustainedAmps() { return sustainedAmps; }
 
-    /** Returns the burst cap in amps, or zero when no burst is declared. */
+    /** Per-cycle primitive: burst cap in amps. Teams should use {@link #burstCurrent()}. */
     public double burstAmps() { return burstAmps; }
 
-    /** Returns the burst time budget in seconds. */
+    /** Per-cycle primitive: burst budget in seconds. Teams should use {@link #burstDuration()}. */
     public double burstSeconds() { return burstSeconds; }
 
-    /** Returns the maximum cap increase in amps per second, or zero when not ramp limited. */
+    /** Per-cycle primitive: ramp rate in amps per second. */
     public double rampAmpsPerSecond() { return rampAmpsPerSecond; }
 
     /** Returns the relative share weight. */
@@ -176,6 +195,8 @@ public final class PowerProfile {
         sustainedAmps = other.sustainedAmps;
         burstAmps = other.burstAmps;
         burstSeconds = other.burstSeconds;
+        rampStepAmps = other.rampStepAmps;
+        rampIntervalSeconds = other.rampIntervalSeconds;
         rampAmpsPerSecond = other.rampAmpsPerSecond;
         share = other.share;
         sag = other.sag;

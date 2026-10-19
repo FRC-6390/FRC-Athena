@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -39,7 +40,7 @@ class DeviceActionCompositionTest {
         assertInstanceOf(Actions.EncoderSetPosition.class, encoder.setPosition(1.0));
         assertInstanceOf(Actions.MotorPercent.class, MOTOR.percent(0.2));
         assertInstanceOf(Actions.DynamicMotorPercent.class, MOTOR.percent(() -> 0.2));
-        assertInstanceOf(Actions.MotorVoltage.class, MOTOR.voltage(2.0));
+        assertInstanceOf(Actions.MotorVoltage.class, MOTOR.voltage(Units.Volts.of(2.0)));
         assertInstanceOf(Actions.MotorNeutral.class, MOTOR.neutral());
     }
 }

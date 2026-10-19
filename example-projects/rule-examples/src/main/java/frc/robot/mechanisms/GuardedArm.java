@@ -17,15 +17,15 @@ import frc.robot.Constants;
 import java.util.function.BooleanSupplier;
 
 public final class GuardedArm implements Mechanism {
-    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 10).brake().currentLimit(30);
+    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 10).brake().currentLimit(edu.wpi.first.units.Units.Amps.of(30));
     private final DigitalInputDevice home = Constants.RIO.dio(1).digitalInput().inverted();
     private final DigitalInputDevice hardStop = Constants.RIO.dio(2).digitalInput().inverted();
-    private final Range travel = Range.degrees(0.0, 110.0);
+    private final Range travel = Range.of(edu.wpi.first.units.Units.Degrees.of(0.0), edu.wpi.first.units.Units.Degrees.of(110.0));
     private final SimModel simulation = SimModel.arm(motor)
             .encoder(motor.encoder())
             .range(travel)
-            .limit(home, travel.minimum())
-            .limit(hardStop, travel.maximum());
+            .limit(home, travel.minimumInUnit())
+            .limit(hardStop, travel.maximumInUnit());
     private final ControlBinding position = Controls.position(motor)
             .feedback(motor.encoder())
             .pid(0.72, 0.0, 0.0)

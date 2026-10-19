@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -40,9 +41,9 @@ class ActionArbitrationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
 
         for (Action conflicting : List.of(
-                Actions.parallel(ARM.percent(0.25), ARM.voltage(4.0)),
-                Actions.race(ARM.percent(0.25), ARM.voltage(4.0)),
-                Actions.deadline(Actions.waitSeconds(1.0).then(ARM.percent(0.25)), ARM.voltage(4.0)))) {
+                Actions.parallel(ARM.percent(0.25), ARM.voltage(Units.Volts.of(4.0))),
+                Actions.race(ARM.percent(0.25), ARM.voltage(Units.Volts.of(4.0))),
+                Actions.deadline(Actions.waitSeconds(1.0).then(ARM.percent(0.25)), ARM.voltage(Units.Volts.of(4.0))))) {
             IllegalArgumentException error = assertThrows(
                     IllegalArgumentException.class, () -> scheduler.request(conflicting));
             String message = error.getMessage();
@@ -78,7 +79,7 @@ class ActionArbitrationTest {
         SingleMotorMechanism mechanism = new SingleMotorMechanism(ARM, 0.0);
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
         Action dynamicConflict = Actions.compute(
-                () -> Actions.parallel(ARM.percent(0.20), ARM.voltage(4.0)), ARM);
+                () -> Actions.parallel(ARM.percent(0.20), ARM.voltage(Units.Volts.of(4.0))), ARM);
 
         scheduler.request(dynamicConflict);
         IllegalStateException error = assertThrows(
@@ -541,7 +542,7 @@ class ActionArbitrationTest {
     private static final class NamedConflictMechanism implements Mechanism {
         private final MotorDevice arm = ARM;
         private final Action firstAction = arm.percent(0.20);
-        private final Action secondAction = arm.voltage(4.0);
+        private final Action secondAction = arm.voltage(Units.Volts.of(4.0));
         private final Action offendingAction = Actions.parallel(firstAction, secondAction);
     }
 

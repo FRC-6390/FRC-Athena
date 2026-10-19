@@ -75,9 +75,9 @@ Good public API:
 SimModel.arm(pivotMotor)
         .encoder(pivotEncoder)
         .gearRatio(GearRatio.reduction(125.0, 1.0))
-        .lengthMeters(0.42)
-        .momentOfInertia(0.018)
-        .range(Range.of(-0.25, 1.75))
+        .length(Meters.of(0.42))
+        .momentOfInertia(KilogramSquareMeters.of(0.018))
+        .range(Range.of(Rotations.of(-0.25), Rotations.of(1.75)))
         .limit(lowerLimit, 0.0);
 ```
 
@@ -131,7 +131,8 @@ Normal robot periodic still owns action, hook, command, vision, and localization
 SimulationSession session = SimulationSession.create()
         .resetPose(new PoseSnapshot(0.0, 0.0, 0.0));
 
-session.drivePose(1.0, 0.0, 0.0, 0.02);
+session.drivePose(MetersPerSecond.of(1.0), MetersPerSecond.of(0.0),
+        RadiansPerSecond.of(0.0), Seconds.of(0.02));
 PoseSnapshot pose = session.pose();
 ```
 

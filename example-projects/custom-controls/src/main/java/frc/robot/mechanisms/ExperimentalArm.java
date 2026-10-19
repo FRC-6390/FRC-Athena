@@ -16,12 +16,12 @@ import frc.robot.Constants;
 public final class ExperimentalArm implements Mechanism {
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 20)
             .brake()
-            .currentLimit(40);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(40));
     private final SimModel simulation = SimModel.arm(motor)
             .encoder(motor.encoder())
             .gearRatio(GearRatio.reduction(100.0, 1.0))
-            .momentOfInertia(0.18)
-            .lengthMeters(0.55);
+            .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.18))
+            .length(edu.wpi.first.units.Units.Meters.of(0.55));
     private final ControlBinding arm = Controls.position(motor)
             .feedback(motor.encoder())
             .pid(0.96, 0.0, 0.024)

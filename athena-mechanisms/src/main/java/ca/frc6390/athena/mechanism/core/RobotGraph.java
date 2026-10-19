@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
@@ -446,17 +447,17 @@ final class RobotGraph {
         values.put(config + "/Supported", TelemetryValue.bool(() -> overrides.supportsMotorConfig(motor)));
         values.put(config + "/Restore", TelemetryValue.command(() -> overrides.restore(motor)));
         values.put(config + "/Status", TelemetryValue.string(() -> overrides.motorStatus(motor)));
-        values.put(state + "/PositionRotations", safeNumber(motor::positionRotations));
+        values.put(state + "/PositionRotations", safeNumber(() -> motor.position().in(edu.wpi.first.units.Units.Rotations)));
         values.put(state + "/VelocityRotationsPerSecond", safeNumber(motor::velocityRotationsPerSecond));
-        values.put(state + "/AppliedVoltage", safeNumber(motor::appliedVoltage));
+        values.put(state + "/AppliedVoltage", safeNumber(motor::appliedVoltageVolts));
         values.put(state + "/SupplyCurrentAmps", safeNumber(motor::supplyCurrentAmps));
         values.put(state + "/StatorCurrentAmps", safeNumber(motor::statorCurrentAmps));
         values.put(state + "/CommandMode", TelemetryValue.string(() -> motor.command().mode().name()));
         values.put(state + "/CommandValue", TelemetryValue.number(() -> motor.command().value()));
         // Thermal and power state. The temperature is the thermal model's estimate, the derate is the curve applied
         // to it, and the cap is the effective limit of the latest power cycle (0 when none). No hardware is read.
-        values.put(state + "/TemperatureCelsius", safeNumber(motor::temperatureCelsius));
-        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().derateFraction(motor.temperatureCelsius())));
+        values.put(state + "/TemperatureCelsius", safeNumber(motor::fusedTemperatureCelsius));
+        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().derateFractionCelsius(motor.fusedTemperatureCelsius())));
         values.put(state + "/PowerCapAmps", safeNumber(() -> overrides.powerCapAmps(motor)));
     }
 
@@ -509,7 +510,7 @@ final class RobotGraph {
         values.put(path + "/Health/Connected", TelemetryValue.bool(imu::isConnected));
         values.put(path + "/Health/Calibrating", TelemetryValue.bool(imu::isCalibrating));
         values.put(path + "/Health/LastUpdateSeconds", safeNumber(imu::lastUpdateSeconds));
-        values.put(path + "/Health/Fresh100ms", TelemetryValue.bool(() -> imu.isFresh(0.1)));
+        values.put(path + "/Health/Fresh100ms", TelemetryValue.bool(() -> imu.isFresh(edu.wpi.first.units.Units.Seconds.of(0.1))));
         values.put(path + "/Setup/RequestedYawDegrees", TelemetryValue.writableNumber(
                 () -> overrides.requestedImuYaw(imu), value -> overrides.requestedImuYaw(imu, value)));
         values.put(path + "/Setup/SetYaw", TelemetryValue.command(() ->

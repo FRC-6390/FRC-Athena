@@ -1,5 +1,7 @@
 package ca.frc6390.athena.hardware.signal;
 
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
 import java.util.Objects;
 
 /**
@@ -15,11 +17,14 @@ public final class ImuMount {
     }
 
     public static ImuMount identity() {
-        return rotationDegrees(0.0, 0.0, 0.0);
+        return new ImuMount(rotation(0.0, 0.0, 0.0));
     }
 
     /** Creates a mount from sensor roll, pitch, and yaw relative to the robot. */
-    public static ImuMount rotationDegrees(double rollDegrees, double pitchDegrees, double yawDegrees) {
+    public static ImuMount rotation(Angle roll, Angle pitch, Angle yaw) {
+        double rollDegrees = Objects.requireNonNull(roll, "roll").in(Units.Degrees);
+        double pitchDegrees = Objects.requireNonNull(pitch, "pitch").in(Units.Degrees);
+        double yawDegrees = Objects.requireNonNull(yaw, "yaw").in(Units.Degrees);
         if (!Double.isFinite(rollDegrees) || !Double.isFinite(pitchDegrees) || !Double.isFinite(yawDegrees)) {
             throw new IllegalArgumentException("IMU mount angles must be finite.");
         }
@@ -30,8 +35,8 @@ public final class ImuMount {
     }
 
     /** Creates a level mount rotated around the robot's up axis. */
-    public static ImuMount yawDegrees(double yawDegrees) {
-        return rotationDegrees(0.0, 0.0, yawDegrees);
+    public static ImuMount yaw(Angle yaw) {
+        return rotation(Units.Degrees.of(0.0), Units.Degrees.of(0.0), yaw);
     }
 
     /** Begins a cardinal mount declaration using the sensor direction that points robot-forward. */

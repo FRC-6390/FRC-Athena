@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -57,8 +58,8 @@ class ControlBindingTest {
                 .constraint(Constraints.clamp(2.0));
 
         assertSame(angular, control.sink());
-        assertEquals(-Math.PI, control.continuousRange().minimum(), 1.0e-9);
-        assertEquals(Math.PI, control.continuousRange().maximum(), 1.0e-9);
+        assertEquals(-Math.PI, control.continuousRange().minimumInUnit(), 1.0e-9);
+        assertEquals(Math.PI, control.continuousRange().maximumInUnit(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> control.continuous(1.0, 1.0));
         assertThrows(IllegalStateException.class,
                 () -> Controls.velocity(angular).continuous(-Math.PI, Math.PI));
@@ -247,7 +248,7 @@ class ControlBindingTest {
                 .feedback(encoder)
                 .pid(0.2, 0.01, 0.03)
                 .ff(0.1, 0.2, 0.3)
-                .constraint(Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-1.0, 1.0)))
+                .constraint(Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-1.0), Units.Value.of(1.0))))
                 .dependency(encoder);
 
         ControlBinding<?> copied = original.follower(follower).slot(2);

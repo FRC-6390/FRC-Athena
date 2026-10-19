@@ -90,7 +90,7 @@ public final class PidGains implements ControlLoop, TelemetrySource {
                     .outputRange(-MAX_OUTPUT_VOLTS, MAX_OUTPUT_VOLTS);
             controller = continuousRange == null
                     ? configured
-                    : configured.continuous(continuousRange.minimum(), continuousRange.maximum());
+                    : configured.continuous(continuousRange.minimumInUnit(), continuousRange.maximumInUnit());
         }
 
         @Override public void reset(ControlLoopContext context) {

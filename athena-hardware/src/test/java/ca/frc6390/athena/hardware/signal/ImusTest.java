@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import edu.wpi.first.units.Units;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -12,21 +13,21 @@ class ImusTest {
     @Test
     void relativeSourceMaintainsIndependentHeadingOffset() {
         double[] yaw = {35.0};
-        ImuSource physical = Imus.yaw(() -> yaw[0]);
+        ImuSource physical = Imus.yaw(() -> Units.Degrees.of(yaw[0]));
         ImuSource relative = physical.relative();
 
         assertEquals(0.0, relative.yawDegrees(), 1.0e-9);
         yaw[0] = 50.0;
         assertEquals(15.0, relative.yawDegrees(), 1.0e-9);
 
-        relative.applyYaw(ActionContext.empty(), -10.0);
+        relative.applyYawDegrees(ActionContext.empty(), -10.0);
         assertEquals(-10.0, relative.yawDegrees(), 1.0e-9);
         assertEquals(50.0, physical.yawDegrees(), 1.0e-9);
     }
 
     @Test
     void yawOnlySourceRejectsMeasurementsItDoesNotProvide() {
-        ImuSource source = Imus.yaw(() -> 12.0);
+        ImuSource source = Imus.yaw(() -> Units.Degrees.of(12.0));
 
         assertThrows(UnsupportedOperationException.class, source::pitchDegrees);
         assertThrows(UnsupportedOperationException.class, source::linearAccelerationXG);
@@ -47,7 +48,7 @@ class ImusTest {
         assertEquals(-0.3, inverted.linearAccelerationZG(), 1.0e-9);
         assertEquals(physical.dependencies(), inverted.dependencies());
 
-        inverted.applyYaw(ActionContext.empty(), 25.0);
+        inverted.applyYawDegrees(ActionContext.empty(), 25.0);
         assertEquals(-25.0, physical.requestedYaw, 1.0e-9);
         assertSame(physical, inverted.inverted());
         assertSame(physical, physical.inverted(false));
@@ -70,7 +71,7 @@ class ImusTest {
         assertEquals(0.1, transformed.linearAccelerationYG(), 1.0e-9);
         assertEquals(-0.3, transformed.linearAccelerationZG(), 1.0e-9);
 
-        transformed.applyYaw(ActionContext.empty(), 25.0);
+        transformed.applyYawDegrees(ActionContext.empty(), 25.0);
         assertEquals(-25.0, physical.requestedYaw, 1.0e-9);
     }
 
@@ -81,7 +82,7 @@ class ImusTest {
         physical.angle = 840.0;
         physical.rollRate = 1.0;
         physical.accelerationX = 1.0;
-        ImuSource mounted = physical.mounting(ImuMount.yawDegrees(90.0));
+        ImuSource mounted = physical.mounting(ImuMount.yaw(Units.Degrees.of(90.0)));
 
         assertEquals(30.0, mounted.yawDegrees(), 1.0e-9);
         assertEquals(750.0, mounted.angleDegrees(), 1.0e-9);
@@ -92,7 +93,7 @@ class ImusTest {
         assertEquals(0.0, mounted.linearAccelerationXG(), 1.0e-9);
         assertEquals(1.0, mounted.linearAccelerationYG(), 1.0e-9);
 
-        mounted.applyYaw(ActionContext.empty(), 20.0);
+        mounted.applyYawDegrees(ActionContext.empty(), 20.0);
         assertEquals(110.0, physical.requestedYaw, 1.0e-9);
     }
 
@@ -119,14 +120,14 @@ class ImusTest {
         assertEquals(true, derived.isConnected());
         assertEquals(false, derived.isCalibrating());
         assertEquals(physical.updated, derived.lastUpdateSeconds(), 1.0e-9);
-        assertEquals(true, derived.isFresh(0.1));
+        assertEquals(true, derived.isFresh(Units.Seconds.of(0.1)));
 
         physical.calibrating = true;
-        assertEquals(false, derived.isFresh(0.1));
+        assertEquals(false, derived.isFresh(Units.Seconds.of(0.1)));
         physical.calibrating = false;
         physical.updated -= 1.0;
-        assertEquals(false, derived.isFresh(0.1));
-        assertThrows(IllegalArgumentException.class, () -> derived.isFresh(-0.1));
+        assertEquals(false, derived.isFresh(Units.Seconds.of(0.1)));
+        assertThrows(IllegalArgumentException.class, () -> derived.isFresh(Units.Seconds.of(-0.1)));
     }
 
     private static final class RecordingSource implements ImuSource {
@@ -144,7 +145,7 @@ class ImusTest {
         @Override public double linearAccelerationYG() { return -0.2; }
         @Override public double linearAccelerationZG() { return 0.3; }
         @Override public List<?> dependencies() { return List.of(dependency); }
-        @Override public void applyYaw(ActionContext context, double yawDegrees) { requestedYaw = yawDegrees; }
+        @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { requestedYaw = yawDegrees; }
     }
 
     private static final class MutableSource implements ImuSource {
@@ -174,6 +175,6 @@ class ImusTest {
         @Override public boolean isConnected() { return connected; }
         @Override public boolean isCalibrating() { return calibrating; }
         @Override public double lastUpdateSeconds() { return updated; }
-        @Override public void applyYaw(ActionContext context, double yawDegrees) { requestedYaw = yawDegrees; }
+        @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { requestedYaw = yawDegrees; }
     }
 }

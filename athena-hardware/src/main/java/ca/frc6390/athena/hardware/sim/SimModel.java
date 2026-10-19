@@ -6,6 +6,13 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.LinearVelocity;
+import edu.wpi.first.units.measure.MomentOfInertia;
+import edu.wpi.first.units.measure.Time;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -13,7 +20,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.Set;
 
 /**
@@ -25,8 +31,8 @@ import java.util.Set;
  */
 public final class SimModel {
     private final BuiltIn kind;
-    private final OptionalDouble momentOfInertia;
-    private final OptionalDouble lengthMeters;
+    private final Optional<MomentOfInertia> momentOfInertia;
+    private final Optional<Distance> length;
     private final GearRatio gearRatio;
     private final boolean simulatesGravity;
     private final List<MotorDevice> directMotors;
@@ -40,8 +46,8 @@ public final class SimModel {
 
     private SimModel(
             BuiltIn kind,
-            OptionalDouble momentOfInertia,
-            OptionalDouble lengthMeters,
+            Optional<MomentOfInertia> momentOfInertia,
+            Optional<Distance> length,
             GearRatio gearRatio,
             boolean simulatesGravity,
             List<MotorDevice> motors,
@@ -53,8 +59,8 @@ public final class SimModel {
             RuntimeFactory runtimeFactory,
             SimPlant plant) {
         this.kind = kind;
-        this.momentOfInertia = momentOfInertia == null ? OptionalDouble.empty() : momentOfInertia;
-        this.lengthMeters = lengthMeters == null ? OptionalDouble.empty() : lengthMeters;
+        this.momentOfInertia = momentOfInertia == null ? Optional.empty() : momentOfInertia;
+        this.length = length == null ? Optional.empty() : length;
         this.gearRatio = gearRatio;
         this.simulatesGravity = simulatesGravity;
         directMotors = motors == null ? List.of() : List.copyOf(motors);
@@ -118,8 +124,8 @@ public final class SimModel {
     private static SimModel leaf(BuiltIn kind, boolean gravity) {
         return new SimModel(
                 Objects.requireNonNull(kind, "kind"),
-                OptionalDouble.empty(),
-                OptionalDouble.empty(),
+                Optional.empty(),
+                Optional.empty(),
                 null,
                 gravity,
                 List.of(),
@@ -132,8 +138,9 @@ public final class SimModel {
                 null);
     }
 
-    public SimModel momentOfInertia(double value) {
-        return copy(OptionalDouble.of(value), lengthMeters, gearRatio, simulatesGravity,
+    /** Declares the simulated mechanism's moment of inertia about its motion axis. */
+    public SimModel momentOfInertia(MomentOfInertia value) {
+        return copy(Optional.of(Objects.requireNonNull(value, "momentOfInertia")), length, gearRatio, simulatesGravity,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);
     }
 
@@ -143,8 +150,8 @@ public final class SimModel {
      */
     public SimModel model(SimDynamicsSource source) {
         Objects.requireNonNull(source, "source");
-        OptionalDouble inertia = source.momentOfInertia();
-        SimModel updated = inertia.isPresent() ? momentOfInertia(inertia.getAsDouble()) : this;
+        Optional<MomentOfInertia> inertia = source.momentOfInertia();
+        SimModel updated = inertia.isPresent() ? momentOfInertia(inertia.get()) : this;
         Optional<SimPlant> identified = source.plant();
         return identified.isPresent() ? updated.withPlant(identified.get()) : updated;
     }
@@ -153,7 +160,7 @@ public final class SimModel {
         if (kind == null) {
             throw new IllegalStateException("Provider-backed physics options can only be applied to a leaf model.");
         }
-        return new SimModel(kind, momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+        return new SimModel(kind, momentOfInertia, length, gearRatio, simulatesGravity,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs, children, runtimeFactory,
                 Objects.requireNonNull(value, "plant"));
     }
@@ -167,25 +174,26 @@ public final class SimModel {
         return Optional.ofNullable(plant);
     }
 
-    public SimModel lengthMeters(double value) {
-        return copy(momentOfInertia, OptionalDouble.of(value), gearRatio, simulatesGravity,
+    /** Declares the simulated arm length, from the pivot to the center of mass. */
+    public SimModel length(Distance value) {
+        return copy(momentOfInertia, Optional.of(Objects.requireNonNull(value, "length")), gearRatio, simulatesGravity,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);
     }
 
     public SimModel gearRatio(GearRatio value) {
-        return copy(momentOfInertia, lengthMeters, Objects.requireNonNull(value, "gearRatio"), simulatesGravity,
+        return copy(momentOfInertia, length, Objects.requireNonNull(value, "gearRatio"), simulatesGravity,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);
     }
 
     public SimModel gravity(boolean value) {
-        return copy(momentOfInertia, lengthMeters, gearRatio, value,
+        return copy(momentOfInertia, length, gearRatio, value,
                 directMotors, directEncoders, range, directLimits, directDigitalInputs);
     }
 
     public SimModel withMotor(MotorDevice motor) {
         List<MotorDevice> updated = new ArrayList<>(directMotors);
         updated.add(Objects.requireNonNull(motor, "motor"));
-        return copy(momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+        return copy(momentOfInertia, length, gearRatio, simulatesGravity,
                 updated, directEncoders, range, directLimits, directDigitalInputs);
     }
 
@@ -202,20 +210,20 @@ public final class SimModel {
     public SimModel encoder(EncoderDevice encoder) {
         List<EncoderDevice> updated = new ArrayList<>(directEncoders);
         updated.add(Objects.requireNonNull(encoder, "encoder"));
-        return copy(momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+        return copy(momentOfInertia, length, gearRatio, simulatesGravity,
                 directMotors, updated, range, directLimits, directDigitalInputs);
     }
 
     /**
-     * Limits the simulated mechanism's travel. Plants work in mechanism rotations, so a degree range
-     * ({@link Range#degrees}) is converted; rotation and unitless ranges are used as given.
+     * Limits the simulated mechanism's travel. Plants work in mechanism rotations, so a range declared in
+     * degrees is converted to rotations; other ranges are used as given.
      */
     public SimModel range(Range range) {
         Objects.requireNonNull(range, "range");
-        Range plantRange = "deg".equals(range.unit())
-                ? Range.rotations(range.minimum() / 360.0, range.maximum() / 360.0)
+        Range plantRange = range.unit() == Units.Degrees
+                ? Range.of(Units.Rotations.of(range.minimumInUnit() / 360.0), Units.Rotations.of(range.maximumInUnit() / 360.0))
                 : range;
-        return copy(momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+        return copy(momentOfInertia, length, gearRatio, simulatesGravity,
                 directMotors, directEncoders, plantRange, directLimits, directDigitalInputs);
     }
 
@@ -226,13 +234,13 @@ public final class SimModel {
     public SimModel limit(DigitalInputDevice sensor, double position, double tolerance) {
         List<SimLimit> updated = new ArrayList<>(directLimits);
         updated.add(new SimLimit(sensor, position, tolerance));
-        return copy(momentOfInertia, lengthMeters, gearRatio, simulatesGravity,
+        return copy(momentOfInertia, length, gearRatio, simulatesGravity,
                 directMotors, directEncoders, range, updated, directDigitalInputs);
     }
 
     private SimModel copy(
-            OptionalDouble momentOfInertia,
-            OptionalDouble lengthMeters,
+            Optional<MomentOfInertia> momentOfInertia,
+            Optional<Distance> length,
             GearRatio gearRatio,
             boolean gravity,
             List<MotorDevice> motors,
@@ -243,7 +251,7 @@ public final class SimModel {
         if (kind == null) {
             throw new IllegalStateException("Provider-backed physics options can only be applied to a leaf model.");
         }
-        return new SimModel(kind, momentOfInertia, lengthMeters, gearRatio, gravity,
+        return new SimModel(kind, momentOfInertia, length, gearRatio, gravity,
                 motors, encoders, range, limits, digitalInputs, children, runtimeFactory, plant);
     }
 
@@ -322,12 +330,14 @@ public final class SimModel {
         ELEVATOR
     }
 
-    public OptionalDouble momentOfInertia() {
+    /** Returns the declared moment of inertia, when present. */
+    public Optional<MomentOfInertia> momentOfInertia() {
         return momentOfInertia;
     }
 
-    public OptionalDouble lengthMeters() {
-        return lengthMeters;
+    /** Returns the declared arm length, when present. */
+    public Optional<Distance> length() {
+        return length;
     }
 
     public GearRatio gearRatio() {
@@ -347,25 +357,31 @@ public final class SimModel {
     public interface Context {
         MotorCommand command(MotorDevice motor);
 
-        double motorPosition(MotorDevice motor);
+        /** Integrated motor position, as an angle of the motor shaft. */
+        Angle motorPosition(MotorDevice motor);
 
-        double motorVelocity(MotorDevice motor);
+        /** Integrated motor velocity. */
+        AngularVelocity motorVelocity(MotorDevice motor);
 
-        void motorState(MotorDevice motor, double position, double velocity);
+        void motorState(MotorDevice motor, Angle position, AngularVelocity velocity);
 
-        double encoderPosition(EncoderDevice encoder);
+        /** Raw encoder position in sensor revolutions. */
+        Angle encoderPosition(EncoderDevice encoder);
 
-        double encoderAbsolutePosition(EncoderDevice encoder);
+        /** Raw absolute encoder position in sensor revolutions. */
+        Angle encoderAbsolutePosition(EncoderDevice encoder);
 
-        double encoderVelocity(EncoderDevice encoder);
+        /** Raw encoder velocity. */
+        AngularVelocity encoderVelocity(EncoderDevice encoder);
 
-        void encoderState(EncoderDevice encoder, double position, double absolutePosition, double velocity);
+        void encoderState(EncoderDevice encoder, Angle position, Angle absolutePosition, AngularVelocity velocity);
 
         void digitalInput(DigitalInputDevice input, boolean active);
 
         PoseSnapshot pose();
 
-        void advancePose(double fieldXVelocity, double fieldYVelocity, double angularVelocity, double seconds);
+        void advancePose(LinearVelocity fieldXVelocity, LinearVelocity fieldYVelocity,
+                AngularVelocity angularVelocity, Time seconds);
     }
 
     /** Last command applied to a simulated motor. */
@@ -439,8 +455,8 @@ public final class SimModel {
         public SimModel build() {
             return new SimModel(
                     null,
-                    OptionalDouble.empty(),
-                    OptionalDouble.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
                     null,
                     false,
                     List.copyOf(motors),

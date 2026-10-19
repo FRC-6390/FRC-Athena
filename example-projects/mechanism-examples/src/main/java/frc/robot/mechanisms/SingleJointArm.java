@@ -47,7 +47,7 @@ public final class SingleJointArm implements Mechanism {
             0.0, 0.0, 0.0,
             0.0195, 0.12, 1, List.of("KRAKEN_X60"), 10.0, Map.of(), 0.0, 0);
 
-    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 10).brake().currentLimit(30);
+    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 10).brake().currentLimit(edu.wpi.first.units.Units.Amps.of(30));
     private final EncoderDevice encoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 10).measures(Degrees);
 
     /** The base declaration: typed feedback, gains, constraints, and motion policies. */

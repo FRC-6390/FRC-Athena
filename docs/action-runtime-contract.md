@@ -80,9 +80,9 @@ disable) and by `ActionRegressionTest`.
 
 - `Actions.untilStalled(signal, action)`, `deviceAction.untilStalled(signal)`, and the
   `Sequence`/`Cycle` `untilStalled(signal, action)` steps run an action until the motor's
-  stall detector trips. The debounce window (`signal.forSeconds(...)`) restarts every time
+  stall detector trips. The debounce window (`signal.forTime(...)`) restarts every time
   the action starts, so one detector can be shared by several actions.
-- Typical homing: `Actions.sequence().untilStalled(motor.stall(), arm.voltage(-2.0))
+- Typical homing: `Actions.sequence().untilStalled(motor.stall(), arm.voltage(Volts.of(-2.0)))
   .doOnce(motor.encoder().setPosition(0.0)).then(arm.neutral())`.
 - `Events.when(signal).rising()` remains available for robot-wide stall reactions.
 

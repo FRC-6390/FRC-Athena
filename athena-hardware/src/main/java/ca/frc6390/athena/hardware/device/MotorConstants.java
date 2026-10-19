@@ -1,6 +1,12 @@
 package ca.frc6390.athena.hardware.device;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Resistance;
+import edu.wpi.first.units.measure.Torque;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.Optional;
 
 /**
@@ -10,71 +16,64 @@ import java.util.Optional;
  * characteristic: {@code R = Vnom / stallCurrent}, {@code Kt = stallTorque / stallCurrent} and the
  * speed constant {@code Kv = freeSpeed / (Vnom - R * freeCurrent)}. Built-in constants are
  * datasheet-level approximations. They are good enough for stall gating and motor-effort estimates,
- * not for exact simulation, and teams can supply their own with {@link #of(double, double, double, double)}.</p>
+ * not for exact simulation, and teams can supply their own with {@link #of(Torque, Current, Current, AngularVelocity)}.</p>
  *
- * @param stallTorqueNm stall torque in newton-metres
- * @param stallCurrentAmps stall current in amps
- * @param freeCurrentAmps no-load current in amps
- * @param freeSpeedRadPerSec no-load speed in radians per second
+ * <p>Torque constant and speed constant have no WPILib unit (newton-metres per amp, radians per second
+ * per volt). Their accessors are per-cycle primitives in those units, documented below.</p>
+ *
+ * @param stallTorque stall torque
+ * @param stallCurrent stall current
+ * @param freeCurrent no-load current
+ * @param freeSpeed no-load speed
  * @param nominalVoltage voltage the stall and free points were measured at
- * @param resistanceOhms winding resistance
- * @param torqueConstant torque per amp, newton-metres per amp
- * @param speedConstant no-load speed per volt of back-EMF, radians per second per volt
+ * @param resistance winding resistance
  */
 public record MotorConstants(
-        double stallTorqueNm,
-        double stallCurrentAmps,
-        double freeCurrentAmps,
-        double freeSpeedRadPerSec,
-        double nominalVoltage,
-        double resistanceOhms,
-        double torqueConstant,
-        double speedConstant) {
+        Torque stallTorque,
+        Current stallCurrent,
+        Current freeCurrent,
+        AngularVelocity freeSpeed,
+        Voltage nominalVoltage,
+        Resistance resistance) {
 
     /** Nominal battery voltage used by the published characteristics. */
-    public static final double NOMINAL_VOLTAGE = 12.0;
+    public static final Voltage NOMINAL_VOLTAGE = Units.Volts.of(12.0);
 
     public MotorConstants {
-        requirePositive(stallTorqueNm, "stall torque");
-        requirePositive(stallCurrentAmps, "stall current");
-        requireNonNegative(freeCurrentAmps, "free current");
-        requirePositive(freeSpeedRadPerSec, "free speed");
-        requirePositive(nominalVoltage, "nominal voltage");
-        requirePositive(resistanceOhms, "resistance");
-        requirePositive(torqueConstant, "torque constant");
-        requirePositive(speedConstant, "speed constant");
+        requirePositive(stallTorque.in(Units.NewtonMeters), "stall torque");
+        requirePositive(stallCurrent.in(Units.Amps), "stall current");
+        requireNonNegative(freeCurrent.in(Units.Amps), "free current");
+        requirePositive(freeSpeed.in(Units.RadiansPerSecond), "free speed");
+        requirePositive(nominalVoltage.in(Units.Volts), "nominal voltage");
+        requirePositive(resistance.in(Units.Ohms), "resistance");
     }
 
     /**
-     * Derives the full constant set from the published stall and free-run points at 12 V.
+     * Derives the full constant set from the published stall and free-run points at 12 V. The
+     * resistance is derived from the stall point and the nominal voltage.
      *
-     * @param stallTorqueNm stall torque in newton-metres
-     * @param stallCurrentAmps stall current in amps
-     * @param freeCurrentAmps no-load current in amps
-     * @param freeSpeedRpm no-load speed in revolutions per minute
+     * @param stallTorque stall torque
+     * @param stallCurrent stall current
+     * @param freeCurrent no-load current
+     * @param freeSpeed no-load speed
      * @return constants for the motor
      */
-    public static MotorConstants of(
-            double stallTorqueNm,
-            double stallCurrentAmps,
-            double freeCurrentAmps,
-            double freeSpeedRpm) {
-        requirePositive(stallCurrentAmps, "stall current");
-        double resistance = NOMINAL_VOLTAGE / stallCurrentAmps;
-        double freeSpeed = freeSpeedRpm * 2.0 * Math.PI / 60.0;
-        double backEmfAtFree = NOMINAL_VOLTAGE - resistance * freeCurrentAmps;
+    public static MotorConstants of(Torque stallTorque, Current stallCurrent, Current freeCurrent,
+            AngularVelocity freeSpeed) {
+        requirePositive(stallCurrent.in(Units.Amps), "stall current");
+        double nominalVolts = NOMINAL_VOLTAGE.in(Units.Volts);
+        double resistanceOhms = nominalVolts / stallCurrent.in(Units.Amps);
+        double backEmfAtFree = nominalVolts - resistanceOhms * freeCurrent.in(Units.Amps);
         if (backEmfAtFree <= 0.0) {
             throw new IllegalArgumentException("Free current is too high for the stall current.");
         }
         return new MotorConstants(
-                stallTorqueNm,
-                stallCurrentAmps,
-                freeCurrentAmps,
+                stallTorque,
+                stallCurrent,
+                freeCurrent,
                 freeSpeed,
                 NOMINAL_VOLTAGE,
-                resistance,
-                stallTorqueNm / stallCurrentAmps,
-                freeSpeed / backEmfAtFree);
+                Units.Ohms.of(resistanceOhms));
     }
 
     /**
@@ -88,22 +87,61 @@ public record MotorConstants(
     }
 
     /**
+     * Returns the motor-side torque produced by a current.
+     *
+     * @param current motor current
+     * @return torque, {@code current * Kt}
+     */
+    public Torque torqueAt(Current current) {
+        return Units.NewtonMeters.of(current.in(Units.Amps) * torqueConstantNmPerAmp());
+    }
+
+    /**
      * Returns the no-load speed the applied voltage would produce, ignoring load.
      *
      * <p>The winding drop uses the free-run current rather than the measured current. At a true
      * stall the back-EMF is zero, so a drop computed from the measured current would predict zero
      * speed and hide the stall.</p>
      *
-     * @param appliedVolts voltage applied to the motor
-     * @return expected unloaded speed in radians per second, may be negative for very low voltage
+     * @param appliedVoltage voltage applied to the motor; may be negative for very low voltage
+     * @return expected unloaded speed
      */
-    public double expectedUnloadedSpeedRadPerSec(double appliedVolts) {
-        return (appliedVolts - freeCurrentAmps * resistanceOhms) * speedConstant;
+    public AngularVelocity expectedUnloadedSpeed(Voltage appliedVoltage) {
+        return Units.RadiansPerSecond.of(expectedUnloadedSpeedRadPerSec(appliedVoltage.in(Units.Volts)));
     }
 
-    /** Returns the motor-side torque produced by a current, in newton-metres. */
-    public double torqueAt(double currentAmps) {
-        return currentAmps * torqueConstant;
+    /**
+     * Per-cycle primitive for {@link #expectedUnloadedSpeed(Voltage)}, in radians per second and volts.
+     * Athena's hot paths call this to avoid allocating measures; teams should use the typed method.
+     *
+     * @param appliedVolts applied voltage in volts
+     * @return expected unloaded speed in radians per second
+     */
+    public double expectedUnloadedSpeedRadPerSec(double appliedVolts) {
+        return (appliedVolts - freeCurrent.in(Units.Amps) * resistance.in(Units.Ohms))
+                * speedConstantRadPerSecPerVolt();
+    }
+
+    /**
+     * Per-cycle primitive: torque constant {@code Kt = stallTorque / stallCurrent}, newton-metres per amp.
+     * No WPILib unit exists for this ratio.
+     *
+     * @return torque constant in newton-metres per amp
+     */
+    public double torqueConstantNmPerAmp() {
+        return stallTorque.in(Units.NewtonMeters) / stallCurrent.in(Units.Amps);
+    }
+
+    /**
+     * Per-cycle primitive: speed constant {@code Kv}, radians per second per volt of back-EMF.
+     * No WPILib unit exists for this ratio.
+     *
+     * @return speed constant in radians per second per volt
+     */
+    public double speedConstantRadPerSecPerVolt() {
+        double backEmfAtFree = nominalVoltage.in(Units.Volts)
+                - resistance.in(Units.Ohms) * freeCurrent.in(Units.Amps);
+        return freeSpeed.in(Units.RadiansPerSecond) / backEmfAtFree;
     }
 
     private static void requirePositive(double value, String name) {

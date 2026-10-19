@@ -17,7 +17,7 @@ public final class Flywheel implements Mechanism {
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 21);
     private final SimModel simulation = SimModel.flywheel(motor)
             .encoder(motor.encoder())
-            .momentOfInertia(0.006);
+            .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.006));
     private final ControlBinding devicePid = Controls.velocity(motor)
             .feedback(motor.encoder())
             .slot(1)

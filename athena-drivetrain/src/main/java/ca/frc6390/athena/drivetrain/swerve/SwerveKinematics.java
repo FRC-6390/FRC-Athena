@@ -251,10 +251,10 @@ public final class SwerveKinematics implements SimModel.Source {
                 robot.yMetersPerSecond() * seconds,
                 robot.angularRadiansPerSecond() * seconds));
         context.advancePose(
-                (next.getX() - current.getX()) / seconds,
-                (next.getY() - current.getY()) / seconds,
-                robot.angularRadiansPerSecond(),
-                seconds);
+                Units.MetersPerSecond.of((next.getX() - current.getX()) / seconds),
+                Units.MetersPerSecond.of((next.getY() - current.getY()) / seconds),
+                Units.RadiansPerSecond.of(robot.angularRadiansPerSecond()),
+                Units.Seconds.of(seconds));
     }
 
     private void synchronizeModuleSensors(
@@ -269,22 +269,24 @@ public final class SwerveKinematics implements SimModel.Source {
             double rawDriveVelocity = driveDistance.rotationsFromPosition(Meters.of(state.speedMetersPerSecond()))
                     - driveDistance.rotationsFromPosition(Meters.of(0.0));
             drivePositions[index] += rawDriveVelocity * seconds;
-            context.motorState(module.drive.get(), drivePositions[index], rawDriveVelocity);
+            context.motorState(module.drive.get(), Units.Rotations.of(drivePositions[index]),
+                    Units.RotationsPerSecond.of(rawDriveVelocity));
             context.encoderState(
                     driveDistance,
-                    drivePositions[index],
-                    drivePositions[index],
-                    rawDriveVelocity);
+                    Units.Rotations.of(drivePositions[index]),
+                    Units.Rotations.of(drivePositions[index]),
+                    Units.RotationsPerSecond.of(rawDriveVelocity));
 
             EncoderDevice angle = module.angle.get();
             double rawAngle = angle.rotationsFromPosition(Rotations.of(state.angleRotations()));
-            double previousAngle = context.encoderPosition(angle);
-            context.encoderState(angle, rawAngle, rawAngle, (rawAngle - previousAngle) / seconds);
+            double previousAngle = context.encoderPosition(angle).in(Units.Rotations);
+            context.encoderState(angle, Units.Rotations.of(rawAngle), Units.Rotations.of(rawAngle),
+                    Units.RotationsPerSecond.of((rawAngle - previousAngle) / seconds));
             double steerPosition = rawAngle * module.model().steerReduction();
             context.motorState(
                     module.steer.get(),
-                    steerPosition,
-                    (rawAngle - previousAngle) * module.model().steerReduction() / seconds);
+                    Units.Rotations.of(steerPosition),
+                    Units.RotationsPerSecond.of((rawAngle - previousAngle) * module.model().steerReduction() / seconds));
         }
     }
 
@@ -302,7 +304,7 @@ public final class SwerveKinematics implements SimModel.Source {
         private SwerveSimulationRuntime(SimModel.Context context) {
             this.context = context;
             for (int index = 0; index < modules.size(); index++) {
-                drivePositions[index] = context.encoderPosition(distanceEncoder(modules.get(index).module()));
+                drivePositions[index] = context.encoderPosition(distanceEncoder(modules.get(index).module())).in(Units.Rotations);
             }
         }
 
@@ -334,7 +336,7 @@ public final class SwerveKinematics implements SimModel.Source {
             case VELOCITY -> command.value();
             case PERCENT -> command.value() * maxSpeedMetersPerSecond;
             case VOLTAGE -> command.value() / 12.0 * maxSpeedMetersPerSecond;
-            case POSITION, NEUTRAL -> context.motorVelocity(module.drive.get())
+            case POSITION, NEUTRAL -> context.motorVelocity(module.drive.get()).in(Units.RotationsPerSecond)
                     * Math.PI
                     * module.model().wheelDiameter().in(Meters);
         };
@@ -345,7 +347,7 @@ public final class SwerveKinematics implements SimModel.Source {
         if (command.mode() == SimModel.CommandMode.POSITION) {
             return command.value();
         }
-        return context.encoderAbsolutePosition(module.angle.get());
+        return context.encoderAbsolutePosition(module.angle.get()).in(Units.Rotations);
     }
 
     private static void accumulate(

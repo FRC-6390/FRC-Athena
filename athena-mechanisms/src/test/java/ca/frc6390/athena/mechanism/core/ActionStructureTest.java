@@ -21,7 +21,7 @@ class ActionStructureTest {
 
     private static List<Case> composites() {
         Action leaf = MOTOR.percent(0.2);
-        Action other = MOTOR.voltage(3.0);
+        Action other = MOTOR.voltage(Units.Volts.of(3.0));
         ControlBinding<?> position = Controls.position(MOTOR);
         return List.of(
                 new Case("sequence steps and then",
@@ -95,7 +95,7 @@ class ActionStructureTest {
     @Test
     void sequenceReportsEveryStepAndTheContinuation() {
         Action first = MOTOR.percent(0.2);
-        Action second = MOTOR.voltage(3.0);
+        Action second = MOTOR.voltage(Units.Volts.of(3.0));
         Action continuation = MOTOR.neutral();
         Actions.Sequence sequence = Actions.sequence().run(first).run(second).then(continuation);
 
@@ -131,7 +131,7 @@ class ActionStructureTest {
     void childRolesAreNeverNull() {
         List<String> roles = new ArrayList<>();
         roles.addAll(roles(Actions.sequence().run(MOTOR.percent(0.2)).then(MOTOR.neutral())));
-        roles.addAll(roles(Actions.deadline(MOTOR.percent(0.2), MOTOR.voltage(1.0))));
+        roles.addAll(roles(Actions.deadline(MOTOR.percent(0.2), MOTOR.voltage(Units.Volts.of(1.0)))));
         assertTrue(roles.stream().noneMatch(role -> role == null || role.isBlank()));
     }
 

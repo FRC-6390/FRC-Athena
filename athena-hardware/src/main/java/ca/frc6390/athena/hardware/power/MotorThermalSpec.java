@@ -2,6 +2,7 @@ package ca.frc6390.athena.hardware.power;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.MotorSpec;
+import edu.wpi.first.units.Units;
 
 /**
  * Nominal electrical and thermal constants used by Athena's motor model.
@@ -46,7 +47,7 @@ public record MotorThermalSpec(
 
     /** Returns the default derate curve: full limit until 30 C below the rated winding temperature, then to 50 percent. */
     public Thermal defaultDerate() {
-        return new Thermal(maxWindingCelsius - 30.0, maxWindingCelsius, 0.5);
+        return new Thermal(Units.Celsius.of(maxWindingCelsius - 30.0), Units.Celsius.of(maxWindingCelsius), 0.5);
     }
 
     /**

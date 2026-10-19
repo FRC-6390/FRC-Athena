@@ -193,7 +193,7 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     }
 
     private static double momentOfInertia(SimModel model) {
-        return Math.max(1.0e-6, model.momentOfInertia().orElse(DEFAULT_MOI));
+        return Math.max(1.0e-6, model.momentOfInertia().map(inertia -> inertia.in(edu.wpi.first.units.Units.KilogramSquareMeters)).orElse(DEFAULT_MOI));
     }
 
     private static Range range(SimModel model, Range fallback) {
@@ -307,15 +307,15 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         private final SingleJointedArmSim sim;
 
         private ArmAdapter(SimModel model) {
-            Range range = range(model, Range.rotations(-0.5, 0.5));
+            Range range = range(model, Range.of(edu.wpi.first.units.Units.Rotations.of(-0.5), edu.wpi.first.units.Units.Rotations.of(0.5)));
             DCMotor gearbox = gearbox(model);
             sim = new SingleJointedArmSim(
                     gearbox,
                     gearing(model),
                     momentOfInertia(model),
-                    model.lengthMeters().orElse(DEFAULT_ARM_LENGTH_METERS),
-                    rotationsToRadians(range.minimum()),
-                    rotationsToRadians(range.maximum()),
+                    model.length().map(length -> length.in(edu.wpi.first.units.Units.Meters)).orElse(DEFAULT_ARM_LENGTH_METERS),
+                    rotationsToRadians(range.minimumInUnit()),
+                    rotationsToRadians(range.maximumInUnit()),
                     model.simulatesGravity(),
                     rotationsToRadians(range.clamp(0.0)));
         }
@@ -334,14 +334,14 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         private final ElevatorSim sim;
 
         private ElevatorAdapter(SimModel model) {
-            Range range = range(model, Range.of(0.0, 1.0));
+            Range range = range(model, Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.0)));
             sim = new ElevatorSim(
                     gearbox(model),
                     gearing(model),
                     DEFAULT_ELEVATOR_MASS_KG,
                     DEFAULT_ELEVATOR_DRUM_RADIUS_METERS,
-                    range.minimum(),
-                    range.maximum(),
+                    range.minimumInUnit(),
+                    range.maximumInUnit(),
                     model.simulatesGravity(),
                     range.clamp(0.0));
         }
@@ -379,12 +379,12 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             this.plant = plant;
             double torquePerVolt = plant.outputPerVolt();
             if (plant.rotary()) {
-                range = range(model, Range.rotations(-0.5, 0.5));
+                range = range(model, Range.of(edu.wpi.first.units.Units.Rotations.of(-0.5), edu.wpi.first.units.Units.Rotations.of(0.5)));
                 outputPerVolt = torquePerVolt;
                 // J = kA * torque per volt / (2 pi), from kA = 2 pi J / (torque per volt).
                 inertia = plant.kAVoltsPerUnitPerSecondSquared() * torquePerVolt / (2.0 * Math.PI);
             } else {
-                range = range(model, Range.of(0.0, 1.0));
+                range = range(model, Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.0)));
                 outputPerVolt = torquePerVolt / DEFAULT_ELEVATOR_DRUM_RADIUS_METERS;
                 inertia = plant.kAVoltsPerUnitPerSecondSquared() * outputPerVolt;
             }
@@ -428,11 +428,11 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
                 }
             }
             position += velocity * seconds;
-            if (position <= range.minimum() && velocity <= 0.0) {
-                position = range.minimum();
+            if (position <= range.minimumInUnit() && velocity <= 0.0) {
+                position = range.minimumInUnit();
                 velocity = 0.0;
-            } else if (position >= range.maximum() && velocity >= 0.0) {
-                position = range.maximum();
+            } else if (position >= range.maximumInUnit() && velocity >= 0.0) {
+                position = range.maximumInUnit();
                 velocity = 0.0;
             }
         }

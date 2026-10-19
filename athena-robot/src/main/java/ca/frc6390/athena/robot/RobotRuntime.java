@@ -2,6 +2,7 @@ package ca.frc6390.athena.robot;
 
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Radians;
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.AutoPlan;
 import ca.frc6390.athena.auto.AutoPreview;
@@ -893,7 +894,7 @@ public final class RobotRuntime implements AutoCloseable {
         if (simulationSession == null) {
             return;
         }
-        simulationSession.step(dtSeconds);
+        simulationSession.step(edu.wpi.first.units.Units.Seconds.of(dtSeconds));
         hardwareGraph.refreshInputs();
         refreshFailures(nowSeconds + dtSeconds);
         refreshLocalizations(new MechanismContext(

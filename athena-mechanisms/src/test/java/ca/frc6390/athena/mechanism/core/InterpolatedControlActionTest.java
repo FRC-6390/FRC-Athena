@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -141,7 +142,7 @@ class InterpolatedControlActionTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         RecordingMotor handle = new RecordingMotor(motor);
         ControlBinding<?> control = Controls.position(motor)
-                .constraint(Constraints.range(Range.of(0.0, 5.0)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))));
         InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> 2.0)
                 .at(1.0, 4.0)
                 .at(3.0, 8.0);

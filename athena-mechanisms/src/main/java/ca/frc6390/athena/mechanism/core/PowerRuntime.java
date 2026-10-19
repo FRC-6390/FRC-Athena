@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.device.MotorConstants;
@@ -59,7 +60,7 @@ final class PowerRuntime {
 
     private double measuredVolts = Double.NaN;
     private double openCircuitVolts = Double.NaN;
-    private double batteryOhms = PowerPolicy.DEFAULT_BATTERY_OHMS;
+    private double batteryOhms = PowerPolicy.DEFAULT_BATTERY_RESISTANCE.in(edu.wpi.first.units.Units.Ohms);
     private double predictedVolts = Double.NaN;
     private double budgetAmps = Double.POSITIVE_INFINITY;
     private double demandAmps;
@@ -180,8 +181,8 @@ final class PowerRuntime {
             state.readInputs(handle);
             if (Double.isFinite(state.supplyAmps)) totalSupply += state.supplyAmps;
             MotorRuntimeConfig config = overrides.config(motor);
-            state.derate = state.curve.derateFraction(motor.temperatureCelsius());
-            state.temperatureCelsius = motor.temperatureCelsius();
+            state.derate = state.curve.derateFractionCelsius(motor.fusedTemperatureCelsius());
+            state.temperatureCelsius = motor.fusedTemperatureCelsius();
             // The declared limits (applied once at configuration) bound the cap too, scaled by the derate.
             // The tighter of supply and stator wins, because the cap is applied to the motor's voltage.
             double declaredLimit = Math.min(
@@ -291,8 +292,8 @@ final class PowerRuntime {
                     && Double.isFinite(rotationsPerSecond)) {
                 MotorConstants known = constants.get();
                 double omega = rotationsPerSecond * 2.0 * Math.PI;
-                double backEmf = omega / known.speedConstant();
-                demandAmps = Math.abs(volts - backEmf) / known.resistanceOhms();
+                double backEmf = omega / known.speedConstantRadPerSecPerVolt();
+                demandAmps = Math.abs(volts - backEmf) / known.resistance().in(edu.wpi.first.units.Units.Ohms);
             } else if (constants.isPresent() && Double.isFinite(volts)) {
                 demandAmps = 0.0;
             } else {

@@ -236,7 +236,7 @@ public record EncoderDevice(
         if (!(measuresUnit instanceof DistanceUnit distance)) {
             throw new IllegalStateException("travelPerRevolution requires measures(DistanceUnit) first.");
         }
-        return withConversion(UnitConversions.value(travel, distance));
+        return withConversion(travel.in(distance));
     }
 
     private EncoderDevice withConversion(double conversion) {
@@ -387,7 +387,10 @@ public record EncoderDevice(
      */
     public double rotationsFromPosition(Measure<?> position) {
         Objects.requireNonNull(position, "position");
-        double value = UnitConversions.value(position, measuresUnit);
+        if (!UnitConversions.sameDimension(position.unit(), measuresUnit)) {
+            throw new IllegalArgumentException("Encoder position must measure " + measuresUnit.name() + " dimension.");
+        }
+        double value = measuresUnit.fromBaseUnits(position.baseUnitMagnitude());
         if (!Double.isFinite(value)) {
             throw new IllegalArgumentException("Encoder position must be finite.");
         }

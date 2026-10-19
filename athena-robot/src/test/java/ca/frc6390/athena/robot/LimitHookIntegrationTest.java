@@ -191,7 +191,7 @@ class LimitHookIntegrationTest {
         private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.5, 0.0, 0.0)
-                .constraint(Constraints.range(Range.of(0.0, 0.35)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(0.35))));
         private final Action holdHome = position.position(0.0);
         private final Action homeAction = Actions.sequence()
                 .until(home::active, motor.percent(-0.4));
@@ -201,7 +201,7 @@ class LimitHookIntegrationTest {
         private final ControlBinding<?> derivativePosition = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.0, 0.0, 1.0)
-                .constraint(Constraints.range(Range.of(0.0, 0.35)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(0.35))));
         private final Action derivativeTarget = derivativePosition.position(0.2);
         private int homeStarts;
         private int homeEnds;

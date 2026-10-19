@@ -11,12 +11,12 @@ import ca.frc6390.athena.mechanism.constraint.Constraints;
 import frc.robot.Constants;
 
 public final class FollowerElevator implements Mechanism {
-    private final MotorDevice leader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 13).brake().currentLimit(40);
+    private final MotorDevice leader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 13).brake().currentLimit(edu.wpi.first.units.Units.Amps.of(40));
     private final MotorDevice follower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 14)
             .follow(leader)
             .inverted()
             .brake();
-    private final Range travel = Range.of(0.0, 1.7);
+    private final Range travel = Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.7));
     private final ControlBinding lift = Controls.position(leader)
             .feedback(leader.encoder())
             .pid(6.0, 0.0, 0.0)

@@ -13,9 +13,9 @@ import ca.frc6390.athena.mechanism.constraint.Constraints;
 import frc.robot.Constants;
 
 public final class PositionElevator implements Mechanism {
-    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 6).brake().currentLimit(40);
+    private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 6).brake().currentLimit(edu.wpi.first.units.Units.Amps.of(40));
     private final EncoderDevice height = motor.encoder();
-    private final Range travel = Range.of(0.0, 1.4);
+    private final Range travel = Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.4));
     @SuppressWarnings("unused")
     private final SimModel simulation = SimModel.elevator(motor).encoder(height).range(travel);
     private final ControlBinding lift = Controls.position(motor)

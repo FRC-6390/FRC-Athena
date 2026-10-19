@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -53,9 +54,9 @@ class StallActionIntegrationTest {
 
     private static final class HomingArm implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 81)
-                .supplyCurrentLimit(30)
-                .statorCurrentLimit(40);
-        private final MotorStallSignal stall = motor.stall().forSeconds(0.08);
+                .supplyCurrentLimit(Units.Amps.of(30))
+                .statorCurrentLimit(Units.Amps.of(40));
+        private final MotorStallSignal stall = motor.stall().forTime(Units.Seconds.of(0.08));
         private final int[] zeroed = {0};
         private final Action bringIn = Actions.untilStalled(stall, motor.percent(-0.3)).then(motor.neutral());
         private final Action home = Actions.sequence()

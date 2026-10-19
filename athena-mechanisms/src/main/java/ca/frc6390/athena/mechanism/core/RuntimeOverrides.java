@@ -287,8 +287,8 @@ final class RuntimeOverrides {
                     ? Constraints.motionProfile(control.constraints())
                     : control.profile();
             return new ControlTuning(
-                    range.minimum(),
-                    range.maximum(),
+                    range.minimumInUnit(),
+                    range.maximumInUnit(),
                     profile == null ? Double.MAX_VALUE : profile.maxVelocity(),
                     profile == null ? Double.MAX_VALUE : profile.maxAcceleration());
         }

@@ -2,6 +2,7 @@ package ca.frc6390.athena.hardware.backend;
 
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
+import edu.wpi.first.units.Units;
 import java.util.Objects;
 
 /**
@@ -9,6 +10,9 @@ import java.util.Objects;
  *
  * <p>The {@link MotorDevice} remains the immutable deployment declaration. Runtime telemetry and
  * commissioning tools apply this value to its already-created {@link MotorHandle}.</p>
+ *
+ * <p>This is a backend value: the vendor handles take whole-amp integer limits, so the record stays
+ * primitive. {@link #declared(MotorDevice)} rounds the typed declaration to the nearest amp.</p>
  */
 public record MotorRuntimeConfig(
         MotorNeutralMode neutralMode,
@@ -29,7 +33,7 @@ public record MotorRuntimeConfig(
         return new MotorRuntimeConfig(
                 safeDevice.neutralMode(),
                 safeDevice.isInverted(),
-                limits.supplyAmps(),
-                limits.statorAmps());
+                (int) Math.round(limits.supply().in(Units.Amps)),
+                (int) Math.round(limits.stator().in(Units.Amps)));
     }
 }

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.sim.runtime;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -51,12 +52,12 @@ class SimulationSessionTest {
         SimMotorHandle motor = session.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 3));
 
         motor.setPercentOutput(2.0);
-        session.step(0.5);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.5));
         assertEquals(1.0, motor.integratedVelocityRotationsPerSecond(), 1.0e-9);
         assertEquals(0.5, motor.integratedPositionRotations(), 1.0e-9);
 
         motor.setVoltage(-6.0);
-        session.step(2.0);
+        session.step(edu.wpi.first.units.Units.Seconds.of(2.0));
         assertEquals(-0.5, motor.integratedVelocityRotationsPerSecond(), 1.0e-9);
         assertEquals(-0.5, motor.integratedPositionRotations(), 1.0e-9);
 
@@ -65,9 +66,9 @@ class SimulationSessionTest {
         assertEquals(0.0, motor.integratedVelocityRotationsPerSecond(), 1.0e-9);
 
         motor.setVelocityTargetRotationsPerSecond(3.0);
-        session.step(Double.NaN);
+        session.step(edu.wpi.first.units.Units.Seconds.of(Double.NaN));
         assertEquals(4.0, motor.integratedPositionRotations(), 1.0e-9);
-        session.step(0.25);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.25));
         assertEquals(4.75, motor.integratedPositionRotations(), 1.0e-9);
     }
 
@@ -96,11 +97,11 @@ class SimulationSessionTest {
                 .physicsEngine((models, runtime, seconds) -> calls.incrementAndGet())
                 .model("drive", SimModel.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 4)));
 
-        session.step(Double.NaN);
-        session.step(Double.POSITIVE_INFINITY);
-        session.step(Double.NEGATIVE_INFINITY);
-        session.step(-0.02);
-        session.step(0.02);
+        session.step(edu.wpi.first.units.Units.Seconds.of(Double.NaN));
+        session.step(edu.wpi.first.units.Units.Seconds.of(Double.POSITIVE_INFINITY));
+        session.step(edu.wpi.first.units.Units.Seconds.of(Double.NEGATIVE_INFINITY));
+        session.step(edu.wpi.first.units.Units.Seconds.of(-0.02));
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.02));
 
         assertEquals(1, calls.get());
     }
@@ -112,18 +113,18 @@ class SimulationSessionTest {
                 .yawDegrees(10.0)
                 .yawRateDegreesPerSecond(90.0);
 
-        session.step(0.5);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.5));
 
         assertEquals(55.0, imu.yawDegrees(), 1.0e-9);
         assertEquals(55.0, imu.angleDegrees(), 1.0e-9);
 
         imu.zeroYaw();
         assertEquals(0.0, imu.yawDegrees(), 1.0e-9);
-        session.step(0.5);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.5));
         assertEquals(45.0, imu.yawDegrees(), 1.0e-9);
 
         imu.reset();
-        session.step(0.5);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.5));
         assertEquals(0.0, imu.yawDegrees(), 1.0e-9);
     }
 
@@ -153,7 +154,7 @@ class SimulationSessionTest {
         assertSame(session.imu(imu), graph.imu(imu));
 
         graphMotor.setVelocityTargetRotationsPerSecond(2.0);
-        session.step(0.5);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.5));
         assertEquals(1.0, session.motor(motor).integratedPositionRotations(), 1.0e-9);
         assertSame(graph.encoder(motor.encoder()), graph.encoder(motor.encoder()));
         assertEquals(1.0, graph.encoder(motor.encoder()).positionRotations(), 1.0e-9);
@@ -247,7 +248,7 @@ class SimulationSessionTest {
         MotorHandle handle = session.hardwareGraph().motor(motor);
 
         handle.setVelocityTargetRotationsPerSecond(5.0);
-        session.step(0.2);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.2));
 
         assertEquals(1.0, session.motor(motor).integratedPositionRotations(), 1.0e-9);
     }
@@ -259,7 +260,7 @@ class SimulationSessionTest {
         MotorHandle handle = session.hardwareGraph().motor(motor);
 
         handle.setVelocityTargetRotationsPerSecond(2.0);
-        session.step(0.25);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.25));
 
         assertSame(session.motor(motor), handle);
         assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
@@ -272,7 +273,7 @@ class SimulationSessionTest {
 
         session.imu(imu);
         session.resetPose(new PoseSnapshot(1.0, 2.0, Math.PI / 2.0))
-                .drivePose(3.0, -1.0, Math.PI, 0.5);
+                .drivePose(edu.wpi.first.units.Units.MetersPerSecond.of(3.0), edu.wpi.first.units.Units.MetersPerSecond.of(-1.0), edu.wpi.first.units.Units.RadiansPerSecond.of(Math.PI), edu.wpi.first.units.Units.Seconds.of(0.5));
 
         assertEquals(2.5, session.pose().xMeters(), 1.0e-9);
         assertEquals(1.5, session.pose().yMeters(), 1.0e-9);
@@ -287,8 +288,8 @@ class SimulationSessionTest {
 
         session.vision(pose -> observedPose[0] = pose)
                 .resetPose(new PoseSnapshot(1.0, 2.0, 0.25))
-                .drivePose(3.0, -1.0, 0.5, 0.2)
-                .step(0.02);
+                .drivePose(edu.wpi.first.units.Units.MetersPerSecond.of(3.0), edu.wpi.first.units.Units.MetersPerSecond.of(-1.0), edu.wpi.first.units.Units.RadiansPerSecond.of(0.5), edu.wpi.first.units.Units.Seconds.of(0.2))
+                .step(edu.wpi.first.units.Units.Seconds.of(0.02));
 
         assertEquals(1, session.visionSimulations().size());
         assertEquals(1.6, observedPose[0].xMeters(), 1.0e-9);
@@ -306,7 +307,7 @@ class SimulationSessionTest {
 
         MotorHandle handle = session.hardwareGraph().motor(motor);
         handle.setPercentOutput(1.0);
-        session.step(0.2);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.2));
 
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
         assertTrue(session.encoder(encoder).velocityRotationsPerSecond() > 0.0);
@@ -314,7 +315,7 @@ class SimulationSessionTest {
         // reached after a few hundred milliseconds of full output rather than within the first 0.2 s.
         boolean[] active = {false};
         for (int step = 0; step < 500 && !active[0]; step++) {
-            session.step(0.02);
+            session.step(edu.wpi.first.units.Units.Seconds.of(0.02));
             session.withDigitalInputs(() -> active[0] = limit.active());
         }
         assertTrue(active[0], () -> "limit should activate near 12 rotations, reached "
@@ -334,7 +335,7 @@ class SimulationSessionTest {
         HardwareGraph graph = session.hardwareGraph();
 
         graph.motor(motor).setPercentOutput(1.0);
-        session.step(0.06);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.06));
 
         // The motor turns twice per mechanism turn: the mechanism encoder reads mechanism rotations and the
         // integrated motor encoder reads motor rotations, whatever the (physical) spin-up speed is.
@@ -371,16 +372,17 @@ class SimulationSessionTest {
                 .encoder(encoder)
                 .runtime(context -> seconds -> {
                     double velocity = context.command(motor).value() * 5.0;
-                    double position = context.encoderPosition(encoder) + velocity * seconds;
-                    context.motorState(motor, position, velocity);
-                    context.encoderState(encoder, position, position, velocity);
+                    double position = context.encoderPosition(encoder).in(Units.Rotations) + velocity * seconds;
+                    context.motorState(motor, Units.Rotations.of(position), Units.RotationsPerSecond.of(velocity));
+                    context.encoderState(encoder, Units.Rotations.of(position), Units.Rotations.of(position),
+                            Units.RotationsPerSecond.of(velocity));
                 })
                 .build();
         SimModel composed = SimModel.motor(MotorDevice.of(MotorKinds.KRAKEN_X44, 41)).and(custom);
         SimulationSession session = SimulationSession.create().model("robot", composed);
 
         session.hardwareGraph().motor(motor).setPercentOutput(0.5);
-        session.step(0.2);
+        session.step(edu.wpi.first.units.Units.Seconds.of(0.2));
 
         assertEquals(1, session.registeredModels().size());
         assertEquals(1, composed.physicsLeaves().size());
@@ -407,12 +409,12 @@ class SimulationSessionTest {
         EncoderDevice encoder = motor.encoder();
         SimulationSession session = SimulationSession.create().model("axis", SimModel.motor(motor)
                 .gearRatio(GearRatio.reduction(100.0, 1.0))
-                .momentOfInertia(0.5));
+                .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.5)));
         session.encoder(encoder).positionRotations(0.0).velocityRotationsPerSecond(0.5 * 100.0);
         session.motor(motor).stop();
 
         for (int cycle = 0; cycle < 150; cycle++) {
-            session.step(0.02);
+            session.step(edu.wpi.first.units.Units.Seconds.of(0.02));
         }
         return session.encoder(encoder).positionRotations() / 100.0;
     }

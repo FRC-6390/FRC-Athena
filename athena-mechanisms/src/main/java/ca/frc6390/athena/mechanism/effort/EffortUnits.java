@@ -104,7 +104,7 @@ public final class EffortUnits {
         if (motors.isEmpty()) {
             throw new IllegalArgumentException("Effort needs at least one motor.");
         }
-        double value = UnitConversions.value(effort, unitOf(kind));
+        double value = unitOf(kind).fromBaseUnits(effort.baseUnitMagnitude());
         if (!Double.isFinite(value) || value < 0.0) {
             throw new IllegalArgumentException("Effort must be finite and non-negative.");
         }
@@ -124,7 +124,7 @@ public final class EffortUnits {
                 throw new IllegalArgumentException("Force effort requires the drum radius — use Amps, "
                         + "or declare Effort.radius(...).");
             }
-            torque = value * UnitConversions.value(radius, Units.Meters);
+            torque = value * Units.Meters.fromBaseUnits(radius.baseUnitMagnitude());
         }
         double count = motors.size();
         for (int i = 0; i < amps.length; i++) {
@@ -134,7 +134,7 @@ public final class EffortUnits {
                 throw new IllegalArgumentException(name + " effort needs torque constants for motor "
                         + motor.defaultName() + " — use Amps for this motor kind.");
             }
-            amps[i] = torque / (count * gearing * constants.get().torqueConstant());
+            amps[i] = torque / (count * gearing * constants.get().torqueConstantNmPerAmp());
         }
         return amps;
     }
@@ -155,7 +155,7 @@ public final class EffortUnits {
             if (constants.isEmpty() || !Double.isFinite(amps[i])) {
                 return Double.NaN;
             }
-            torque += amps[i] * constants.get().torqueConstant() * gearing;
+            torque += amps[i] * constants.get().torqueConstantNmPerAmp() * gearing;
         }
         return torque;
     }

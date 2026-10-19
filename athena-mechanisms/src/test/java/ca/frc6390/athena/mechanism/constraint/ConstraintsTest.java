@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.constraint;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -29,7 +30,7 @@ class ConstraintsTest {
         ConstraintResult<Double> result = Constraints.evaluate(
                 List.of(
                         Constraints.override(() -> true, -5.0),
-                        Constraints.range(ca.frc6390.athena.hardware.device.Range.of(0.0, 30.0))),
+                        Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(0.0), Units.Value.of(30.0)))),
                 new ConstraintContext<>(8.0, 24.0, MechanismContext.empty()));
 
         assertEquals(0.0, result.value(), 1.0e-9);
@@ -67,22 +68,22 @@ class ConstraintsTest {
         assertEquals(8.0, Constraints.evaluate(List.of(grouped), context).value(), 1.0e-9);
         assertEquals(3.0, Constraints.evaluateOutput(List.of(grouped), context).value(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> Constraints.all(
-                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-1.0, 1.0)),
+                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-1.0), Units.Value.of(1.0))),
                 Constraints.clamp(1.0)));
     }
 
     @Test
     void rangeAndMotionDeclarationsExposeStrictestCombinedLimits() {
         List<Constraint<Double>> constraints = List.of(
-                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-5.0, 8.0)),
-                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-2.0, 10.0)),
+                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-5.0), Units.Value.of(8.0))),
+                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-2.0), Units.Value.of(10.0))),
                 Constraints.motion(12.0, 30.0),
                 Constraints.motion(9.0, 40.0));
 
         var range = Constraints.positionRange(constraints);
         var motion = Constraints.motionProfile(constraints);
-        assertEquals(-2.0, range.minimum(), 1.0e-9);
-        assertEquals(8.0, range.maximum(), 1.0e-9);
+        assertEquals(-2.0, range.minimumInUnit(), 1.0e-9);
+        assertEquals(8.0, range.maximumInUnit(), 1.0e-9);
         assertEquals(9.0, motion.maxVelocity(), 1.0e-9);
         assertEquals(30.0, motion.maxAcceleration(), 1.0e-9);
     }
@@ -90,14 +91,14 @@ class ConstraintsTest {
     @Test
     void groupedRangeAndMotionDeclarationsExposeTheirMetadata() {
         Constraint<Double> grouped = Constraints.all(
-                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(-2.0, 4.0)),
+                Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-2.0), Units.Value.of(4.0))),
                 Constraints.motion(3.0, 7.0));
 
         var range = Constraints.positionRange(List.of(grouped));
         var motion = Constraints.motionProfile(List.of(grouped));
 
-        assertEquals(-2.0, range.minimum(), 1.0e-9);
-        assertEquals(4.0, range.maximum(), 1.0e-9);
+        assertEquals(-2.0, range.minimumInUnit(), 1.0e-9);
+        assertEquals(4.0, range.maximumInUnit(), 1.0e-9);
         assertEquals(3.0, motion.maxVelocity(), 1.0e-9);
         assertEquals(7.0, motion.maxAcceleration(), 1.0e-9);
     }

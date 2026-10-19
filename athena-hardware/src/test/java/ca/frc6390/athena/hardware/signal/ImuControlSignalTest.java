@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.signal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.hardware.runtime.ActionContext;
+import edu.wpi.first.units.Units;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -22,38 +23,49 @@ class ImuControlSignalTest {
             @Override public double linearAccelerationYG() { return -0.2; }
             @Override public double linearAccelerationZG() { return 0.3; }
             @Override public List<?> dependencies() { return List.of(dependency); }
-            @Override public void applyYaw(ActionContext context, double yawDegrees) { }
+            @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { }
         };
 
-        assertEquals(Math.PI / 2.0, source.yaw().position(), 1.0e-9);
-        assertEquals(-Math.PI / 4.0, source.pitch().position(), 1.0e-9);
-        assertEquals(Math.PI / 6.0, source.roll().position(), 1.0e-9);
-        assertEquals(Math.PI, source.yawRate().velocity(), 1.0e-9);
-        assertEquals(-Math.PI / 2.0, source.pitchRate().velocity(), 1.0e-9);
-        assertEquals(Math.PI / 4.0, source.rollRate().velocity(), 1.0e-9);
-        assertEquals(0.1, source.accelerationX().value(), 1.0e-9);
-        assertEquals(-0.2, source.accelerationY().value(), 1.0e-9);
-        assertEquals(0.3, source.accelerationZ().value(), 1.0e-9);
-        assertEquals(List.of(dependency), source.yaw().dependencies());
-        assertEquals(List.of(dependency), source.yawRate().dependencies());
+        assertEquals(Math.PI / 2.0, source.headingSignal().position(), 1.0e-9);
+        assertEquals(-Math.PI / 4.0, source.pitchSignal().position(), 1.0e-9);
+        assertEquals(Math.PI / 6.0, source.rollSignal().position(), 1.0e-9);
+        assertEquals(Math.PI, source.yawRateSignal().velocity(), 1.0e-9);
+        assertEquals(-Math.PI / 2.0, source.pitchRateSignal().velocity(), 1.0e-9);
+        assertEquals(Math.PI / 4.0, source.rollRateSignal().velocity(), 1.0e-9);
+        assertEquals(0.1, source.accelerationXSignal().value(), 1.0e-9);
+        assertEquals(-0.2, source.accelerationYSignal().value(), 1.0e-9);
+        assertEquals(0.3, source.accelerationZSignal().value(), 1.0e-9);
+        assertEquals(List.of(dependency), source.headingSignal().dependencies());
+        assertEquals(List.of(dependency), source.yawRateSignal().dependencies());
 
-        assertEquals(-Math.PI / 2.0, source.yaw().inverted().position(), 1.0e-9);
-        assertEquals(Math.PI / 4.0, source.pitch().inverted().position(), 1.0e-9);
-        assertEquals(-Math.PI, source.yawRate().inverted().velocity(), 1.0e-9);
-        assertEquals(List.of(dependency), source.yaw().inverted().dependencies());
-        assertEquals(List.of(dependency), source.yawRate().inverted().dependencies());
-        assertEquals(List.of(dependency), source.accelerationX().dependencies());
-        assertEquals(-0.1, source.accelerationX().inverted().value(), 1.0e-9);
-        assertEquals(source.yaw().position(), source.yaw().inverted(false).position(), 1.0e-9);
+        assertEquals(-Math.PI / 2.0, source.inverted().headingSignal().position(), 1.0e-9);
+        assertEquals(Math.PI / 4.0, source.inverted().pitchSignal().position(), 1.0e-9);
+        assertEquals(-Math.PI, source.inverted().yawRateSignal().velocity(), 1.0e-9);
+        assertEquals(List.of(dependency), source.inverted().headingSignal().dependencies());
+        assertEquals(List.of(dependency), source.inverted().yawRateSignal().dependencies());
+        assertEquals(List.of(dependency), source.accelerationXSignal().dependencies());
+        assertEquals(-0.1, source.inverted().accelerationXSignal().value(), 1.0e-9);
+        assertEquals(source.headingSignal().position(), source.inverted(false).headingSignal().position(), 1.0e-9);
+    }
+
+    @Test
+    void typedAccessorsMatchPrimitiveReadingsInTheirUnits() {
+        ImuSource source = new TestSource(90.0, 90.0, -45.0, 30.0);
+
+        assertEquals(90.0, source.yaw().in(Units.Degrees), 1.0e-12);
+        assertEquals(-45.0, source.pitch().in(Units.Degrees), 1.0e-12);
+        assertEquals(30.0, source.roll().in(Units.Degrees), 1.0e-12);
+        assertEquals(90.0, source.angle().in(Units.Degrees), 1.0e-12);
     }
 
     @Test
     void headingIsWrappedWhileContinuousHeadingUsesAccumulatedAngle() {
         ImuSource source = new TestSource(450.0, 810.0, 0.0, 0.0);
 
-        assertEquals(Math.PI / 2.0, source.heading().position(), 1.0e-9);
-        assertEquals(Math.PI / 2.0, source.yaw().position(), 1.0e-9);
-        assertEquals(4.5 * Math.PI, source.continuousHeading().position(), 1.0e-9);
+        assertEquals(Math.PI / 2.0, source.headingSignal().position(), 1.0e-9);
+        // yaw() is the raw reading (450 degrees); only the heading signal wraps.
+        assertEquals(2.5 * Math.PI, source.yaw().in(Units.Radians), 1.0e-9);
+        assertEquals(4.5 * Math.PI, source.continuousHeadingSignal().position(), 1.0e-9);
     }
 
     private record TestSource(double yawValue, double angleValue, double pitchValue, double rollValue)
@@ -66,6 +78,6 @@ class ImuControlSignalTest {
         @Override public double linearAccelerationXG() { return 0.0; }
         @Override public double linearAccelerationYG() { return 0.0; }
         @Override public double linearAccelerationZG() { return 0.0; }
-        @Override public void applyYaw(ActionContext context, double yawDegrees) { }
+        @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { }
     }
 }
