@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot.replay;
 
+import edu.wpi.first.units.measure.Voltage;
 import ca.frc6390.athena.hardware.backend.HardwareIdentity;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.runtime.HardwareCycleSnapshot;

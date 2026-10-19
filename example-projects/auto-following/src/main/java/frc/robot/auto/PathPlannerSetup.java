@@ -1,5 +1,8 @@
 package frc.robot.auto;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import ca.frc6390.athena.mechanism.core.Events;
 import ca.frc6390.athena.mechanism.core.HookBinding;
 import ca.frc6390.athena.mechanism.core.Mechanism;
@@ -31,9 +34,9 @@ public final class PathPlannerSetup implements Mechanism {
                     ChassisSpeeds::new,
                     (speeds, feedforwards) -> {
                         drive.autoVelocity.set(RobotVelocity.robot(
-                            speeds.vxMetersPerSecond,
-                            speeds.vyMetersPerSecond,
-                            speeds.omegaRadiansPerSecond));
+                            MetersPerSecond.of(speeds.vxMetersPerSecond),
+                            MetersPerSecond.of(speeds.vyMetersPerSecond),
+                            RadiansPerSecond.of(speeds.omegaRadiansPerSecond)));
                         drive.pooledDrive.request();
                     },
                     new PPHolonomicDriveController(

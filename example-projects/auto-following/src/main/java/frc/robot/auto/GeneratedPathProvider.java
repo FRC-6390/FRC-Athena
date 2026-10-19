@@ -1,5 +1,8 @@
 package frc.robot.auto;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.auto.PathPreview;
@@ -43,7 +46,7 @@ public final class GeneratedPathProvider implements PathProvider {
 
             @Override
             public Action output(PathAction path, MechanismContext context) {
-                drive.autoVelocity.set(RobotVelocity.robot(1.0, 0.0, 0.0));
+                drive.autoVelocity.set(RobotVelocity.robot(MetersPerSecond.of(1.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(0.0)));
                 return drive.pooledDrive;
             }
 

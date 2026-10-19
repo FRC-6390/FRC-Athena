@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,14 +40,14 @@ class SwervePathFollowerTest {
 
         RobotVelocity actual = follower.calculateVelocity(new SwervePathSample(
                 new Pose2d(2.0, 4.0, Rotation2d.fromDegrees(-179.0)),
-                RobotVelocity.field(0.5, -0.25, 0.1)), 0.02);
+                RobotVelocity.field(MetersPerSecond.of(0.5), MetersPerSecond.of(-0.25), RadiansPerSecond.of(0.1))), 0.02);
         RobotVelocity expected = RobotVelocity.field(
-                2.5, 3.75, 0.1 + 3.0 * Math.toRadians(2.0))
-                .fieldToRobot(Math.toRadians(179.0));
+                MetersPerSecond.of(2.5), MetersPerSecond.of(3.75), RadiansPerSecond.of(0.1 + 3.0 * Math.toRadians(2.0)))
+                .fieldToRobot(Rotation2d.fromRadians(Math.toRadians(179.0)));
 
-        assertEquals(expected.xMetersPerSecond(), actual.xMetersPerSecond(), 1.0e-9);
-        assertEquals(expected.yMetersPerSecond(), actual.yMetersPerSecond(), 1.0e-9);
-        assertEquals(expected.angularRadiansPerSecond(), actual.angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(expected.raw().xMetersPerSecond(), actual.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(expected.raw().yMetersPerSecond(), actual.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(expected.raw().angularRadiansPerSecond(), actual.raw().angularRadiansPerSecond(), 1.0e-9);
         assertEquals(FollowerBackend.CHOREO, follower.backend());
         assertSame(translation, follower.translationGains());
         assertSame(heading, follower.headingGains());
@@ -65,11 +67,11 @@ class SwervePathFollowerTest {
                 new Pose2d(2.0, 0.0, new Rotation2d()),
                 RobotVelocity.zero(VelocityFrame.FIELD));
 
-        assertEquals(2.0, follower.calculateVelocity(sample, 0.02).xMetersPerSecond(), 1.0e-9);
+        assertEquals(2.0, follower.calculateVelocity(sample, 0.02).raw().xMetersPerSecond(), 1.0e-9);
         follower.telemetry().get("translation/p").set(3.0);
-        assertEquals(6.0, follower.calculateVelocity(sample, 0.02).xMetersPerSecond(), 1.0e-9);
+        assertEquals(6.0, follower.calculateVelocity(sample, 0.02).raw().xMetersPerSecond(), 1.0e-9);
         follower.telemetry().get("translation/disabled").set(true);
-        assertEquals(0.0, follower.calculateVelocity(sample, 0.02).xMetersPerSecond(), 1.0e-9);
+        assertEquals(0.0, follower.calculateVelocity(sample, 0.02).raw().xMetersPerSecond(), 1.0e-9);
 
         Pose2d resetTarget = new Pose2d(4.0, 5.0, Rotation2d.fromDegrees(20.0));
         Action reset = follower.resetPose(resetTarget);
@@ -82,7 +84,7 @@ class SwervePathFollowerTest {
         SwerveKinematics kinematics = kinematics();
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.Channel auto = pool.channel();
-        Action sharedDrive = kinematics.drive(pool, () -> 0.0);
+        Action sharedDrive = kinematics.drive(pool, () -> Rotation2d.fromRadians(0.0));
         SwervePathFollower follower = kinematics.follow(
                 FollowerBackend.CHOREO,
                 Pose2d::new,
@@ -93,11 +95,11 @@ class SwervePathFollowerTest {
 
         Action output = follower.follow(new SwervePathSample(
                 new Pose2d(),
-                RobotVelocity.field(1.5, -0.25, 0.4)), 0.02);
+                RobotVelocity.field(MetersPerSecond.of(1.5), MetersPerSecond.of(-0.25), RadiansPerSecond.of(0.4))), 0.02);
 
         assertSame(sharedDrive, output);
         assertEquals(List.of(sharedDrive), follower.ownership());
-        assertEquals(RobotVelocity.robot(1.5, -0.25, 0.4), auto.velocity());
+        assertEquals(RobotVelocity.robot(MetersPerSecond.of(1.5), MetersPerSecond.of(-0.25), RadiansPerSecond.of(0.4)), auto.velocity());
         follower.stop();
         assertFalse(auto.isActive());
     }

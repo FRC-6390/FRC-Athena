@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.measure.Current;
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -14,7 +15,7 @@ import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -44,16 +45,16 @@ class InterpolatedControlActionTest {
                 .at(0.0, 0.0);
 
         assertEquals(5.0, action.target(), 1.0e-9);
-        Point2d[] configured = (Point2d[]) action.telemetry().get("Visualization/Points").value();
-        Point2d[] curve = (Point2d[]) action.telemetry().get("Visualization/Curve").value();
-        Point2d[] current = (Point2d[]) action.telemetry().get("Visualization/Current").value();
+        Translation2d[] configured = (Translation2d[]) action.telemetry().get("Visualization/Points").value();
+        Translation2d[] curve = (Translation2d[]) action.telemetry().get("Visualization/Curve").value();
+        Translation2d[] current = (Translation2d[]) action.telemetry().get("Visualization/Current").value();
 
-        assertEquals(new Point2d(0.0, 0.0), configured[0]);
-        assertEquals(new Point2d(10.0, 20.0), configured[1]);
+        assertEquals(new Translation2d(0.0, 0.0), configured[0]);
+        assertEquals(new Translation2d(10.0, 20.0), configured[1]);
         assertEquals(17, curve.length);
-        assertEquals(new Point2d(0.0, 0.0), curve[0]);
-        assertEquals(new Point2d(10.0, 20.0), curve[curve.length - 1]);
-        assertEquals(new Point2d(5.0, 5.0), current[0]);
+        assertEquals(new Translation2d(0.0, 0.0), curve[0]);
+        assertEquals(new Translation2d(10.0, 20.0), curve[curve.length - 1]);
+        assertEquals(new Translation2d(5.0, 5.0), current[0]);
         assertTrue((Boolean) action.telemetry().get("State/Sampled").value());
     }
 

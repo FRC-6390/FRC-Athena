@@ -1,5 +1,8 @@
 package ca.frc6390.athena.runtime.control;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.AngularVelocity;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -31,21 +34,21 @@ public final class RobotVelocityPool {
         return List.copyOf(channels);
     }
 
-    public RobotVelocity robotRelative(double headingRadians) {
-        return combined(VelocityFrame.ROBOT, headingRadians);
+    public RobotVelocity robotRelative(Rotation2d heading) {
+        return combined(VelocityFrame.ROBOT, heading);
     }
 
-    public RobotVelocity fieldRelative(double headingRadians) {
-        return combined(VelocityFrame.FIELD, headingRadians);
+    public RobotVelocity fieldRelative(Rotation2d heading) {
+        return combined(VelocityFrame.FIELD, heading);
     }
 
-    public RobotVelocity combined(VelocityFrame frame, double headingRadians) {
+    public RobotVelocity combined(VelocityFrame frame, Rotation2d heading) {
         VelocityFrame safeFrame = Objects.requireNonNull(frame, "frame");
         RobotVelocity combined = RobotVelocity.zero(safeFrame);
         for (Channel channel : channels) {
             RobotVelocity contribution = channel.contribution();
             if (contribution != null) {
-                combined = combined.plus(contribution.inFrame(safeFrame, headingRadians));
+                combined = combined.plus(contribution.inFrame(safeFrame, heading));
             }
         }
         AngularChannel angular = null;
@@ -55,7 +58,7 @@ public final class RobotVelocityPool {
             }
         }
         if (angular != null) {
-            combined = combined.withAngular(angular.radiansPerSecond());
+            combined = combined.withAngular(angular.angularVelocity());
         }
         return combined;
     }
@@ -67,14 +70,20 @@ public final class RobotVelocityPool {
         private volatile long sequence;
         private volatile boolean inverted;
 
+        /** Applies a scalar control-loop result, interpreted as radians per second. */
         @Override
-        public void apply(double value) {
-            if (!Double.isFinite(value)) {
+        public void apply(double radiansPerSecond) {
+            if (!Double.isFinite(radiansPerSecond)) {
                 throw new IllegalArgumentException("Angular velocity must be finite.");
             }
-            this.value = value;
+            this.value = radiansPerSecond;
             active = true;
             sequence = activationSequence.incrementAndGet();
+        }
+
+        /** Applies a typed angular velocity request. */
+        public void apply(AngularVelocity angularVelocity) {
+            apply(Objects.requireNonNull(angularVelocity, "angularVelocity").in(Units.RadiansPerSecond));
         }
 
         @Override
@@ -87,11 +96,12 @@ public final class RobotVelocityPool {
             return active;
         }
 
-        public double radiansPerSecond() {
+        /** Returns the angular velocity currently owned by this channel, or zero when inactive. */
+        public AngularVelocity angularVelocity() {
             if (!active) {
-                return 0.0;
+                return Units.RadiansPerSecond.zero();
             }
-            return inverted ? -value : value;
+            return Units.RadiansPerSecond.of(inverted ? -value : value);
         }
 
         /** Reverses values applied by a control binding. */

@@ -1,10 +1,13 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import ca.frc6390.athena.drivetrain.swerve.SwerveOdometry;
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.HardwareMeasurementSignal;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.VelocityFrame;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
@@ -61,8 +64,8 @@ public final class Localization implements PoseSignal {
         KALMAN
     }
 
-    private static final MeasurementStdDevs DEFAULT_STATE_STD_DEVS = MeasurementStdDevs.of(0.1, 0.1, 0.1);
-    private static final MeasurementStdDevs DEFAULT_VISION_STD_DEVS = MeasurementStdDevs.of(0.9, 0.9, 0.9);
+    private static final MeasurementStdDevs DEFAULT_STATE_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.1));
+    private static final MeasurementStdDevs DEFAULT_VISION_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.9), Meters.of(0.9), Radians.of(0.9));
     private static final double TWO_PI = Math.PI * 2.0;
 
     private final Strategy strategy;
@@ -203,18 +206,18 @@ public final class Localization implements PoseSignal {
     public Localization stateStdDevs(Distance translation, Angle heading) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
-                stdDevs(translation, heading), defaultVisionStdDevs);
+                stdDevsOf(translation, heading), defaultVisionStdDevs);
     }
 
     public Localization defaultVisionStdDevs(Distance translation, Angle heading) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
-                stateStdDevs, stdDevs(translation, heading));
+                stateStdDevs, stdDevsOf(translation, heading));
     }
 
-    private static MeasurementStdDevs stdDevs(Distance translation, Angle heading) {
+    private static MeasurementStdDevs stdDevsOf(Distance translation, Angle heading) {
         double translationMeters = translation.in(Meters);
-        return MeasurementStdDevs.of(translationMeters, translationMeters, heading.in(Radians));
+        return MeasurementStdDevs.of(Meters.of(translationMeters), Meters.of(translationMeters), Radians.of(heading.in(Radians)));
     }
 
     /**
@@ -331,7 +334,7 @@ public final class Localization implements PoseSignal {
 
     /** Returns the current estimate using WPILib's standard pose type. */
     public Pose2d pose2d() {
-        PoseSnapshot pose = pose();
+        PoseSnapshot pose = poseSnapshot();
         return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
     }
 
@@ -466,7 +469,7 @@ public final class Localization implements PoseSignal {
         if (cameras.isEmpty()) {
             return;
         }
-        double heading = pose().headingRadians();
+        double heading = poseSnapshot().headingRadians();
         if (!Double.isFinite(heading)) {
             return;
         }
@@ -693,15 +696,15 @@ public final class Localization implements PoseSignal {
         double distanceWeight = 0.0;
         int targetCount = 0;
         for (PoseMeasurementSample sample : samples) {
-            double variance = finiteVariance(sample.stdDevs().translationVariance(), 1.0);
+            double variance = finiteVariance(sample.stdDevs().raw().translationVarianceMetersSquared(), 1.0);
             double weight = 1.0 / variance;
             x += sample.pose().xMeters() * weight;
             y += sample.pose().yMeters() * weight;
             sin += Math.sin(sample.pose().headingRadians()) * weight;
             cos += Math.cos(sample.pose().headingRadians()) * weight;
-            vx += sample.speeds().xMetersPerSecond() * weight;
-            vy += sample.speeds().yMetersPerSecond() * weight;
-            omega += sample.speeds().angularRadiansPerSecond() * weight;
+            vx += sample.speeds().raw().xMetersPerSecond() * weight;
+            vy += sample.speeds().raw().yMetersPerSecond() * weight;
+            omega += sample.speeds().raw().angularRadiansPerSecond() * weight;
             totalWeight += weight;
             timestamp = Math.max(timestamp, sample.timestampSeconds());
             ambiguity += sample.ambiguity() * weight;
@@ -712,13 +715,13 @@ public final class Localization implements PoseSignal {
             }
         }
         MeasurementStdDevs outputStdDevs = MeasurementStdDevs.of(
-                Math.sqrt(1.0 / totalWeight),
-                Math.sqrt(1.0 / totalWeight),
-                samples.stream().map(PoseMeasurementSample::stdDevs)
-                        .mapToDouble(MeasurementStdDevs::headingRadians).min().orElse(1.0));
+                Meters.of(Math.sqrt(1.0 / totalWeight)),
+                Meters.of(Math.sqrt(1.0 / totalWeight)),
+                Radians.of(samples.stream().map(PoseMeasurementSample::stdDevs)
+                        .mapToDouble(stdDevs -> stdDevs.raw().headingRadians()).min().orElse(1.0)));
         return List.of(outputMeasurement(
                 new PoseSnapshot(x / totalWeight, y / totalWeight, Math.atan2(sin, cos)),
-                new RobotVelocity(vx / totalWeight, vy / totalWeight, omega / totalWeight),
+                RobotVelocity.Raw.of(vx / totalWeight, vy / totalWeight, omega / totalWeight, VelocityFrame.ROBOT),
                 timestamp,
                 outputStdDevs,
                 this,
@@ -815,12 +818,12 @@ public final class Localization implements PoseSignal {
     }
 
     private static boolean trustsHeading(PoseMeasurementSample sample) {
-        return sample.stdDevs() == null || sample.stdDevs().headingRadians() <= Math.PI;
+        return sample.stdDevs() == null || sample.stdDevs().raw().headingRadians() <= Math.PI;
     }
 
     private static boolean trustsTranslation(PoseMeasurementSample sample) {
         return sample.stdDevs() == null
-                || (sample.stdDevs().xMeters() < 1.0e6 && sample.stdDevs().yMeters() < 1.0e6);
+                || (sample.stdDevs().raw().xMeters() < 1.0e6 && sample.stdDevs().raw().yMeters() < 1.0e6);
     }
 
     /** Null when every filter accepts the sample, otherwise the reason of the first filter that rejects it. */
@@ -892,7 +895,7 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs stdDevs,
             Object source) {
         return Measurements.poseAndSpeeds(pose, speeds)
-                .timing(timestampSeconds, 0.0)
+                .timing(Seconds.of(timestampSeconds), Seconds.of(0.0))
                 .stdDevs(stdDevs)
                 .source(source);
     }
@@ -907,7 +910,7 @@ public final class Localization implements PoseSignal {
             int targetCount,
             double averageTargetDistanceMeters) {
         return Measurements.poseAndSpeeds(pose, speeds)
-                .timing(timestampSeconds, 0.0)
+                .timing(Seconds.of(timestampSeconds), Seconds.of(0.0))
                 .visionMetadata(ambiguity, targetCount, averageTargetDistanceMeters)
                 .stdDevs(stdDevs)
                 .source(source);
@@ -1163,7 +1166,7 @@ public final class Localization implements PoseSignal {
             SwerveModulePosition[] positions = positions(odometry);
             RobotVelocity odometrySpeeds = odometry.velocity();
             if (estimator == null) {
-                PoseSnapshot initial = reset == null ? odometry.pose() : reset;
+                PoseSnapshot initial = reset == null ? odometry.poseSnapshot() : reset;
                 estimator = new SwerveDrivePoseEstimator(
                         kinematics,
                         heading,
@@ -1216,7 +1219,7 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             RobotVelocity speeds = measuredSpeeds(sample, odometrySpeeds);
-            double spin = Math.abs(speeds.angularRadiansPerSecond());
+            double spin = Math.abs(speeds.raw().angularRadiansPerSecond());
             if (spin > tuning.maxAngularVelocity()) {
                 return Verdict.reject(LocalizationFilters.format("spinning %.1f rad/s > %.1f",
                         spin, tuning.maxAngularVelocity()));
@@ -1231,10 +1234,10 @@ public final class Localization implements PoseSignal {
             }
             MeasurementStdDevs base = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
             double scale = 1.0
-                    + tuning.speedScaleLinear() * Math.hypot(speeds.xMetersPerSecond(), speeds.yMetersPerSecond())
+                    + tuning.speedScaleLinear() * Math.hypot(speeds.raw().xMetersPerSecond(), speeds.raw().yMetersPerSecond())
                     + tuning.speedScaleAngular() * spin;
             MeasurementStdDevs stdDevs = MeasurementStdDevs.of(
-                    base.xMeters() * scale, base.yMeters() * scale, base.headingRadians() * scale);
+                    Meters.of(base.raw().xMeters() * scale), Meters.of(base.raw().yMeters() * scale), Radians.of(base.raw().headingRadians() * scale));
             // Heading-residual and innovation gates share one recovery path: a source whose samples
             // are rejected but stay self-consistent for several frames (e.g. after a gyro slip or a
             // reset to the wrong heading) is re-admitted instead of being locked out forever.
@@ -1263,12 +1266,12 @@ public final class Localization implements PoseSignal {
         private static RobotVelocity measuredSpeeds(PoseMeasurementSample sample, RobotVelocity odometrySpeeds) {
             RobotVelocity speeds = sample.speeds();
             if (speeds != null
-                    && Double.isFinite(speeds.xMetersPerSecond())
-                    && Double.isFinite(speeds.yMetersPerSecond())
-                    && Double.isFinite(speeds.angularRadiansPerSecond())
-                    && (speeds.xMetersPerSecond() != 0.0
-                            || speeds.yMetersPerSecond() != 0.0
-                            || speeds.angularRadiansPerSecond() != 0.0)) {
+                    && Double.isFinite(speeds.raw().xMetersPerSecond())
+                    && Double.isFinite(speeds.raw().yMetersPerSecond())
+                    && Double.isFinite(speeds.raw().angularRadiansPerSecond())
+                    && (speeds.raw().xMetersPerSecond() != 0.0
+                            || speeds.raw().yMetersPerSecond() != 0.0
+                            || speeds.raw().angularRadiansPerSecond() != 0.0)) {
                 return speeds;
             }
             return odometrySpeeds == null ? RobotVelocity.zero() : odometrySpeeds;
@@ -1304,9 +1307,9 @@ public final class Localization implements PoseSignal {
             double dx = sample.pose().xMeters() - predicted.getX();
             double dy = sample.pose().yMeters() - predicted.getY();
             double dh = wrapRadians(sample.pose().headingRadians() - predicted.getRotation().getRadians());
-            return square(dx / stdDevs.xMeters())
-                    + square(dy / stdDevs.yMeters())
-                    + square(dh / stdDevs.headingRadians());
+            return square(dx / stdDevs.raw().xMeters())
+                    + square(dy / stdDevs.raw().yMeters())
+                    + square(dh / stdDevs.raw().headingRadians());
         }
 
         private double headingResidual(PoseMeasurementSample sample) {
@@ -1326,9 +1329,9 @@ public final class Localization implements PoseSignal {
 
         private static boolean usable(MeasurementStdDevs stdDevs) {
             return stdDevs != null
-                    && Double.isFinite(stdDevs.xMeters())
-                    && Double.isFinite(stdDevs.yMeters())
-                    && Double.isFinite(stdDevs.headingRadians());
+                    && Double.isFinite(stdDevs.raw().xMeters())
+                    && Double.isFinite(stdDevs.raw().yMeters())
+                    && Double.isFinite(stdDevs.raw().headingRadians());
         }
 
         private static double square(double value) {
@@ -1352,9 +1355,9 @@ public final class Localization implements PoseSignal {
                     sample.pose(),
                     sample.speeds(),
                     sample.timestampSeconds(),
-                    square(stdDevs.xMeters()),
-                    square(stdDevs.yMeters()),
-                    square(stdDevs.headingRadians()),
+                    square(stdDevs.raw().xMeters()),
+                    square(stdDevs.raw().yMeters()),
+                    square(stdDevs.raw().headingRadians()),
                     sample.ambiguity(),
                     sample.targetCount(),
                     sample.averageTargetDistanceMeters());
@@ -1386,10 +1389,11 @@ public final class Localization implements PoseSignal {
                                     pose.headingRadians(), headingVariance,
                                     otherHeading, other.headingVariance,
                                     bestWeight))),
-                    new RobotVelocity(
-                            (speeds.xMetersPerSecond() + other.speeds.xMetersPerSecond()) / 2.0,
-                            (speeds.yMetersPerSecond() + other.speeds.yMetersPerSecond()) / 2.0,
-                            (speeds.angularRadiansPerSecond() + other.speeds.angularRadiansPerSecond()) / 2.0),
+                    RobotVelocity.Raw.of(
+                            (speeds.raw().xMetersPerSecond() + other.speeds.raw().xMetersPerSecond()) / 2.0,
+                            (speeds.raw().yMetersPerSecond() + other.speeds.raw().yMetersPerSecond()) / 2.0,
+                            (speeds.raw().angularRadiansPerSecond() + other.speeds.raw().angularRadiansPerSecond()) / 2.0,
+                            VelocityFrame.ROBOT),
                     fusedTimestamp(other, bestWeight),
                     xVar,
                     yVar,
@@ -1426,9 +1430,9 @@ public final class Localization implements PoseSignal {
 
         private MeasurementStdDevs stdDevs() {
             return MeasurementStdDevs.of(
-                    Math.sqrt(xVariance),
-                    Math.sqrt(yVariance),
-                    Math.sqrt(headingVariance));
+                    Meters.of(Math.sqrt(xVariance)),
+                    Meters.of(Math.sqrt(yVariance)),
+                    Radians.of(Math.sqrt(headingVariance)));
         }
 
         private static double combinedVariance(double first, double second, double weight) {
@@ -1460,7 +1464,7 @@ public final class Localization implements PoseSignal {
 
     private static edu.wpi.first.math.Matrix<edu.wpi.first.math.numbers.N3, edu.wpi.first.math.numbers.N1> vector(
             MeasurementStdDevs stdDevs) {
-        return VecBuilder.fill(stdDevs.xMeters(), stdDevs.yMeters(), stdDevs.headingRadians());
+        return VecBuilder.fill(stdDevs.raw().xMeters(), stdDevs.raw().yMeters(), stdDevs.raw().headingRadians());
     }
 
     private static Pose2d toWpilib(PoseSnapshot pose) {

@@ -11,7 +11,6 @@ import ca.frc6390.athena.vision.device.HeliosDevice;
 import ca.frc6390.athena.vision.device.LimelightDevice;
 import ca.frc6390.athena.vision.device.PhotonVisionDevice;
 import ca.frc6390.athena.vision.signal.TargetSignal;
-import edu.wpi.first.math.util.Units;
 import java.util.List;
 
 public final class VisionSources {
@@ -23,24 +22,24 @@ public final class VisionSources {
             .mount(new CameraMountPose(Meters.of(0.0), Meters.of(0.0), Meters.of(0.7), Degrees.of(0.0), Degrees.of(-20.0), Degrees.of(0.0)));
     public final CameraDevice customCamera = Cameras.camera(
             () -> "team:target-camera", "custom-target-camera")
-            .bindTargets(() -> List.of(Measurements.target(42, 3.5, -8.0, 2.7, 0.95)));
+            .bindTargets(() -> List.of(Measurements.target(42, Degrees.of(3.5), Degrees.of(-8.0), Meters.of(2.7), 0.95)));
 
     public final PoseSignal limelightPose = frontLimelight.pose()
             .megatag2Blue()
             .tags(7, 8)
-            .singleTagStdDevs(0.8, 0.8, Units.degreesToRadians(30.0))
-            .multiTagStdDevs(0.25, 0.25, Units.degreesToRadians(6.0))
-            .distanceStdDevScaling(2.0, 2.0);
+            .singleTagStdDevs(Meters.of(0.8), Meters.of(0.8), Degrees.of(30.0))
+            .multiTagStdDevs(Meters.of(0.25), Meters.of(0.25), Degrees.of(6.0))
+            .distanceStdDevScaling(Meters.of(2.0), 2.0);
     // Single-tag frames are solved with the robot heading (needs PhotonVisionCameraAdapter.defaultRobotHeading).
     public final PoseSignal photonPose = rearPhoton.pose()
             .multiTagOnCoprocessor().singleTagUsesHeading()
-            .singleTagStdDevs(0.7, 0.7, Units.degreesToRadians(25.0))
-            .multiTagStdDevs(0.18, 0.18, Units.degreesToRadians(4.0))
-            .distanceStdDevScaling(2.0, 2.0);
+            .singleTagStdDevs(Meters.of(0.7), Meters.of(0.7), Degrees.of(25.0))
+            .multiTagStdDevs(Meters.of(0.18), Meters.of(0.18), Degrees.of(4.0))
+            .distanceStdDevScaling(Meters.of(2.0), 2.0);
     public final PoseSignal heliosPose = driverHelios.pose()
-            .singleTagStdDevs(0.9, 0.9, Units.degreesToRadians(35.0))
-            .multiTagStdDevs(0.3, 0.3, Units.degreesToRadians(8.0))
-            .distanceStdDevScaling(1.5, 2.0);
+            .singleTagStdDevs(Meters.of(0.9), Meters.of(0.9), Degrees.of(35.0))
+            .multiTagStdDevs(Meters.of(0.3), Meters.of(0.3), Degrees.of(8.0))
+            .distanceStdDevScaling(Meters.of(1.5), 2.0);
     public final TargetSignal limelightTargets = frontLimelight.targets();
     public final TargetSignal photonTargets = rearPhoton.targets();
     public final TargetSignal customTargets = customCamera.targets();

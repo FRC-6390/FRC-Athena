@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot.explore;
 
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.robot.explore.ExplorationReport.Category;
 import ca.frc6390.athena.robot.explore.ExplorationReport.Finding;
@@ -76,7 +78,8 @@ public final class SimExplorer {
     }
 
     /** Sets the run length in seconds. Default 60. */
-    public SimExplorer duration(double seconds) {
+    public SimExplorer duration(Time length) {
+        double seconds = Objects.requireNonNull(length, "length").in(Seconds);
         if (!(seconds > 0.0) || !Double.isFinite(seconds)) {
             throw new IllegalArgumentException("duration must be positive and finite");
         }
@@ -119,9 +122,10 @@ public final class SimExplorer {
      * Sets how long a requested Action may get no output while a newer lease holds its resources before it counts
      * as starved. Default 2 s.
      */
-    public SimExplorer starvationSeconds(double seconds) {
+    public SimExplorer starvation(Time limit) {
+        double seconds = Objects.requireNonNull(limit, "limit").in(Seconds);
         if (!(seconds > 0.0) || !Double.isFinite(seconds)) {
-            throw new IllegalArgumentException("starvationSeconds must be positive and finite");
+            throw new IllegalArgumentException("starvation must be positive and finite");
         }
         this.starvationSeconds = seconds;
         return this;
@@ -238,7 +242,7 @@ public final class SimExplorer {
                 break;
             }
             out.add(segment);
-            elapsed += segment.seconds();
+            elapsed += segment.duration().in(Seconds);
         }
         return out;
     }
@@ -252,8 +256,8 @@ public final class SimExplorer {
                 break;
             }
             entries.add(new Entry(start, 0, String.format(Locale.ROOT, "t=%.3f mode %s for %.1f s",
-                    start, segment.mode(), segment.seconds())));
-            start += segment.seconds();
+                    start, segment.mode(), segment.duration().in(Seconds))));
+            start += segment.duration().in(Seconds);
         }
         for (InputEvent event : script) {
             if (event.timeSeconds() > until) {

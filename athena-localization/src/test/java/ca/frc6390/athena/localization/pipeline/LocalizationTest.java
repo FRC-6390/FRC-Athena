@@ -26,9 +26,9 @@ class LocalizationTest {
     void filterPreservesAcceptedMeasurementMetadataAndTracksRejections() {
         Object camera = new Object();
         Sample accepted = sample(2.0, 3.0, 0.25, 4.0, 0.08, 3, 2.5,
-                MeasurementStdDevs.of(0.2, 0.3, 0.1), camera);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.3), Radians.of(0.1)), camera);
         Sample rejected = sample(9.0, 9.0, 0.5, 5.0, 0.35, 1, 7.0,
-                MeasurementStdDevs.of(1.0, 1.1, 0.8), camera);
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.1), Radians.of(0.8)), camera);
 
         Localization stage = Localizations.filter()
                 .input(signal(accepted, rejected))
@@ -49,9 +49,9 @@ class LocalizationTest {
     @Test
     void localizationStagesChainWithoutDiscardingTheIntermediatePose() {
         Sample old = sample(1.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(0.5, 0.5, 0.5), new Object());
+                MeasurementStdDevs.of(Meters.of(0.5), Meters.of(0.5), Radians.of(0.5)), new Object());
         Sample newest = sample(3.0, 2.0, 0.4, 3.0, 0.0, 2, 1.5,
-                MeasurementStdDevs.of(0.2, 0.2, 0.2), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.2)), new Object());
         Localization filtered = Localizations.filter()
                 .input(signal(old, newest))
                 .filter((localization, measurement, pose) -> pose.yMeters() >= 0.0)
@@ -59,7 +59,7 @@ class LocalizationTest {
         Localization latest = Localizations.latestValid().input(filtered).name("latest");
 
         assertEquals(2, filtered.measurements().size());
-        assertPose(latest.pose(), 3.0, 2.0, 0.4, EPSILON);
+        assertPose(latest.poseSnapshot(), 3.0, 2.0, 0.4, EPSILON);
         assertSame(newest, latest.measurements().get(0));
         assertEquals("filtered", filtered.debugName());
         assertEquals("latest", latest.debugName());
@@ -72,11 +72,11 @@ class LocalizationTest {
     @Test
     void latestValidSelectsNewestTimestampAndReportsAllAcceptedInputs() {
         Sample first = sample(1.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(1.0)), new Object());
         Sample latest = sample(3.0, 0.0, 0.0, 3.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(1.0)), new Object());
         Sample middle = sample(2.0, 0.0, 0.0, 2.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(1.0)), new Object());
         Localization localization = Localizations.latestValid().input(signal(first, latest, middle));
 
         assertSame(latest, localization.measurements().get(0));
@@ -87,9 +87,9 @@ class LocalizationTest {
     @Test
     void forkedLocalizationBuildersKeepIndependentRuntimeState() {
         Sample first = sample(1.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(1.0)), new Object());
         Sample second = sample(2.0, 0.0, 0.0, 1.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 1.0), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(1.0)), new Object());
         Localization base = Localizations.latestValid();
         Localization firstBranch = base.input(signal(first));
         Localization secondBranch = base.input(signal(second));
@@ -106,28 +106,28 @@ class LocalizationTest {
     @Test
     void weightedAverageUsesTranslationVarianceAndCircularHeadingAverage() {
         Sample weak = sample(0.0, 0.0, Math.toRadians(179.0), 4.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(2.0, 2.0, 0.4), new Object());
+                MeasurementStdDevs.of(Meters.of(2.0), Meters.of(2.0), Radians.of(0.4)), new Object());
         Sample strong = sample(10.0, 4.0, Math.toRadians(-179.0), 6.0, 0.0, 1, 1.0,
-                MeasurementStdDevs.of(1.0, 1.0, 0.2), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(1.0), Radians.of(0.2)), new Object());
         Localization localization = Localizations.weightedAverage().input(signal(weak, strong));
 
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
         assertEquals(8.0, fused.pose().xMeters(), EPSILON);
         assertEquals(3.2, fused.pose().yMeters(), EPSILON);
         assertEquals(6.0, fused.timestampSeconds(), EPSILON);
-        assertEquals(Math.sqrt(1.0 / 1.25), fused.stdDevs().xMeters(), EPSILON);
-        assertEquals(0.2, fused.stdDevs().headingRadians(), EPSILON);
+        assertEquals(Math.sqrt(1.0 / 1.25), fused.stdDevs().raw().xMeters(), EPSILON);
+        assertEquals(0.2, fused.stdDevs().raw().headingRadians(), EPSILON);
         assertTrue(Math.abs(Math.abs(fused.pose().headingRadians()) - Math.PI) < 0.02);
     }
 
     @Test
     void covarianceIntersectionGroupsSamplesAndReturnsConservativeCovariance() {
         Sample older = sample(1.0, 1.0, 0.1, 1.00, 0.0, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 1.0, 0.3), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(1.0), Radians.of(0.3)), new Object());
         Sample newest = sample(3.0, 2.0, 0.2, 1.02, 0.0, 2, 2.0,
-                MeasurementStdDevs.of(1.0, 0.2, 0.5), new Object());
+                MeasurementStdDevs.of(Meters.of(1.0), Meters.of(0.2), Radians.of(0.5)), new Object());
         Sample stale = sample(20.0, 20.0, 1.0, 0.50, 0.0, 2, 2.0,
-                MeasurementStdDevs.of(0.01, 0.01, 0.01), new Object());
+                MeasurementStdDevs.of(Meters.of(0.01), Meters.of(0.01), Radians.of(0.01)), new Object());
         Localization localization = Localizations.covarianceIntersection()
                 .input(signal(older, newest, stale))
                 .groupWithin(Seconds.of(0.03))
@@ -139,20 +139,20 @@ class LocalizationTest {
         // Fused poses blend frames from different instants, so the stamp is the
         // information-weighted mean of the grouped frames rather than the newest frame.
         assertTrue(fused.timestampSeconds() > 1.00 && fused.timestampSeconds() < 1.02);
-        assertTrue(Double.isFinite(fused.stdDevs().xMeters()));
-        assertTrue(Double.isFinite(fused.stdDevs().yMeters()));
-        assertTrue(fused.stdDevs().xMeters() >= 0.2);
-        assertTrue(fused.stdDevs().yMeters() >= 0.2);
+        assertTrue(Double.isFinite(fused.stdDevs().raw().xMeters()));
+        assertTrue(Double.isFinite(fused.stdDevs().raw().yMeters()));
+        assertTrue(fused.stdDevs().raw().xMeters() >= 0.2);
+        assertTrue(fused.stdDevs().raw().yMeters() >= 0.2);
     }
 
     @Test
     void covarianceIntersectionDoesNotLetNewestOutlierAnchorTheCameraGroup() {
         Sample firstGood = sample(2.0, 3.0, 0.1, 0.98, 0.04, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Sample secondGood = sample(2.1, 3.1, 0.12, 0.99, 0.03, 2, 2.1,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Sample newestOutlier = sample(12.0, 7.0, Math.PI, 1.0, 0.8, 1, 6.0,
-                MeasurementStdDevs.of(0.1, 0.1, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.1)), new Object());
         Localization localization = Localizations.covarianceIntersection()
                 .input(signal(firstGood, secondGood, newestOutlier))
                 .groupWithin(Seconds.of(0.03))
@@ -169,9 +169,9 @@ class LocalizationTest {
     @Test
     void covarianceIntersectionGroupsTranslationOnlyCamerasWithOppositeHeadings() {
         PoseSignal first = signal(sample(2.0, 3.0, 0.0, 1.0, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).translationOnly();
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object())).translationOnly();
         PoseSignal opposite = signal(sample(2.1, 3.0, Math.PI, 1.0, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).translationOnly();
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object())).translationOnly();
         Localization localization = Localizations.covarianceIntersection()
                 .input(first, opposite)
                 .maxTranslationDisagreement(Meters.of(0.5))
@@ -181,7 +181,7 @@ class LocalizationTest {
 
         assertTrue(fused.pose().xMeters() >= 2.0 && fused.pose().xMeters() <= 2.1);
         assertEquals(4, fused.targetCount());
-        assertTrue(fused.stdDevs().headingRadians() > Math.PI);
+        assertTrue(fused.stdDevs().raw().headingRadians() > Math.PI);
     }
 
     @Test
@@ -189,9 +189,9 @@ class LocalizationTest {
         Object firstCamera = new Object();
         Object secondCamera = new Object();
         Sample firstFrame = sample(2.0, 3.0, 0.1, 1.00, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstCamera);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstCamera);
         Sample secondFrameSameCamera = sample(2.02, 3.0, 0.1, 1.01, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstCamera);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstCamera);
         Localization oneCamera = Localizations.covarianceIntersection()
                 .input(signal(firstFrame, secondFrameSameCamera))
                 .minimumSourceCount(2);
@@ -199,7 +199,7 @@ class LocalizationTest {
         assertTrue(oneCamera.measurements().isEmpty());
 
         Sample agreeingSecondCamera = sample(2.01, 3.02, 0.12, 1.01, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondCamera);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), secondCamera);
         Localization twoCameras = Localizations.covarianceIntersection()
                 .input(signal(firstFrame, agreeingSecondCamera))
                 .minimumSourceCount(2);
@@ -210,7 +210,7 @@ class LocalizationTest {
     @Test
     void refreshPublishesOneImmutableCycleSharedWithRuntimeSnapshots() {
         Sample sample = sample(2.0, 3.0, 0.1, 1.0, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Localization localization = Localizations.filter().input(signal(sample));
 
         PoseSignal cycle = localization.refresh(null, 1.0, 0.02);
@@ -232,13 +232,13 @@ class LocalizationTest {
         Localization lowerAmbiguity = Localizations.covarianceIntersection()
                 .input(signal(
                         sample(1.0, 1.0, 0.0, 0.90, 0.20, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstA),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstA),
                         sample(1.1, 1.0, 0.0, 0.91, 0.20, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstB),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstB),
                         sample(8.0, 1.0, 0.0, 0.95, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), secondA),
                         sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), secondB)))
                 .groupWithin(Seconds.of(0.2))
                 .maxTranslationDisagreement(Meters.of(0.5));
 
@@ -249,13 +249,13 @@ class LocalizationTest {
         Localization newer = Localizations.covarianceIntersection()
                 .input(signal(
                         sample(1.0, 1.0, 0.0, 0.90, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstA),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstA),
                         sample(1.1, 1.0, 0.0, 0.91, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), firstB),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), firstB),
                         sample(8.0, 1.0, 0.0, 0.95, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), secondA),
                         sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
-                                MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
+                                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), secondB)))
                 .groupWithin(Seconds.of(0.2))
                 .maxTranslationDisagreement(Meters.of(0.5));
 
@@ -266,9 +266,9 @@ class LocalizationTest {
     @Test
     void headingOnlyConsensusIgnoresCameraTranslationDisagreement() {
         PoseSignal first = signal(sample(1.0, 1.0, 0.10, 1.0, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).headingOnly();
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object())).headingOnly();
         PoseSignal second = signal(sample(8.0, 6.0, 0.12, 1.0, 0.02, 2, 2.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).headingOnly();
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object())).headingOnly();
         Localization localization = Localizations.covarianceIntersection()
                 .input(first, second)
                 .maxTranslationDisagreement(Meters.of(0.5))
@@ -277,7 +277,7 @@ class LocalizationTest {
 
         assertEquals(1, localization.measurements().size());
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
-        assertTrue(fused.stdDevs().xMeters() > 1.0e5);
+        assertTrue(fused.stdDevs().raw().xMeters() > 1.0e5);
         assertEquals(4, fused.targetCount());
     }
 
@@ -287,22 +287,22 @@ class LocalizationTest {
         Object multiCamera = new Object();
         PoseSignal configured = signal(
                         sample(1.0, 2.0, 0.0, 1.0, 0.1, 1, 4.0,
-                                MeasurementStdDevs.of(9.0, 9.0, 9.0), singleCamera),
+                                MeasurementStdDevs.of(Meters.of(9.0), Meters.of(9.0), Radians.of(9.0)), singleCamera),
                         sample(2.0, 3.0, 0.0, 2.0, 0.05, 3, 1.0,
-                                MeasurementStdDevs.of(9.0, 9.0, 9.0), multiCamera))
-                .singleTagStdDevs(0.5, 0.6, 0.7)
-                .multiTagStdDevs(0.1, 0.2, 0.3)
-                .distanceStdDevScaling(2.0, 2.0);
+                                MeasurementStdDevs.of(Meters.of(9.0), Meters.of(9.0), Radians.of(9.0)), multiCamera))
+                .singleTagStdDevs(Meters.of(0.5), Meters.of(0.6), Radians.of(0.7))
+                .multiTagStdDevs(Meters.of(0.1), Meters.of(0.2), Radians.of(0.3))
+                .distanceStdDevScaling(Meters.of(2.0), 2.0);
         Localization stage = Localizations.filter().input(configured);
 
         PoseMeasurementSample single = (PoseMeasurementSample) stage.measurements().get(0);
         PoseMeasurementSample multi = (PoseMeasurementSample) stage.measurements().get(1);
-        assertEquals(2.0, single.stdDevs().xMeters(), EPSILON);
-        assertEquals(2.4, single.stdDevs().yMeters(), EPSILON);
-        assertEquals(2.8, single.stdDevs().headingRadians(), EPSILON);
-        assertEquals(0.1, multi.stdDevs().xMeters(), EPSILON);
-        assertEquals(0.2, multi.stdDevs().yMeters(), EPSILON);
-        assertEquals(0.3, multi.stdDevs().headingRadians(), EPSILON);
+        assertEquals(2.0, single.stdDevs().raw().xMeters(), EPSILON);
+        assertEquals(2.4, single.stdDevs().raw().yMeters(), EPSILON);
+        assertEquals(2.8, single.stdDevs().raw().headingRadians(), EPSILON);
+        assertEquals(0.1, multi.stdDevs().raw().xMeters(), EPSILON);
+        assertEquals(0.2, multi.stdDevs().raw().yMeters(), EPSILON);
+        assertEquals(0.3, multi.stdDevs().raw().headingRadians(), EPSILON);
         assertSame(singleCamera, single.source());
         assertSame(multiCamera, multi.source());
     }
@@ -312,27 +312,27 @@ class LocalizationTest {
         Object camera = new Object();
         java.util.concurrent.atomic.AtomicReference<List<Measurement>> current =
                 new java.util.concurrent.atomic.AtomicReference<>(List.of(sample(1.0, 0.0, 0.0, 1.0, 0.0, 2, 1.0,
-                        MeasurementStdDevs.of(0.2, 0.2, 0.1), camera)));
+                        MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera)));
         PoseSignal cameraSignal = current::get;
         Localization filtered = Localizations.filter().input(cameraSignal).name("filtered");
         Localization fused = Localizations.latestValid().input(filtered.translationOnly()).name("fused");
 
         fused.refresh(null, 1.0, 0.02);
         filtered.refresh(null, 1.0, 0.02);
-        assertEquals(1.0, fused.pose().xMeters(), EPSILON);
+        assertEquals(1.0, fused.pose().getX(), EPSILON);
 
         current.set(List.of(sample(2.0, 0.0, 0.0, 2.0, 0.0, 2, 1.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera)));
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera)));
         // The runtime may refresh the downstream node first; it must still see this cycle's data.
         fused.refresh(null, 2.0, 0.02);
 
-        assertEquals(2.0, fused.pose().xMeters(), EPSILON);
+        assertEquals(2.0, fused.pose().getX(), EPSILON);
     }
 
     @Test
     void maxLatencyRejectsFramesOlderThanTheLimitAtTheRuntimeTimestamp() {
         Sample frame = sample(1.0, 2.0, 0.0, 1.0, 0.0, 2, 1.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Localization latency = Localizations.filter()
                 .input(signal(frame))
                 .filter(VisionFilters.maxLatency(Seconds.of(0.1)));
@@ -352,9 +352,9 @@ class LocalizationTest {
     void latencyAndAgeFiltersRejectFramesFromTheFuture() {
         // Captured at t=40 while the robot clock reads 1.0: the camera clock is not synced yet.
         Sample unsynced = sample(1.0, 2.0, 0.0, 40.0, 0.0, 2, 1.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Sample slightSkew = sample(1.0, 2.0, 0.0, 1.05, 0.0, 2, 1.0,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object());
         Localization latency = Localizations.filter()
                 .input(signal(unsynced, slightSkew))
                 .filter(VisionFilters.maxLatency(Seconds.of(0.1)));

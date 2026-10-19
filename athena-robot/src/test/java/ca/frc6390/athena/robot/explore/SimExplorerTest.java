@@ -1,5 +1,8 @@
 package ca.frc6390.athena.robot.explore;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -41,11 +44,11 @@ class SimExplorerTest {
         ExplorationReport report = SimExplorer.of(session -> RobotRuntime.simulated(session)
                         .register(new StarvedRoller()))
                 .seed(3)
-                .duration(60)
+                .duration(Seconds.of(60))
                 .controllers(0)
-                .modes(ModeSchedule.of(new ModeSchedule.Segment(LifecycleMode.TELEOP, 60)))
-                .inputs(InputModel.standard().buttons(2).buttonPressesPerSecond(1.0).meanHoldSeconds(3.0)
-                        .axes(0).povChangesPerSecond(0.0))
+                .modes(ModeSchedule.of(new ModeSchedule.Segment(LifecycleMode.TELEOP, Seconds.of(60))))
+                .inputs(InputModel.standard().buttons(2).buttonPresses(Hertz.of(1.0)).meanHold(Seconds.of(3.0))
+                        .axes(0).povChanges(Hertz.of(0.0)))
                 .save(save)
                 .run();
 
@@ -79,7 +82,7 @@ class SimExplorerTest {
         ExplorationReport report = SimExplorer.of(session -> RobotRuntime.simulated(session)
                         .register(new CleanRobot()))
                 .seed(11)
-                .duration(120)
+                .duration(Seconds.of(120))
                 .controllers(0)
                 .modes(ModeSchedule.random())
                 .inputs(InputModel.standard())
@@ -92,10 +95,10 @@ class SimExplorerTest {
     void sameSeedGivesSameReport() {
         SimExplorer explorer = SimExplorer.of(session -> RobotRuntime.simulated(session).register(new StarvedRoller()))
                 .seed(3)
-                .duration(40)
+                .duration(Seconds.of(40))
                 .controllers(0)
-                .modes(ModeSchedule.of(new ModeSchedule.Segment(LifecycleMode.TELEOP, 40)))
-                .inputs(InputModel.standard().buttons(2).buttonPressesPerSecond(1.0).meanHoldSeconds(3.0));
+                .modes(ModeSchedule.of(new ModeSchedule.Segment(LifecycleMode.TELEOP, Seconds.of(40))))
+                .inputs(InputModel.standard().buttons(2).buttonPresses(Hertz.of(1.0)).meanHold(Seconds.of(3.0)));
         ExplorationReport first = explorer.run();
         ExplorationReport second = explorer.run();
         assertEquals(first, second);

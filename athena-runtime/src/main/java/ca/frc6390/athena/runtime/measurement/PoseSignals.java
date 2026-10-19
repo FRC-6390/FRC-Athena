@@ -1,11 +1,33 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import static edu.wpi.first.units.Units.Seconds;
+
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.units.measure.Time;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
 
 /** Pose-signal transformations shared by all pose-producing backends. */
 public final class PoseSignals {
+
+    /** Converts a WPILib time to primitive seconds for measurement filtering. */
+    static double seconds(Time time) {
+        return Objects.requireNonNull(time, "time").in(Seconds);
+    }
+
+    /** Converts an internal pose snapshot to a WPILib pose. */
+    static Pose2d toPose2d(PoseSnapshot pose) {
+        return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
+    }
+
+    /** Converts a WPILib pose to the internal pose snapshot used by the runtime pipeline. */
+    static PoseSnapshot toSnapshot(Pose2d pose) {
+        Objects.requireNonNull(pose, "pose");
+        return new PoseSnapshot(pose.getX(), pose.getY(), pose.getRotation().getRadians());
+    }
     private static final double UNTRUSTED_HEADING_STD_DEV_RADIANS = 1.0e6;
     private static final double UNTRUSTED_TRANSLATION_STD_DEV_METERS = 1.0e6;
 
@@ -73,16 +95,16 @@ public final class PoseSignals {
 
     static Measurement withStdDevs(PoseMeasurementSample sample, MeasurementStdDevs stdDevs) {
         if (sample instanceof TranslationOnlyPoseMeasurement) {
-            return new TranslationOnlyPoseMeasurement(sample, MeasurementStdDevs.of(
-                    stdDevs.xMeters(),
-                    stdDevs.yMeters(),
+            return new TranslationOnlyPoseMeasurement(sample, MeasurementStdDevs.Raw.of(
+                    stdDevs.raw().xMeters(),
+                    stdDevs.raw().yMeters(),
                     UNTRUSTED_HEADING_STD_DEV_RADIANS));
         }
         if (sample instanceof HeadingOnlyPoseMeasurement) {
-            return new HeadingOnlyPoseMeasurement(sample, MeasurementStdDevs.of(
+            return new HeadingOnlyPoseMeasurement(sample, MeasurementStdDevs.Raw.of(
                     UNTRUSTED_TRANSLATION_STD_DEV_METERS,
                     UNTRUSTED_TRANSLATION_STD_DEV_METERS,
-                    stdDevs.headingRadians()));
+                    stdDevs.raw().headingRadians()));
         }
         return new ConfiguredPoseMeasurement(sample, stdDevs);
     }
@@ -111,10 +133,10 @@ public final class PoseSignals {
             return measurement;
         }
         double scale = Math.max(1.0, Math.pow(distance / referenceMeters, exponent));
-        return withStdDevs(sample, MeasurementStdDevs.of(
-                stdDevs.xMeters() * scale,
-                stdDevs.yMeters() * scale,
-                stdDevs.headingRadians() * scale));
+        return withStdDevs(sample, MeasurementStdDevs.Raw.of(
+                stdDevs.raw().xMeters() * scale,
+                stdDevs.raw().yMeters() * scale,
+                stdDevs.raw().headingRadians() * scale));
     }
 
     private static Measurement withoutHeading(Measurement measurement) {
@@ -123,11 +145,11 @@ public final class PoseSignals {
         }
         MeasurementStdDevs configured = sample.stdDevs();
         MeasurementStdDevs stdDevs = configured == null
-                ? MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
+                ? MeasurementStdDevs.Raw.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY,
                         UNTRUSTED_HEADING_STD_DEV_RADIANS)
-                : MeasurementStdDevs.of(
-                        configured.xMeters(),
-                        configured.yMeters(),
+                : MeasurementStdDevs.Raw.of(
+                        configured.raw().xMeters(),
+                        configured.raw().yMeters(),
                         UNTRUSTED_HEADING_STD_DEV_RADIANS);
         return new TranslationOnlyPoseMeasurement(sample, stdDevs);
     }
@@ -137,10 +159,10 @@ public final class PoseSignals {
             return measurement;
         }
         MeasurementStdDevs configured = sample.stdDevs();
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.Raw.of(
                 UNTRUSTED_TRANSLATION_STD_DEV_METERS,
                 UNTRUSTED_TRANSLATION_STD_DEV_METERS,
-                configured == null ? Double.POSITIVE_INFINITY : configured.headingRadians());
+                configured == null ? Double.POSITIVE_INFINITY : configured.raw().headingRadians());
         return new HeadingOnlyPoseMeasurement(sample, stdDevs);
     }
 

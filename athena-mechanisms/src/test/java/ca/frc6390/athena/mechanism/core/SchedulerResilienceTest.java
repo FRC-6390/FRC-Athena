@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
 
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -107,7 +108,7 @@ class SchedulerResilienceTest {
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.Channel channel = pool.channel();
         Action contribution = Actions.contributeVelocity(
-                channel, () -> RobotVelocity.angular(1.0), Actions.waitSeconds(Seconds.of(0.02)));
+                channel, () -> RobotVelocity.angular(RadiansPerSecond.of(1.0)), Actions.waitSeconds(Seconds.of(0.02)));
         MechanismRuntime runtime = MechanismRuntime.of(new TestMechanism(contribution), ActionContext.empty());
         runtime.set(contribution);
 

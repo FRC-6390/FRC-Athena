@@ -1,5 +1,9 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.control.PidController;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -115,16 +119,16 @@ public final class SwervePathFollower implements TelemetrySource {
         Pose2d current = pose();
         Pose2d target = sample.pose();
         RobotVelocity feedforward = sample.fieldVelocity();
-        double x = feedforward.xMetersPerSecond()
+        double x = feedforward.raw().xMetersPerSecond()
                 + xController.calculate(current.getX(), target.getX(), dtSeconds);
-        double y = feedforward.yMetersPerSecond()
+        double y = feedforward.raw().yMetersPerSecond()
                 + yController.calculate(current.getY(), target.getY(), dtSeconds);
-        double omega = feedforward.angularRadiansPerSecond()
+        double omega = feedforward.raw().angularRadiansPerSecond()
                 + headingController.calculate(
                         current.getRotation().getRadians(),
                         target.getRotation().getRadians(),
                         dtSeconds);
-        return RobotVelocity.field(x, y, omega).fieldToRobot(current.getRotation().getRadians());
+        return RobotVelocity.field(MetersPerSecond.of(x), MetersPerSecond.of(y), RadiansPerSecond.of(omega)).fieldToRobot(Rotation2d.fromRadians(current.getRotation().getRadians()));
     }
 
     @Override

@@ -1,5 +1,7 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 
 import static edu.wpi.first.units.Units.MetersPerSecond;
@@ -23,6 +25,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.Units;
 
 public final class DriveTrain implements Mechanism {
@@ -55,7 +58,7 @@ public final class DriveTrain implements Mechanism {
             .enabled(DriverStation::isAutonomousEnabled);
     public final Action pooledDrive = kinematics.drive(
             velocity,
-            () -> heading.yaw().in(edu.wpi.first.units.Units.Radians));
+            () -> Rotation2d.fromRadians(heading.yaw().in(edu.wpi.first.units.Units.Radians)));
 
     public Action drive(
             DoubleSupplier forward,
@@ -64,14 +67,11 @@ public final class DriveTrain implements Mechanism {
             BooleanSupplier fieldOriented) {
         driverVelocity.set(() -> {
             RobotVelocity requested = RobotVelocity.robot(
-                    linearSpeed(forward.getAsDouble()),
-                    linearSpeed(strafe.getAsDouble()),
-                    rotationSpeed(rotation.getAsDouble()));
+                    MetersPerSecond.of(linearSpeed(forward.getAsDouble())),
+                    MetersPerSecond.of(linearSpeed(strafe.getAsDouble())),
+                    RadiansPerSecond.of(rotationSpeed(rotation.getAsDouble())));
             if (fieldOriented.getAsBoolean()) {
-                requested = RobotVelocity.field(
-                        requested.xMetersPerSecond(),
-                        requested.yMetersPerSecond(),
-                        requested.angularRadiansPerSecond());
+                requested = RobotVelocity.field(requested.x(), requested.y(), requested.angular());
             }
             return requested;
         });

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import edu.wpi.first.units.measure.Time;
 import java.util.Objects;
 
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -39,7 +40,7 @@ record PoseMeasurement(
                 ? Math.max(0.0, averageTargetDistanceMeters)
                 : Double.NaN;
         stdDevs = stdDevs == null
-                ? MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
+                ? MeasurementStdDevs.Raw.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY)
                 : stdDevs;
     }
 
@@ -57,12 +58,13 @@ record PoseMeasurement(
     /**
      * Returns a copy with timing metadata.
      *
-     * @param timestampSeconds timestamp
-     * @param latencySeconds latency
+     * @param timestamp timestamp
+     * @param latency latency
      * @return updated measurement
      */
-    public PoseMeasurementSample timing(double timestampSeconds, double latencySeconds) {
-        return new PoseMeasurement(pose, speeds, timestampSeconds, latencySeconds, ambiguity, targetCount,
+    public PoseMeasurementSample timing(Time timestamp, Time latency) {
+        return new PoseMeasurement(pose, speeds, PoseSignals.seconds(timestamp), PoseSignals.seconds(latency),
+                ambiguity, targetCount,
                 averageTargetDistanceMeters, stdDevs, source);
     }
 

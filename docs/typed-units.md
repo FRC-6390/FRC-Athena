@@ -122,6 +122,79 @@ in control units. Its typed form, `untilSettled(Measure, Time)`, is the one to u
 distance units, and `MotionKind.UNSPECIFIED` for raw bindings. Model and effort features use it to
 pick the right formulas.
 
+## Removed runtime API (typed-runtime branch)
+
+The runtime, drivetrain, localization, WPILib and robot modules now take WPILib units
+(`LinearVelocity`, `AngularVelocity`, `Distance`, `Angle`, `Time`, `Frequency`, `Rotation2d`, `Translation2d`,
+`Pose2d`) on team-facing methods. The old primitive overloads are removed rather than deprecated. Primitive
+hot-path access stays available through `RobotVelocity.raw()`, `MeasurementStdDevs.raw()` and the
+`Raw` nested classes. Each row is a removed or renamed public member; unchanged signatures are not listed.
+
+| Removed | Use instead |
+| --- | --- |
+| `new RobotVelocity(double, double, double)` | `RobotVelocity.robot(LinearVelocity, LinearVelocity, AngularVelocity)` (same ROBOT frame; the record constructor is private) |
+| `RobotVelocity.robot(double, double, double)` / `field(double, double, double)` | `robot(...)` / `field(...)` with `MetersPerSecond.of(...)`, `RadiansPerSecond.of(...)` |
+| `RobotVelocity.linear(double, double[, VelocityFrame])` | `linear(LinearVelocity, LinearVelocity[, VelocityFrame])` |
+| `RobotVelocity.angular(double[, VelocityFrame])` | `angular(AngularVelocity[, VelocityFrame])` |
+| `RobotVelocity.withLinear(double, double)` / `withAngular(double)` | `withLinear(LinearVelocity, LinearVelocity)` / `withAngular(AngularVelocity)` |
+| `RobotVelocity.linearMagnitude()` returning `double` | returns `LinearVelocity`; `.in(MetersPerSecond)` for a double |
+| `RobotVelocity.fieldToRobot(double)`, `robotToField(double)`, `inFrame(frame, double)` | same names, take `Rotation2d` |
+| `RobotVelocity.clamp(double, double)` | `clamp(LinearVelocity, AngularVelocity)` |
+| `RobotVelocity.xMetersPerSecond()`, `yMetersPerSecond()`, `angularRadiansPerSecond()` | `x()`, `y()`, `angular()` (typed); primitives via `raw().xMetersPerSecond()` and so on |
+| `RobotVelocityPool.robotRelative(double)`, `fieldRelative(double)`, `combined(frame, double)` | take `Rotation2d` |
+| `RobotVelocityPool.radiansPerSecond()` | `angularVelocity()` (returns `AngularVelocity`) |
+| `SwerveKinematics.drive(RobotVelocityPool, DoubleSupplier)` | `drive(RobotVelocityPool, Supplier<Rotation2d>)` |
+| `SwerveOdometry.pose()` returning `PoseSnapshot` | `pose()` returns `Pose2d`; the primitive view is `poseSnapshot()` |
+| `Point2d` record | `Translation2d` (`new Translation2d(x, y)`, `getX()`, `getY()`) |
+| `Point2d.from(PoseSnapshot)` | `new Translation2d(pose.xMeters(), pose.yMeters())` |
+| `Point2d.distance(Point2d)` | `Translation2d.getDistance(Translation2d)` |
+| `Geometry2d.contains(Point2d)`, `contains(PoseSnapshot)`, `expanded(double)` | `contains(Translation2d)`, `contains(Pose2d)`, `expanded(Distance)` |
+| `Circle2d(Point2d, double)` record, `Circle2d.of(double, double, double)` | `Circle2d.of(Translation2d, Distance)` or `Circle2d.of(Distance, Distance, Distance)`; `center()` is a `Translation2d`, `radius()` a `Distance` |
+| `Circle2d` / `Polygon2d` / `Rectangle2d` `signedDistance(Point2d)` returning `double` | `signedDistance(Translation2d)` returns `Distance`; `signedDistancePrimitive(Translation2d)` returns `double` |
+| `Rectangle2d(double x4)` record, `Rectangle2d.of(double x4)`, `Rectangle2d.field(double, double)` | `Rectangle2d.of(Distance x4)`, `Rectangle2d.field(Distance, Distance)`; `minimumX()` and the others return `Distance` |
+| `Polygon2d.of(Point2d...)`, `vertices()` returning `List<Point2d>` | `of(Translation2d...)`, `List<Translation2d>` |
+| `runtime.geometry.AllianceTransform` | renamed `runtime.geometry.AllianceMapping` (internal, double meters); `translation(...)` takes and returns `Translation2d` |
+| `wpilib.geometry.AllianceTransform.rotate180(double, double)`, `mirrorX(double)`, `mirrorY(double)` | take `Distance`, for example `rotate180(Meters.of(16.54), Meters.of(8.21))` |
+| `MeasurementSignal.stdDevs(double, double)`, `stdDevs(double, double, double)` | `stdDevs(Distance, Angle)`, `stdDevs(Distance, Distance, Angle)` |
+| `latencyLimit(double)`, `maxAge(double now, double maxAge)` on `MeasurementSignal` and `ConfiguredMeasurementSignal` | `latencyLimit(Time)`, `maxAge(Time now, Time maxAge)` |
+| `MeasurementStdDevs(double, double, double)` record and `MeasurementStdDevs.of(double, double, double)` | `MeasurementStdDevs.of(Distance, Distance, Angle)`; primitive input is `MeasurementStdDevs.Raw.of(double, double, double)` (radians) |
+| `MeasurementStdDevs.xMeters()`, `yMeters()`, `headingRadians()` | `xStdDev()`, `yStdDev()` (`Distance`), `headingStdDev()` (`Angle`); primitives via `raw()` |
+| `MeasurementStdDevs.translationVariance()` | `raw().translationVarianceMetersSquared()` |
+| `Measurements.poses(Supplier<PoseSnapshot>)`, `poseAndSpeeds(Supplier<PoseSnapshot>, ...)` | take `Supplier<Pose2d>`; the single-sample `Measurements.pose(PoseSnapshot)` stays, and `pose(Pose2d)` is added |
+| `PoseMeasurement.timing(double, double)`, `PoseMeasurementSample.timing(double, double)` | `timing(Time, Time)` |
+| `PoseSignal.value()` returning `Optional<PoseSnapshot>` | returns `Optional<Pose2d>` |
+| `PoseSignal.pose()` returning `PoseSnapshot` | returns `Pose2d`; the primitive view is `poseSnapshot()` |
+| `PoseSignal.singleTagStdDevs(double x3)`, `multiTagStdDevs(double x3)` | `(Distance, Distance, Angle)` |
+| `PoseSignal.distanceStdDevScaling(double, double)` | `distanceStdDevScaling(Distance, double)` |
+| `TelemetryValue.points(Supplier<Point2d[]>)` | `Supplier<Translation2d[]>` |
+| `MechanismTelemetryPublisher.readOnlyPeriodSeconds(double)` | `readOnlyPeriod(Time)` |
+| `RobotRuntime.fastSignalSampling(double[, executor])` | `fastSignalSampling(Time[, executor])` |
+| `RobotRuntime.localizationMaxAge(double)` | `localizationMaxAge(Time)` |
+| `RobotRuntime.mechanismTracePeriodSeconds(double)` | `mechanismTracePeriod(Time)` |
+| `RobotRuntime.recordDisable(double)` | `recordDisable(Time)` |
+| `RuntimeWorker(String, double, Runnable)`, `RuntimeWorker.every(String, double, Runnable)` | take a `Time` period |
+| `SimExplorer.duration(double)`, `starvationSeconds(double)` | `duration(Time)`, `starvation(Time)` |
+| `InputModel.buttonPressesPerSecond(double)`, `povChangesPerSecond(double)` | `buttonPresses(Frequency)`, `povChanges(Frequency)` |
+| `InputModel.meanHoldSeconds(double)` | `meanHold(Time)` |
+| `InputModel.axisWalk(double, double)` | `axisWalk(Frequency, double)` |
+| `ModeSchedule.dwell(mode, double, double)`, `ModeSchedule.Segment(mode, double seconds)` | `dwell(mode, Time, Time)`, `Segment(mode, Time duration)` |
+
+Examples of the conversion:
+
+```java
+// Before
+RobotVelocity.robot(1.0, 0.0, 0.5);
+RobotVelocity.field(1.0, 0.0, Math.toRadians(90));
+runtime.fastSignalSampling(0.005, scheduler);
+driveTrain.drive(pool, () -> pose.getRotation().getRadians());
+
+// After
+RobotVelocity.robot(MetersPerSecond.of(1.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(0.5));
+RobotVelocity.field(MetersPerSecond.of(1.0), MetersPerSecond.of(0.0), DegreesPerSecond.of(90));
+runtime.fastSignalSampling(Milliseconds.of(5), scheduler);
+driveTrain.drive(pool, () -> pose.getRotation());
+```
+
 ## Summary
 
 | Need | Use |
