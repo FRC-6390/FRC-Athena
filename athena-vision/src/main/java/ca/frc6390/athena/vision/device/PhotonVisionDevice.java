@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vision.device;
 
+import static edu.wpi.first.units.Units.Radians;
+import edu.wpi.first.units.measure.Angle;
+import java.util.Objects;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -192,23 +195,23 @@ public final class PhotonVisionDevice implements RobotHeadingAware, CameraDevice
     /** Runtime options shared by all copies of one declaration. */
     /** Latest robot heading reported by the localization (see {@link RobotHeadingAware}). */
     @Override
-    public void reportRobotHeading(double timestampSeconds, double headingRadians) {
-        state.robotHeadingRadians = headingRadians;
+    public void reportRobotHeading(double timestampSeconds, Angle heading) {
+        state.robotHeading = Objects.requireNonNull(heading, "heading");
     }
 
     /**
-     * Returns the latest robot heading reported to this camera, or NaN before the first report.
+     * Returns the latest robot heading reported to this camera, or NaN radians before the first report.
      *
-     * @return heading in radians
+     * @return heading
      */
-    public double reportedRobotHeadingRadians() {
-        return state.robotHeadingRadians;
+    public Angle reportedRobotHeading() {
+        return state.robotHeading;
     }
 
     private static final class State {
         private volatile boolean singleTagUsesHeading;
         private volatile PhotonVisionPoseStrategy poseStrategy = PhotonVisionPoseStrategy.MULTI_TAG_ON_COPROCESSOR;
         private volatile Supplier<CameraClockStatus> clockStatus = CameraClockStatus::unknown;
-        private volatile double robotHeadingRadians = Double.NaN;
+        private volatile Angle robotHeading = Radians.of(Double.NaN);
     }
 }

@@ -1,6 +1,11 @@
 package ca.frc6390.athena.vision.runtime;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
 import java.util.Objects;
 
 /**
@@ -8,13 +13,13 @@ import java.util.Objects;
  *
  * @param id target id, or {@code -1} when unavailable
  * @param pose field-relative target pose
- * @param heightMeters target center height
+ * @param height target center height
  * @param confidence target confidence where higher is better
  */
-public record VisionSimulationTarget(int id, PoseSnapshot pose, double heightMeters, double confidence) {
+public record VisionSimulationTarget(int id, PoseSnapshot pose, Distance height, double confidence) {
     public VisionSimulationTarget {
         pose = Objects.requireNonNull(pose, "pose");
-        heightMeters = finiteOrZero(heightMeters);
+        height = Objects.requireNonNull(height, "height");
         confidence = finiteOrZero(confidence);
     }
 
@@ -22,19 +27,21 @@ public record VisionSimulationTarget(int id, PoseSnapshot pose, double heightMet
      * Creates an AprilTag-style field target.
      *
      * @param id target id
-     * @param xMeters field x
-     * @param yMeters field y
-     * @param zMeters target center height
-     * @param headingRadians target heading
+     * @param x field x
+     * @param y field y
+     * @param z target center height
+     * @param heading target heading
      * @return target
      */
     public static VisionSimulationTarget aprilTag(
             int id,
-            double xMeters,
-            double yMeters,
-            double zMeters,
-            double headingRadians) {
-        return new VisionSimulationTarget(id, new PoseSnapshot(xMeters, yMeters, headingRadians), zMeters, 1.0);
+            Distance x,
+            Distance y,
+            Distance z,
+            Angle heading) {
+        return new VisionSimulationTarget(id,
+                new PoseSnapshot(x.in(Meters), y.in(Meters), heading.in(Radians)),
+                z, 1.0);
     }
 
     private static double finiteOrZero(double value) {

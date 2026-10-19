@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vision.runtime;
 
+import static edu.wpi.first.units.Units.Seconds;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -226,7 +227,7 @@ public final class VisionGraph {
             poseMeasurements = List.of();
             targetMeasurements = List.of();
             lastFailure = Objects.requireNonNull(exception, "exception");
-            retryAtSeconds = nowSeconds + camera.recoveryPolicy().retryIntervalSeconds();
+            retryAtSeconds = nowSeconds + camera.recoveryPolicy().retryInterval().in(Seconds);
             if (owner != null) {
                 owner.aggregateDirty = true;
             }

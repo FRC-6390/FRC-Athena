@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vision.signal;
 
+import static edu.wpi.first.units.Units.Meters;
+
+import edu.wpi.first.units.measure.Distance;
 import java.util.Arrays;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -17,10 +20,10 @@ public final class LimelightPoseSignal implements PoseSignal {
     private final PoseSignal delegate;
     private final String poseMode;
     private final List<Integer> tags;
-    private final double trustDistanceMeters;
+    private final Distance trustDistance;
 
     public LimelightPoseSignal(LimelightDevice camera, PoseSignal delegate) {
-        this(camera, delegate, "", List.of(), Double.POSITIVE_INFINITY);
+        this(camera, delegate, "", List.of(), Meters.of(Double.POSITIVE_INFINITY));
     }
 
     private LimelightPoseSignal(
@@ -28,14 +31,15 @@ public final class LimelightPoseSignal implements PoseSignal {
             PoseSignal delegate,
             String poseMode,
             List<Integer> tags,
-            double trustDistanceMeters) {
+            Distance trustDistance) {
         this.camera = Objects.requireNonNull(camera, "camera");
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.poseMode = poseMode == null ? "" : poseMode;
         this.tags = tags == null ? List.of() : List.copyOf(tags);
-        this.trustDistanceMeters = Double.isFinite(trustDistanceMeters)
-                ? Math.max(0.0, trustDistanceMeters)
-                : Double.POSITIVE_INFINITY;
+        double meters = trustDistance == null ? Double.POSITIVE_INFINITY : trustDistance.in(Meters);
+        this.trustDistance = Double.isFinite(meters)
+                ? Meters.of(Math.max(0.0, meters))
+                : Meters.of(Double.POSITIVE_INFINITY);
     }
 
     /**
@@ -73,20 +77,20 @@ public final class LimelightPoseSignal implements PoseSignal {
      */
     public LimelightPoseSignal tags(int... tags) {
         if (tags == null) {
-            return new LimelightPoseSignal(camera, delegate, poseMode, List.of(), trustDistanceMeters);
+            return new LimelightPoseSignal(camera, delegate, poseMode, List.of(), trustDistance);
         }
         return new LimelightPoseSignal(camera, delegate, poseMode, Arrays.stream(tags).boxed().toList(),
-                trustDistanceMeters);
+                trustDistance);
     }
 
     /**
      * Sets a distance hint for downstream trust policies.
      *
-     * @param meters trust distance
+     * @param distance trust distance
      * @return updated signal
      */
-    public LimelightPoseSignal trustDistance(double meters) {
-        return new LimelightPoseSignal(camera, delegate, poseMode, tags, meters);
+    public LimelightPoseSignal trustDistance(Distance distance) {
+        return new LimelightPoseSignal(camera, delegate, poseMode, tags, distance);
     }
 
     @Override
@@ -108,8 +112,8 @@ public final class LimelightPoseSignal implements PoseSignal {
         if (!tags.isEmpty()) {
             metadata.put("tags", tags);
         }
-        if (Double.isFinite(trustDistanceMeters)) {
-            metadata.put("trustDistanceMeters", trustDistanceMeters);
+        if (Double.isFinite(trustDistance.in(Meters))) {
+            metadata.put("trustDistanceMeters", trustDistance.in(Meters));
         }
         return Map.copyOf(metadata);
     }
@@ -137,11 +141,11 @@ public final class LimelightPoseSignal implements PoseSignal {
      *
      * @return trust distance
      */
-    public double trustDistanceMeters() {
-        return trustDistanceMeters;
+    public Distance trustDistance() {
+        return trustDistance;
     }
 
     private LimelightPoseSignal withPoseMode(String mode) {
-        return new LimelightPoseSignal(camera, delegate, mode, tags, trustDistanceMeters);
+        return new LimelightPoseSignal(camera, delegate, mode, tags, trustDistance);
     }
 }
