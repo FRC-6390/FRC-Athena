@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import edu.wpi.first.math.geometry.Rotation2d;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,7 +45,7 @@ class LeaseReservationTest {
         // lease must now own the drivetrain and turn the robot.
         for (int cycle = 5; cycle <= 10; cycle++) scheduler.autoPeriodic(cycle * 0.02, 0.02);
         assertTrue(robot.angular.isActive());
-        assertEquals(0.5, robot.angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(0.5, robot.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
         assertEquals(0.5, hardware.motor(DRIVE).percent, 1.0e-9);
     }
 
@@ -242,7 +244,7 @@ class LeaseReservationTest {
                 .feedback(() -> 0.0)
                 .pid(1.0, 0.0, 0.0)
                 .constraint(Constraints.clamp(0.5));
-        private final Action pooledDrive = DRIVE.percent(() -> pool.robotRelative(0.0).angularRadiansPerSecond());
+        private final Action pooledDrive = DRIVE.percent(() -> pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond());
         private final Action faceHub = heading.position(2.0);
         @SuppressWarnings("unused")
         private final MotorDevice driveMotor = DRIVE;

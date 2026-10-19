@@ -1,7 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import ca.frc6390.athena.runtime.geometry.Geometry2d;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
@@ -143,10 +143,10 @@ public final class TelemetryValue {
         }, null);
     }
     /** Creates read-only 2D point telemetry evaluated when telemetry is sampled. */
-    public static TelemetryValue points(Supplier<Point2d[]> value) {
+    public static TelemetryValue points(Supplier<Translation2d[]> value) {
         Objects.requireNonNull(value, "value");
         return new TelemetryValue(Type.POINTS, false, () -> {
-            Point2d[] current = Objects.requireNonNull(value.get(), "point telemetry value");
+            Translation2d[] current = Objects.requireNonNull(value.get(), "point telemetry value");
             return current.clone();
         }, null);
     }

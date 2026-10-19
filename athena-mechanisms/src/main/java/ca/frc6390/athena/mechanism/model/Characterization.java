@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.model;
 
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorConstants;

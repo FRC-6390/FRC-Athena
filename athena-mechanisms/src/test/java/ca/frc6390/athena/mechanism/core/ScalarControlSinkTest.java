@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import edu.wpi.first.math.geometry.Rotation2d;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +24,7 @@ class ScalarControlSinkTest {
                 EventContext.empty());
 
         assertTrue(mechanism.angular.isActive());
-        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(1.0, mechanism.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
 
         scheduler.cancel(mechanism.aim).periodic(
                 new MechanismContext(0.02, 0.0, 0.02, true, false, false),
@@ -44,7 +46,7 @@ class ScalarControlSinkTest {
                     EventContext.empty());
 
             assertTrue(mechanism.angular.isActive(), () -> traceLevel + " disabled the control sink");
-            assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9,
+            assertEquals(1.0, mechanism.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9,
                     () -> traceLevel + " changed the control sink output");
         }
     }
@@ -58,13 +60,13 @@ class ScalarControlSinkTest {
         MechanismContext context = new MechanismContext(0.0, 0.0, 0.02, true, false, false);
 
         scheduler.request(mechanism.slow).periodic(context, EventContext.empty());
-        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(1.0, mechanism.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
 
         scheduler.request(mechanism.fast).periodic(context, EventContext.empty());
-        assertEquals(2.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(2.0, mechanism.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
 
         scheduler.cancel(mechanism.fast).periodic(context, EventContext.empty());
-        assertEquals(1.0, mechanism.angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(1.0, mechanism.angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
     }
 
     @Test
@@ -83,7 +85,7 @@ class ScalarControlSinkTest {
         applier.endCycle();
 
         assertTrue(angular.isActive());
-        assertEquals(1.5, angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(1.5, angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
 
         applier.beginCycle();
         applier.endCycle();
@@ -103,8 +105,8 @@ class ScalarControlSinkTest {
         OutputApplier.using(ActionContext.empty())
                 .apply(new ResolvedOutput(OutputRequest.of(control, target), target));
 
-        assertEquals(-1.5, angular.radiansPerSecond(), 1.0e-9);
-        assertEquals(-1.5, pool.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(-1.5, angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
+        assertEquals(-1.5, pool.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -120,7 +122,7 @@ class ScalarControlSinkTest {
         OutputApplier.using(ActionContext.empty())
                 .apply(new ResolvedOutput(OutputRequest.of(control, target), target));
 
-        assertEquals(Math.toRadians(2.0), angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(Math.toRadians(2.0), angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
     }
 
     @Test
@@ -133,7 +135,7 @@ class ScalarControlSinkTest {
         OutputApplier.using(ActionContext.empty())
                 .apply(new ResolvedOutput(OutputRequest.of(control, target), target));
 
-        assertEquals(0.75, angular.radiansPerSecond(), 1.0e-9);
+        assertEquals(0.75, angular.angularVelocity().in(RadiansPerSecond), 1.0e-9);
     }
 
     private static final class AimMechanism implements Mechanism {

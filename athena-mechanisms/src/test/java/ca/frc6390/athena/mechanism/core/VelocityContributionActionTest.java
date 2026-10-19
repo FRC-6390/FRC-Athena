@@ -1,5 +1,8 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,21 +19,21 @@ class VelocityContributionActionTest {
     @Test
     void contributionPublishesWhileScheduledAndClearsWhenCancelled() {
         double[] omega = {0.5};
-        TestMechanism mechanism = new TestMechanism(() -> RobotVelocity.angular(omega[0]));
+        TestMechanism mechanism = new TestMechanism(() -> RobotVelocity.angular(RadiansPerSecond.of(omega[0])));
         MechanismScheduler scheduler = MechanismScheduler.create(new MotorContext()).register(mechanism);
 
         scheduler.request(mechanism.aim);
         scheduler.teleopPeriodic(0.0, 0.02);
         assertTrue(mechanism.aimVelocity.isActive());
-        assertEquals(0.5, mechanism.velocity.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(0.5, mechanism.velocity.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
 
         omega[0] = -0.75;
         scheduler.teleopPeriodic(0.02, 0.02);
-        assertEquals(-0.75, mechanism.velocity.robotRelative(0.0).angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(-0.75, mechanism.velocity.robotRelative(Rotation2d.fromRadians(0.0)).raw().angularRadiansPerSecond(), 1.0e-9);
 
         scheduler.cancel(mechanism.aim);
         assertFalse(mechanism.aimVelocity.isActive());
-        assertEquals(RobotVelocity.zero(), mechanism.velocity.robotRelative(0.0));
+        assertEquals(RobotVelocity.zero(), mechanism.velocity.robotRelative(Rotation2d.fromRadians(0.0)));
     }
 
     private static final class TestMechanism implements Mechanism {
