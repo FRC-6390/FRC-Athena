@@ -183,6 +183,12 @@ tasks.register('compileExamples') {
     }
 }
 
+project(':athena-api') {
+    dependencies {
+        api "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+    }
+}
+
 project(':athena-runtime') {
     dependencies {
         api project(':athena-api')
