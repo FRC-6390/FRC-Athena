@@ -3,7 +3,6 @@ members = [
   "crates/arcp-core",
   "crates/arcp-server",
   "crates/arcp-jni",
-  "crates/arcp-dashboard",
   "crates/arcp-client",
 ]
 default-members = [

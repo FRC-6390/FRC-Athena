@@ -9,10 +9,9 @@ through `ArcpSink`.
 
 | Path | What it is |
 | --- | --- |
-| `rust/crates/arcp-core` | Wire codec: v2 records, frames, control messages, patterns (appendix E1-W). Also the v1 model used by `arcp-dashboard`. |
-| `rust/crates/arcp-server` | Server. `v2::ArcpServerV2` is the robot server (UDP frames, TCP control, file service). The v1 server stays for `arcp-dashboard`. |
+| `rust/crates/arcp-core` | Wire codec: v2 records, frames, control messages, patterns (appendix E1-W). |
+| `rust/crates/arcp-server` | Server. `v2::ArcpServerV2` is the robot server (UDP frames, TCP control, file service). |
 | `rust/crates/arcp-jni` | JNI entry points for `ca.frc6390.athena.arcp.ArcpNative`, plus the request queue between client threads and the robot thread. |
-| `rust/crates/arcp-dashboard` | Dashboard CLI and web tools. Used by `host-dashboard`; not built by the athena-arcp Gradle module. |
 | `java` | Gradle module `:athena-arcp` (package `ca.frc6390.athena.arcp`). Public API plus JNI declarations. |
 | `../docs/wire-vectors` | Golden vectors checked by the Rust tests. |
 
@@ -174,9 +173,6 @@ JAVA_HOME=<jdk17> ./gradlew :athena-arcp:test
   (`ArcpWireClient`) decodes replies and frames with athena-runtime's reference reader. This is test code
   only.
 - `ArcpMarshalTest` checks the marshalling buffers and `Config` validation without the native library.
-
-Note: `cargo test --offline --workspace` also builds `arcp-dashboard`, whose dependencies are not in the
-offline cache on this machine. Use the `-p` list above.
 
 ## Wire behaviour
 
