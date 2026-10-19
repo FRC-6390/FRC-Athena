@@ -14,6 +14,9 @@ import ca.frc6390.athena.mechanism.core.Output;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.mechanism.effort.EffortUnits;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Time;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -36,7 +39,7 @@ import java.util.Objects;
  * Voltage saturation, the binding's effort ceiling and the power caps still bound the voltage after this loop,
  * and the integral is re-seeded from the applied voltage so it does not wind up.</p>
  *
- * <p>The optional load estimate {@code d_hat} (see {@link #loadEstimate(double)}) is a disturbance observer
+ * <p>The optional load estimate {@code d_hat} (see {@link #loadEstimate(Time)}) is a disturbance observer
  * that uses only the motor's measured current and speed. It adds the load current that the measured
  * acceleration does not explain, so a load step is compensated within about one control cycle.</p>
  *
@@ -66,10 +69,10 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
             Map.entry("p", TelemetryValue.writableNumber(this::p, this::setP)),
             Map.entry("i", TelemetryValue.writableNumber(this::i, this::setI)),
             Map.entry("d", TelemetryValue.writableNumber(this::d, this::setD)),
-            Map.entry("static", TelemetryValue.writableNumber(this::staticAmps, this::setStaticAmps)),
+            Map.entry("static", TelemetryValue.writableNumber(() -> staticAmps, this::setStaticAmps)),
             Map.entry("inertia", TelemetryValue.writableNumber(this::inertia, this::setInertia)),
             Map.entry("loadTimeConstant",
-                    TelemetryValue.writableNumber(this::loadTimeConstant, this::setLoadTimeConstant)),
+                    TelemetryValue.writableNumber(() -> loadTimeConstant, this::setLoadTimeConstant)),
             Map.entry("disabled", TelemetryValue.writableBoolean(this::isDisabled, value -> disabled = value)),
             Map.entry("Target", TelemetryValue.number(() -> targetValue)),
             Map.entry("Measured", TelemetryValue.number(() -> measuredValue)),
@@ -83,18 +86,24 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * @param p proportional gain in amps of total motor current per velocity unit
      * @param i integral gain in amps per velocity unit per second
      * @param d derivative gain in amps per velocity unit per second, on the measurement
-     * @param staticAmps static friction current in amps of total motor current
+     * @param staticCurrent static friction current, non-negative, of total motor current
      * @param inertia inertia gain in amps per velocity unit per second squared
-     * @param loadTimeConstant load-estimate time constant in seconds, 0 to disable the estimate
+     * @param loadTimeConstant load-estimate time constant, zero to disable the estimate
      */
-    public TorqueVelocityGains(double p, double i, double d, double staticAmps, double inertia,
-            double loadTimeConstant) {
+    public TorqueVelocityGains(double p, double i, double d, Current staticCurrent, double inertia,
+            Time loadTimeConstant) {
+        this(p, i, d, amps(staticCurrent), inertia, seconds(loadTimeConstant));
+    }
+
+    /** Primitive form used internally: static amps and load time constant in seconds. */
+    private TorqueVelocityGains(double p, double i, double d, double staticAmps, double inertia,
+            double loadTimeConstantSeconds) {
         setP(p);
         setI(i);
         setD(d);
         setStaticAmps(staticAmps);
         setInertia(inertia);
-        setLoadTimeConstant(loadTimeConstant);
+        setLoadTimeConstant(loadTimeConstantSeconds);
     }
 
     /**
@@ -113,11 +122,11 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * Returns these gains with a static friction current. The current is applied with the sign of the target,
      * so it is the current needed to overcome friction in the direction of motion.
      *
-     * @param amps friction current in amps of total motor current, non-negative
+     * @param current friction current of total motor current, non-negative
      * @return gains with the static term
      */
-    public TorqueVelocityGains staticAmps(double amps) {
-        return new TorqueVelocityGains(p, i, d, amps, inertia, loadTimeConstant);
+    public TorqueVelocityGains staticCurrent(Current current) {
+        return new TorqueVelocityGains(p, i, d, amps(current), inertia, loadTimeConstant);
     }
 
     /**
@@ -144,20 +153,21 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * needs a signed stator current ({@code MotorHandle#statorCurrentAmps}); a magnitude-only reading, such as
      * a SPARK output current, makes it wrong in the reverse direction.</p>
      *
-     * @param timeConstantSeconds filter time constant in seconds, non-negative; 0 disables the estimate
+     * @param timeConstant filter time constant, non-negative; zero disables the estimate
      * @return gains with the load estimate
      */
-    public TorqueVelocityGains loadEstimate(double timeConstantSeconds) {
-        return new TorqueVelocityGains(p, i, d, staticAmps, inertia, timeConstantSeconds);
+    public TorqueVelocityGains loadEstimate(Time timeConstant) {
+        return new TorqueVelocityGains(p, i, d, staticAmps, inertia, seconds(timeConstant));
     }
 
     public double p() { return p; }
     public double i() { return i; }
     public double d() { return d; }
-    public double staticAmps() { return staticAmps; }
+    /** Static friction current of total motor current; zero when there is no static term. */
+    public Current staticCurrent() { return Units.Amps.of(staticAmps); }
     public double inertia() { return inertia; }
-    /** Load-estimate time constant in seconds; 0 when the estimate is off. */
-    public double loadTimeConstant() { return loadTimeConstant; }
+    /** Load-estimate time constant; zero when the estimate is off. */
+    public Time loadTimeConstant() { return Units.Seconds.of(loadTimeConstant); }
     /** Whether the load estimate is on. */
     public boolean loadEstimateEnabled() { return loadTimeConstant > 0.0; }
     public boolean isDisabled() { return disabled; }
@@ -171,6 +181,14 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
     private void setInertia(double value) { inertia = finite(value, "Torque velocity inertia gain"); }
     private void setLoadTimeConstant(double value) {
         loadTimeConstant = nonNegative(value, "Torque velocity load-estimate time constant");
+    }
+
+    private static double amps(Current current) {
+        return Objects.requireNonNull(current, "current").in(Units.Amps);
+    }
+
+    private static double seconds(Time time) {
+        return Objects.requireNonNull(time, "time").in(Units.Seconds);
     }
 
     private static double finite(double value, String description) {
@@ -300,7 +318,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
             }
             if (disabled) {
                 lastUnclampedVolts = 0.0;
-                return ControlOutput.voltage(0.0);
+                return new ControlOutput.Voltage(0.0);
             }
             double[] omega = new double[devices.length];
             for (int index = 0; index < devices.length; index++) {
@@ -348,7 +366,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
             lastUnclampedVolts = volts;
             previousMeasurement = measured;
             publish(target, measured, total, clamped, loadCurrent);
-            return ControlOutput.voltage(clamped);
+            return new ControlOutput.Voltage(clamped);
         }
 
         @Override

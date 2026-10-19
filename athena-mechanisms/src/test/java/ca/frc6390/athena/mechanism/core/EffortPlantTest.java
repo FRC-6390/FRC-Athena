@@ -307,7 +307,7 @@ class EffortPlantTest {
                 .model(model());
         double stow = -0.2;
         Action action = angle.position(stow).effort(Units.Amps.of(8.0))
-                .until(angle.blocked().threshold(0.1).forSeconds(0.0))
+                .until(angle.blocked().threshold(0.1).forTime(Units.Seconds.of(0.0)))
                 .then(angle.position(stow).effort(Units.Amps.of(1.0)));
         Rig rig = rigFor(plant, angle, action);
         rig.plant.theta = 0.4;

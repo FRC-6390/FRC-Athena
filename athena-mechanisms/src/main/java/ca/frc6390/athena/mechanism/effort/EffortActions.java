@@ -98,7 +98,7 @@ public final class EffortActions {
         for (double amps : perMotor) {
             minimum = Math.min(minimum, amps);
         }
-        return new EffortRequest(minimum);
+        return new EffortRequest(edu.wpi.first.units.Units.Amps.of(minimum));
     }
 
     /** Returns the binding's effort declaration, or null when it has none. */

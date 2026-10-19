@@ -183,7 +183,7 @@ error. Until then the payload counts as external load.
 ## Checks (B3)
 
 Model-equipped bindings expose checks. A check is a `BindingCheck`, a `BooleanSupplier`. It has
-`threshold(value)` and `forSeconds(seconds)` overrides and reports true once its condition has held for
+`threshold(value)` and `forTime(Time)` overrides and reports true once its condition has held for
 the debounce time.
 
 | Method | Needs a model | Condition (default threshold, debounce) |
