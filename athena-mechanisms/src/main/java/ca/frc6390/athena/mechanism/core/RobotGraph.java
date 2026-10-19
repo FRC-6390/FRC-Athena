@@ -360,6 +360,7 @@ final class RobotGraph {
                 if (directDeclarations.contains(loop) || !publishedDeclarations.add(loop)) continue;
                 String loopName = loop instanceof ca.frc6390.athena.mechanism.control.PidGains ? "PID"
                         : loop instanceof ca.frc6390.athena.mechanism.control.FeedforwardGains ? "Feedforward"
+                        : loop instanceof ca.frc6390.athena.mechanism.control.TorqueVelocityGains ? "TorqueVelocity"
                         : "Loop" + customLoop++;
                 if (loop instanceof TelemetrySource source) {
                     source.telemetry().forEach((name, value) ->
