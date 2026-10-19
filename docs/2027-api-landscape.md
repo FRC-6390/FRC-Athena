@@ -45,7 +45,7 @@ This is the current public API Rebuilt actually imports.
 - Localization: `PoseSignal`, `Localization`, `Localizations`, shared `Geometry2d` shapes, and `LocalizationFilters`.
 - Vision: `Cameras`, `HeliosDevice`, `LimelightDevice`, `PhotonVisionDevice`, `CameraMountPose`.
 - Commands: removed. External imperative behaviour is `LifecycleAction` (`Actions.lifecycle`), and WPILib interop lives in `WpilibCommands`.
-- Drivetrain geometry: `WheelBase`, `TrackWidth`.
+- Drivetrain geometry: WPILib `Distance` values passed to `SwerveKinematics.rectangular(...)`. `WheelBase` and `TrackWidth` were removed.
 
 Everything else is required implementation behind these APIs. Old public surface is deleted.
 
@@ -228,8 +228,8 @@ Plain values stay public only when robot code uses them. Declaration-critical va
 | `PidRef` | `PidGains` | RENAME | Rebuilt uses PID constants. |
 | `FeedforwardRef` | `FeedforwardGains` | RENAME | Rebuilt uses feedforward constants. |
 | `CrtRef` | removed | REMOVE | Not used by Rebuilt. |
-| `WheelBase` | `WheelBase` | KEEP | Rebuilt drivetrain uses it. |
-| `TrackWidth` | `TrackWidth` | KEEP | Rebuilt drivetrain uses it. |
+| `WheelBase` | `Distance` (WPILib) | REMOVE | Duplicate of WPILib units; pass `Meters.of(...)` to `rectangular`. |
+| `TrackWidth` | `Distance` (WPILib) | REMOVE | Duplicate of WPILib units; pass `Meters.of(...)` to `rectangular`. |
 | Old module location ref | removed | REMOVE | Old graph/introspection helper; Rebuilt-style swerve uses mechanism-owned geometry. |
 | `CameraMountPose` | `CameraMountPose` | KEEP | Rebuilt uses camera placement. |
 | `ImuMountPose` | removed | REMOVE | Not used by Rebuilt. |

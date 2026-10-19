@@ -1,6 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.Rotations;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
@@ -25,6 +26,8 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Twist2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.LinearVelocity;
 
 /**
  * Production swerve kinematics shared by drive actions, odometry, and optional simulation.
@@ -40,11 +43,12 @@ public final class SwerveKinematics implements SimModel.Source {
     private final AtomicReference<RobotVelocity> requestedSimulationVelocity = new AtomicReference<>();
     private SimModel simulationModel;
 
-    public SwerveKinematics(double maxSpeedMetersPerSecond, Module... modules) {
-        this(maxSpeedMetersPerSecond, modules == null ? List.of() : Arrays.asList(modules));
+    public SwerveKinematics(LinearVelocity maxSpeed, Module... modules) {
+        this(maxSpeed, modules == null ? List.of() : Arrays.asList(modules));
     }
 
-    public SwerveKinematics(double maxSpeedMetersPerSecond, List<Module> modules) {
+    public SwerveKinematics(LinearVelocity maxSpeed, List<Module> modules) {
+        double maxSpeedMetersPerSecond = Objects.requireNonNull(maxSpeed, "maxSpeed").in(MetersPerSecond);
         if (!Double.isFinite(maxSpeedMetersPerSecond) || maxSpeedMetersPerSecond <= 0.0) {
             throw new IllegalArgumentException("Max speed must be positive.");
         }
@@ -58,22 +62,26 @@ public final class SwerveKinematics implements SimModel.Source {
 
     /** Creates the common four-module rectangular layout. */
     public static SwerveKinematics rectangular(
-            double wheelBaseMeters,
-            double trackWidthMeters,
-            double maxSpeedMetersPerSecond,
+            Distance wheelBase,
+            Distance trackWidth,
+            LinearVelocity maxSpeed,
             SwerveModule frontLeft,
             SwerveModule frontRight,
             SwerveModule backLeft,
             SwerveModule backRight) {
+        double wheelBaseMeters = Objects.requireNonNull(wheelBase, "wheelBase").in(Meters);
+        double trackWidthMeters = Objects.requireNonNull(trackWidth, "trackWidth").in(Meters);
         requirePositive(wheelBaseMeters, "Wheelbase");
         requirePositive(trackWidthMeters, "Track width");
-        double x = wheelBaseMeters / 2.0;
-        double y = trackWidthMeters / 2.0;
-        return new SwerveKinematics(maxSpeedMetersPerSecond, List.of(
+        Distance x = Meters.of(wheelBaseMeters / 2.0);
+        Distance y = Meters.of(trackWidthMeters / 2.0);
+        Distance negativeX = Meters.of(-wheelBaseMeters / 2.0);
+        Distance negativeY = Meters.of(-trackWidthMeters / 2.0);
+        return new SwerveKinematics(maxSpeed, List.of(
                 new Module(frontLeft, x, y),
-                new Module(frontRight, x, -y),
-                new Module(backLeft, -x, y),
-                new Module(backRight, -x, -y)));
+                new Module(frontRight, x, negativeY),
+                new Module(backLeft, negativeX, y),
+                new Module(backRight, negativeX, negativeY)));
     }
 
     /** Converts a requested robot-relative velocity into one composed module action. */
@@ -165,8 +173,17 @@ public final class SwerveKinematics implements SimModel.Source {
         return modules;
     }
 
-    public double maxSpeedMetersPerSecond() {
-        return maxSpeedMetersPerSecond;
+    /** Wheel speed that the kinematics saturates to when a requested velocity is too fast. */
+    public LinearVelocity maxSpeed() {
+        return MetersPerSecond.of(maxSpeedMetersPerSecond);
+    }
+
+    /**
+     * Whole-drivetrain drive characterization for this layout: all modules straight, the same voltage on every
+     * drive motor, average drive velocity logged, kS/kV/kA fitted with no gravity term.
+     */
+    public SwerveDriveCharacterization characterization() {
+        return new SwerveDriveCharacterization(modules);
     }
 
     /** Creates the path follower for this exact module layout. */
@@ -275,7 +292,7 @@ public final class SwerveKinematics implements SimModel.Source {
         return module.drive.get().encoder()
                 .reduction(module.model().driveReduction())
                 .measures(Units.Meters)
-                .travelPerRevolution(Units.Meters.of(Math.PI * module.model().wheelDiameterMeters()));
+                .travelPerRevolution(module.model().wheelCircumference());
     }
 
     private final class SwerveSimulationRuntime implements SimModel.Runtime {
@@ -319,7 +336,7 @@ public final class SwerveKinematics implements SimModel.Source {
             case VOLTAGE -> command.value() / 12.0 * maxSpeedMetersPerSecond;
             case POSITION, NEUTRAL -> context.motorVelocity(module.drive.get())
                     * Math.PI
-                    * module.model().wheelDiameterMeters();
+                    * module.model().wheelDiameter().in(Meters);
         };
     }
 
@@ -389,16 +406,28 @@ public final class SwerveKinematics implements SimModel.Source {
         }
     }
 
-    /** A module and its real position relative to robot center. */
-    public record Module(SwerveModule module, double xMeters, double yMeters) {
+    /** A module and its real position relative to robot center: {@code x} forward, {@code y} left. */
+    public record Module(SwerveModule module, Distance x, Distance y) {
         public Module {
             Objects.requireNonNull(module, "module");
+            Objects.requireNonNull(x, "x");
+            Objects.requireNonNull(y, "y");
             if (!module.drive.filled() || !module.steer.filled() || !module.angle.filled()) {
                 throw new IllegalArgumentException("Swerve module slots must be filled before creating kinematics.");
             }
-            if (!Double.isFinite(xMeters) || !Double.isFinite(yMeters)) {
+            if (!Double.isFinite(x.in(Meters)) || !Double.isFinite(y.in(Meters))) {
                 throw new IllegalArgumentException("Module position must be finite.");
             }
+        }
+
+        /** Forward offset in meters. Per-cycle math reads primitives through this, so nothing allocates. */
+        double xMeters() {
+            return x.in(Meters);
+        }
+
+        /** Left offset in meters. */
+        double yMeters() {
+            return y.in(Meters);
         }
     }
 }

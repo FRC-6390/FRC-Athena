@@ -147,9 +147,9 @@ frontLeft.drive.fill(driveMotor)
         .angle.fill(absoluteEncoder);
 
 private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-        0.58,
-        0.58,
-        4.5,
+        Meters.of(0.58),
+        Meters.of(0.58),
+        MetersPerSecond.of(4.5),
         frontLeft,
         frontRight,
         backLeft,

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -102,7 +104,7 @@ class SwervePathFollowerTest {
 
     private static SwerveKinematics kinematics() {
         return SwerveKinematics.rectangular(
-                0.55, 0.55, 4.0,
+                Meters.of(0.55), Meters.of(0.55), MetersPerSecond.of(4.0),
                 module(1, 5, 9), module(2, 6, 10), module(3, 7, 11), module(4, 8, 12));
     }
 
@@ -111,7 +113,7 @@ class SwervePathFollowerTest {
                 .drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId))
                 .steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId))
                 .angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId))
-                .driveMaxSpeedMetersPerSecond(4.0)
+                .driveMaxSpeed(MetersPerSecond.of(4.0))
                 .steerPid(12.0, 0.0, 0.0);
     }
 }

@@ -1,5 +1,8 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.Rotations;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -86,7 +89,7 @@ class SwerveOdometryTest {
         assertSame(initial, rig.odometry.modulePositions());
         assertThrows(
                 UnsupportedOperationException.class,
-                () -> initial.add(new SwerveOdometry.ModulePosition(1.0, 0.0)));
+                () -> initial.add(new SwerveOdometry.ModulePosition(Meters.of(1.0), Rotations.of(0.0))));
 
         rig.drivePositions.replaceAll((id, ignored) -> 2.0);
         rig.moduleAngles.replaceAll((id, ignored) -> 0.25);
@@ -96,17 +99,17 @@ class SwerveOdometryTest {
         assertNotSame(initial, updated);
         assertSame(updated, rig.odometry.modulePositions());
         for (SwerveOdometry.ModulePosition position : initial) {
-            assertEquals(0.0, position.distanceMeters(), 1.0e-9);
-            assertEquals(0.0, position.angleRotations(), 1.0e-9);
+            assertEquals(0.0, position.distance().in(Meters), 1.0e-9);
+            assertEquals(0.0, position.angle().in(Rotations), 1.0e-9);
         }
         for (SwerveOdometry.ModulePosition position : updated) {
-            assertEquals(1.0, position.distanceMeters(), 1.0e-9);
-            assertEquals(0.25, position.angleRotations(), 1.0e-9);
+            assertEquals(1.0, position.distance().in(Meters), 1.0e-9);
+            assertEquals(0.25, position.angle().in(Rotations), 1.0e-9);
         }
     }
 
     private static SwerveModuleTarget target(SwerveOdometry.ModulePosition position) {
-        return new SwerveModuleTarget(position.distanceMeters(), position.angleRotations());
+        return new SwerveModuleTarget(position.distance().in(Meters), position.angle().in(Rotations));
     }
 
     private static void assertPose(PoseSnapshot pose, double x, double y, double heading) {
@@ -124,7 +127,7 @@ class SwerveOdometryTest {
         private final SwerveModule backLeft = module(3, 13, 23);
         private final SwerveModule backRight = module(4, 14, 24);
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5, 0.5, 5.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5), Meters.of(0.5), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         private final SwerveOdometry odometry = kinematics.odometry(imu);
         private final ActionContext context = new ActionContext() {
             @Override
@@ -179,7 +182,7 @@ class SwerveOdometryTest {
 
     private static final class TestModule extends SwerveModule {
         private TestModule() {
-            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+            super(SwerveModuleModel.custom(2.0, 1.0, Meters.of(1.0 / Math.PI)));
         }
     }
 

@@ -13,7 +13,9 @@ import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import java.util.Objects;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.LinearVelocity;
 
 /**
  * Base type for a swerve module declared as a specialized mechanism.
@@ -40,7 +42,9 @@ public abstract class SwerveModule implements MechanismTemplate {
         return model;
     }
 
-    public SwerveModule driveMaxSpeedMetersPerSecond(double maxSpeedMetersPerSecond) {
+    /** Sets the wheel speed that maps to full drive voltage. Used as the drive velocity feedforward scale. */
+    public SwerveModule driveMaxSpeed(LinearVelocity maxSpeed) {
+        double maxSpeedMetersPerSecond = Objects.requireNonNull(maxSpeed, "maxSpeed").in(MetersPerSecond);
         if (!Double.isFinite(maxSpeedMetersPerSecond) || maxSpeedMetersPerSecond <= 0.0) {
             throw new IllegalArgumentException("Drive max speed must be positive.");
         }
@@ -63,7 +67,7 @@ public abstract class SwerveModule implements MechanismTemplate {
         EncoderDevice driveDistance = drive.get().encoder()
                 .reduction(model.driveReduction())
                 .measures(Units.Meters)
-                .travelPerRevolution(Units.Meters.of(Math.PI * model.wheelDiameterMeters()));
+                .travelPerRevolution(model.wheelCircumference());
 
         driveVelocity = Controls.velocity(drive.get())
                 .feedback(driveDistance);
@@ -85,7 +89,7 @@ public abstract class SwerveModule implements MechanismTemplate {
         }
         if (driveVelocity.loops().isEmpty() || steerPosition.loops().isEmpty()) {
             throw new IllegalStateException(
-                    "Swerve module requires driveMaxSpeedMetersPerSecond(...) and steerPid(...) before targeting.");
+                    "Swerve module requires driveMaxSpeed(...) and steerPid(...) before targeting.");
         }
         return Actions.computeHardware(
                 java.util.List.of(drive.get(), steer.get(), angle.get()),
@@ -114,6 +118,14 @@ public abstract class SwerveModule implements MechanismTemplate {
         speed *= Math.cos(delta * TWO_PI);
         heldAngleRotations = currentAngleRotations + delta;
         return new SwerveModuleTarget(speed, heldAngleRotations);
+    }
+
+    /** Drive voltage with the steer held at zero. Used only by drive characterization. */
+    Action characterizeDrive(double volts) {
+        if (driveVelocity == null || steerPosition == null) {
+            throw new IllegalStateException("Swerve module controls have not been configured.");
+        }
+        return Actions.parallel(driveVelocity.voltage(volts), steerPosition.position(0.0));
     }
 
     private Action applyTarget(SwerveModuleTarget target) {

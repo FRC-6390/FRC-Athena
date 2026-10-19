@@ -1,5 +1,8 @@
 package frc.robot.auto;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.drivetrain.swerve.FollowerBackend;
@@ -27,7 +30,7 @@ public final class ExampleDrive implements Mechanism {
     public final SwerveModule backLeft = module(3, 7, 11);
     public final SwerveModule backRight = module(4, 8, 12);
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-            0.55, 0.55, MAX_SPEED, frontLeft, frontRight, backLeft, backRight);
+            Meters.of(0.55), Meters.of(0.55), MetersPerSecond.of(MAX_SPEED), frontLeft, frontRight, backLeft, backRight);
     public final RobotVelocityPool velocity = new RobotVelocityPool();
     public final RobotVelocityPool.Channel autoVelocity = velocity.channel();
     public final Action pooledDrive = kinematics.drive(
@@ -55,7 +58,7 @@ public final class ExampleDrive implements Mechanism {
                 .steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId).brake())
                 .angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId)
                         .measures(Units.Rotations))
-                .driveMaxSpeedMetersPerSecond(MAX_SPEED)
+                .driveMaxSpeed(MetersPerSecond.of(MAX_SPEED))
                 .steerPid(12.0, 0.0, 0.0);
     }
 }

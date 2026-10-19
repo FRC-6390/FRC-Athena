@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -64,7 +66,7 @@ class SwerveModulesTest {
             assertEquals(preset.name(), model.name());
             assertEquals(preset.driveReduction(), model.driveReduction(), 1.0e-9);
             assertEquals(preset.steerReduction(), model.steerReduction(), 1.0e-9);
-            assertEquals(preset.wheelDiameterMeters(), model.wheelDiameterMeters(), 1.0e-9);
+            assertEquals(preset.wheelDiameterMeters(), model.wheelDiameter().in(Meters), 1.0e-9);
         }
     }
 
@@ -83,7 +85,7 @@ class SwerveModulesTest {
         assertNotNull(module.steerPosition);
         assertThrows(IllegalStateException.class, () -> module.target(new SwerveModuleTarget(1.0, 0.25)));
 
-        module.driveMaxSpeedMetersPerSecond(4.0).steerPid(1.0, 0.0, 0.0);
+        module.driveMaxSpeed(MetersPerSecond.of(4.0)).steerPid(1.0, 0.0, 0.0);
 
         assertDoesNotThrow(() -> module.target(new SwerveModuleTarget(1.0, 0.25)));
     }
@@ -96,7 +98,7 @@ class SwerveModulesTest {
         SwerveModule backRight = module(7, 8, 14);
 
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.6, 0.5, 4.5, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(4.5), frontLeft, frontRight, backLeft, backRight);
         SimModel model = kinematics.simulationModel();
 
         assertEquals(4, kinematics.modules().size());
@@ -110,7 +112,7 @@ class SwerveModulesTest {
     @Test
     void productionKinematicsRoundTripsArbitraryChassisVelocity() {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.6, 0.5, 4.5, module(21, 22, 31), module(23, 24, 32), module(25, 26, 33), module(27, 28, 34));
+                Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(4.5), module(21, 22, 31), module(23, 24, 32), module(25, 26, 33), module(27, 28, 34));
         RobotVelocity requested = new RobotVelocity(1.2, -0.7, 0.9);
 
         RobotVelocity measured = kinematics.velocity(kinematics.targets(requested));
@@ -123,7 +125,7 @@ class SwerveModulesTest {
     @Test
     void finiteCycleTargetsRemoveTranslationSkewWhileRotating() {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.6, 0.5, 8.0, module(121, 122, 131), module(123, 124, 132),
+                Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(8.0), module(121, 122, 131), module(123, 124, 132),
                 module(125, 126, 133), module(127, 128, 134));
         RobotVelocity requested = RobotVelocity.robot(2.0, 0.4, Math.PI);
         double dtSeconds = 0.02;
@@ -143,7 +145,7 @@ class SwerveModulesTest {
     @Test
     void moduleOptimizationUsesCurrentAngleAndFlipsReverseDriveSpeed() {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.6, 0.5, 4.5, module(41, 42, 51), module(43, 44, 52), module(45, 46, 53), module(47, 48, 54));
+                Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(4.5), module(41, 42, 51), module(43, 44, 52), module(45, 46, 53), module(47, 48, 54));
 
         List<SwerveModuleTarget> targets = kinematics.targets(new RobotVelocity(-2.0, 0.0, 0.0));
 

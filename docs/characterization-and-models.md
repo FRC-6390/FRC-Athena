@@ -63,6 +63,25 @@ All tests run through the normal scheduler. They use the binding's constraints, 
 arbitration, and they never exceed `maxVoltage`. The collected samples are bounded (5000 entries, oldest
 dropped first).
 
+## Whole-drivetrain drive characterization
+
+`SwerveKinematics.characterization()` returns a `SwerveDriveCharacterization` for the whole layout. Every test points
+all modules straight (steer held at zero), applies the same voltage to every drive motor, and records the average
+measured drive velocity in meters per second with the voltage. The fit is `Identification.fitFeedforward` with
+`Gravity.NONE`, so `kS()`, `kV()` and `kA()` come out in volts, volts per meter-per-second and volts per
+meter-per-second squared.
+
+```java
+public final SwerveDriveCharacterization driveTest = kinematics.characterization()
+        .maxVoltage(Volts.of(6.0))
+        .rampRate(Volts.of(1.0).per(Seconds))
+        .timeout(Seconds.of(8.0));
+```
+
+Actions: `quasistaticForward()`, `quasistaticReverse()`, `dynamicForward()`, `dynamicReverse()`, and `routine()`
+(the four in that order). Holding an action runs it. Releasing it, or the timeout, ends it and releases drive and
+steer. Settings are read when a test starts. Steer characterization per module is not implemented.
+
 ## Fitting
 
 Positions are in rotations (rotary) or meters (linear). A typed binding converts its own unit to

@@ -1,5 +1,9 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -37,9 +41,9 @@ public final class DriveTrain implements Mechanism {
     public final HookBinding alignDriverHeadingAfterAuto = Events.autonomousExit()
             .onStart(heading.setYaw(DriveTrain::allianceDriverHeadingDegrees));
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-            WHEELBASE_METERS,
-            TRACK_WIDTH_METERS,
-            MAX_SPEED_METERS_PER_SECOND,
+            Meters.of(WHEELBASE_METERS),
+            Meters.of(TRACK_WIDTH_METERS),
+            MetersPerSecond.of(MAX_SPEED_METERS_PER_SECOND),
             frontLeft,
             frontRight,
             backLeft,
@@ -85,7 +89,7 @@ public final class DriveTrain implements Mechanism {
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
                         .offset(angleOffsetRotations)
                         .measures(Units.Rotations))
-                .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
+                .driveMaxSpeed(MetersPerSecond.of(MAX_SPEED_METERS_PER_SECOND))
                 .steerPid(22.8, 0.0, 0.0);
     }
 

@@ -1145,7 +1145,7 @@ public final class Localization implements PoseSignal {
             this.stateStdDevs = stateStdDevs;
             this.defaultVisionStdDevs = defaultVisionStdDevs;
             kinematics = new SwerveDriveKinematics(odometry.kinematics().modules().stream()
-                    .map(module -> new Translation2d(module.xMeters(), module.yMeters()))
+                    .map(module -> new Translation2d(module.x().in(edu.wpi.first.units.Units.Meters), module.y().in(edu.wpi.first.units.Units.Meters)))
                     .toArray(Translation2d[]::new));
         }
 
@@ -1159,7 +1159,7 @@ public final class Localization implements PoseSignal {
                 KalmanTuning tuning,
                 boolean seeding,
                 VisionDiagnostics diagnostics) {
-            Rotation2d heading = new Rotation2d(odometry.headingRadians());
+            Rotation2d heading = new Rotation2d(odometry.heading().in(edu.wpi.first.units.Units.Radians));
             SwerveModulePosition[] positions = positions(odometry);
             RobotVelocity odometrySpeeds = odometry.velocity();
             if (estimator == null) {
@@ -1319,8 +1319,8 @@ public final class Localization implements PoseSignal {
         private static SwerveModulePosition[] positions(SwerveOdometry odometry) {
             return odometry.modulePositions().stream()
                     .map(position -> new SwerveModulePosition(
-                            position.distanceMeters(),
-                            Rotation2d.fromRotations(position.angleRotations())))
+                            position.distance().in(edu.wpi.first.units.Units.Meters),
+                            Rotation2d.fromRotations(position.angle().in(edu.wpi.first.units.Units.Rotations))))
                     .toArray(SwerveModulePosition[]::new);
         }
 

@@ -5,6 +5,7 @@ import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Hertz;
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -342,7 +343,7 @@ class VisionLocalizationConvergenceSimulationTest {
         private final SwerveModule backLeft = module(93, 103, 113);
         private final SwerveModule backRight = module(94, 104, 114);
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5588, 0.5588, 5.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5588), Meters.of(0.5588), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         final SwerveOdometry odometry = kinematics.odometry(imu);
 
         private final PoseSignal frontPose;
@@ -387,14 +388,14 @@ class VisionLocalizationConvergenceSimulationTest {
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
             module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).measures(Units.Rotations));
             return module
-                    .driveMaxSpeedMetersPerSecond(5.0)
+                    .driveMaxSpeed(MetersPerSecond.of(5.0))
                     .steerPid(12.0, 0.0, 0.0);
         }
     }
 
     private static final class TestModule extends SwerveModule {
         private TestModule() {
-            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+            super(SwerveModuleModel.custom(2.0, 1.0, Meters.of(1.0 / Math.PI)));
         }
     }
 }

@@ -1,5 +1,9 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+
+import static edu.wpi.first.units.Units.MetersPerSecond;
+
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -30,9 +34,9 @@ public final class DriveTrain implements Mechanism {
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
     public final ImuSource heading = imu.relative();
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-            0.55,
-            0.55,
-            MAX_SPEED_METERS_PER_SECOND,
+            Meters.of(0.55),
+            Meters.of(0.55),
+            MetersPerSecond.of(MAX_SPEED_METERS_PER_SECOND),
             frontLeft,
             frontRight,
             backLeft,
@@ -82,7 +86,7 @@ public final class DriveTrain implements Mechanism {
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
                         .offset(angleOffsetRotations)
                         .measures(Units.Rotations))
-                .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
+                .driveMaxSpeed(MetersPerSecond.of(MAX_SPEED_METERS_PER_SECOND))
                 .steerPid(22.8, 0.0, 0.0);
     }
 

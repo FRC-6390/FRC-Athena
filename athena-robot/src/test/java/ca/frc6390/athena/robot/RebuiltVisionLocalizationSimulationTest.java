@@ -4,6 +4,7 @@ import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,7 +137,7 @@ class RebuiltVisionLocalizationSimulationTest {
         private final SwerveModule backLeft = module(93, 103, 113);
         private final SwerveModule backRight = module(94, 104, 114);
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.5588, 0.5588, 5.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.5588), Meters.of(0.5588), MetersPerSecond.of(5.0), frontLeft, frontRight, backLeft, backRight);
         private final SwerveOdometry odometry = kinematics.odometry(imu);
         private final Action drive = kinematics.drive(() -> RobotVelocity.robot(0.8, 0.0, 0.35));
 
@@ -198,14 +199,14 @@ class RebuiltVisionLocalizationSimulationTest {
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
             module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).measures(Units.Rotations));
             return module
-                    .driveMaxSpeedMetersPerSecond(5.0)
+                    .driveMaxSpeed(MetersPerSecond.of(5.0))
                     .steerPid(12.0, 0.0, 0.0);
         }
     }
 
     private static final class TestModule extends SwerveModule {
         private TestModule() {
-            super(SwerveModuleModel.custom(2.0, 1.0, 1.0 / Math.PI));
+            super(SwerveModuleModel.custom(2.0, 1.0, Meters.of(1.0 / Math.PI)));
         }
     }
 
@@ -217,7 +218,7 @@ class RebuiltVisionLocalizationSimulationTest {
         private final SwerveModule backLeft = offseasonModule(193, 203, 213, 0.693);
         private final SwerveModule backRight = offseasonModule(194, 204, 214, 0.365);
         private final SwerveKinematics kinematics = SwerveKinematics.rectangular(
-                0.55, 0.55, 4.0, frontLeft, frontRight, backLeft, backRight);
+                Meters.of(0.55), Meters.of(0.55), MetersPerSecond.of(4.0), frontLeft, frontRight, backLeft, backRight);
         public final SwerveOdometry odometry = kinematics.odometry(imu);
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.Channel driver = pool.channel();
@@ -235,7 +236,7 @@ class RebuiltVisionLocalizationSimulationTest {
                     .measures(Units.Rotations)
                     .offset(offset));
             return module
-                    .driveMaxSpeedMetersPerSecond(4.0)
+                    .driveMaxSpeed(MetersPerSecond.of(4.0))
                     .steerPid(14.0, 0.0, 0.0);
         }
     }

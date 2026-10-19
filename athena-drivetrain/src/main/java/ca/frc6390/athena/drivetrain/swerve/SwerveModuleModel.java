@@ -1,5 +1,8 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.Meters;
+
+import edu.wpi.first.units.measure.Distance;
 import java.util.Objects;
 
 /**
@@ -9,36 +12,42 @@ import java.util.Objects;
  * @param name module name
  * @param driveReduction motor-to-wheel reduction
  * @param steerReduction steer motor-to-azimuth reduction
- * @param wheelDiameterMeters wheel diameter
+ * @param wheelDiameter wheel diameter
  */
 public record SwerveModuleModel(
         String vendor,
         String name,
         double driveReduction,
         double steerReduction,
-        double wheelDiameterMeters) {
+        Distance wheelDiameter) {
     public SwerveModuleModel {
         vendor = vendor == null || vendor.isBlank() ? "custom" : vendor;
         name = name == null || name.isBlank() ? "custom" : name;
         requirePositive(driveReduction, "driveReduction");
         requirePositive(steerReduction, "steerReduction");
-        requirePositive(wheelDiameterMeters, "wheelDiameterMeters");
+        Objects.requireNonNull(wheelDiameter, "wheelDiameter");
+        requirePositive(wheelDiameter.in(Meters), "wheelDiameter");
     }
 
-    public static SwerveModuleModel custom(double driveReduction, double steerReduction, double wheelDiameterMeters) {
-        return new SwerveModuleModel("custom", "custom", driveReduction, steerReduction, wheelDiameterMeters);
+    public static SwerveModuleModel custom(double driveReduction, double steerReduction, Distance wheelDiameter) {
+        return new SwerveModuleModel("custom", "custom", driveReduction, steerReduction, wheelDiameter);
     }
 
     public SwerveModuleModel withDriveReduction(double driveReduction) {
-        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameterMeters);
+        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameter);
     }
 
     public SwerveModuleModel withSteerReduction(double steerReduction) {
-        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameterMeters);
+        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameter);
     }
 
-    public SwerveModuleModel withWheelDiameterMeters(double wheelDiameterMeters) {
-        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameterMeters);
+    public SwerveModuleModel withWheelDiameter(Distance wheelDiameter) {
+        return new SwerveModuleModel(vendor, name, driveReduction, steerReduction, wheelDiameter);
+    }
+
+    /** Wheel circumference, the drive travel per motor-side revolution before reduction. */
+    Distance wheelCircumference() {
+        return Meters.of(Math.PI * wheelDiameter.in(Meters));
     }
 
     private static void requirePositive(double value, String name) {
