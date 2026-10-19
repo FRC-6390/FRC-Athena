@@ -1,5 +1,10 @@
 package ca.frc6390.athena.vendor.rev;
 
+import static edu.wpi.first.units.Units.Amps;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -68,13 +73,13 @@ class RevBackendTest {
     @Test
     void motorOptionsSanitizeInvalidValues() {
         RevMotorOptions options = new RevMotorOptions()
-                .smartCurrentLimit(-1)
-                .openLoopRampSeconds(Double.NaN)
-                .closedLoopRampSeconds(1.25);
+                .smartCurrentLimit(Amps.of(-1))
+                .openLoopRamp(Seconds.of(Double.NaN))
+                .closedLoopRamp(Seconds.of(1.25));
 
-        assertEquals(0, options.smartCurrentLimitAmps());
-        assertEquals(0.0, options.openLoopRampSeconds());
-        assertEquals(1.25, options.closedLoopRampSeconds());
+        assertEquals(0, options.smartCurrentLimit().in(Amps));
+        assertEquals(0.0, options.openLoopRamp().in(Seconds));
+        assertEquals(1.25, options.closedLoopRamp().in(Seconds));
         assertFalse(options.resetSafeParameters());
         assertTrue(options.persistParameters());
     }
@@ -178,10 +183,10 @@ class RevBackendTest {
     @Test
     void realRevConfigIncludesSafetyTelemetryAndAbsoluteEncoderCalibration() throws Exception {
         RevMotorOptions motorOptions = new RevMotorOptions()
-                .voltageCompensation(12.0)
-                .telemetrySignalPeriodMs(25)
-                .forwardSoftLimitRotations(20.5)
-                .reverseSoftLimitRotations(-1.5)
+                .voltageCompensation(Volts.of(12.0))
+                .telemetrySignalPeriod(Milliseconds.of(25))
+                .forwardSoftLimit(Rotations.of(20.5))
+                .reverseSoftLimit(Rotations.of(-1.5))
                 .forwardLimitSwitch(true, true)
                 .reverseLimitSwitch(false, false);
         SparkBaseConfig motor = RevMotorHandle.activationConfig(
@@ -204,7 +209,7 @@ class RevBackendTest {
                 new RevMotorOptions()
                         .absoluteEncoderProfile(RevMotorOptions.AbsoluteEncoderProfile.REV_THROUGH_BORE_V2)
                         .absoluteEncoderAverageDepth(8)
-                        .absoluteEncoderSignalPeriodMs(30),
+                        .absoluteEncoderSignalPeriod(Milliseconds.of(30)),
                 false);
         Map<Integer, Object> absoluteParameters = parameters(absolute.absoluteEncoder);
         Map<Integer, Object> absoluteSignals = parameters(absolute.signals);
@@ -266,7 +271,7 @@ class RevBackendTest {
     @Test
     void motorConfigurationRunsDuringActivationOnlyOnce() {
         RecordingSparkController controller = new RecordingSparkController();
-        RevMotorOptions options = new RevMotorOptions().smartCurrentLimit(35);
+        RevMotorOptions options = new RevMotorOptions().smartCurrentLimit(Amps.of(35));
         RevMotorHandle handle = new RevMotorHandle(
                 MotorDevice.of(MotorKinds.NEO, 1).neutralMode(MotorNeutralMode.BRAKE),
                 options,
@@ -298,7 +303,7 @@ class RevBackendTest {
                 new RevMotorOptions()));
         assertEquals(55, RevMotorHandle.effectiveSmartCurrentLimit(
                 MotorDevice.of(MotorKinds.NEO, 5).supplyCurrentLimit(35).statorCurrentLimit(30),
-                new RevMotorOptions().smartCurrentLimit(55)));
+                new RevMotorOptions().smartCurrentLimit(Amps.of(55))));
     }
 
     @Test

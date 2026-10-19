@@ -1,5 +1,12 @@
 package ca.frc6390.athena.vendor.rev;
 
+import static edu.wpi.first.units.Units.Amps;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Time;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
@@ -355,6 +362,16 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         return Double.isFinite(value) ? value : 0.0;
     }
 
+    /** Converts a typed limit to the whole amps the SPARK API takes. */
+    private static int wholeAmps(Current limit) {
+        return (int) Math.round(limit.in(Amps));
+    }
+
+    /** Converts a typed period to the whole milliseconds the SPARK API takes. */
+    private static int wholeMillis(Time period) {
+        return (int) Math.round(period.in(Milliseconds));
+    }
+
     static int effectiveSmartCurrentLimit(MotorDevice device, RevMotorOptions options) {
         int declared = declaredSmartCurrentLimit(device, options);
         if (declared > 0 || (options != null && options.preserveDeviceCurrentLimit())) {
@@ -364,7 +381,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     private static int declaredSmartCurrentLimit(MotorDevice device, RevMotorOptions options) {
-        int vendorLimit = options == null ? 0 : options.smartCurrentLimitAmps();
+        int vendorLimit = options == null ? 0 : wholeAmps(options.smartCurrentLimit());
         if (vendorLimit > 0) {
             return vendorLimit;
         }
@@ -417,14 +434,14 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             }
         }
         if (options.openLoopRampConfigured()) {
-            config.openLoopRampRate(options.openLoopRampSeconds());
+            config.openLoopRampRate(options.openLoopRamp().in(Seconds));
         }
         if (options.closedLoopRampConfigured()) {
-            config.closedLoopRampRate(options.closedLoopRampSeconds());
+            config.closedLoopRampRate(options.closedLoopRamp().in(Seconds));
         }
         if (options.voltageCompensationConfigured()) {
-            if (options.voltageCompensationVolts() > 0.0) {
-                config.voltageCompensation(options.voltageCompensationVolts());
+            if (options.voltageCompensation().in(Volts) > 0.0) {
+                config.voltageCompensation(options.voltageCompensation().in(Volts));
             } else {
                 config.disableVoltageCompensation();
             }
@@ -433,10 +450,10 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             configurePrimaryEncoder(config, options);
         }
         configureLimits(config, options, flex);
-        if (options.telemetrySignalPeriodMs() > 0) {
-            config.signals.appliedOutputPeriodMs(options.telemetrySignalPeriodMs())
-                    .busVoltagePeriodMs(options.telemetrySignalPeriodMs())
-                    .outputCurrentPeriodMs(options.telemetrySignalPeriodMs());
+        if (wholeMillis(options.telemetrySignalPeriod()) > 0) {
+            config.signals.appliedOutputPeriodMs(wholeMillis(options.telemetrySignalPeriod()))
+                    .busVoltagePeriodMs(wholeMillis(options.telemetrySignalPeriod()))
+                    .outputCurrentPeriodMs(wholeMillis(options.telemetrySignalPeriod()));
         }
         config.disableFollowerMode();
         return config;
@@ -444,17 +461,17 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     private static void configureLimits(SparkBaseConfig config, RevMotorOptions options, boolean flex) {
         if (options.forwardSoftLimitConfigured()) {
-            boolean enabled = Double.isFinite(options.forwardSoftLimitRotations());
+            boolean enabled = Double.isFinite(options.forwardSoftLimit().in(Rotations));
             config.softLimit.forwardSoftLimitEnabled(enabled);
             if (enabled) {
-                config.softLimit.forwardSoftLimit(options.forwardSoftLimitRotations());
+                config.softLimit.forwardSoftLimit(options.forwardSoftLimit().in(Rotations));
             }
         }
         if (options.reverseSoftLimitConfigured()) {
-            boolean enabled = Double.isFinite(options.reverseSoftLimitRotations());
+            boolean enabled = Double.isFinite(options.reverseSoftLimit().in(Rotations));
             config.softLimit.reverseSoftLimitEnabled(enabled);
             if (enabled) {
-                config.softLimit.reverseSoftLimit(options.reverseSoftLimitRotations());
+                config.softLimit.reverseSoftLimit(options.reverseSoftLimit().in(Rotations));
             }
         }
         if (!flex && (options.forwardLimitSwitchEnabled() || options.reverseLimitSwitchEnabled())) {
@@ -482,9 +499,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         }
         config.signals.primaryEncoderPositionAlwaysOn(true)
                 .primaryEncoderVelocityAlwaysOn(true);
-        if (options.primaryEncoderSignalPeriodMs() > 0) {
-            config.signals.primaryEncoderPositionPeriodMs(options.primaryEncoderSignalPeriodMs())
-                    .primaryEncoderVelocityPeriodMs(options.primaryEncoderSignalPeriodMs());
+        if (wholeMillis(options.primaryEncoderSignalPeriod()) > 0) {
+            config.signals.primaryEncoderPositionPeriodMs(wholeMillis(options.primaryEncoderSignalPeriod()))
+                    .primaryEncoderVelocityPeriodMs(wholeMillis(options.primaryEncoderSignalPeriod()));
         }
     }
 
@@ -503,9 +520,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         }
         config.signals.absoluteEncoderPositionAlwaysOn(true)
                 .absoluteEncoderVelocityAlwaysOn(true);
-        if (options.absoluteEncoderSignalPeriodMs() > 0) {
-            config.signals.absoluteEncoderPositionPeriodMs(options.absoluteEncoderSignalPeriodMs())
-                    .absoluteEncoderVelocityPeriodMs(options.absoluteEncoderSignalPeriodMs());
+        if (wholeMillis(options.absoluteEncoderSignalPeriod()) > 0) {
+            config.signals.absoluteEncoderPositionPeriodMs(wholeMillis(options.absoluteEncoderSignalPeriod()))
+                    .absoluteEncoderVelocityPeriodMs(wholeMillis(options.absoluteEncoderSignalPeriod()));
         }
         return config;
     }
