@@ -159,7 +159,7 @@ public final MechanismModel model = characterization.model();
 Model-equipped bindings expose:
 - `load()` – `NumberSignal`/`DoubleSupplier` estimated external torque/force (B0 units).
 - `blocked()`, `backdriven()`, `feedbackStalled()` – `BooleanSignal`s with `.threshold(...)`,
-  `.forTime(...)` overrides on stall signals and `.forSeconds(...)` on binding checks.
+  `.forTime(...)` overrides on stall signals and `.forTime(...)` on binding checks.
 - `.slipCheck(EncoderDevice second, GearRatio ratio, Measure<U> tolerance)` – only exists when
   configured; exposes `slipping()`.
 - Checks only exist when their data exists (no model => only `feedbackStalled` from current/output).

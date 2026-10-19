@@ -17,6 +17,22 @@ public sealed interface ControlOutput
         return new Percent(value);
     }
 
+    /**
+     * Voltage output.
+     *
+     * @param value volts
+     * @return output
+     */
+    static ControlOutput voltage(edu.wpi.first.units.measure.Voltage value) {
+        return new Voltage(value.in(edu.wpi.first.units.Units.Volts));
+    }
+
+    /**
+     * Primitive voltage output for per-cycle control loops, in volts. Team code uses the {@code Voltage} form.
+     *
+     * @param value volts
+     * @return output
+     */
     static ControlOutput voltage(double value) {
         return new Voltage(value);
     }

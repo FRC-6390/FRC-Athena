@@ -120,12 +120,12 @@ class EffortValidationTest {
         Action action = arm.position(0.5).effort(Units.NewtonMeters.of(4));
         var position = assertInstanceOf(Actions.ControlPosition.class, action);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), position.effort().currentLimitAmps(), 1e-9);
+        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), position.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-9);
         // Amps on the action need no gearing.
         var amps = assertInstanceOf(Actions.ControlPosition.class,
                 Controls.position(KRAKEN, Units.Rotations).feedback(EncoderDevice.of(EncoderKinds.CANCODER, 8)
                         .measures(Units.Rotations)).position(0.5).effort(Units.Amps.of(12)));
-        assertEquals(12.0, amps.effort().currentLimitAmps(), 1e-12);
+        assertEquals(12.0, amps.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
     }
 
     @Test
@@ -145,9 +145,9 @@ class EffortValidationTest {
                 .then(arm.position(0.0)).effort(Units.Amps.of(3));
         Actions.Conditional conditional = assertInstanceOf(Actions.Conditional.class, composed);
         var first = assertInstanceOf(Actions.ControlPosition.class, conditional.action());
-        assertEquals(3.0, first.effort().currentLimitAmps(), 1e-12);
+        assertEquals(3.0, first.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
         var next = assertInstanceOf(Actions.ControlPosition.class, conditional.next());
-        assertEquals(3.0, next.effort().currentLimitAmps(), 1e-12);
+        assertEquals(3.0, next.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
     }
 
     @Test

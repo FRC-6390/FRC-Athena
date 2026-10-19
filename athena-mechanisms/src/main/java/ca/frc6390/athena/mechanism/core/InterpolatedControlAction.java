@@ -216,7 +216,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
                 }
             }
             if (present) continue;
-            updated.add(new Entry(() -> point, () -> value, point, RecordMetadata.at(Double.NaN)));
+            updated.add(new Entry(() -> point, () -> value, point, RecordMetadata.atSeconds(Double.NaN)));
             changed = true;
         }
         if (changed) {

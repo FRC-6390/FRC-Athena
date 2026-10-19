@@ -13,9 +13,9 @@ that loads the wheel should cost as little speed as possible, and the wheel shou
 public final ControlBinding<?> shooter = Controls.velocity(leader, follower)   // follower is commanded too
         .feedback(position, velocity)                                          // velocity in rotations per second
         .torqueVelocity(TorqueVelocityGains.of(kP, kI, 0.0)                     // amps of total motor current
-                .staticAmps(kS)
+                .staticCurrent(Units.Amps.of(kS))
                 .inertia(kA)
-                .loadEstimate(0.01))                                           // optional disturbance observer
+                .loadEstimate(Units.Seconds.of(0.01)))                                           // optional disturbance observer
         .effort(Effort.max(Units.Amps.of(60.0)));                              // optional ceiling, per motor
 ```
 
@@ -62,7 +62,7 @@ for one motor or two. A test checks the split: with two motors, each draws half 
 
 ## Load estimate (disturbance observer, opt-in)
 
-`loadEstimate(tau)` enables a disturbance observer that uses only the motor's measured current and speed:
+`loadEstimate(Time tau)` enables a disturbance observer that uses only the motor's measured current and speed:
 
 ```
 raw = I_measured - kA * a_measured - kS sign(v)       (I_measured: stator current summed over the motors)

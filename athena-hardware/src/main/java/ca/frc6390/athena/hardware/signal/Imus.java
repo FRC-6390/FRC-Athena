@@ -51,7 +51,7 @@ public final class Imus {
         if (!Double.isFinite(degrees)) {
             throw new IllegalArgumentException("IMU yaw must be finite.");
         }
-        return (T) DeviceActionFactories.get().imuSetYaw(source, degrees);
+        return (T) DeviceActionFactories.get().imuSetYaw(source, yaw);
     }
 
     @SuppressWarnings("unchecked")

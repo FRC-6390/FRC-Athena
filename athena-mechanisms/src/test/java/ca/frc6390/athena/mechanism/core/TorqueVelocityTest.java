@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -212,7 +213,19 @@ class TorqueVelocityTest {
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(TUNING.kpAmps, TUNING.kiAmps, 0.0)
                         .inertia(TUNING.kaAmps)
-                        .loadEstimate(observerTau));
+                        .loadEstimate(Units.Seconds.of(observerTau)));
+    }
+
+    @Test
+    void torqueVelocityGainsCarryTypedStaticCurrentAndLoadTimeConstant() {
+        TorqueVelocityGains gains = TorqueVelocityGains.of(1.0, 0.0, 0.0)
+                .staticCurrent(Units.Amps.of(0.8))
+                .loadEstimate(Units.Milliseconds.of(20.0));
+
+        assertEquals(0.8, gains.staticCurrent().in(Units.Amps), 1.0e-12);
+        assertEquals(0.02, gains.loadTimeConstant().in(Units.Seconds), 1.0e-12);
+        assertTrue(gains.loadEstimateEnabled());
+        assertFalse(TorqueVelocityGains.of(1.0, 0.0, 0.0).loadEstimateEnabled());
     }
 
     @Test

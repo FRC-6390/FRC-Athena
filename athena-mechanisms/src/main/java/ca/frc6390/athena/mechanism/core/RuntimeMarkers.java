@@ -52,7 +52,7 @@ public interface RuntimeMarkers {
      * @return record metadata
      */
     default RecordMetadata recordMetadata() {
-        return RecordMetadata.at(clockSeconds());
+        return RecordMetadata.atSeconds(clockSeconds());
     }
 
     /**

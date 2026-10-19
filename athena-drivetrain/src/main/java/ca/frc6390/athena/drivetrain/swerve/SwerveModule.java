@@ -73,7 +73,7 @@ public abstract class SwerveModule implements MechanismTemplate {
                 .feedback(driveDistance);
         steerPosition = Controls.position(steer.get())
                 .feedback(angle.get().absoluteSignal(), angle.get())
-                .planner(MotionPlanners.boundedAngular(1.0));
+                .planner(MotionPlanners.boundedAngular(Units.Rotations.of(1.0), Units.Rotations));
         if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
             driveVelocity = driveVelocity.ff(0.0, 12.0 / driveMaxSpeedMetersPerSecond, 0.0);
         }

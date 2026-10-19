@@ -178,7 +178,7 @@ class ControlRobustnessTest {
         hardware.motor(ARM).position = 350.0;
         ControlBinding<?> turret = Controls.position(ARM)
                 .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(400.0))))
-                .planner(MotionPlanners.boundedAngular(360.0));
+                .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
         RuntimeOverrides overrides = new RuntimeOverrides();
         overrides.maximumPosition(turret, 5.0);
         OutputApplier applier = OutputApplier.using(hardware, overrides);
@@ -263,7 +263,7 @@ class ControlRobustnessTest {
                 .loop(ControlLoops.targetTransform(binding -> context -> ControlOutput.position(context.target())))
                 .pid(0.144, 0.0, 0.006)
                 .constraints(Constraints.range(Range.of(Units.Value.of(-270.0), Units.Value.of(270.0))), Constraints.motion(180.0, 540.0))
-                .planner(MotionPlanners.boundedAngular(360.0));
+                .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(turret, ARM_ENCODER))
                 .traceLevel(MechanismTraceLevel.CAPTURE)

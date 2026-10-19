@@ -6,6 +6,8 @@ import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.runtime.DeviceActionFactory;
 import ca.frc6390.athena.hardware.signal.ImuSource;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.function.DoubleSupplier;
 
 /**
@@ -38,7 +40,7 @@ public final class MechanismDeviceActions implements DeviceActionFactory {
     }
 
     @Override
-    public DeviceAction motorVoltage(MotorDevice motor, double volts) {
+    public DeviceAction motorVoltage(MotorDevice motor, Voltage volts) {
         return Actions.voltage(motor, volts);
     }
 
@@ -53,8 +55,8 @@ public final class MechanismDeviceActions implements DeviceActionFactory {
     }
 
     @Override
-    public DeviceAction imuSetYaw(ImuSource imu, double yawDegrees) {
-        return Actions.setYaw(imu, yawDegrees);
+    public DeviceAction imuSetYaw(ImuSource imu, Angle yaw) {
+        return Actions.setYaw(imu, yaw);
     }
 
     @Override

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.model;
 
 import edu.wpi.first.units.measure.MomentOfInertia;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.sim.SimDynamicsSource;
 import ca.frc6390.athena.hardware.sim.SimPlant;
@@ -120,22 +121,26 @@ public record MechanismModel(
 
     /**
      * Mechanism-side moment of inertia in kg m^2, from kA and the motor constants:
-     * {@code J = (kA / 2 pi) * motors * gear * Kt / R}. Returns NaN for linear mechanisms or when the
+     * {@code J = (kA / 2 pi) * motors * gear * Kt / R}. The measure is NaN for linear mechanisms or when the
      * motor constants are unknown.
      */
-    public double inertia() {
+    public MomentOfInertia inertia() {
+        return Units.KilogramSquareMeters.of(inertiaKgM2());
+    }
+
+    /** Returns {@link #inertia()} as an optional value for simulation; empty when unknown. */
+    @Override
+    public Optional<MomentOfInertia> momentOfInertia() {
+        double inertia = inertiaKgM2();
+        return Double.isFinite(inertia) ? Optional.of(Units.KilogramSquareMeters.of(inertia)) : Optional.empty();
+    }
+
+    private double inertiaKgM2() {
         if (motionKind != MotionKind.ROTARY || kA <= 0.0 || motorTorqueConstant <= 0.0
                 || motorResistance <= 0.0 || motorCount <= 0) {
             return Double.NaN;
         }
         return kA / (2.0 * Math.PI) * motorCount * gearRatio * motorTorqueConstant / motorResistance;
-    }
-
-    /** Returns {@link #inertia()} as an optional value for simulation. */
-    @Override
-    public Optional<MomentOfInertia> momentOfInertia() {
-        double inertia = inertia();
-        return Double.isFinite(inertia) ? Optional.of(edu.wpi.first.units.Units.KilogramSquareMeters.of(inertia)) : Optional.empty();
     }
 
     /**
@@ -179,10 +184,16 @@ public record MechanismModel(
         return values;
     }
 
-    /** Returns a copy with a different payload delta. */
-    public MechanismModel withPayloadDelta(double delta) {
+    /**
+     * Returns a copy with a different payload delta. The delta is a change of the gravity amplitude kG, so it is
+     * in volts.
+     *
+     * @param delta gravity-amplitude change in volts
+     * @return model with the payload delta
+     */
+    public MechanismModel withPayloadDelta(Voltage delta) {
         return new MechanismModel(motionKind, staticFrictionVolts, kineticFrictionVolts, kV, kA, kG,
-                gravityOffsetRadians, friction, backlash, latencySeconds, delta, motorTorqueConstant,
+                gravityOffsetRadians, friction, backlash, latencySeconds, delta.in(Units.Volts), motorTorqueConstant,
                 motorResistance, motorCount, motorKinds, gearRatio, standardErrors, rSquared, sampleCount);
     }
 

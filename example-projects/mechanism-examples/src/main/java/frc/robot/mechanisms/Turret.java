@@ -50,7 +50,7 @@ public final class Turret implements Mechanism {
                     ControlOutput.position(context.target() - chassisImu.angleDegrees())))
             .pid(0.144, 0.0, 0.006)
             .constraints(Constraints.range(travel), Constraints.motion(180.0, 540.0))
-            .planner(MotionPlanners.boundedAngular(360.0));
+            .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
 
     public final Action forward = fieldHeading.position(0.0).untilWithin(1.5);
     public final Action left = fieldHeading.position(90.0).untilWithin(1.5);

@@ -737,7 +737,7 @@ public record ControlBinding<U extends Unit>(
         return new BindingCheck(() -> {
             double velocity = feedback.velocity().velocity() * factor;
             return Math.abs(velocity) < STOPPED_SPEED ? Math.abs(appliedVoltage(motor)) : 0.0;
-        }, 1.0, true, 0.2, MonotonicClock.SYSTEM);
+        }, 1.0, true, edu.wpi.first.units.Units.Seconds.of(0.2), MonotonicClock.SYSTEM);
     }
 
     /**
@@ -754,7 +754,7 @@ public record ControlBinding<U extends Unit>(
                 return 0.0;
             }
             return -feedback.velocity().velocity() * Math.signum(applied);
-        }, 0.05, true, 0.1, MonotonicClock.SYSTEM);
+        }, 0.05, true, edu.wpi.first.units.Units.Seconds.of(0.1), MonotonicClock.SYSTEM);
     }
 
     /**
@@ -774,7 +774,7 @@ public record ControlBinding<U extends Unit>(
             } catch (RuntimeException unavailable) {
                 return Double.NaN;
             }
-        }, 2.0, true, 0.1, MonotonicClock.SYSTEM);
+        }, 2.0, true, edu.wpi.first.units.Units.Seconds.of(0.1), MonotonicClock.SYSTEM);
     }
 
     /**

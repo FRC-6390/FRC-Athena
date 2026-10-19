@@ -174,9 +174,9 @@ public final class EffortLimit implements ControlLoop, TelemetrySource {
         return threshold;
     }
 
-    /** Returns the largest per-motor ceiling at declaration, in amps. */
-    public double ceilingAmpsMax() {
-        return ceilingAmpsMax;
+    /** Returns the largest per-motor ceiling at declaration. */
+    public edu.wpi.first.units.measure.Current ceilingMax() {
+        return edu.wpi.first.units.Units.Amps.of(ceilingAmpsMax);
     }
 
     /** Creates the per-binding runtime. The runtime is bound once for each binding identity. */

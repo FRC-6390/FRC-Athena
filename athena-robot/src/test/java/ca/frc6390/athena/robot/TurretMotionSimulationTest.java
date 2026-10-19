@@ -102,7 +102,7 @@ class TurretMotionSimulationTest {
                         ControlOutput.position(context.target() - chassisImu.angleDegrees())))
                 .pid(0.144, 0.0, 0.006)
                 .constraints(Constraints.range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))), Constraints.motion(180.0, 540.0))
-                .planner(MotionPlanners.boundedAngular(360.0));
+                .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
         private final Action neutral = fieldHeading.neutral();
     }
 }

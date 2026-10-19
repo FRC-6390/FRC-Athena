@@ -24,7 +24,7 @@ public final class Flywheel implements Mechanism {
             .pid(KP_VOLTS_PER_ROTATION_PER_SECOND, 0.0, 0.0);
     private final ControlBinding assisted = devicePid
             .loop(ControlLoops.arbitraryFeedforward(binding -> context ->
-                    ControlOutput.voltage(0.4 + 0.02 * Math.abs(context.target()))));
+                    ControlOutput.voltage(edu.wpi.first.units.Units.Volts.of(0.4 + 0.02 * Math.abs(context.target())))));
 
     public final Action off = devicePid.neutral();
     public final Action withDevicePid = devicePid.velocity(55.0);

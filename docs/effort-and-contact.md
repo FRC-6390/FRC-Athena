@@ -152,7 +152,7 @@ No new primitive is needed. Position past a hard stop with an effort cap holds a
 
 ```java
 public final Action stow = angle.position(stowDegrees).effort(Units.Amps.of(8))
-        .until(angle.blocked().threshold(0.1).forSeconds(0.0))
+        .until(angle.blocked().threshold(0.1).forTime(Units.Seconds.of(0.0)))
         .then(angle.position(stowDegrees).effort(Units.Amps.of(1)));
 ```
 
