@@ -31,16 +31,16 @@ class SwerveOdometryTest {
 
         rig.drivePositions.replaceAll((id, ignored) -> 2.0);
         rig.odometry.refresh(rig.context, 1.0, 1.0);
-        assertPose(rig.odometry.pose(), 1.0, 0.0, 0.0);
+        assertPose(rig.odometry.poseSnapshot(), 1.0, 0.0, 0.0);
 
         rig.moduleAngles.replaceAll((id, ignored) -> 0.25);
         rig.drivePositions.replaceAll((id, position) -> position + 2.0);
         rig.odometry.refresh(rig.context, 2.0, 1.0);
-        assertPose(rig.odometry.pose(), 1.0, 1.0, 0.0);
+        assertPose(rig.odometry.poseSnapshot(), 1.0, 1.0, 0.0);
 
         rig.imu.yawDegrees = 90.0;
         rig.odometry.refresh(rig.context, 3.0, 1.0);
-        assertPose(rig.odometry.pose(), 1.0, 1.0, Math.PI / 2.0);
+        assertPose(rig.odometry.poseSnapshot(), 1.0, 1.0, Math.PI / 2.0);
     }
 
     @Test
@@ -51,7 +51,7 @@ class SwerveOdometryTest {
 
         rig.odometry.refresh(rig.context, 1.0, 0.02);
 
-        assertPose(rig.odometry.pose(), 5.0, 6.0, Math.PI);
+        assertPose(rig.odometry.poseSnapshot(), 5.0, 6.0, Math.PI);
     }
 
     @Test
@@ -75,8 +75,8 @@ class SwerveOdometryTest {
                 target(positions.get(1)),
                 target(positions.get(2)),
                 target(positions.get(3))));
-        assertEquals(expected.xMetersPerSecond(), rig.odometry.velocity().xMetersPerSecond(), 1.0e-9);
-        assertEquals(expected.yMetersPerSecond(), rig.odometry.velocity().yMetersPerSecond(), 1.0e-9);
+        assertEquals(expected.raw().xMetersPerSecond(), rig.odometry.velocity().raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(expected.raw().yMetersPerSecond(), rig.odometry.velocity().raw().yMetersPerSecond(), 1.0e-9);
     }
 
     @Test

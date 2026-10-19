@@ -1,11 +1,16 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.HardwareMeasurementSignal;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
+import ca.frc6390.athena.runtime.control.VelocityFrame;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.Measurements;
@@ -97,24 +102,25 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
             double heading = rawHeading + headingOffsetRadians;
             double headingDelta = wrapRadians(heading - previousHeadingRadians);
             double midpointHeading = previousHeadingRadians + headingDelta / 2.0;
-            double robotDx = wheelVelocity.xMetersPerSecond() * seconds;
-            double robotDy = wheelVelocity.yMetersPerSecond() * seconds;
+            double robotDx = wheelVelocity.raw().xMetersPerSecond() * seconds;
+            double robotDy = wheelVelocity.raw().yMetersPerSecond() * seconds;
             double cos = Math.cos(midpointHeading);
             double sin = Math.sin(midpointHeading);
             pose = new PoseSnapshot(
                     pose.xMeters() + robotDx * cos - robotDy * sin,
                     pose.yMeters() + robotDx * sin + robotDy * cos,
                     heading);
-            velocity = new RobotVelocity(
-                    wheelVelocity.xMetersPerSecond(),
-                    wheelVelocity.yMetersPerSecond(),
-                    headingDelta / seconds);
+            velocity = RobotVelocity.Raw.of(
+                    wheelVelocity.raw().xMetersPerSecond(),
+                    wheelVelocity.raw().yMetersPerSecond(),
+                    headingDelta / seconds,
+                    VelocityFrame.ROBOT);
             commitModuleReadings();
             previousHeadingRadians = heading;
         }
         modulePositionVersion++;
         measurement = Measurements.poseAndSpeeds(pose, velocity)
-                .timing(timestampSeconds, 0.0)
+                .timing(Seconds.of(timestampSeconds), Seconds.of(0.0))
                 .source(this);
         lastRefreshTimestamp = timestampSeconds;
     }
@@ -131,7 +137,14 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         velocity = RobotVelocity.zero();
     }
 
-    public synchronized PoseSnapshot pose() {
+    /** Returns the latest odometry pose as a WPILib pose. */
+    @Override
+    public synchronized Pose2d pose() {
+        return new Pose2d(pose.xMeters(), pose.yMeters(), new Rotation2d(pose.headingRadians()));
+    }
+
+    /** Returns the latest odometry pose in the runtime's internal snapshot form. */
+    public synchronized PoseSnapshot poseSnapshot() {
         return pose;
     }
 
@@ -199,10 +212,11 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
             rhsY += wheelY;
             rhsRotation += -module.yMeters() * wheelX + module.xMeters() * wheelY;
         }
-        return new RobotVelocity(
+        return RobotVelocity.Raw.of(
                 dot(velocityInverse[0], rhsX, rhsY, rhsRotation),
                 dot(velocityInverse[1], rhsX, rhsY, rhsRotation),
-                dot(velocityInverse[2], rhsX, rhsY, rhsRotation));
+                dot(velocityInverse[2], rhsX, rhsY, rhsRotation),
+                VelocityFrame.ROBOT);
     }
 
     private static double[][] velocityInverse(List<SwerveKinematics.Module> modules) {

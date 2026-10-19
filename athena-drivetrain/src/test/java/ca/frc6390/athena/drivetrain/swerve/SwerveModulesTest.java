@@ -1,5 +1,7 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -113,13 +115,13 @@ class SwerveModulesTest {
     void productionKinematicsRoundTripsArbitraryChassisVelocity() {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(4.5), module(21, 22, 31), module(23, 24, 32), module(25, 26, 33), module(27, 28, 34));
-        RobotVelocity requested = new RobotVelocity(1.2, -0.7, 0.9);
+        RobotVelocity requested = RobotVelocity.robot(MetersPerSecond.of(1.2), MetersPerSecond.of(-0.7), RadiansPerSecond.of(0.9));
 
         RobotVelocity measured = kinematics.velocity(kinematics.targets(requested));
 
-        assertEquals(requested.xMetersPerSecond(), measured.xMetersPerSecond(), 1.0e-9);
-        assertEquals(requested.yMetersPerSecond(), measured.yMetersPerSecond(), 1.0e-9);
-        assertEquals(requested.angularRadiansPerSecond(), measured.angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(requested.raw().xMetersPerSecond(), measured.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(requested.raw().yMetersPerSecond(), measured.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(requested.raw().angularRadiansPerSecond(), measured.raw().angularRadiansPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -127,18 +129,18 @@ class SwerveModulesTest {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(8.0), module(121, 122, 131), module(123, 124, 132),
                 module(125, 126, 133), module(127, 128, 134));
-        RobotVelocity requested = RobotVelocity.robot(2.0, 0.4, Math.PI);
+        RobotVelocity requested = RobotVelocity.robot(MetersPerSecond.of(2.0), MetersPerSecond.of(0.4), RadiansPerSecond.of(Math.PI));
         double dtSeconds = 0.02;
 
         RobotVelocity corrected = kinematics.velocity(kinematics.targets(requested, dtSeconds));
         Pose2d realizedDelta = Pose2d.kZero.exp(new Twist2d(
-                corrected.xMetersPerSecond() * dtSeconds,
-                corrected.yMetersPerSecond() * dtSeconds,
-                corrected.angularRadiansPerSecond() * dtSeconds));
+                corrected.raw().xMetersPerSecond() * dtSeconds,
+                corrected.raw().yMetersPerSecond() * dtSeconds,
+                corrected.raw().angularRadiansPerSecond() * dtSeconds));
 
-        assertEquals(requested.xMetersPerSecond() * dtSeconds, realizedDelta.getX(), 1.0e-9);
-        assertEquals(requested.yMetersPerSecond() * dtSeconds, realizedDelta.getY(), 1.0e-9);
-        assertEquals(requested.angularRadiansPerSecond() * dtSeconds,
+        assertEquals(requested.raw().xMetersPerSecond() * dtSeconds, realizedDelta.getX(), 1.0e-9);
+        assertEquals(requested.raw().yMetersPerSecond() * dtSeconds, realizedDelta.getY(), 1.0e-9);
+        assertEquals(requested.raw().angularRadiansPerSecond() * dtSeconds,
                 realizedDelta.getRotation().getRadians(), 1.0e-9);
     }
 
@@ -147,15 +149,15 @@ class SwerveModulesTest {
         SwerveKinematics kinematics = SwerveKinematics.rectangular(
                 Meters.of(0.6), Meters.of(0.5), MetersPerSecond.of(4.5), module(41, 42, 51), module(43, 44, 52), module(45, 46, 53), module(47, 48, 54));
 
-        List<SwerveModuleTarget> targets = kinematics.targets(new RobotVelocity(-2.0, 0.0, 0.0));
+        List<SwerveModuleTarget> targets = kinematics.targets(RobotVelocity.robot(MetersPerSecond.of(-2.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(0.0)));
 
         for (SwerveModuleTarget target : targets) {
             assertEquals(2.0, target.speedMetersPerSecond(), 1.0e-9);
             assertEquals(0.5, target.angleRotations(), 1.0e-9);
         }
         RobotVelocity reconstructed = kinematics.velocity(targets);
-        assertEquals(-2.0, reconstructed.xMetersPerSecond(), 1.0e-9);
-        assertEquals(0.0, reconstructed.yMetersPerSecond(), 1.0e-9);
+        assertEquals(-2.0, reconstructed.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(0.0, reconstructed.raw().yMetersPerSecond(), 1.0e-9);
 
         SwerveModuleTarget optimized = kinematics.modules().get(0).module().optimizedTarget(targets.get(0), 0.0);
         assertEquals(-2.0, optimized.speedMetersPerSecond(), 1.0e-9);
