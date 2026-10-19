@@ -3,7 +3,11 @@ package ca.frc6390.athena.drivetrain;
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.Events;
+import ca.frc6390.athena.mechanism.core.HookBinding;
+import ca.frc6390.athena.mechanism.core.HookGroup;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
@@ -37,7 +41,8 @@ import java.util.function.Supplier;
  *       competition. {@link #allianceKnown()} reports whether it is known.</li>
  *   <li><b>No auto and no seed.</b> {@link #assumeDriverForward()} sets the pose heading to the alliance forward
  *       (robot facing away from its own wall) only while {@code poseSeeded} is false. A seeded pose (auto or
- *       vision) is left alone. Bind it to teleop start.</li>
+ *       vision) is left alone. This runs automatically on every teleop enable through the orientation's
+ *       teleop-start hook, see {@link #hooks()}.</li>
  *   <li><b>Driver reset (Start).</b> {@link #resetHeading()} makes the current robot facing the driver's forward.
  *       It stores an offset and never touches the field pose, so field-oriented drive and field-pose consumers
  *       stay consistent.</li>
@@ -46,7 +51,7 @@ import java.util.function.Supplier;
  *       forward does not move.</li>
  * </ul>
  */
-public final class DriverOrientation {
+public final class DriverOrientation implements HookGroup {
     private static final double PI = Math.PI;
 
     /** Driver Station alliance as seen by the driver orientation. */
@@ -59,6 +64,7 @@ public final class DriverOrientation {
     private final Supplier<Optional<Alliance>> alliance;
     private final BooleanSupplier poseSeeded;
     private final Function<PoseSnapshot, ActionBinding> resetPose;
+    private final HookBinding assumeForwardAtTeleop;
     private volatile double driverOffsetRadians;
 
     private DriverOrientation(
@@ -70,6 +76,17 @@ public final class DriverOrientation {
         this.alliance = Objects.requireNonNull(alliance, "alliance");
         this.poseSeeded = Objects.requireNonNull(poseSeeded, "poseSeeded");
         this.resetPose = Objects.requireNonNull(resetPose, "resetPose");
+        this.assumeForwardAtTeleop = Events.teleopInit().onStart(assumeDriverForwardBinding());
+    }
+
+    /**
+     * Returns the teleop-start hook that runs {@link #assumeDriverForward()} on every teleop enable. The hook is
+     * owned by this orientation: a field of a registered mechanism whose type is {@link HookGroup} is discovered
+     * with the mechanism, as {@code <field>.assumeForwardAtTeleop}, so robot code does not bind it.
+     */
+    @Override
+    public Map<String, HookBinding> hooks() {
+        return Map.of("assumeForwardAtTeleop", assumeForwardAtTeleop);
     }
 
     /**
