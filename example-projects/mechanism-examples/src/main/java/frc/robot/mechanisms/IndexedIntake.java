@@ -12,7 +12,7 @@ import frc.robot.Constants;
 
 public final class IndexedIntake implements Mechanism {
     private final MotorDevice roller = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 12)
-            .statorCurrentLimit(35)
+            .statorCurrentLimit(edu.wpi.first.units.Units.Amps.of(35))
             .coast();
     private final DigitalInputDevice beamBreak = Constants.RIO.dio(3).digitalInput().inverted();
 
@@ -24,10 +24,10 @@ public final class IndexedIntake implements Mechanism {
     public final Action reject = roller.percent(-0.6);
     public final HookBinding stopOnStall = Events.when(roller.stall()
             .atCurrentLimit(0.9)
-            .velocityBelow(0.5)
-            .commandedVoltageAbove(3.0)
-            .forSeconds(0.25)
-            .rearmAfterSeconds(1.0))
+            .velocityBelow(edu.wpi.first.units.Units.RotationsPerSecond.of(0.5))
+            .commandedVoltageAbove(edu.wpi.first.units.Units.Volts.of(3.0))
+            .forTime(edu.wpi.first.units.Units.Seconds.of(0.25))
+            .rearmAfter(edu.wpi.first.units.Units.Seconds.of(1.0)))
             .rising()
             .onStart(stop);
 }

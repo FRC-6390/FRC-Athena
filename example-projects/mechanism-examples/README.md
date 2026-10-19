@@ -55,7 +55,7 @@ arm gravity compensation is state-dependent and should remain a custom loop rath
 ```java
 public final MotorSlot<TemplateRoller> motor = Slots.motor(this, "motor", this::configureIfReady)
         .coast()
-        .currentLimit(20);
+        .currentLimit(Amps.of(20));
 ```
 
 The robot supplies the physical device while the template owns its requirements:

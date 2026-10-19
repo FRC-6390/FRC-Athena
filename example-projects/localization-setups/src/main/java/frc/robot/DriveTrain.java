@@ -43,7 +43,7 @@ public final class DriveTrain implements Mechanism {
             .enabled(DriverStation::isTeleopEnabled);
     public final RobotVelocityPool.Channel targetingVelocity = velocity.channel()
             .enabled(DriverStation::isTeleopEnabled);
-    private DoubleSupplier fieldHeadingRadians = () -> Math.toRadians(heading.yawDegrees());
+    private DoubleSupplier fieldHeadingRadians = () -> heading.yaw().in(edu.wpi.first.units.Units.Radians);
     public final Action pooledDrive = kinematics.drive(
             velocity,
             () -> fieldHeadingRadians.getAsDouble());

@@ -88,7 +88,7 @@ Declare those defaults on the binding; dashboard edits are temporary overrides o
 private final ControlBinding armControl = Controls.position(armMotor)
         .feedback(armEncoder)
         .constraints(
-                Constraints.range(Range.of(0.0, 105.0)),
+                Constraints.range(Range.of(Degrees.of(0.0), Degrees.of(105.0))),
                 Constraints.motion(60.0, 120.0),
                 Constraints.clamp(8.4));
 ```

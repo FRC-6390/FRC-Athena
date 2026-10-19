@@ -24,7 +24,7 @@ public final class SimulationHarness {
 
     public void step(double seconds) {
         session.motor(motor).setVoltage(6.0);
-        session.step(seconds);
+        session.step(edu.wpi.first.units.Units.Seconds.of(seconds));
     }
 
     public SimulationSession session() {

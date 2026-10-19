@@ -36,7 +36,7 @@ public final class StagedArm implements Mechanism {
     /** Derates the limit from 100 C (full) down to 40 percent at 130 C. Thermal alone never brakes the motor. */
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 20)
             .brake()
-            .currentLimit(60)
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(60))
             .thermal(Thermal.derate(Celsius.of(100.0), Celsius.of(130.0), 0.4));
     private final EncoderDevice encoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 20).measures(Degrees);
 

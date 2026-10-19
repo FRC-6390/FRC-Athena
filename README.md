@@ -216,8 +216,8 @@ MotorDevice intake = RIO.motor(MotorKinds.NEO_550, 2);
 MotorDevice flexNeo = RIO.motor(MotorControllerKinds.SPARK_FLEX, MotorKinds.NEO, 3);
 
 MotorDevice leader = RIO.motor(MotorKinds.NEO, 10)
-        .supplyCurrentLimit(40)
-        .statorCurrentLimit(60);
+        .supplyCurrentLimit(Amps.of(40))
+        .statorCurrentLimit(Amps.of(60));
 MotorDevice followerA = RIO.motor(MotorKinds.NEO, 11).follow(leader);
 MotorDevice followerB = RIO.motor(MotorKinds.NEO, 12).follow(leader);
 MotorDevice followerC = RIO.motor(MotorKinds.NEO, 13).follow(leader);
@@ -246,17 +246,18 @@ localization, and controls:
 ```java
 ImuSource heading = pigeon
         .transform(ImuTransform.identity().yawInverted())
-        .mounting(ImuMount.yawDegrees(90.0))
+        .mounting(ImuMount.yaw(Degrees.of(90.0)))
         .relative();
 
-PositionSignal wrappedHeading = heading.heading();
-PositionSignal accumulatedHeading = heading.continuousHeading();
-VelocitySignal yawRate = heading.yawRate();
-ScalarSignal forwardAcceleration = heading.accelerationX();
+Angle yaw = heading.yaw();
+PositionSignal wrappedHeading = heading.headingSignal();
+PositionSignal accumulatedHeading = heading.continuousHeadingSignal();
+VelocitySignal yawRate = heading.yawRateSignal();
+ScalarSignal forwardAcceleration = heading.accelerationXSignal();
 
 boolean usable = heading.isConnected()
         && !heading.isCalibrating()
-        && heading.isFresh(0.1);
+        && heading.isFresh(Seconds.of(0.1));
 ```
 
 For a cardinal installation, describe which sensor directions point robot-forward and robot-up:
