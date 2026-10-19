@@ -8,6 +8,8 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.effort.EffortCarrier;
 import ca.frc6390.athena.mechanism.effort.EffortRequest;
 import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -119,8 +121,8 @@ public final class Actions {
         return new Then(mechanismAction(action), mechanismAction(next));
     }
 
-    static Action timeout(DeviceAction action, double seconds) {
-        return timeout(mechanismAction(action), seconds);
+    static Action timeout(DeviceAction action, Time duration) {
+        return timeout(mechanismAction(action), duration);
     }
 
     private static Action mechanismAction(DeviceAction action) {
@@ -250,8 +252,8 @@ public final class Actions {
         return mechanismAction(action);
     }
 
-    public static Action waitSeconds(double seconds) {
-        return new WaitSeconds(seconds);
+    public static Action waitSeconds(Time duration) {
+        return new WaitSeconds(duration);
     }
 
     /**
@@ -309,8 +311,8 @@ public final class Actions {
         return waitUntil(ctx -> condition.getAsBoolean());
     }
 
-    public static Action timeout(Action action, double seconds) {
-        return new Timeout(action, seconds);
+    public static Action timeout(Action action, Time duration) {
+        return new Timeout(action, duration);
     }
 
     public static When when(ActionCondition condition) {
@@ -366,8 +368,9 @@ public final class Actions {
      * Requires the measurement to stay inside the tolerance window for {@code seconds} continuously.
      * The timer restarts whenever the measurement leaves the window.
      */
-    public static Action settled(Action action, double seconds) {
+    public static Action settled(Action action, Time duration) {
         WithinTolerance within = requireWithin(action, "settled");
+        double seconds = requireDuration(duration.in(Seconds), "Settle duration");
         return new WithinTolerance(within.action(), within.tolerance(), seconds, within.maxVelocity());
     }
 
@@ -592,7 +595,8 @@ public final class Actions {
         }
 
         /** Sets the time limit of the most recently added attempt. */
-        public Attempt within(double seconds) {
+        public Attempt within(Time duration) {
+            double seconds = duration.in(Seconds);
             if (!(seconds > 0.0) || Double.isNaN(seconds)) {
                 throw new IllegalArgumentException("Attempt time limit must be positive.");
             }
@@ -632,7 +636,7 @@ public final class Actions {
 
         private static Action timedAttempt(Step step, Flag flag) {
             Action body = new Then(step.action(), new DoOnce(flag::mark));
-            return Double.isFinite(step.seconds()) ? new Timeout(body, step.seconds()) : body;
+            return Double.isFinite(step.seconds()) ? new Timeout(body, Seconds.of(step.seconds())) : body;
         }
 
         record Step(Action action, double seconds) {
@@ -1004,18 +1008,18 @@ public final class Actions {
         }
     }
 
-    public record WaitSeconds(double seconds) implements Action {
+    public record WaitSeconds(Time duration) implements Action {
         public WaitSeconds {
-            requireDuration(seconds, "Wait duration");
+            requireDuration(duration.in(Seconds), "Wait duration");
         }
 
         @Override
         public String describe() {
-            return "WAIT " + seconds + "s";
+            return "WAIT " + duration.in(Seconds) + "s";
         }
 
         public boolean complete(MechanismContext ctx) {
-            return hasElapsed(ctx.timeInStateSeconds(), seconds);
+            return hasElapsed(ctx.timeInStateSeconds(), duration.in(Seconds));
         }
     }
 
@@ -1057,7 +1061,7 @@ public final class Actions {
         }
     }
 
-    public record Timeout(Action action, double seconds) implements Action {
+    public record Timeout(Action action, Time duration) implements Action {
 
         @Override
         public List<Child> children() {
@@ -1066,16 +1070,16 @@ public final class Actions {
 
         @Override
         public String describe() {
-            return "TIMEOUT " + seconds + "s";
+            return "TIMEOUT " + duration.in(Seconds) + "s";
         }
 
         public Timeout {
             Objects.requireNonNull(action, "action");
-            requireDuration(seconds, "Timeout duration");
+            requireDuration(duration.in(Seconds), "Timeout duration");
         }
 
         public boolean expired(MechanismContext ctx) {
-            return hasElapsed(ctx.timeInStateSeconds(), seconds);
+            return hasElapsed(ctx.timeInStateSeconds(), duration.in(Seconds));
         }
     }
 
@@ -1336,6 +1340,7 @@ public final class Actions {
      * {@code intake}. The other builder calls mutate until the sequence is first requested or
      * declared on a registered mechanism and return a modified copy after that.
      */
+    @SuppressWarnings("unchecked") // Action.timeout(Time) overrides DeviceAction's generic timeout.
     public static final class Sequence implements Action {
 
         @Override
@@ -1376,8 +1381,8 @@ public final class Actions {
             return run(mechanismAction(action));
         }
 
-        public Sequence forTime(double seconds, Action action) {
-            requireDuration(seconds, "Sequence stage duration");
+        public Sequence forTime(Time duration, Action action) {
+            double seconds = requireDuration(duration.in(Seconds), "Sequence stage duration");
             Sequence target = mutable();
             SequenceStep step = new SequenceStep(
                     target.alongsideStarted(action),
@@ -1429,8 +1434,9 @@ public final class Actions {
             return target;
         }
 
-        public Sequence waitSeconds(double seconds) {
-            Action wait = Actions.waitSeconds(seconds);
+        public Sequence waitSeconds(Time duration) {
+            double seconds = duration.in(Seconds);
+            Action wait = Actions.waitSeconds(duration);
             Sequence target = mutable();
             target.steps.add(new SequenceStep(
                     target.alongsideStarted(wait),
@@ -1455,10 +1461,10 @@ public final class Actions {
          * {@code then(...)}, run after the limited part, as with {@code timeout(...)} on any action.
          */
         @Override
-        public Sequence timeout(double seconds) {
-            requireDuration(seconds, "Sequence timeout");
+        public Sequence timeout(Time duration) {
+            requireDuration(duration.in(Seconds), "Sequence timeout");
             Sequence outer = new Sequence();
-            outer.steps.add(new SequenceStep(new Timeout(copy(), seconds), ctx -> false, false));
+            outer.steps.add(new SequenceStep(new Timeout(copy(), duration), ctx -> false, false));
             return outer;
         }
 
@@ -1584,8 +1590,8 @@ public final class Actions {
             return add(new CycleStep(action, ctx -> false));
         }
 
-        public Cycle forTime(double seconds, Action action) {
-            requireDuration(seconds, "Cycle stage duration");
+        public Cycle forTime(Time duration, Action action) {
+            double seconds = requireDuration(duration.in(Seconds), "Cycle stage duration");
             return add(new CycleStep(action, ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds)));
         }
 

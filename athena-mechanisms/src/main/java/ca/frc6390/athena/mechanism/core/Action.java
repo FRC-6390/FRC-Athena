@@ -6,6 +6,8 @@ import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 import ca.frc6390.athena.mechanism.effort.EffortActions;
 import ca.frc6390.athena.mechanism.staging.Staging;
 import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -130,23 +132,23 @@ public interface Action extends DeviceAction {
     }
 
     /**
-     * Requires the measurement of an {@link #untilWithin(double) untilWithin} action to stay inside its
+     * Requires the measurement of an {@link #untilWithin(Measure) untilWithin} action to stay inside its
      * window continuously for {@code seconds} before it completes. The timer restarts whenever the
      * measurement leaves the window. Use this to stop a mechanism that swings through the target at speed
      * from completing on the first in-window cycle and coasting past it.
      *
-     * @param seconds required continuous time inside the window (finite, non-negative)
+     * @param duration required continuous time inside the window (finite, non-negative)
      * @return settled tolerance action
      * @throws IllegalArgumentException when this action is not an {@code untilWithin} action
      */
-    default Action settled(double seconds) {
-        return Actions.settled(this, seconds);
+    default Action settled(Time duration) {
+        return Actions.settled(this, Objects.requireNonNull(duration, "duration"));
     }
 
-    /** Typed form of {@link #settled(double)}. */
+    /** {@link #settled(Time)} for a {@link java.time.Duration}. */
     default Action settled(java.time.Duration duration) {
         Objects.requireNonNull(duration, "duration");
-        return Actions.settled(this, duration.toNanos() / 1.0e9);
+        return Actions.settled(this, Seconds.of(duration.toNanos() / 1.0e9));
     }
 
     /**
@@ -162,24 +164,36 @@ public interface Action extends DeviceAction {
         return Actions.maxVelocity(this, maxVelocity);
     }
 
-    /** Typed form of {@link #maxVelocity(double)}: a rate of the control binding's unit per second. */
+    /** Typed form of {@link #maxVelocity(Measure)}: a rate of the control binding's unit per second. */
     default Action maxVelocity(Measure<?> maxVelocity) {
         return Actions.maxVelocity(this, maxVelocity);
     }
 
     /**
-     * Convenience for {@code untilWithin(tolerance).settled(seconds)}: completes once the position or
-     * velocity error stays within {@code tolerance} continuously for {@code seconds}.
+     * Convenience for {@code untilWithin(tolerance).settled(duration)}: completes once the position or
+     * velocity error stays within {@code tolerance} continuously for {@code duration}.
      *
      * @param tolerance maximum absolute target error in the control's configured units
-     * @param seconds required continuous time inside the window
+     * @param duration required continuous time inside the window
      * @return settled tolerance action
      */
-    default Action untilSettled(double tolerance, double seconds) {
-        return untilWithin(tolerance).settled(seconds);
+    default Action untilSettled(double tolerance, Time duration) {
+        return untilWithin(tolerance).settled(duration);
     }
 
-    /** Typed form of {@link #untilSettled(double, double)}. */
+    /**
+     * Convenience for {@code untilWithin(tolerance).settled(duration)}: completes once the position or
+     * velocity error stays within {@code tolerance} continuously for {@code duration}.
+     *
+     * @param tolerance maximum absolute target error as a measure of the control's unit
+     * @param duration required continuous time inside the window
+     * @return settled tolerance action
+     */
+    default Action untilSettled(Measure<?> tolerance, Time duration) {
+        return untilWithin(tolerance).settled(duration);
+    }
+
+    /** {@link #untilSettled(Measure, Time)} for a {@link java.time.Duration}. */
     default Action untilSettled(Measure<?> tolerance, java.time.Duration settle) {
         return untilWithin(tolerance).settled(settle);
     }
@@ -207,8 +221,8 @@ public interface Action extends DeviceAction {
         return Actions.untilStalled(signal, this);
     }
 
-    default Action timeout(double seconds) {
-        return Actions.timeout(this, seconds);
+    default Action timeout(Time duration) {
+        return Actions.timeout(this, Objects.requireNonNull(duration, "duration"));
     }
 
     /**
@@ -217,7 +231,7 @@ public interface Action extends DeviceAction {
      */
     default Action atMost(java.time.Duration duration) {
         Objects.requireNonNull(duration, "duration");
-        return Actions.timeout(this, duration.toNanos() / 1.0e9);
+        return Actions.timeout(this, Seconds.of(duration.toNanos() / 1.0e9));
     }
 
     /**

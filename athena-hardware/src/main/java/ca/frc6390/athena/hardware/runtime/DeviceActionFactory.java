@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.runtime;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
+import edu.wpi.first.units.measure.Time;
 import java.util.function.DoubleSupplier;
 
 /**
@@ -32,8 +33,8 @@ public interface DeviceActionFactory {
     /** Runs {@code next} after {@code action} completes. */
     DeviceAction then(DeviceAction action, DeviceAction next);
 
-    /** Completes {@code action} after {@code seconds}. */
-    DeviceAction timeout(DeviceAction action, double seconds);
+    /** Completes {@code action} after {@code duration}. */
+    DeviceAction timeout(DeviceAction action, Time duration);
 
     DeviceAction untilStalled(DeviceAction action, ca.frc6390.athena.hardware.signal.MotorStallSignal signal);
 }

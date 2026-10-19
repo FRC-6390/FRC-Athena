@@ -97,6 +97,25 @@ The encoder declaration is typed-only. These members are gone:
 | `EncoderUnit.RAW` | the default declaration (rotations, one revolution per raw turn) |
 | `EncoderUnit.METERS` | `measures(Units.Meters)` |
 
+## Removed timing API
+
+Durations are WPILib `Time` measures. The `double` seconds overloads are gone.
+
+| Removed | Use instead |
+| --- | --- |
+| `Actions.waitSeconds(double)` | `Actions.waitSeconds(Time)`, for example `Actions.waitSeconds(Seconds.of(0.2))` |
+| `Action.timeout(double)`, `Actions.timeout(Action, double)`, `Actions.timeout(DeviceAction, double)` | `timeout(Time)`, `Actions.timeout(action, Time)` |
+| `DeviceAction.timeout(Number)` | `timeout(Time)` |
+| `Action.settled(double)`, `Actions.settled(Action, double)` | `settled(Time)`, `Actions.settled(action, Time)` (`java.time.Duration` overloads remain) |
+| `Action.untilSettled(double, double)` | `untilSettled(double, Time)` (tolerance is still a double in control units; see the note below) |
+| `Attempt.within(double)` | `within(Time)` |
+| `Sequence.forTime(double, Action)`, `Sequence.waitSeconds(double)`, `Sequence.timeout(double)` | `Time` overloads |
+| `Cycle.forTime(double, Action)` | `forTime(Time, Action)` |
+| `Actions.WaitSeconds.seconds()`, `Actions.Timeout.seconds()` | `duration()`, which returns a `Time` |
+
+`Action.untilSettled(double, Time)` keeps a `double` tolerance for now, so the tolerance is still
+in control units. Its typed form, `untilSettled(Measure, Time)`, is the one to use with unit-typed bindings.
+
 ## Motion kind
 
 `ControlBinding.motionKind()` returns `MotionKind.ROTARY` for angle units, `MotionKind.LINEAR` for
@@ -113,7 +132,7 @@ pick the right formulas.
 | Typed target | `position(Measure)`, `velocity(Measure)` |
 | Primitive supplier with unit | `position(DoubleSupplier, unit)`, `velocity(DoubleSupplier, unit)` |
 | Typed tolerance | `Action.untilWithin(Measure)` |
-| Settled tolerance | `untilWithin(t).settled(seconds)`, `untilWithin(t).maxVelocity(Measure)`, `untilSettled(t, seconds)` |
+| Settled tolerance | `untilWithin(t).settled(Time)`, `untilWithin(t).maxVelocity(Measure)`, `untilSettled(t, Time)` |
 | Typed limits | `Constraints.range(Measure, Measure)`, `Constraints.motion(Measure, Measure)` |
 | Typed interpolation | `interpolate(model, input, inputUnit)` and `at(Measure, Measure)` |
 | Rotary or linear | `ControlBinding.motionKind()` |

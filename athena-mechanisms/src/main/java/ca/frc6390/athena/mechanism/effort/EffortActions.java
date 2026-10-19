@@ -63,7 +63,7 @@ public final class EffortActions {
             return new Actions.Then(limit(a.action(), limit), limit(a.next(), limit));
         }
         if (action instanceof Actions.Timeout a) {
-            return new Actions.Timeout(limit(a.action(), limit), a.seconds());
+            return new Actions.Timeout(limit(a.action(), limit), a.duration());
         }
         if (action instanceof Actions.WithinTolerance a) {
             return new Actions.WithinTolerance(

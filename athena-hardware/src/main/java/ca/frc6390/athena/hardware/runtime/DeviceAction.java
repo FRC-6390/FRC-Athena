@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.runtime;
 
 import ca.frc6390.athena.hardware.signal.MotorStallSignal;
+import edu.wpi.first.units.measure.Time;
 
 /**
  * Marker for an Athena action created by a hardware declaration.
@@ -32,13 +33,13 @@ public interface DeviceAction extends ActionBinding, Runnable {
     /**
      * Completes this action after the supplied duration.
      *
-     * @param seconds maximum action duration in seconds
+     * @param duration maximum action duration
      * @param <T> resulting Athena action type
      * @return timeout-wrapped action
      */
     @SuppressWarnings("unchecked")
-    default <T extends DeviceAction> T timeout(Number seconds) {
-        return (T) DeviceActionFactories.get().timeout(this, seconds.doubleValue());
+    default <T extends DeviceAction> T timeout(Time duration) {
+        return (T) DeviceActionFactories.get().timeout(this, java.util.Objects.requireNonNull(duration, "duration"));
     }
 
     /**

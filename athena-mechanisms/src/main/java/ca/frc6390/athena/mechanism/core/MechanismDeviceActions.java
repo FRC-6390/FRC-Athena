@@ -68,8 +68,8 @@ public final class MechanismDeviceActions implements DeviceActionFactory {
     }
 
     @Override
-    public DeviceAction timeout(DeviceAction action, double seconds) {
-        return Actions.timeout(action, seconds);
+    public DeviceAction timeout(DeviceAction action, edu.wpi.first.units.measure.Time duration) {
+        return Actions.timeout(action, duration);
     }
 
     @Override

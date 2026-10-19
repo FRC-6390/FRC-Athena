@@ -1575,7 +1575,7 @@ final class MechanismRuntime {
                 if (node.terminal) return schedule.result(null, true, local);
                 if (timeout.expired(local)) {
                     RuntimeEvents.emit(RuntimeEvents.TIMEOUT,
-                            "after " + timeout.seconds() + " s: " + typeName(timeout.action()));
+                            "after " + timeout.duration().in(edu.wpi.first.units.Units.Seconds) + " s: " + typeName(timeout.action()));
                     schedule.named("timeout", timeout.action()).reset();
                     node.terminal = true;
                     return schedule.result(null, true, local);
