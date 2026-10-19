@@ -1,5 +1,7 @@
 package ca.frc6390.athena.hardware.runtime;
 
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
+
 /**
  * Marker for an Athena action created by a hardware declaration.
  */
@@ -40,14 +42,15 @@ public interface DeviceAction extends ActionBinding, Runnable {
     }
 
     /**
-     * Runs this action for the supplied duration, then completes it.
+     * Runs this action until the stall detector reports a commanded motor that is not moving,
+     * then completes. Debounce timing restarts every time the composed action starts.
      *
-     * @param seconds action duration in seconds
+     * @param signal stall detector, usually {@code motor.stall()} with tuned thresholds
      * @param <T> resulting Athena action type
-     * @return duration-wrapped action
+     * @return stall-completing action
      */
     @SuppressWarnings("unchecked")
-    default <T extends DeviceAction> T forTime(Number seconds) {
-        return (T) timeout(seconds);
+    default <T extends DeviceAction> T untilStalled(MotorStallSignal signal) {
+        return (T) DeviceActionFactories.get().untilStalled(this, signal);
     }
 }

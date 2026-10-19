@@ -34,4 +34,6 @@ public interface DeviceActionFactory {
 
     /** Completes {@code action} after {@code seconds}. */
     DeviceAction timeout(DeviceAction action, double seconds);
+
+    DeviceAction untilStalled(DeviceAction action, ca.frc6390.athena.hardware.signal.MotorStallSignal signal);
 }

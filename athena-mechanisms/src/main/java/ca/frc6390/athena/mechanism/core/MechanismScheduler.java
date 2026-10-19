@@ -71,6 +71,7 @@ public final class MechanismScheduler {
     /** Newer requests held because a running Action does not allow interruption yet. */
     private final List<PendingRequest> pendingRequests = new ArrayList<>();
     private final List<Mechanism> pendingAborts = new ArrayList<>();
+    private final List<Action> deferredRequests = new ArrayList<>();
     private final List<RuntimeFault> pendingFaults = new ArrayList<>();
     private final Map<String, FaultHistory> faultHistory = new LinkedHashMap<>();
     private static final double FAULT_REPORT_PERIOD_SECONDS = 5.0;
@@ -713,6 +714,9 @@ public final class MechanismScheduler {
             validateConcurrentResourceConflicts(choice.inactive(), path + ".choice.inactive", visited);
         } else if (action instanceof Actions.WhenBranch branch) {
             validateConcurrentResourceConflicts(branch.active(), path + ".when.active", visited);
+        } else if (action instanceof Actions.Either either) {
+            validateConcurrentResourceConflicts(either.active(), path + ".either.active", visited);
+            validateConcurrentResourceConflicts(either.inactive(), path + ".either.inactive", visited);
         } else if (action instanceof Actions.Timeout timeout) {
             validateConcurrentResourceConflicts(timeout.action(), path + ".timeout", visited);
         } else if (action instanceof Actions.WithinTolerance within) {
@@ -870,6 +874,15 @@ public final class MechanismScheduler {
             return this;
         }
         Action safeAction = rootAction(requested);
+        for (int index = 0; index < evaluatingLeases.size(); index++) {
+            if (evaluatingLeases.get(index) == safeAction) {
+                // An action restarting itself (or an ancestor lease) from inside its own tree, for
+                // example sequence().doOnce(...).then(doOnce(() -> self.request())): restart it after
+                // this cycle instead of tearing down the tree that is evaluating right now.
+                deferredRequests.add(safeAction);
+                return this;
+            }
+        }
         Interrupt interrupt = requested instanceof Actions.Interruptible policy ? policy.interrupt() : null;
         if (blockedBy(safeAction)) {
             // A running Action does not allow interruption yet: hold this request instead of applying it.
@@ -1037,6 +1050,7 @@ public final class MechanismScheduler {
 
     private void cancelSpawned(Object key, Set<Object> visited) {
         if (key == null || !visited.add(key)) return;
+        deferredRequests.removeIf(deferred -> deferred == key);
         forgetCompletion(key);
         pendingRequests.removeIf(pending -> pending.action() == key);
         releaseLease(key);
@@ -1334,6 +1348,12 @@ public final class MechanismScheduler {
                 runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
             }
             retireCompletedRequests();
+            evaluatingLeases.clear();
+            if (!deferredRequests.isEmpty()) {
+                List<Action> deferred = List.copyOf(deferredRequests);
+                deferredRequests.clear();
+                deferred.forEach(this::request);
+            }
         }
         outputCapacityHint = Math.max(outputCapacityHint, outputs.size());
         resolver.overrides().persistence().periodic(cycleSeconds,

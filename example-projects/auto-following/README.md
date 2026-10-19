@@ -7,7 +7,7 @@ path provider. Selectable autos remain ordinary Athena `Action` trees and each a
 | --- | --- |
 | `ChoreoMarkersAuto` | Bind Choreo event names directly to mechanism Actions |
 | `ChoreoMultiPathSplitAuto` | Sequence split points, a second path, and mechanism Actions |
-| `ConditionalChoreoAuto` | Choose the next path from live robot state at the branch point |
+| `ConditionalChoreoAuto` | Choose the next path once, from robot state at the branch point (`Actions.either`) |
 | `PathPlannerAuto` | Run a PathPlanner `.auto` through `PathPlannerPathProvider` and `AutoBuilder` |
 | `GeneratedPathAuto` | Run and preview a vendor-neutral path owned by a team `PathProvider` |
 | `PathPlannerSetup` | Convert PathPlanner chassis-speed callbacks into normal Athena drive Actions |

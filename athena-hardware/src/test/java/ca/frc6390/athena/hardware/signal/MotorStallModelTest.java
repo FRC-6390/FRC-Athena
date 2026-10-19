@@ -30,6 +30,25 @@ class MotorStallModelTest {
     }
 
     @Test
+    void reverseDriveStallsAndRunsLikeForward() throws Exception {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(40);
+        FakeHandle handle = new FakeHandle(motor);
+        try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-stall-reverse"), handle)) {
+            assertTrue(ignored != null);
+            MotorStallSignal stall = motor.stall();
+            // Homing drives in reverse: a loaded, stopped motor at -3.6 V is a stall...
+            handle.appliedVoltage = -3.6;
+            handle.statorCurrent = -40.0;
+            handle.velocity = 0.0;
+            assertTrue(stall.instantaneousActive());
+            // ...and the same motor spinning freely backwards is not.
+            handle.statorCurrent = -2.0;
+            handle.velocity = -25.0;
+            assertFalse(stall.instantaneousActive());
+        }
+    }
+
+    @Test
     void freeRunningMotorIsNotAStall() throws Exception {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).statorCurrentLimit(120);
         FakeHandle handle = new FakeHandle(motor);

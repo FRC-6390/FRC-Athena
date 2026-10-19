@@ -26,8 +26,11 @@ contract lives in `ActionLifecycleContractTest` and must change with this docume
   compiled reservation.
 - Disjoint leases run together.
 - For a conflicting resource, the most recently requested lease supplies the output.
-- A preempted lease remains active. It resumes automatically when all newer conflicting
-  leases release. Requesting an existing action again restarts it and makes it newest.
+- A preempted lease remains active (its timers keep running). It resumes automatically when
+  all newer conflicting leases release. Requesting an existing action again restarts it and
+  makes it newest, so request an action once (for example from `onTrue`/`whileTrue`), not
+  every loop; a per-loop `request()` restarts it each cycle and its waits never finish.
+- An action that requests itself from inside its own tree restarts on the next cycle.
 - A newer request that overlaps a running Action whose interrupt policy does not allow
   interruption is held pending: it does not preempt, reserve, or evaluate until the blocker allows
   it (the blocker completes, its `Interrupt.after(...)` condition becomes true, or the robot is
@@ -49,6 +52,39 @@ contract lives in `ActionLifecycleContractTest` and must change with this docume
   selected branch are neutralized unless another active lease drives them.
 - A composite can replace only the conflicting portion of another composite; unrelated
   resources continue running.
+
+## Composition
+
+The composition rules below are checked against an independent timing model by
+`ActionFuzzTest` (random trees of every operator, plus lease restart, cancel, preemption and
+disable) and by `ActionRegressionTest`.
+
+- `a.then(b)` and sequence stages run back to back; the next stage starts on the same cycle
+  the previous one completes. `a.until(c).then(b).then(d)` keeps every stage.
+- Composing never mutates its inputs. `intake.then(stop)` or `intake.timeout(2)` on a declared
+  sequence returns a new action; `intake` is unchanged.
+- `timeout(s)` / `forTime(s)` end their whole subtree after `s` seconds, measured from when
+  that node starts. On a sequence it limits everything built so far; stages added after it
+  (including `then`) run afterwards.
+- `parallel` completes when every child has completed, `race` when any child completes, and
+  `deadline` when its first child completes. Children of a finished group are stopped.
+- `until(c)` completes when `c` is true or the wrapped action finishes on its own. Once it
+  completes it never falls back into the wrapped action.
+- `Actions.when(c).run(a).otherwise(b)` is a live rule: `c` is checked every cycle and the
+  running branch switches when it changes. Without `otherwise`, a false condition outputs
+  neutral and never completes. For a one-time decision use `Actions.either(c, a, b)` or
+  `Actions.onlyIf(c, a)`, which check `c` once when they start and skip when false.
+- Durations must be numbers; `NaN` is rejected when the action is built.
+
+## Stall Detection In Actions
+
+- `Actions.untilStalled(signal, action)`, `deviceAction.untilStalled(signal)`, and the
+  `Sequence`/`Cycle` `untilStalled(signal, action)` steps run an action until the motor's
+  stall detector trips. The debounce window (`signal.forSeconds(...)`) restarts every time
+  the action starts, so one detector can be shared by several actions.
+- Typical homing: `Actions.sequence().untilStalled(motor.stall(), arm.voltage(-2.0))
+  .doOnce(motor.encoder().setPosition(0.0)).then(arm.neutral())`.
+- `Events.when(signal).rising()` remains available for robot-wide stall reactions.
 
 ## Completion And Cancellation
 
@@ -159,7 +195,8 @@ interrupt. Nesting a root-only policy in another Action fails when the tree is c
 ## Robot Modes
 
 - Disabled mode suspends action evaluation and neutralizes driven motors. It does not
-  complete or cancel directly requested actions; they resume when enabled.
+  complete or cancel directly requested actions; they resume when enabled. Action timers are
+  paused while disabled, so a wait or timeout resumes with the time it had left.
 - Direct requests are not teleop-only and may run in autonomous or teleop.
 - Lifecycle hooks are mode-scoped. For example, `Events.teleopPeriodic().whileActive(...)`
   releases its lease outside teleop and reacquires it when teleop periodic resumes.

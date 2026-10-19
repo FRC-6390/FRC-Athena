@@ -9,6 +9,7 @@ import ca.frc6390.athena.mechanism.effort.EffortCarrier;
 import ca.frc6390.athena.mechanism.effort.EffortRequest;
 import edu.wpi.first.units.Measure;
 import ca.frc6390.athena.hardware.signal.ImuSource;
+import ca.frc6390.athena.hardware.signal.MotorStallSignal;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.sysid.SysIdState;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
@@ -245,6 +246,52 @@ public final class Actions {
         return new WaitSeconds(seconds);
     }
 
+    /**
+     * Completes once the stall detector has seen a commanded, non-moving motor for its configured
+     * duration. Debounce timing restarts each time this action starts, so the same detector can be
+     * reused by several actions. Combine it with the action that drives the motor, for example
+     * {@code Actions.untilStalled(signal, arm.voltage(-2.0))}.
+     */
+    public static Action waitUntilStalled(MotorStallSignal signal) {
+        return new WaitUntilStalled(signal);
+    }
+
+    /**
+     * Runs {@code action} until {@code signal} reports a stall, then completes. Typical homing:
+     * {@code Actions.untilStalled(motor.stall(), arm.voltage(-2.0)).then(motor.encoder().setPosition(0.0))}.
+     */
+    public static Action untilStalled(MotorStallSignal signal, Action action) {
+        return new Race(List.of(Objects.requireNonNull(action, "action"), waitUntilStalled(signal)));
+    }
+
+    static Action untilStalled(DeviceAction action, MotorStallSignal signal) {
+        return untilStalled(signal, mechanismAction(action));
+    }
+
+    /**
+     * Picks {@code active} or {@code inactive} once, when this action starts, and runs that branch
+     * to completion. Unlike {@link #when(ActionCondition)}, the condition is not re-checked while
+     * the chosen branch runs.
+     */
+    public static Action either(ActionCondition condition, Action active, Action inactive) {
+        return new Either(condition, active, Objects.requireNonNull(inactive, "inactive"));
+    }
+
+    public static Action either(BooleanSupplier condition, Action active, Action inactive) {
+        Objects.requireNonNull(condition, "condition");
+        return either(ctx -> condition.getAsBoolean(), active, inactive);
+    }
+
+    /** Runs {@code action} when the condition is true at start; otherwise completes immediately. */
+    public static Action onlyIf(ActionCondition condition, Action action) {
+        return new Either(condition, action, null);
+    }
+
+    public static Action onlyIf(BooleanSupplier condition, Action action) {
+        Objects.requireNonNull(condition, "condition");
+        return onlyIf(ctx -> condition.getAsBoolean(), action);
+    }
+
     public static Action waitUntil(ActionCondition condition) {
         return new WaitUntil(condition);
     }
@@ -469,6 +516,7 @@ public final class Actions {
         }
         if (action instanceof Deadline deadline) return bounded(deadline.primary());
         if (action instanceof Choice choice) return bounded(choice.active()) && bounded(choice.inactive());
+        if (action instanceof Either either) return bounded(either.active()) && bounded(either.inactive());
         return false;
     }
 
@@ -589,6 +637,12 @@ public final class Actions {
 
             void clear() { set = false; }
         }
+    }
+
+    /** Appends {@code next} after an existing follow-up, keeping every stage already chained. */
+    static Action chain(Action existing, Action next) {
+        Objects.requireNonNull(next, "next");
+        return existing == null ? next : then(existing, next);
     }
 
     public record Neutral() implements Action, Output.Neutral {
@@ -968,6 +1022,9 @@ public final class Actions {
     }
 
     public record WaitSeconds(double seconds) implements Action {
+        public WaitSeconds {
+            requireDuration(seconds, "Wait duration");
+        }
 
         @Override
         public String describe() {
@@ -989,6 +1046,34 @@ public final class Actions {
         }
     }
 
+    public record WaitUntilStalled(MotorStallSignal signal) implements Action {
+        public WaitUntilStalled {
+            Objects.requireNonNull(signal, "signal");
+        }
+    }
+
+    /** One-shot branch: the condition is sampled when the action starts. A null inactive branch skips. */
+    public record Either(ActionCondition condition, Action active, Action inactive) implements Action {
+        public Either {
+            Objects.requireNonNull(condition, "condition");
+            Objects.requireNonNull(active, "active");
+        }
+
+        public Action choose(MechanismContext ctx) {
+            return condition.test(ctx) ? active : inactive;
+        }
+
+        @Override
+        public List<Child> children() {
+            return childrenOf(child("true", active), child("false", inactive));
+        }
+
+        @Override
+        public String describe() {
+            return inactive == null ? "ONLY IF" : "EITHER";
+        }
+    }
+
     public record Timeout(Action action, double seconds) implements Action {
 
         @Override
@@ -1003,6 +1088,7 @@ public final class Actions {
 
         public Timeout {
             Objects.requireNonNull(action, "action");
+            requireDuration(seconds, "Timeout duration");
         }
 
         public boolean expired(MechanismContext ctx) {
@@ -1261,6 +1347,12 @@ public final class Actions {
         }
     }
 
+    /**
+     * Ordered stages. {@link #then(Action)} and {@link #timeout(double)} always return a new
+     * sequence, like every other action composition, so {@code intake.then(stop)} never changes
+     * {@code intake}. The other builder calls mutate until the sequence is first requested or
+     * declared on a registered mechanism and return a modified copy after that.
+     */
     public static final class Sequence implements Action {
 
         @Override
@@ -1285,23 +1377,27 @@ public final class Actions {
         private final Set<SequenceStep> timedSteps = Collections.newSetFromMap(new IdentityHashMap<>());
         private Action next;
         private double timeoutSeconds = Double.POSITIVE_INFINITY;
+        private boolean sealed;
 
         private Sequence() {
         }
 
         public Sequence run(Action action) {
-            steps.add(new SequenceStep(withStartedUntilComplete(action), ctx -> false, false));
-            return this;
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(target.withStartedUntilComplete(action), ctx -> false, false));
+            return target;
         }
 
         public Sequence forTime(double seconds, Action action) {
+            requireDuration(seconds, "Sequence stage duration");
+            Sequence target = mutable();
             SequenceStep step = new SequenceStep(
-                    alongsideStarted(action),
+                    target.alongsideStarted(action),
                     ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds),
                     true);
-            steps.add(step);
-            timedSteps.add(step);
-            return this;
+            target.steps.add(step);
+            target.timedSteps.add(step);
+            return target;
         }
 
         /** True when the step's completion is bounded by its own time limit (forTime). */
@@ -1310,8 +1406,10 @@ public final class Actions {
         }
 
         public Sequence until(ActionCondition condition, Action action) {
-            steps.add(new SequenceStep(alongsideStarted(action), condition, true));
-            return this;
+            Objects.requireNonNull(condition, "condition");
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(target.alongsideStarted(action), condition, true));
+            return target;
         }
 
         public Sequence until(BooleanSupplier condition, Action action) {
@@ -1319,14 +1417,23 @@ public final class Actions {
             return until(ctx -> condition.getAsBoolean(), action);
         }
 
+        /** Runs {@code action} until {@code signal} detects a stall, then advances. */
+        public Sequence untilStalled(MotorStallSignal signal, Action action) {
+            return run(Actions.untilStalled(signal, action));
+        }
+
         public Sequence doOnce(Runnable action) {
-            steps.add(new SequenceStep(withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
-            return this;
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(
+                    target.withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
+            return target;
         }
 
         public Sequence doOnce(ActionBinding action) {
-            steps.add(new SequenceStep(withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
-            return this;
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(
+                    target.withStartedUntilComplete(Actions.doOnce(action)), ctx -> true, true));
+            return target;
         }
 
         public Sequence doOnce(DeviceAction action) {
@@ -1334,16 +1441,19 @@ public final class Actions {
         }
 
         public Sequence waitSeconds(double seconds) {
-            steps.add(new SequenceStep(
-                    alongsideStarted(Actions.waitSeconds(seconds)),
+            Action wait = Actions.waitSeconds(seconds);
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(
+                    target.alongsideStarted(wait),
                     ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds),
                     true));
-            return this;
+            return target;
         }
 
         public Sequence waitUntil(ActionCondition condition) {
-            steps.add(new SequenceStep(alongsideStarted(Actions.waitUntil(condition)), condition, true));
-            return this;
+            Sequence target = mutable();
+            target.steps.add(new SequenceStep(target.alongsideStarted(Actions.waitUntil(condition)), condition, true));
+            return target;
         }
 
         public Sequence waitUntil(BooleanSupplier condition) {
@@ -1351,9 +1461,16 @@ public final class Actions {
             return waitUntil(ctx -> condition.getAsBoolean());
         }
 
+        /**
+         * Limits everything built so far to {@code seconds}. Stages added afterwards, including
+         * {@code then(...)}, run after the limited part, as with {@code timeout(...)} on any action.
+         */
+        @Override
         public Sequence timeout(double seconds) {
-            timeoutSeconds = seconds;
-            return this;
+            requireDuration(seconds, "Sequence timeout");
+            Sequence outer = new Sequence();
+            outer.steps.add(new SequenceStep(new Timeout(copy(), seconds), ctx -> false, false));
+            return outer;
         }
 
         /**
@@ -1365,23 +1482,25 @@ public final class Actions {
             for (Action existing : started) {
                 if (existing == safeAction) return this;
             }
-            started.add(safeAction);
-            return this;
+            Sequence target = mutable();
+            target.started.add(safeAction);
+            return target;
         }
 
         /** Stops carrying a previously started action into subsequent stages. */
         public Sequence stop(Action action) {
             Action safeAction = Objects.requireNonNull(action, "action");
-            started.removeIf(existing -> existing == safeAction);
-            return this;
+            Sequence target = mutable();
+            target.started.removeIf(existing -> existing == safeAction);
+            return target;
         }
 
         @Override
         public Sequence then(Action action) {
-            Action safeAction = Objects.requireNonNull(action, "action");
-            safeAction = withStartedUntilComplete(safeAction);
-            next = next == null ? safeAction : Actions.then(next, safeAction);
-            return this;
+            Sequence target = copy();
+            Action safeAction = target.withStartedUntilComplete(Objects.requireNonNull(action, "action"));
+            target.next = target.next == null ? safeAction : Actions.then(target.next, safeAction);
+            return target;
         }
 
         public List<SequenceStep> steps() {
@@ -1394,6 +1513,24 @@ public final class Actions {
 
         public double timeoutSeconds() {
             return timeoutSeconds;
+        }
+
+        void seal() {
+            sealed = true;
+        }
+
+        private Sequence mutable() {
+            return sealed ? copy() : this;
+        }
+
+        private Sequence copy() {
+            Sequence copy = new Sequence();
+            copy.steps.addAll(steps);
+            copy.started.addAll(started);
+            copy.timedSteps.addAll(timedSteps);
+            copy.next = next;
+            copy.timeoutSeconds = timeoutSeconds;
+            return copy;
         }
 
         private Action alongsideStarted(Action action) {
@@ -1430,6 +1567,7 @@ public final class Actions {
         }
     }
 
+    /** Repeating stages. Like {@link Sequence}, builder calls copy once the cycle is requested or declared. */
     public static final class Cycle implements Action {
 
         @Override
@@ -1448,23 +1586,22 @@ public final class Actions {
 
         private final List<CycleStep> steps = new ArrayList<>();
         private final List<CycleStep> stepView = Collections.unmodifiableList(steps);
+        private boolean sealed;
 
         private Cycle() {
         }
 
         public Cycle run(Action action) {
-            steps.add(new CycleStep(action, ctx -> false));
-            return this;
+            return add(new CycleStep(action, ctx -> false));
         }
 
         public Cycle forTime(double seconds, Action action) {
-            steps.add(new CycleStep(action, ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds)));
-            return this;
+            requireDuration(seconds, "Cycle stage duration");
+            return add(new CycleStep(action, ctx -> hasElapsed(ctx.timeInStateSeconds(), seconds)));
         }
 
         public Cycle until(ActionCondition condition, Action action) {
-            steps.add(new CycleStep(action, condition));
-            return this;
+            return add(new CycleStep(action, condition));
         }
 
         public Cycle until(BooleanSupplier condition, Action action) {
@@ -1472,8 +1609,27 @@ public final class Actions {
             return until(ctx -> condition.getAsBoolean(), action);
         }
 
+        /** Runs {@code action} until {@code signal} detects a stall, then advances. */
+        public Cycle untilStalled(MotorStallSignal signal, Action action) {
+            return run(Actions.untilStalled(signal, action));
+        }
+
         public List<CycleStep> steps() {
             return stepView;
+        }
+
+        void seal() {
+            sealed = true;
+        }
+
+        private Cycle add(CycleStep step) {
+            Cycle target = this;
+            if (sealed) {
+                target = new Cycle();
+                target.steps.addAll(steps);
+            }
+            target.steps.add(step);
+            return target;
         }
     }
 
@@ -1506,6 +1662,7 @@ public final class Actions {
         if (action == null || !visited.add(action)) return;
         rejectNestedRootOnly(action);
         if (action instanceof Sequence sequence) {
+            sequence.seal();
             validateSequence(sequence);
         } else if (action instanceof Then then) {
             validateThenSource(then.action());
@@ -1546,6 +1703,7 @@ public final class Actions {
         if (action instanceof DoOnce || action instanceof RuntimeAction
                 || action instanceof EncoderSetPosition || action instanceof ImuYawMutation
                 || action instanceof WaitSeconds || action instanceof WaitUntil
+                || action instanceof WaitUntilStalled
                 || action instanceof Timeout || action instanceof WithinTolerance
                 || action instanceof Conditional) {
             return Completion.POSSIBLE;
@@ -1597,6 +1755,13 @@ public final class Actions {
         if (action instanceof VelocityContribution contribution) {
             return completion(contribution.driveAction(), visited);
         }
+        if (action instanceof Either either) {
+            if (either.inactive() == null) return Completion.POSSIBLE;
+            Completion active = completion(either.active(), visited);
+            Completion inactive = completion(either.inactive(), visited);
+            if (active == Completion.POSSIBLE && inactive == Completion.POSSIBLE) return Completion.POSSIBLE;
+            return active == Completion.NEVER && inactive == Completion.NEVER ? Completion.NEVER : Completion.UNKNOWN;
+        }
         return Completion.UNKNOWN;
     }
 
@@ -1644,6 +1809,13 @@ public final class Actions {
             throw new IllegalStateException(required.name().toLowerCase(java.util.Locale.ROOT)
                     + " action requires a matching control binding.");
         }
+    }
+
+    private static double requireDuration(double seconds, String description) {
+        if (Double.isNaN(seconds)) {
+            throw new IllegalArgumentException(description + " must be a number of seconds, not NaN.");
+        }
+        return seconds;
     }
 
     private static double requireFinite(double value, String description) {

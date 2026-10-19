@@ -71,4 +71,9 @@ public final class MechanismDeviceActions implements DeviceActionFactory {
     public DeviceAction timeout(DeviceAction action, double seconds) {
         return Actions.timeout(action, seconds);
     }
+
+    @Override
+    public DeviceAction untilStalled(DeviceAction action, ca.frc6390.athena.hardware.signal.MotorStallSignal signal) {
+        return Actions.untilStalled(action, signal);
+    }
 }

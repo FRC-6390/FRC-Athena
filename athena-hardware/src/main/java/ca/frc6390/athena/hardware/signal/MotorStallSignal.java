@@ -128,11 +128,13 @@ public record MotorStallSignal(
             return false;
         }
         double freeSpeedRps = constants.freeSpeedRadPerSec() / (2.0 * Math.PI);
-        double expectedRps = constants.expectedUnloadedSpeedRadPerSec(volts) / (2.0 * Math.PI);
+        // The motor model is symmetric: driving in reverse (homing usually does) expects the same
+        // speed magnitude, so compare magnitudes rather than signed values.
+        double expectedRps = constants.expectedUnloadedSpeedRadPerSec(Math.abs(volts)) / (2.0 * Math.PI);
         if (expectedRps < MODEL_MIN_EXPECTED_FRACTION * freeSpeedRps) {
             return false;
         }
-        if (amps < MODEL_LOADED_CURRENT_MULTIPLE * constants.freeCurrentAmps()) {
+        if (Math.abs(amps) < MODEL_LOADED_CURRENT_MULTIPLE * constants.freeCurrentAmps()) {
             return false;
         }
         return Math.abs(velocityRotationsPerSecond()) < MODEL_STALLED_SPEED_FRACTION * expectedRps;
