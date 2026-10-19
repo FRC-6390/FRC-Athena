@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.lifecycle;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -69,7 +71,7 @@ class AthenaRobotTest {
 
     @Test
     void simulationRuntimeUsesTheSelectedVisionField() {
-        VisionSimulationField field = VisionSimulationField.of(VisionSimulationTarget.aprilTag(7, 3.0, 1.0, 1.3, 0.0));
+        VisionSimulationField field = VisionSimulationField.of(VisionSimulationTarget.aprilTag(7, Meters.of(3.0), Meters.of(1.0), Meters.of(1.3), Radians.of(0.0)));
 
         assertEquals(field, AthenaRobot.createRuntime(true, new ConcurrentHashMap<>(), field)
                 .simulationSession().visionField());

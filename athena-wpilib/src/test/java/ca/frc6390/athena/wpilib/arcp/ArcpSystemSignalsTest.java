@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.arcp;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -185,8 +187,8 @@ class ArcpSystemSignalsTest {
 
     private static VisionSourceStatus camera(String name, VisionSourceStatus.State state, String reason,
             double accepted, double rejected, double frameAgeSeconds, int tags, double secondsSinceAccepted) {
-        return new VisionSourceStatus(name, state, reason, accepted, rejected, frameAgeSeconds, tags,
-                secondsSinceAccepted);
+        return new VisionSourceStatus(name, state, reason, Hertz.of(accepted), Hertz.of(rejected),
+                Seconds.of(frameAgeSeconds), tags, Seconds.of(secondsSinceAccepted));
     }
 
     @Test
@@ -231,7 +233,7 @@ class ArcpSystemSignalsTest {
     void timeSyncIsSentOnlyForCamerasThatKnowTheirClockAndOnlyOnChange() {
         FakeSource source = new FakeSource();
         source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.UNSYNCED, "frame 3.0 s in the future",
-                0.0, 5.0, -3.0, 1, Double.NaN, false));
+                Hertz.of(0.0), Hertz.of(5.0), Seconds.of(-3.0), 1, Seconds.of(Double.NaN), false));
         ArcpSystemSignals signals = new ArcpSystemSignals(1, source);
         signals.discoverVision();
         long timeSync = byPath(signals).get("athena/vision/Intake/TimeSync").signalId();
@@ -239,10 +241,10 @@ class ArcpSystemSignalsTest {
         assertEquals(false, sampled(signals).get(timeSync));
         assertFalse(sampled(signals).containsKey(timeSync), "unchanged");
         source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.OK, "",
-                5.0, 0.0, 0.02, 2, 0.0, true));
+                Hertz.of(5.0), Hertz.of(0.0), Seconds.of(0.02), 2, Seconds.of(0.0), true));
         assertEquals(true, sampled(signals).get(timeSync));
         source.vision = List.of(new VisionSourceStatus("Intake", VisionSourceStatus.State.OK, "",
-                5.0, 0.0, 0.02, 2, 0.0));
+                Hertz.of(5.0), Hertz.of(0.0), Seconds.of(0.02), 2, Seconds.of(0.0)));
         assertFalse(sampled(signals).containsKey(timeSync), "unknown clock sends nothing");
     }
 

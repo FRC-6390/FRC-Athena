@@ -1,5 +1,8 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -23,10 +26,10 @@ class AutoPreviewPublisherTest {
                     "Score Two",
                     List.of("SEQUENCE", "  PATH choreo:out"),
                     List.of(new PathPreview("choreo:out", List.of(
-                            new PathPreview.Pose(1.0, 2.0, 0.0),
-                            new PathPreview.Pose(3.0, 4.0, 1.0)), List.of(
-                            new PathPreview.Event("shoot", 0.5,
-                                    new PathPreview.Pose(2.0, 3.0, 0.5))))))), "Score Two");
+                            new PathPreview.Pose(Meters.of(1.0), Meters.of(2.0), Radians.of(0.0)),
+                            new PathPreview.Pose(Meters.of(3.0), Meters.of(4.0), Radians.of(1.0))), List.of(
+                            new PathPreview.Event("shoot", Seconds.of(0.5),
+                                    new PathPreview.Pose(Meters.of(2.0), Meters.of(3.0), Radians.of(0.5)))))))), "Score Two");
 
             assertEquals("Score Two", instance.getStringTopic(
                     "/Athena/Auto/Selected").subscribe("").get());
