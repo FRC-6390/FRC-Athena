@@ -28,7 +28,12 @@ public record RecordMetadata(
     }
 
     /** Creates metadata with only a timestamp. */
-    public static RecordMetadata at(double timestampSeconds) {
+    public static RecordMetadata at(edu.wpi.first.units.measure.Time timestamp) {
+        return atSeconds(Objects.requireNonNull(timestamp, "timestamp").in(edu.wpi.first.units.Units.Seconds));
+    }
+
+    /** Per-cycle form for the recorder in this package: takes the primitive timestamp, no measure allocation. */
+    static RecordMetadata atSeconds(double timestampSeconds) {
         return new RecordMetadata(timestampSeconds, "", 0, "", OptionalLong.empty(), OptionalLong.empty());
     }
 

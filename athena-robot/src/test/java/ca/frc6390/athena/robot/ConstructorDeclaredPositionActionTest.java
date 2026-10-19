@@ -99,7 +99,7 @@ class ConstructorDeclaredPositionActionTest {
                     .pid(1.0, 0.0, 0.0);
             position = planned
                     ? configured
-                            .planner(MotionPlanners.boundedAngular(360.0))
+                            .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees))
                             .profile(MotionProfiles.trapezoid(180.0, 360.0))
                     : configured;
             trackTarget = position.position(() -> target.get());
@@ -117,7 +117,7 @@ class ConstructorDeclaredPositionActionTest {
                 .pid(0.015, 0.0, 0.0)
                 .constraint(Constraints.range(Range.of(Units.Degrees.of(-136.0), Units.Degrees.of(204.0))))
                 .constraint(Constraints.require(() -> true))
-                .planner(MotionPlanners.boundedAngular(360.0))
+                .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees))
                 .profile(MotionProfiles.trapezoid(700.0, 1000.0));
         private final Action trackTarget;
 
