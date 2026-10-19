@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import static edu.wpi.first.units.Units.Amps;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -76,13 +77,13 @@ class CtreBackendTest {
     @Test
     void motorOptionsClampNegativeCurrentLimits() {
         CtreMotorOptions options = new CtreMotorOptions()
-                .supplyCurrentLimit(-1)
-                .statorCurrentLimit(-2)
-                .torqueCurrentLimit(35);
+                .supplyCurrentLimit(Amps.of(-1))
+                .statorCurrentLimit(Amps.of(-2))
+                .torqueCurrentLimit(Amps.of(35));
 
-        assertEquals(0, options.supplyCurrentLimitAmps());
-        assertEquals(0, options.statorCurrentLimitAmps());
-        assertEquals(35, options.torqueCurrentLimitAmps());
+        assertEquals(0, options.supplyCurrentLimit().in(Amps));
+        assertEquals(0, options.statorCurrentLimit().in(Amps));
+        assertEquals(35, options.torqueCurrentLimit().in(Amps));
     }
 
     @Test
@@ -146,9 +147,9 @@ class CtreBackendTest {
                         .supplyCurrentLimit(42)
                         .statorCurrentLimit(70),
                 new CtreMotorOptions()
-                        .supplyCurrentLimit(45)
-                        .statorCurrentLimit(80)
-                        .torqueCurrentLimit(60),
+                        .supplyCurrentLimit(Amps.of(45))
+                        .statorCurrentLimit(Amps.of(80))
+                        .torqueCurrentLimit(Amps.of(60)),
                 controller);
 
         handle.activate();

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import static edu.wpi.first.units.Units.Amps;
+
 import ca.frc6390.athena.hardware.backend.FocPolicy;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
@@ -97,9 +99,14 @@ public final class CtreMotorHandle implements MotorHandle {
         if (!controller.configureCurrentLimits(
                 configuration.supplyCurrentLimitAmps(),
                 configuration.statorCurrentLimitAmps(),
-                options.torqueCurrentLimitAmps())) {
+                wholeAmps(options.torqueCurrentLimit()))) {
             throw new IllegalStateException("Failed to configure current limits for " + device.defaultName());
         }
+    }
+
+    /** Converts a typed limit to the whole amps the CTRE controller interface takes. */
+    private static int wholeAmps(Current limit) {
+        return (int) Math.round(limit.in(Amps));
     }
 
     /**
@@ -119,18 +126,18 @@ public final class CtreMotorHandle implements MotorHandle {
                     device.follower() == null && device.isInverted())) {
                 throw new IllegalStateException("Failed to configure output for " + device.defaultName());
             }
-            int supplyLimit = options.supplyCurrentLimitAmps() > 0
-                    ? options.supplyCurrentLimitAmps()
+            int supplyLimit = wholeAmps(options.supplyCurrentLimit()) > 0
+                    ? wholeAmps(options.supplyCurrentLimit())
                     : device.supplyCurrentLimitAmps() > 0
                             ? device.supplyCurrentLimitAmps()
                             : device.currentLimitAmps();
-            int statorLimit = options.statorCurrentLimitAmps() > 0
-                    ? options.statorCurrentLimitAmps()
+            int statorLimit = wholeAmps(options.statorCurrentLimit()) > 0
+                    ? wholeAmps(options.statorCurrentLimit())
                     : device.statorCurrentLimitAmps();
             if (!controller.configureCurrentLimits(
                     supplyLimit,
                     statorLimit,
-                    options.torqueCurrentLimitAmps())) {
+                    wholeAmps(options.torqueCurrentLimit()))) {
                 throw new IllegalStateException("Failed to configure current limits for " + device.defaultName());
             }
             activated = true;
@@ -715,7 +722,7 @@ public final class CtreMotorHandle implements MotorHandle {
         // TalonFXS has no TorqueCurrentConfigs; a torque limit is not applicable, not a failure.
         if (torqueAmps > 0) {
             DriverStation.reportWarning("CTRE TalonFXS " + talon.getDeviceID()
-                    + " ignores torqueCurrentLimitAmps(" + torqueAmps + "); use stator/supply limits.", false);
+                    + " ignores torqueCurrentLimit(" + torqueAmps + "); use stator/supply limits.", false);
         }
         CurrentLimitsConfigs limits = currentLimits(supplyAmps, statorAmps);
         return talon.getConfigurator().apply(limits).isOK();
