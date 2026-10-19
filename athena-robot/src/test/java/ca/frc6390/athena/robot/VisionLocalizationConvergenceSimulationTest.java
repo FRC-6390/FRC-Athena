@@ -185,7 +185,7 @@ class VisionLocalizationConvergenceSimulationTest {
         int cycles = (int) Math.round(seconds / DT);
         for (int cycle = 1; cycle <= cycles; cycle++) {
             double now = cycle * DT;
-            simulation.step(DT);
+            simulation.step(Units.Seconds.of(DT));
             runtime.robotPeriodic(now, DT);
             PoseSnapshot truth = simulation.pose();
             PoseSnapshot estimate = robot.estimate.poseSnapshot();

@@ -20,6 +20,13 @@ import ca.frc6390.athena.hardware.power.MotorThermalSpec;
 import ca.frc6390.athena.hardware.power.PowerProfile;
 import ca.frc6390.athena.hardware.power.Thermal;
 import ca.frc6390.athena.hardware.power.ThermalModel;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Temperature;
+import edu.wpi.first.units.measure.Voltage;
+import java.util.function.Supplier;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -29,9 +36,9 @@ import ca.frc6390.athena.hardware.power.ThermalModel;
  * @param canbus CAN bus name
  * @param isInverted whether positive output is inverted
  * @param neutralMode behavior when no output is commanded
- * @param currentLimitAmps portable current limit, or zero when disabled
- * @param supplyCurrentLimitAmps explicit supply-side limit, or zero when unset
- * @param statorCurrentLimitAmps explicit stator-side limit, or zero when disabled
+ * @param currentLimit portable current limit, or zero when disabled
+ * @param supplyCurrentLimit explicit supply-side limit, or zero when unset
+ * @param statorCurrentLimit explicit stator-side limit, or zero when disabled
  * @param vendorOptions typed vendor-specific configuration
  * @param follower follower relationship, or {@code null} for an independent motor
  * @param isDisabled whether Athena should suppress this motor
@@ -45,9 +52,9 @@ public record MotorDevice(
         String canbus,
         boolean isInverted,
         MotorNeutralMode neutralMode,
-        int currentLimitAmps,
-        int supplyCurrentLimitAmps,
-        int statorCurrentLimitAmps,
+        Current currentLimit,
+        Current supplyCurrentLimit,
+        Current statorCurrentLimit,
         VendorOptions vendorOptions,
         MotorFollowerBinding follower,
         boolean isDisabled,
@@ -55,6 +62,7 @@ public record MotorDevice(
         PowerProfile power,
         Thermal thermal) {
     private static final RuntimeBindings<MotorDevice, RuntimeMotor> RUNTIMES = new RuntimeBindings<>();
+    private static final Current NO_LIMIT = Units.Amps.of(0.0);
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -64,7 +72,7 @@ public record MotorDevice(
      */
     public static MotorDevice of(MotorKind kind, int id) {
         return new MotorDevice(kind, id, "rio", false, MotorNeutralMode.COAST,
-                0, 0, 0, VendorOptions.empty(), null, false, FailurePolicy.DISABLE_MECHANISM, null, null);
+                NO_LIMIT, NO_LIMIT, NO_LIMIT, VendorOptions.empty(), null, false, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
     /** Creates a motor with an explicit controller and physical motor pairing. */
@@ -77,35 +85,35 @@ public record MotorDevice(
         Objects.requireNonNull(kind, "kind");
         canbus = canbus == null || canbus.isBlank() ? "rio" : canbus;
         neutralMode = neutralMode == null ? MotorNeutralMode.COAST : neutralMode;
-        if (currentLimitAmps < 0 || supplyCurrentLimitAmps < 0 || statorCurrentLimitAmps < 0) {
-            throw new IllegalArgumentException("Motor current limits cannot be negative.");
-        }
+        currentLimit = nonNegative(currentLimit, "current limit");
+        supplyCurrentLimit = nonNegative(supplyCurrentLimit, "supply current limit");
+        statorCurrentLimit = nonNegative(statorCurrentLimit, "stator current limit");
         vendorOptions = vendorOptions == null ? VendorOptions.empty() : vendorOptions;
         failurePolicy = failurePolicy == null ? FailurePolicy.DISABLE_MECHANISM : failurePolicy;
     }
 
     public MotorDevice(
             MotorKind kind, int id, String canbus, boolean isInverted,
-            MotorNeutralMode neutralMode, int currentLimitAmps,
+            MotorNeutralMode neutralMode, Current currentLimit,
             VendorOptions vendorOptions, MotorFollowerBinding follower) {
-        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps, vendorOptions, follower, false);
+        this(kind, id, canbus, isInverted, neutralMode, currentLimit, vendorOptions, follower, false);
     }
 
     public MotorDevice(
             MotorKind kind, int id, String canbus, boolean isInverted,
-            MotorNeutralMode neutralMode, int currentLimitAmps,
+            MotorNeutralMode neutralMode, Current currentLimit,
             VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
-        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                0, 0, vendorOptions, follower, isDisabled, FailurePolicy.DISABLE_MECHANISM, null, null);
+        this(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                NO_LIMIT, NO_LIMIT, vendorOptions, follower, isDisabled, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
     public MotorDevice(
             MotorKind kind, int id, String canbus, boolean isInverted,
-            MotorNeutralMode neutralMode, int currentLimitAmps,
-            int supplyCurrentLimitAmps, int statorCurrentLimitAmps,
+            MotorNeutralMode neutralMode, Current currentLimit,
+            Current supplyCurrentLimit, Current statorCurrentLimit,
             VendorOptions vendorOptions, MotorFollowerBinding follower, boolean isDisabled) {
-        this(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower,
+        this(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower,
                 isDisabled, FailurePolicy.DISABLE_MECHANISM, null, null);
     }
 
@@ -115,14 +123,14 @@ public record MotorDevice(
 
     public MotorDevice disabled(boolean disabled) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
-                currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
+                currentLimit, supplyCurrentLimit, statorCurrentLimit,
                 vendorOptions, follower, disabled, failurePolicy, power, thermal);
     }
 
     /** Selects how Athena responds if this motor cannot be created or stops responding. */
     public MotorDevice failurePolicy(FailurePolicy policy) {
         return new MotorDevice(kind, id, canbus, isInverted, neutralMode,
-                currentLimitAmps, supplyCurrentLimitAmps, statorCurrentLimitAmps,
+                currentLimit, supplyCurrentLimit, statorCurrentLimit,
                 vendorOptions, follower, isDisabled, Objects.requireNonNull(policy, "policy"), power, thermal);
     }
 
@@ -137,8 +145,8 @@ public record MotorDevice(
         if (profile != null) {
             profile.markDeclared();
         }
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled,
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled,
                 failurePolicy, profile, thermal);
     }
 
@@ -150,8 +158,8 @@ public record MotorDevice(
      * @return updated ref
      */
     public MotorDevice thermal(Thermal thermal) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled,
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled,
                 failurePolicy, power, thermal);
     }
 
@@ -160,15 +168,21 @@ public record MotorDevice(
         return thermal != null ? thermal : MotorThermalSpec.forKind(kind).defaultDerate();
     }
 
-    /** Returns the fused winding temperature estimate in Celsius. */
-    public double temperatureCelsius() {
+    /** Returns the fused winding temperature estimate. Read once per cycle; each call returns a new measure. */
+    public Temperature temperature() {
         RuntimeMotor runtime = RUNTIMES.find(this);
-        return runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius();
+        return Units.Celsius.of(runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius());
     }
 
     /** Returns the thermal load in {@code [0, 1]}: 0 at the derate start, 1 at the derate end. */
     public double thermalLoad() {
-        return thermalCurve().load(temperatureCelsius());
+        return thermalCurve().loadCelsius(fusedTemperatureCelsius());
+    }
+
+    /** Per-cycle primitive: fused winding temperature in Celsius. Teams should use {@link #temperature()}. */
+    public double fusedTemperatureCelsius() {
+        RuntimeMotor runtime = RUNTIMES.find(this);
+        return runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius();
     }
 
     /** Returns the thermal model bound to this motor, or {@code null} when unbound. */
@@ -205,14 +219,17 @@ public record MotorDevice(
         return (T) DeviceActionFactories.get().motorPercent(this, percent);
     }
 
+    /** Commands this motor to a fixed voltage. */
     @SuppressWarnings("unchecked")
-    public <T extends DeviceAction> T voltage(double volts) {
-        return (T) DeviceActionFactories.get().motorVoltage(this, volts);
+    public <T extends DeviceAction> T voltage(Voltage volts) {
+        return (T) DeviceActionFactories.get().motorVoltage(this, Objects.requireNonNull(volts, "volts").in(Units.Volts));
     }
 
+    /** Commands this motor to a voltage read when the action executes. */
     @SuppressWarnings("unchecked")
-    public <T extends DeviceAction> T voltage(DoubleSupplier volts) {
-        return (T) DeviceActionFactories.get().motorVoltage(this, volts);
+    public <T extends DeviceAction> T voltage(Supplier<Voltage> volts) {
+        Objects.requireNonNull(volts, "volts");
+        return (T) DeviceActionFactories.get().motorVoltage(this, () -> volts.get().in(Units.Volts));
     }
 
     /** Stops commanding this motor and applies its configured neutral mode. */
@@ -229,8 +246,8 @@ public record MotorDevice(
      */
     public MotorDevice canbus(String canbus) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+                kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -241,8 +258,8 @@ public record MotorDevice(
      */
     public MotorDevice inverted(boolean inverted) {
         return new MotorDevice(
-                kind, id, canbus, inverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+                kind, id, canbus, inverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -280,37 +297,37 @@ public record MotorDevice(
      */
     public MotorDevice neutralMode(MotorNeutralMode neutralMode) {
         return new MotorDevice(
-                kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+                kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
      * Sets the portable controller current limit. CTRE maps this to supply current and
      * REV maps it to the smart phase-current limit. An explicit
-     * {@link #supplyCurrentLimit(int)} or vendor-specific supply limit overrides it on
+     * {@link #supplyCurrentLimit(Current)} or vendor-specific supply limit overrides it on
      * CTRE. A value of zero disables the portable limit.
      *
-     * @param amps non-negative current limit in amps
+     * @param current non-negative current limit
      * @return updated motor declaration
      */
-    public MotorDevice currentLimit(int amps) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, amps,
-                supplyCurrentLimitAmps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+    public MotorDevice currentLimit(Current current) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, current,
+                supplyCurrentLimit, statorCurrentLimit, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
      * Sets the controller supply-side current limit. CTRE TalonFX-family controllers
      * enforce this directly. REV SPARK controllers have no supply-current limiter, so
      * Athena conservatively includes this value when selecting the smart phase-current
-     * limit. It overrides {@link #currentLimit(int)}; a vendor option overrides this value.
+     * limit. It overrides {@link #currentLimit(Current)}; a vendor option overrides this value.
      * A value of zero leaves the explicit supply limit unset.
      *
-     * @param amps non-negative supply current limit in amps
+     * @param current non-negative supply current limit
      * @return updated motor declaration
      */
-    public MotorDevice supplyCurrentLimit(int amps) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                amps, statorCurrentLimitAmps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+    public MotorDevice supplyCurrentLimit(Current current) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                current, statorCurrentLimit, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /**
@@ -320,30 +337,32 @@ public record MotorDevice(
      * supply and stator limits are declared for REV, Athena uses the lower value. A
      * vendor option overrides this mapping. A value of zero disables the stator limit.
      *
-     * @param amps non-negative stator current limit in amps
+     * @param current non-negative stator current limit
      * @return updated motor declaration
      */
-    public MotorDevice statorCurrentLimit(int amps) {
-        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimitAmps,
-                supplyCurrentLimitAmps, amps, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
+    public MotorDevice statorCurrentLimit(Current current) {
+        return new MotorDevice(kind, id, canbus, isInverted, neutralMode, currentLimit,
+                supplyCurrentLimit, current, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
     /** Returns the effective supply and stator limits used by Athena. */
     public MotorCurrentLimits currentLimits() {
-        int supply = supplyCurrentLimitAmps > 0 ? supplyCurrentLimitAmps : currentLimitAmps;
+        Current supply = supplyCurrentLimit.in(Units.Amps) > 0 ? supplyCurrentLimit : currentLimit;
+        double supplyAmps = supply.in(Units.Amps);
+        double statorAmps = statorCurrentLimit.in(Units.Amps);
         MotorControllerKind controller = kind.controllerKind();
         String controllerKey = controller == null ? kind.key() : controller.key();
         if (controllerKey.startsWith("rev:spark-")) {
-            int smartLimit = supply <= 0
-                    ? statorCurrentLimitAmps
-                    : statorCurrentLimitAmps <= 0
+            Current smartLimit = supplyAmps <= 0
+                    ? statorCurrentLimit
+                    : statorAmps <= 0
                             ? supply
-                            : Math.min(supply, statorCurrentLimitAmps);
+                            : supplyAmps <= statorAmps ? supply : statorCurrentLimit;
             // A SPARK Smart Current Limit regulates motor phase current, so expose
             // the mapped limit in Athena's stator domain for telemetry and stalls.
-            return new MotorCurrentLimits(0, smartLimit);
+            return new MotorCurrentLimits(NO_LIMIT, smartLimit);
         }
-        return new MotorCurrentLimits(supply, statorCurrentLimitAmps);
+        return new MotorCurrentLimits(supply, statorCurrentLimit);
     }
 
     /** Creates a stall detector derived from this motor's configured current limits. */
@@ -352,23 +371,41 @@ public record MotorDevice(
         if (constants.isPresent() && currentLimits().supportsStallDetection()) {
             return MotorStallSignal.modelBased(this, constants.get());
         }
-        return new MotorStallSignal(this, 0.9, 1.0, 2.0, 0.15, 0.25);
+        return new MotorStallSignal(this, 0.9, Units.RotationsPerSecond.of(1.0), Units.Volts.of(2.0),
+                Units.Seconds.of(0.15), Units.Seconds.of(0.25));
     }
 
     /** Returns the motor's latest applied voltage snapshot. */
-    public double appliedVoltage() { return runtime().handle().appliedVoltage(); }
+    public Voltage appliedVoltage() { return Units.Volts.of(appliedVoltageVolts()); }
 
-    /** Returns the motor's latest supply-current snapshot. */
+    /**
+     * Per-cycle primitive: latest applied voltage in volts. Athena's hot paths use this to avoid
+     * allocating measures; teams should use {@link #appliedVoltage()}.
+     */
+    public double appliedVoltageVolts() { return runtime().handle().appliedVoltage(); }
+
+    /** Per-cycle primitive: latest supply current in amps. Teams should use {@link #supplyCurrent()}. */
     public double supplyCurrentAmps() { return runtime().handle().supplyCurrentAmps(); }
 
-    /** Returns the motor's latest stator-current snapshot. */
+    /** Per-cycle primitive: latest stator current in amps. Teams should use {@link #statorCurrent()}. */
     public double statorCurrentAmps() { return runtime().handle().statorCurrentAmps(); }
 
-    /** Returns the motor's latest integrated velocity snapshot. */
+    /** Per-cycle primitive: latest integrated velocity in rotations per second. Teams should use {@link #velocity()}. */
     public double velocityRotationsPerSecond() { return runtime().handle().integratedVelocityRotationsPerSecond(); }
 
+    /** Returns the motor's latest supply-current snapshot. */
+    public Current supplyCurrent() { return Units.Amps.of(runtime().handle().supplyCurrentAmps()); }
+
+    /** Returns the motor's latest stator-current snapshot. */
+    public Current statorCurrent() { return Units.Amps.of(runtime().handle().statorCurrentAmps()); }
+
+    /** Returns the motor's latest integrated velocity snapshot. */
+    public AngularVelocity velocity() {
+        return Units.RotationsPerSecond.of(runtime().handle().integratedVelocityRotationsPerSecond());
+    }
+
     /** Returns the motor's latest integrated position snapshot. */
-    public double positionRotations() { return runtime().handle().integratedPositionRotations(); }
+    public Angle position() { return Units.Rotations.of(runtime().handle().integratedPositionRotations()); }
 
     /** Returns the latest command Athena applied to this motor. */
     public MotorCommandSnapshot command() { return runtime().command(); }
@@ -439,9 +476,9 @@ public record MotorDevice(
                 canbus,
                 isInverted,
                 neutralMode,
-                currentLimitAmps,
-                supplyCurrentLimitAmps,
-                statorCurrentLimitAmps,
+                currentLimit,
+                supplyCurrentLimit,
+                statorCurrentLimit,
                 vendorOptions,
                 new MotorFollowerBinding(leader),
                 isDisabled,
@@ -456,9 +493,9 @@ public record MotorDevice(
                 canbus,
                 isInverted,
                 neutralMode,
-                currentLimitAmps,
-                supplyCurrentLimitAmps,
-                statorCurrentLimitAmps,
+                currentLimit,
+                supplyCurrentLimit,
+                statorCurrentLimit,
                 vendorOptions,
                 null,
                 isDisabled,
@@ -489,9 +526,9 @@ public record MotorDevice(
                     canbus,
                     isInverted,
                     neutralMode,
-                    currentLimitAmps,
-                    supplyCurrentLimitAmps,
-                    statorCurrentLimitAmps,
+                    currentLimit,
+                    supplyCurrentLimit,
+                    statorCurrentLimit,
                     vendorOptions.with(optionType, options),
                     follower,
                     isDisabled,
@@ -501,6 +538,14 @@ public record MotorDevice(
                     "Vendor option type must expose a no-argument constructor: " + optionType.getName(),
                     exception);
         }
+    }
+
+    private static Current nonNegative(Current current, String name) {
+        Objects.requireNonNull(current, name);
+        if (!Double.isFinite(current.in(Units.Amps)) || current.in(Units.Amps) < 0.0) {
+            throw new IllegalArgumentException("Motor " + name + " cannot be negative.");
+        }
+        return current;
     }
 
     private static String sanitize(String key) {

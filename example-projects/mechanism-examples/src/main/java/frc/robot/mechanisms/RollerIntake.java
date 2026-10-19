@@ -11,6 +11,6 @@ public final class RollerIntake implements Mechanism {
 
     public final Action stop = roller.neutral();
     public final Action intake = roller.percent(0.8);
-    public final Action hold = roller.voltage(2.0);
+    public final Action hold = roller.voltage(edu.wpi.first.units.Units.Volts.of(2.0));
     public final Action eject = roller.percent(-0.6);
 }

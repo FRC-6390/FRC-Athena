@@ -9,7 +9,7 @@ import ca.frc6390.athena.mechanism.core.Slots;
 public final class TemplateRoller implements MechanismTemplate {
     public final MotorSlot<TemplateRoller> motor = Slots.motor(this, "motor", this::configureIfReady)
             .coast()
-            .currentLimit(20);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(20));
 
     private SimModel simulation;
 

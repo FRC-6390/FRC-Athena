@@ -197,6 +197,6 @@ class SwerveOdometryTest {
         @Override public double linearAccelerationXG() { return 0.0; }
         @Override public double linearAccelerationYG() { return 0.0; }
         @Override public double linearAccelerationZG() { return 0.0; }
-        @Override public void applyYaw(ActionContext context, double value) { yawDegrees = value; }
+        @Override public void applyYawDegrees(ActionContext context, double value) { yawDegrees = value; }
     }
 }

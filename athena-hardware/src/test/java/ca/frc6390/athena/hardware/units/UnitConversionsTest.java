@@ -18,19 +18,17 @@ class UnitConversionsTest {
     }
 
     @Test
-    void valueConvertsMeasuresAndRejectsOtherDimensions() {
-        assertEquals(0.3048, UnitConversions.value(Units.Inches.of(12.0), Units.Meters), 1e-9);
-        assertEquals(0.25, UnitConversions.value(Units.Degrees.of(90.0), Units.Rotations), 1e-12);
-        assertThrows(IllegalArgumentException.class,
-                () -> UnitConversions.value(Units.Degrees.of(90.0), Units.Meters));
+    void measureInConvertsAcrossUnitsOfOneDimension() {
+        // Replaces the former UnitConversions.value/rate helpers: Measure.in is the single conversion path.
+        assertEquals(0.3048, Units.Inches.of(12.0).in(Units.Meters), 1e-9);
+        assertEquals(0.25, Units.Degrees.of(90.0).in(Units.Rotations), 1e-12);
+        assertEquals(2.0, Units.RPM.of(120.0).in(Units.RotationsPerSecond), 1e-12);
+        assertEquals(1.0, Units.DegreesPerSecond.of(360.0).in(Units.RotationsPerSecond), 1e-12);
     }
 
     @Test
-    void rateConvertsPerSecondMeasures() {
-        assertEquals(2.0, UnitConversions.rate(Units.RPM.of(120.0), Units.Rotations), 1e-12);
-        assertEquals(1.0, UnitConversions.rate(Units.DegreesPerSecond.of(360.0), Units.Rotations), 1e-12);
-        assertThrows(IllegalArgumentException.class,
-                () -> UnitConversions.rate(Units.Degrees.of(90.0), Units.Rotations));
+    void sameDimensionRejectsMismatchedMeasures() {
+        assertFalse(UnitConversions.sameDimension(Units.Degrees, Units.Meters));
     }
 
     @Test

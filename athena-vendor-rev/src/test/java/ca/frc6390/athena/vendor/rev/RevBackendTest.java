@@ -5,6 +5,7 @@ import static edu.wpi.first.units.Units.Milliseconds;
 import static edu.wpi.first.units.Units.Rotations;
 import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -160,11 +161,11 @@ class RevBackendTest {
     @Test
     void realRevConfigUsesSmartLimitForNeoAndSecondaryLimitForBrushedMotor() throws Exception {
         SparkBaseConfig neo = RevMotorHandle.activationConfig(
-                MotorDevice.of(MotorKinds.NEO, 2).currentLimit(35),
+                MotorDevice.of(MotorKinds.NEO, 2).currentLimit(Units.Amps.of(35)),
                 new RevMotorOptions(),
                 false);
         SparkBaseConfig cim = RevMotorHandle.activationConfig(
-                MotorDevice.of(MotorKinds.CIM, 3).currentLimit(30),
+                MotorDevice.of(MotorKinds.CIM, 3).currentLimit(Units.Amps.of(30)),
                 new RevMotorOptions().primaryEncoderCountsPerRevolution(8192),
                 false);
 
@@ -290,19 +291,19 @@ class RevBackendTest {
     @Test
     void ctreOrientedCurrentLimitsMapConservativelyToRevSmartCurrentLimit() {
         assertEquals(35, RevMotorHandle.effectiveSmartCurrentLimit(
-                MotorDevice.of(MotorKinds.NEO, 1).supplyCurrentLimit(35),
+                MotorDevice.of(MotorKinds.NEO, 1).supplyCurrentLimit(Units.Amps.of(35)),
                 new RevMotorOptions()));
         assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(
-                MotorDevice.of(MotorKinds.NEO, 2).statorCurrentLimit(60),
+                MotorDevice.of(MotorKinds.NEO, 2).statorCurrentLimit(Units.Amps.of(60)),
                 new RevMotorOptions()));
         assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(
-                MotorDevice.of(MotorKinds.NEO, 3).currentLimit(0).statorCurrentLimit(60),
+                MotorDevice.of(MotorKinds.NEO, 3).currentLimit(Units.Amps.of(0)).statorCurrentLimit(Units.Amps.of(60)),
                 new RevMotorOptions()));
         assertEquals(50, RevMotorHandle.effectiveSmartCurrentLimit(
-                MotorDevice.of(MotorKinds.NEO, 4).supplyCurrentLimit(70).statorCurrentLimit(50),
+                MotorDevice.of(MotorKinds.NEO, 4).supplyCurrentLimit(Units.Amps.of(70)).statorCurrentLimit(Units.Amps.of(50)),
                 new RevMotorOptions()));
         assertEquals(55, RevMotorHandle.effectiveSmartCurrentLimit(
-                MotorDevice.of(MotorKinds.NEO, 5).supplyCurrentLimit(35).statorCurrentLimit(30),
+                MotorDevice.of(MotorKinds.NEO, 5).supplyCurrentLimit(Units.Amps.of(35)).statorCurrentLimit(Units.Amps.of(30)),
                 new RevMotorOptions().smartCurrentLimit(Amps.of(55))));
     }
 
@@ -335,7 +336,7 @@ class RevBackendTest {
         for (int index = 0; index < followerControllers.length; index++) {
             MotorDevice followerDevice = MotorDevice.of(MotorKinds.NEO, index + 2)
                     .brake()
-                    .currentLimit(35);
+                    .currentLimit(Units.Amps.of(35));
             RevMotorHandle follower = new RevMotorHandle(
                     followerDevice, null, followerControllers[index]);
 
@@ -347,7 +348,7 @@ class RevBackendTest {
             assertEquals(1, controller.followLeaderId);
             assertFalse(controller.followInverted);
             assertEquals(MotorNeutralMode.BRAKE, controller.followDevice.neutralMode());
-            assertEquals(35, controller.followDevice.currentLimitAmps());
+            assertEquals(35, controller.followDevice.currentLimit().in(edu.wpi.first.units.Units.Amps), 0.0);
         }
     }
 

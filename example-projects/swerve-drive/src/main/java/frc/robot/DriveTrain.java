@@ -39,9 +39,9 @@ public final class DriveTrain implements Mechanism {
     public final SwerveModule backRight = module(7, 8, 14, Constants.ModuleOffsets.BACK_RIGHT);
     public final ImuDevice imu = Constants.RIO.imu(ImuKinds.PIGEON_2, 20);
     public final ImuSource heading = imu.relative();
-    public final Action resetHeading = heading.setYaw(0.0);
+    public final Action resetHeading = heading.setYaw(edu.wpi.first.units.Units.Degrees.of(0.0));
     public final HookBinding alignDriverHeadingAfterAuto = Events.autonomousExit()
-            .onStart(heading.setYaw(DriveTrain::allianceDriverHeadingDegrees));
+            .onStart(heading.setYaw(() -> edu.wpi.first.units.Units.Degrees.of(DriveTrain.allianceDriverHeadingDegrees())));
     public final SwerveKinematics kinematics = SwerveKinematics.rectangular(
             Meters.of(WHEELBASE_METERS),
             Meters.of(TRACK_WIDTH_METERS),
@@ -57,7 +57,7 @@ public final class DriveTrain implements Mechanism {
             .enabled(DriverStation::isAutonomousEnabled);
     public final Action pooledDrive = kinematics.drive(
             velocity,
-            () -> Math.toRadians(heading.yawDegrees()));
+            () -> heading.yaw().in(edu.wpi.first.units.Units.Radians));
 
     public Action drive(
             DoubleSupplier forward,

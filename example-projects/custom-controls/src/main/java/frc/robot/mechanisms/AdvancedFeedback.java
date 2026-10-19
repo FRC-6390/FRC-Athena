@@ -26,7 +26,7 @@ public final class AdvancedFeedback implements Mechanism {
     private final EncoderDevice vernierAbsolute = Constants.RIO.encoder(EncoderKinds.CANCODER, 31);
 
     private final PositionSignal modularAbsolute = FeedbackSignals.modular(
-            Range.rotations(0.0, 17.0),
+            Range.of(edu.wpi.first.units.Units.Rotations.of(0.0), edu.wpi.first.units.Units.Rotations.of(17.0)),
             0.025,
             FeedbackSignals.input(FeedbackSignals.absolutePhase(directAbsolute), 1.0),
             FeedbackSignals.input(FeedbackSignals.absolutePhase(vernierAbsolute), 16.0 / 17.0));

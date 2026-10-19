@@ -137,7 +137,7 @@ public final class PowerPlanner {
                 cap = Math.min(cap, sustainedOrBurst(channel, profile, requested, dtSeconds, sustained));
             }
             Sag sag = profile.sag();
-            if (sag != null && Double.isFinite(bus.measuredVolts()) && bus.measuredVolts() < sag.thresholdVolts()) {
+            if (sag != null && Double.isFinite(bus.measuredVolts()) && bus.measuredVolts() < sag.threshold().in(edu.wpi.first.units.Units.Volts)) {
                 double base = Math.min(cap, requested);
                 cap = base * (1.0 - sag.shedFraction());
             }

@@ -66,7 +66,7 @@ class PowerCapOutputTest {
     /** Predicted stator current of a voltage at a speed, the quantity the clamp bounds. */
     private static double currentAt(double volts, double rotationsPerSecond) {
         double omega = rotationsPerSecond * 2.0 * Math.PI;
-        return (volts - omega / KRAKEN.speedConstant()) / KRAKEN.resistanceOhms();
+        return (volts - omega / KRAKEN.speedConstantRadPerSecPerVolt()) / KRAKEN.resistance().in(Units.Ohms);
     }
 
     /** Runs the power pass on the motors, then applies one output through the applier with the pass installed. */
@@ -95,7 +95,7 @@ class PowerCapOutputTest {
 
     @Test
     void noClampWhenTheCapEqualsTheDeclaredLimit() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 89).currentLimit(20);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 89).currentLimit(Units.Amps.of(20));
         Rig rig = new Rig(motor);
         rig.cycle(0.0);
         assertEquals(Double.POSITIVE_INFINITY, rig.power.capAmps(motor), 0.0);
@@ -109,7 +109,7 @@ class PowerCapOutputTest {
 
     @Test
     void stalledMotorPercentOutputIsCappedBelowItsDeclaredLimit() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 90).currentLimit(20)
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 90).currentLimit(Units.Amps.of(20))
                 .power(PowerProfile.of().sustained(Units.Amps.of(5)));
         Rig rig = new Rig(motor);
         rig.cycle(0.0);
@@ -119,30 +119,30 @@ class PowerCapOutputTest {
 
         Motor handle = rig.hardware.motor(motor);
         assertTrue(Double.isNaN(handle.percent), "a capped percent command is sent as voltage");
-        assertEquals(5.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
+        assertEquals(5.0 * KRAKEN.resistance().in(Units.Ohms), handle.volts, 1e-9);
         assertTrue(currentAt(handle.volts, 0.0) <= 5.0 + 1e-9, "stalled current within the cap");
         assertTrue(handle.writes.isEmpty(), "no configuration write");
     }
 
     @Test
     void movingMotorVoltageIsClampedAroundItsBackEmf() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 91).currentLimit(20)
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 91).currentLimit(Units.Amps.of(20))
                 .power(PowerProfile.of().sustained(Units.Amps.of(5)));
         Rig rig = new Rig(motor);
         Motor handle = rig.hardware.motor(motor);
         // Back-EMF of 6 V: the command of 12 V would drive about (12 - 6) / R amps, far above the cap.
-        handle.rotationsPerSecond = 6.0 * KRAKEN.speedConstant() / (2.0 * Math.PI);
+        handle.rotationsPerSecond = 6.0 * KRAKEN.speedConstantRadPerSecPerVolt() / (2.0 * Math.PI);
         rig.cycle(0.0);
 
         rig.apply(motor, Outputs.voltage(12.0));
 
-        assertEquals(6.0 + 5.0 * KRAKEN.resistanceOhms(), handle.volts, 1e-9);
+        assertEquals(6.0 + 5.0 * KRAKEN.resistance().in(Units.Ohms), handle.volts, 1e-9);
         assertTrue(currentAt(handle.volts, handle.rotationsPerSecond) <= 5.0 + 1e-9, "moving current within the cap");
     }
 
     @Test
     void motorWithoutConstantsIsScaledByItsMeasuredSupplyCurrent() {
-        MotorDevice minion = MotorDevice.of(MotorKinds.MINION, 92).currentLimit(20)
+        MotorDevice minion = MotorDevice.of(MotorKinds.MINION, 92).currentLimit(Units.Amps.of(20))
                 .power(PowerProfile.of().sustained(Units.Amps.of(10)));
         Rig rig = new Rig(minion);
         Motor handle = rig.hardware.motor(minion);
@@ -157,8 +157,8 @@ class PowerCapOutputTest {
 
     @Test
     void softwareFollowerCapBoundsTheSharedCommand() {
-        MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 93).currentLimit(400);
-        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 94).currentLimit(20)
+        MotorDevice leader = MotorDevice.of(MotorKinds.KRAKEN_X60, 93).currentLimit(Units.Amps.of(400));
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 94).currentLimit(Units.Amps.of(20))
                 .power(PowerProfile.of().sustained(Units.Amps.of(5)));
         Rig rig = new Rig(leader, follower);
         rig.hardware.leader = leader;
@@ -167,7 +167,7 @@ class PowerCapOutputTest {
 
         rig.apply(leader, Outputs.voltage(12.0));
 
-        double expected = 5.0 * KRAKEN.resistanceOhms();
+        double expected = 5.0 * KRAKEN.resistance().in(Units.Ohms);
         assertEquals(expected, rig.hardware.motor(leader).volts, 1e-9);
         assertEquals(expected, rig.hardware.motor(follower).volts, 1e-9);
     }

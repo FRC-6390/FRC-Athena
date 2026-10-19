@@ -13,32 +13,36 @@ class ThermalTest {
     @Test
     void derateCurveIsFullBelowStartAndMinimumAboveEnd() {
         Thermal curve = Thermal.derate(Units.Celsius.of(80), Units.Celsius.of(120), 0.4);
-        assertEquals(1.0, curve.derateFraction(60), EPS);
-        assertEquals(1.0, curve.derateFraction(80), EPS);
-        assertEquals(0.7, curve.derateFraction(100), EPS);
-        assertEquals(0.4, curve.derateFraction(120), EPS);
-        assertEquals(0.4, curve.derateFraction(200), EPS);
+        assertEquals(1.0, curve.derateFraction(Units.Celsius.of(60)), EPS);
+        assertEquals(1.0, curve.derateFraction(Units.Celsius.of(80)), EPS);
+        assertEquals(0.7, curve.derateFraction(Units.Celsius.of(100)), EPS);
+        assertEquals(0.4, curve.derateFraction(Units.Celsius.of(120)), EPS);
+        assertEquals(0.4, curve.derateFraction(Units.Celsius.of(200)), EPS);
+        // Typed and per-cycle primitive forms agree exactly.
+        assertEquals(curve.derateFractionCelsius(100), curve.derateFraction(Units.Celsius.of(100)), 0.0);
     }
 
     @Test
     void loadIsClampedRamp() {
-        Thermal curve = new Thermal(80, 120, 0.4);
-        assertEquals(0.0, curve.load(10), EPS);
-        assertEquals(0.5, curve.load(100), EPS);
-        assertEquals(1.0, curve.load(500), EPS);
+        Thermal curve = new Thermal(Units.Celsius.of(80), Units.Celsius.of(120), 0.4);
+        assertEquals(0.0, curve.load(Units.Celsius.of(10)), EPS);
+        assertEquals(0.5, curve.load(Units.Celsius.of(100)), EPS);
+        assertEquals(1.0, curve.load(Units.Celsius.of(500)), EPS);
     }
 
     @Test
     void unknownTemperatureDoesNotDerate() {
-        Thermal curve = new Thermal(80, 120, 0.4);
-        assertEquals(1.0, curve.derateFraction(Double.NaN), EPS);
-        assertEquals(0.0, curve.load(Double.NaN), EPS);
+        Thermal curve = new Thermal(Units.Celsius.of(80), Units.Celsius.of(120), 0.4);
+        assertEquals(1.0, curve.derateFractionCelsius(Double.NaN), EPS);
+        assertEquals(0.0, curve.loadCelsius(Double.NaN), EPS);
     }
 
     @Test
     void invalidCurvesRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new Thermal(120, 80, 0.5));
-        assertThrows(IllegalArgumentException.class, () -> new Thermal(80, 120, 1.5));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Thermal(Units.Celsius.of(120), Units.Celsius.of(80), 0.5));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Thermal(Units.Celsius.of(80), Units.Celsius.of(120), 1.5));
     }
 
     @Test
@@ -73,8 +77,8 @@ class ThermalTest {
     void kindDefaultDerateStartsThirtyDegreesBelowRating() {
         MotorThermalSpec spec = MotorThermalSpec.GENERIC;
         Thermal derate = spec.defaultDerate();
-        assertEquals(spec.maxWindingCelsius() - 30.0, derate.startCelsius(), EPS);
-        assertEquals(spec.maxWindingCelsius(), derate.endCelsius(), EPS);
+        assertEquals(spec.maxWindingCelsius() - 30.0, derate.start().in(Units.Celsius), EPS);
+        assertEquals(spec.maxWindingCelsius(), derate.end().in(Units.Celsius), EPS);
         assertEquals(0.5, derate.minFraction(), EPS);
     }
 }

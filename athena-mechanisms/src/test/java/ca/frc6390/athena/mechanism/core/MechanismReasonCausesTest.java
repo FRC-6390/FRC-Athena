@@ -30,10 +30,10 @@ class MechanismReasonCausesTest {
     private static final EncoderDevice GUARD_ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 932);
     private static final MotorDevice STAGE_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 933);
     private static final MotorDevice POWER_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 934)
-            .currentLimit(400)
+            .currentLimit(Units.Amps.of(400))
             .power(PowerProfile.of().sustained(Units.Amps.of(60)));
     private static final MotorDevice THERMAL_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 935)
-            .currentLimit(100)
+            .currentLimit(Units.Amps.of(100))
             .thermal(Thermal.derate(Units.Celsius.of(40), Units.Celsius.of(60), 0.5));
     private static final MotorDevice FAULT_MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 936);
 
@@ -141,7 +141,7 @@ class MechanismReasonCausesTest {
     private static final class GuardRobot implements Mechanism {
         private final ControlBinding<?> control = Controls.position(GUARD_MOTOR)
                 .feedback(GUARD_ENCODER)
-                .constraint(Constraints.range(Range.of(0.0, 1.0)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
         public final Action push = control.percent(0.2);
     }
 

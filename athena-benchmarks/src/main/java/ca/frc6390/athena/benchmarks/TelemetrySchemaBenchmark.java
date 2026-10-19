@@ -125,7 +125,7 @@ public class TelemetrySchemaBenchmark {
             position = Controls.position(motor)
                     .feedback(encoder)
                     .pid(0.1, 0.0, 0.0)
-                    .constraint(Constraints.range(Range.of(-180.0, 180.0)))
+                    .constraint(Constraints.range(Range.of(Units.Value.of(-180.0), Units.Value.of(180.0))))
                     .profile(MotionProfiles.trapezoid(180.0, 360.0));
             hold = position.position(0.0);
         }

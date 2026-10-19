@@ -66,7 +66,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         if (inputUnit == null) {
             throw new IllegalStateException("Typed interpolation points require interpolate(model, input, inputUnit).");
         }
-        return at(UnitConversions.value(point, inputUnit), control.modeValue(value));
+        return at(ControlBinding.valueIn(point, inputUnit), control.modeValue(value));
     }
 
     /** Adds a fixed interpolation point and target value. */

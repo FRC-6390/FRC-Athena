@@ -61,7 +61,7 @@ class RebuiltVisionLocalizationSimulationTest {
         int filteredAccepted = 0;
         int fusedAccepted = 0;
         for (int cycle = 1; cycle <= 12; cycle++) {
-            simulation.step(0.02);
+            simulation.step(Units.Seconds.of(0.02));
             runtime.robotPeriodic(cycle * 0.02, 0.02);
             filteredAccepted += mechanism.filteredVision.acceptedMeasurements().size();
             fusedAccepted += mechanism.fusedVision.acceptedMeasurements().size();

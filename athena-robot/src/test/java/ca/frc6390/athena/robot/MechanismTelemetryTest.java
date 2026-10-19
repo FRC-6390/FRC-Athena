@@ -5,6 +5,7 @@ import static edu.wpi.first.units.Units.Seconds;
 import edu.wpi.first.units.measure.Current;
 import static edu.wpi.first.units.Units.Meters;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -219,7 +220,7 @@ class MechanismTelemetryTest {
                 schema.values().get(control + "Output").number(), 1e-9, "the output is what the motor was commanded");
 
         double temperature = schema.values().get(motor + "TemperatureCelsius").number();
-        assertEquals(mechanism.motor.temperatureCelsius(), temperature, 1e-9);
+        assertEquals(mechanism.motor.temperature().in(Units.Celsius), temperature, 1e-9);
         double derate = schema.values().get(motor + "Derate").number();
         assertTrue(derate >= 0.0 && derate <= 1.0, "derate is a fraction: " + derate);
         assertTrue(schema.values().get(motor + "PowerCapAmps").number() >= 0.0);

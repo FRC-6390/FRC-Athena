@@ -133,9 +133,9 @@ public final class EffortRuntime implements ControlLoopRuntime {
             baseFactor = declaration.baseFactor();
             yieldDeclared = yieldResponse != null && model != null;
             recoverSeconds = yieldResponse == null || yieldResponse.recovery() == null ? 0.0
-                    : UnitConversions.value(yieldResponse.recovery(), Units.Seconds);
+                    : Units.Seconds.fromBaseUnits(yieldResponse.recovery().baseUnitMagnitude());
             burstDeclared = push != null && model != null;
-            burstSeconds = push == null ? 0.0 : UnitConversions.value(push.duration(), Units.Seconds);
+            burstSeconds = push == null ? 0.0 : Units.Seconds.fromBaseUnits(push.duration().baseUnitMagnitude());
             burstAmps = push == null ? null : EffortUnits.perMotorAmps(push.burst(),
                     EffortUnits.kind(push.burst(), declaration.motion()), this.motors,
                     effort.gearing(), effort.radius());
@@ -372,8 +372,8 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (known.isPresent()) {
                 MotorConstants motor = known.get();
                 double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
-                double backEmf = omega / motor.speedConstant();
-                double span = limitAmps * motor.resistanceOhms();
+                double backEmf = omega / motor.speedConstantRadPerSecPerVolt();
+                double span = limitAmps * motor.resistance().in(Units.Ohms);
                 lower = Math.max(lower, backEmf - span);
                 upper = Math.min(upper, backEmf + span);
             } else {
@@ -437,7 +437,7 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (motor == null) {
                 return Double.NaN;
             }
-            torque += loadVolts * motor.torqueConstant() / motor.resistanceOhms();
+            torque += loadVolts * motor.torqueConstantNmPerAmp() / motor.resistance().in(Units.Ohms);
         }
         return torque * declaration.effort().gearing();
     }
@@ -453,10 +453,10 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (motor == null || !Double.isFinite(activeAmps[i])) {
                 return Double.NaN;
             }
-            torque += activeAmps[i] * motor.torqueConstant() * declaration.effort().gearing();
+            torque += activeAmps[i] * motor.torqueConstantNmPerAmp() * declaration.effort().gearing();
         }
         if (declaration.kind() == EffortUnits.Kind.FORCE) {
-            return torque / UnitConversions.value(declaration.effort().radius(), Units.Meters);
+            return torque / Units.Meters.fromBaseUnits(declaration.effort().radius().baseUnitMagnitude());
         }
         return torque;
     }

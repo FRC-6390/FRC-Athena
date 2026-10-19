@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -47,7 +48,7 @@ class MechanismRuntimeTest {
         actions.encoder(ENCODER).velocity = 0.25;
         ControlBinding<?> position = Controls.position(MOTOR)
                 .feedback(ENCODER)
-                .constraint(Constraints.range(Range.of(0.0, 5.0)))
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))))
                 .profile(MotionProfiles.trapezoid(2.0, 4.0))
                 .pid(1.0, 0.0, 0.0);
         TestMechanism mechanism = new TestMechanism(position.position(10.0));
@@ -282,7 +283,7 @@ class MechanismRuntimeTest {
         TestMechanism mechanism = new TestMechanism(
                 Actions.sequence()
                         .forTime(0.5, MOTOR.percent(0.25))
-                        .then(MOTOR.voltage(6.0)));
+                        .then(MOTOR.voltage(Units.Volts.of(6.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -305,7 +306,7 @@ class MechanismRuntimeTest {
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
                 .waitSeconds(10.0)
                 .forTime(5.0, changingChild)
-                .then(MOTOR.voltage(7.0)));
+                .then(MOTOR.voltage(Units.Volts.of(7.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -432,7 +433,7 @@ class MechanismRuntimeTest {
         TestMechanism mechanism = new TestMechanism(
                 Actions.timeout(MOTOR.percent(0.4), 0.3)
                         .then(Actions.until(ctx -> ctx.nowSeconds() >= 1.0, MOTOR.percent(0.6))
-                                .then(MOTOR.voltage(7.0))));
+                                .then(MOTOR.voltage(Units.Volts.of(7.0)))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -488,7 +489,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding<?> velocity = Controls.velocity(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
-                velocity.velocity(20.0).untilWithin(0.5).then(MOTOR.voltage(4.0)));
+                velocity.velocity(20.0).untilWithin(0.5).then(MOTOR.voltage(Units.Volts.of(4.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -1074,7 +1075,7 @@ class MechanismRuntimeTest {
         ControlBinding<?> control = Controls.position(MOTOR)
                 .feedback(ENCODER)
                 .pid(0.2, 0.0, 0.0)
-                .constraint(Constraints.range(Range.of(0.0, 1.0)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
         TestMechanism mechanism = new TestMechanism(control.position(2.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -1127,7 +1128,7 @@ class MechanismRuntimeTest {
         ControlBinding<?> control = Controls.position(MOTOR)
                 .feedback(ENCODER)
                 .pid(0.2, 0.0, 0.0)
-                .constraint(Constraints.range(Range.of(0.0, 1.0)))
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))))
                 .profile(MotionProfiles.trapezoid(2.0, 2.0));
         TestMechanism mechanism = new TestMechanism(control.position(1.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
@@ -1148,7 +1149,7 @@ class MechanismRuntimeTest {
                 .feedback(ENCODER)
                 .pid(1.0, 0.0, 0.0)
                 .constraints(
-                        Constraints.range(Range.of(0.0, 1.0)),
+                        Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))),
                         Constraints.motion(2.0, 2.0));
         MechanismRuntime runtime = MechanismRuntime.of(
                 new TestMechanism(control.position(1.0)), actions);
@@ -1174,7 +1175,7 @@ class MechanismRuntimeTest {
         ControlBinding<?> control = Controls.position(MOTOR)
                 .feedback(ENCODER)
                 .pid(1.0, 0.0, 0.0)
-                .constraint(Constraints.range(Range.of(0.0, 1.0)))
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))))
                 .profile(MotionProfiles.trapezoid(2.0, 2.0));
         TestMechanism mechanism = new TestMechanism(control.position(1.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
@@ -1253,7 +1254,7 @@ class MechanismRuntimeTest {
                 .feedback(ENCODER)
                 .pid(0.2, 0.0, 0.0)
                 .constraints(
-                        Constraints.range(Range.of(0.0, 100.0)),
+                        Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(100.0))),
                         Constraints.motion(100.0, 200.0),
                         Constraints.clamp(12.0));
         TestMechanism mechanism = new TestMechanism(control.velocity(33.0));
@@ -1273,7 +1274,7 @@ class MechanismRuntimeTest {
         ControlBinding<?> control = Controls.velocity(MOTOR)
                 .feedback(ENCODER)
                 .pid(0.2, 0.0, 0.0)
-                .constraint(Constraints.range(Range.of(0.0, 100.0)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(100.0))));
         TestMechanism mechanism = new TestMechanism(control.velocity(150.0));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -1902,7 +1903,7 @@ class MechanismRuntimeTest {
 
         runtime.request(mechanism.initial);
         runtime.simulationPeriodic(0.0, 0.2);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         EncoderHandle encoder = session.hardwareGraph().encoder(mechanism.encoder);
         assertTrue(encoder.positionRotations() > 0.0);
@@ -1941,7 +1942,7 @@ class MechanismRuntimeTest {
                 .feedback(ENCODER)
                 .pid(0.2, 0.0, 0.0)
                 .constraints(
-                        Constraints.range(Range.of(0.0, 100.0)),
+                        Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(100.0))),
                         Constraints.motion(100.0, 200.0),
                         Constraints.clamp(12.0));
         private final Action collect = speed.velocity(10.0);

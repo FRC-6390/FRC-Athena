@@ -96,7 +96,7 @@ class EffortValidationTest {
         double gearing = 25.0;
         double[] amps = EffortUnits.perMotorAmps(Units.NewtonMeters.of(torque), EffortUnits.Kind.TORQUE,
                 List.of(KRAKEN, KRAKEN_2), gearing, null);
-        double expected = torque / (2 * gearing * kraken.torqueConstant());
+        double expected = torque / (2 * gearing * kraken.torqueConstantNmPerAmp());
         assertEquals(expected, amps[0], 1e-9);
         assertEquals(expected, amps[1], 1e-9);
         // Round trip through the model: N motors at this current produce the declared torque.
@@ -109,7 +109,7 @@ class EffortValidationTest {
                 List.of(KRAKEN), 10.0, Units.Inches.of(2.0));
         double torque = 200 * Units.Inches.of(2.0).in(Units.Meters);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(torque / (10.0 * kraken.torqueConstant()), amps[0], 1e-9);
+        assertEquals(torque / (10.0 * kraken.torqueConstantNmPerAmp()), amps[0], 1e-9);
     }
 
     @Test
@@ -120,7 +120,7 @@ class EffortValidationTest {
         Action action = arm.position(0.5).effort(Units.NewtonMeters.of(4));
         var position = assertInstanceOf(Actions.ControlPosition.class, action);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(4.0 / (25.0 * kraken.torqueConstant()), position.effort().currentLimitAmps(), 1e-9);
+        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), position.effort().currentLimitAmps(), 1e-9);
         // Amps on the action need no gearing.
         var amps = assertInstanceOf(Actions.ControlPosition.class,
                 Controls.position(KRAKEN, Units.Rotations).feedback(EncoderDevice.of(EncoderKinds.CANCODER, 8)
@@ -189,6 +189,6 @@ class EffortValidationTest {
         assertTrue(telemetry.containsKey("ActiveEffort"));
         assertEquals(4.0, telemetry.get("Ceiling").number(), 1e-12);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(4.0 / (25.0 * kraken.torqueConstant()), telemetry.get("CeilingAmps").number(), 1e-9);
+        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), telemetry.get("CeilingAmps").number(), 1e-9);
     }
 }

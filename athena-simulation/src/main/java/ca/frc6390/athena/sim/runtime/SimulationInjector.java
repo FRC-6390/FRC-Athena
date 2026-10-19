@@ -7,6 +7,12 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
 import ca.frc6390.athena.sim.hardware.SimImuHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.LinearAcceleration;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.Objects;
 
 /**
@@ -27,25 +33,26 @@ public final class SimulationInjector {
      * Injects motor feedback and electrical readings.
      *
      * @param name motor name
-     * @param positionRotations integrated position
-     * @param velocityRotationsPerSecond velocity
+     * @param position integrated position
+     * @param velocity velocity
      * @param appliedVoltage applied voltage
-     * @param supplyCurrentAmps supply current
-     * @param statorCurrentAmps stator current
+     * @param supplyCurrent supply current
+     * @param statorCurrent stator current
      * @return true when the motor exists
      */
     public boolean motor(
             String name,
-            double positionRotations,
-            double velocityRotationsPerSecond,
-            double appliedVoltage,
-            double supplyCurrentAmps,
-            double statorCurrentAmps) {
+            Angle position,
+            AngularVelocity velocity,
+            Voltage appliedVoltage,
+            Current supplyCurrent,
+            Current statorCurrent) {
         for (SimMotorHandle handle : coordinator.motorHandles().values()) {
             MotorDevice device = handle.device();
             if (device.defaultName().equals(name)) {
-                handle.state(positionRotations, velocityRotationsPerSecond)
-                        .injectElectrical(appliedVoltage, supplyCurrentAmps, statorCurrentAmps);
+                handle.state(position.in(Units.Rotations), velocity.in(Units.RotationsPerSecond))
+                        .injectElectrical(appliedVoltage.in(Units.Volts), supplyCurrent.in(Units.Amps),
+                                statorCurrent.in(Units.Amps));
                 return true;
             }
         }
@@ -56,20 +63,20 @@ public final class SimulationInjector {
      * Injects encoder readings.
      *
      * @param name encoder name
-     * @param positionRotations position
-     * @param absolutePositionRotations absolute position
-     * @param velocityRotationsPerSecond velocity
+     * @param position raw sensor position
+     * @param absolutePosition raw absolute sensor position
+     * @param velocity raw sensor velocity
      * @return true when the encoder exists
      */
     public boolean encoder(
             String name,
-            double positionRotations,
-            double absolutePositionRotations,
-            double velocityRotationsPerSecond) {
+            Angle position,
+            Angle absolutePosition,
+            AngularVelocity velocity) {
         for (SimEncoderHandle handle : coordinator.encoderHandles().values()) {
             EncoderDevice device = handle.device();
             if (device.defaultName().equals(name)) {
-                coordinator.encoderState(device, positionRotations, absolutePositionRotations, velocityRotationsPerSecond);
+                coordinator.encoderState(device, position, absolutePosition, velocity);
                 return true;
             }
         }
@@ -77,40 +84,41 @@ public final class SimulationInjector {
     }
 
     /**
-     * Injects IMU readings. Angles are degrees, rates degrees per second, and acceleration g.
+     * Injects IMU readings.
      *
      * @param name IMU name
-     * @param yawDegrees yaw
-     * @param pitchDegrees pitch
-     * @param rollDegrees roll
-     * @param yawRateDegreesPerSecond yaw rate
-     * @param pitchRateDegreesPerSecond pitch rate
-     * @param rollRateDegreesPerSecond roll rate
-     * @param accelerationXG x acceleration
-     * @param accelerationYG y acceleration
-     * @param accelerationZG z acceleration
+     * @param yaw yaw
+     * @param pitch pitch
+     * @param roll roll
+     * @param yawRate yaw rate
+     * @param pitchRate pitch rate
+     * @param rollRate roll rate
+     * @param accelerationX x acceleration
+     * @param accelerationY y acceleration
+     * @param accelerationZ z acceleration
      * @return true when the IMU exists
      */
     public boolean imu(
             String name,
-            double yawDegrees,
-            double pitchDegrees,
-            double rollDegrees,
-            double yawRateDegreesPerSecond,
-            double pitchRateDegreesPerSecond,
-            double rollRateDegreesPerSecond,
-            double accelerationXG,
-            double accelerationYG,
-            double accelerationZG) {
+            Angle yaw,
+            Angle pitch,
+            Angle roll,
+            AngularVelocity yawRate,
+            AngularVelocity pitchRate,
+            AngularVelocity rollRate,
+            LinearAcceleration accelerationX,
+            LinearAcceleration accelerationY,
+            LinearAcceleration accelerationZ) {
         for (SimImuHandle handle : coordinator.imuHandles().values()) {
             ImuDevice device = handle.device();
             if (device.defaultName().equals(name)) {
-                handle.yawDegrees(yawDegrees)
-                        .pitchDegrees(pitchDegrees)
-                        .rollDegrees(rollDegrees)
-                        .angularRateDegreesPerSecond(rollRateDegreesPerSecond, pitchRateDegreesPerSecond,
-                                yawRateDegreesPerSecond)
-                        .linearAccelerationG(accelerationXG, accelerationYG, accelerationZG);
+                handle.yawDegrees(yaw.in(Units.Degrees))
+                        .pitchDegrees(pitch.in(Units.Degrees))
+                        .rollDegrees(roll.in(Units.Degrees))
+                        .angularRateDegreesPerSecond(rollRate.in(Units.DegreesPerSecond),
+                                pitchRate.in(Units.DegreesPerSecond), yawRate.in(Units.DegreesPerSecond))
+                        .linearAccelerationG(accelerationX.in(Units.Gs), accelerationY.in(Units.Gs),
+                                accelerationZ.in(Units.Gs));
                 return true;
             }
         }

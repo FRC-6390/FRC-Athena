@@ -18,25 +18,25 @@ import edu.wpi.first.math.util.Units;
 import frc.robot.Constants;
 
 public final class TwoJointArm implements Mechanism {
-    private final MotorDevice shoulderMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).currentLimit(35);
-    private final MotorDevice wristMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 4).currentLimit(20);
+    private final MotorDevice shoulderMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).currentLimit(edu.wpi.first.units.Units.Amps.of(35));
+    private final MotorDevice wristMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 4).currentLimit(edu.wpi.first.units.Units.Amps.of(20));
     private final EncoderDevice shoulderEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 3);
     private final EncoderDevice wristEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 4);
     private final DigitalInputDevice homeSwitch = Constants.RIO.dio(0).digitalInput().inverted();
-    private final Range shoulderTravel = Range.degrees(-25.0, 95.0);
-    private final Range wristTravel = Range.degrees(-70.0, 80.0);
+    private final Range shoulderTravel = Range.of(edu.wpi.first.units.Units.Degrees.of(-25.0), edu.wpi.first.units.Units.Degrees.of(95.0));
+    private final Range wristTravel = Range.of(edu.wpi.first.units.Units.Degrees.of(-70.0), edu.wpi.first.units.Units.Degrees.of(80.0));
     @SuppressWarnings("unused")
     private final SimModel shoulderSimulation = SimModel.arm(shoulderMotor)
             .encoder(shoulderEncoder)
             .range(shoulderTravel)
-            .limit(homeSwitch, shoulderTravel.minimum())
-            .lengthMeters(Units.inchesToMeters(22.0))
+            .limit(homeSwitch, shoulderTravel.minimumInUnit())
+            .length(edu.wpi.first.units.Units.Meters.of(Units.inchesToMeters(22.0)))
             .gearRatio(GearRatio.reduction(60.0, 1.0));
     @SuppressWarnings("unused")
     private final SimModel wristSimulation = SimModel.arm(wristMotor)
             .encoder(wristEncoder)
             .range(wristTravel)
-            .lengthMeters(Units.inchesToMeters(12.0))
+            .length(edu.wpi.first.units.Units.Meters.of(Units.inchesToMeters(12.0)))
             .gearRatio(GearRatio.reduction(30.0, 1.0));
     private final ControlBinding shoulder = Controls.position(shoulderMotor)
             .feedback(shoulderEncoder)

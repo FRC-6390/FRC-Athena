@@ -159,7 +159,7 @@ public final MechanismModel model = characterization.model();
 Model-equipped bindings expose:
 - `load()` – `NumberSignal`/`DoubleSupplier` estimated external torque/force (B0 units).
 - `blocked()`, `backdriven()`, `feedbackStalled()` – `BooleanSignal`s with `.threshold(...)`,
-  `.forSeconds(...)` overrides.
+  `.forTime(...)` overrides on stall signals and `.forSeconds(...)` on binding checks.
 - `.slipCheck(EncoderDevice second, GearRatio ratio, Measure<U> tolerance)` – only exists when
   configured; exposes `slipping()`.
 - Checks only exist when their data exists (no model => only `feedbackStalled` from current/output).
@@ -225,7 +225,7 @@ public final Action endgame = SHOOT.update(p -> p.share(0.5));
 ### B8. Thermal
 - `MotorDevice.thermal(Thermal.derate(Temperature start, Temperature end, double minFraction))`.
   Default when absent: derate only, documented default curve per motor kind.
-- `MotorDevice.temperatureCelsius()` signal (model estimate fused with vendor-reported temperature when
+- `MotorDevice.temperature()` signal (model estimate fused with vendor-reported temperature when
   available), `thermalLoad()` fraction.
 - Thermal never brakes/holds/locks out by itself. Any stronger behaviour is B9.
 

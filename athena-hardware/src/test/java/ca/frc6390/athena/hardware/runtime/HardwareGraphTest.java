@@ -110,7 +110,7 @@ class HardwareGraphTest {
         handle.position = 4.25;
 
         assertSame(handle, graph.motor(second));
-        assertEquals(4.25, second.positionRotations(), 1.0e-9);
+        assertEquals(4.25, second.position().in(Units.Rotations), 1.0e-9);
         assertEquals(1, backend.created);
     }
 
@@ -143,7 +143,7 @@ class HardwareGraphTest {
         recoveredEncoder.position = 2.5;
         recoveredImu.yaw = 37.0;
 
-        assertEquals(1.25, motor.positionRotations(), 1.0e-9);
+        assertEquals(1.25, motor.position().in(Units.Rotations), 1.0e-9);
         assertEquals(2.5, encoder.position(), 1.0e-9);
         assertEquals(37.0, imu.yawDegrees(), 1.0e-9);
         assertTrue(graph.bindingFailures().isEmpty());
@@ -179,8 +179,8 @@ class HardwareGraphTest {
     void graphRejectsConflictingConfigurationForSamePhysicalMotor() {
         FakeMotorBackend backend = new FakeMotorBackend();
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(backend));
-        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).brake().currentLimit(40);
-        MotorDevice conflicting = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).coast().currentLimit(60);
+        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).brake().currentLimit(Units.Amps.of(40));
+        MotorDevice conflicting = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).coast().currentLimit(Units.Amps.of(60));
 
         graph.motor(first);
         IllegalStateException failure = assertThrows(IllegalStateException.class, () -> graph.motor(conflicting));
@@ -497,11 +497,11 @@ class HardwareGraphTest {
     void deviceValidationRejectsInvalidDeclarations() {
         assertThrows(NullPointerException.class, () -> MotorDevice.of(null, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(-1));
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(Units.Amps.of(-1)));
         assertThrows(IllegalArgumentException.class,
-                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).supplyCurrentLimit(-1));
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).supplyCurrentLimit(Units.Amps.of(-1)));
         assertThrows(IllegalArgumentException.class,
-                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(-1));
+                () -> MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(Units.Amps.of(-1)));
         assertThrows(NullPointerException.class, () -> EncoderDevice.of(null, 1));
         assertThrows(NullPointerException.class, () -> ImuDevice.of(null, 1));
         assertThrows(IllegalArgumentException.class, () -> EncoderDevice.of(EncoderKinds.CANCODER, 1).reduction(0.0));
@@ -657,11 +657,11 @@ class HardwareGraphTest {
     @Test
     void simModelDegreeRangesBecomeMechanismRotations() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16);
-        Range plant = SimModel.motor(motor).range(Range.degrees(-270.0, 270.0)).range();
-        assertEquals(-0.75, plant.minimum(), 1e-12);
-        assertEquals(0.75, plant.maximum(), 1e-12);
-        assertEquals("rot", plant.unit());
-        assertEquals(Range.of(-2.0, 2.0), SimModel.motor(motor).range(Range.of(-2.0, 2.0)).range());
+        Range plant = SimModel.motor(motor).range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))).range();
+        assertEquals(-0.75, plant.minimumInUnit(), 1e-12);
+        assertEquals(0.75, plant.maximumInUnit(), 1e-12);
+        assertEquals(edu.wpi.first.units.Units.Rotations, plant.unit());
+        assertEquals(Range.of(Units.Rotations.of(-2.0), Units.Rotations.of(2.0)), SimModel.motor(motor).range(Range.of(Units.Rotations.of(-2.0), Units.Rotations.of(2.0))).range());
     }
 
     @Test
@@ -669,7 +669,7 @@ class HardwareGraphTest {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
         DigitalInputDevice limit = DigitalInputDevice.rio(4);
-        Range range = Range.of(-2.0, 2.0);
+        Range range = Range.of(Units.Rotations.of(-2.0), Units.Rotations.of(2.0));
         SimModel model = SimModel.arm(motor)
                 .encoder(encoder)
                 .gearRatio(GearRatio.reduction(12.0, 48.0))

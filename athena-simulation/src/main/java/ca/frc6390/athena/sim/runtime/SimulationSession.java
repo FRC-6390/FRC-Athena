@@ -13,6 +13,11 @@ import ca.frc6390.athena.sim.hardware.SimImuHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
 import ca.frc6390.athena.vision.runtime.VisionSimulation;
 import ca.frc6390.athena.vision.runtime.VisionSimulationField;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearVelocity;
+import edu.wpi.first.units.measure.Time;
 import java.util.List;
 
 /**
@@ -93,28 +98,32 @@ public final class SimulationSession {
     /**
      * Advances the simulated field pose by a chassis velocity.
      *
-     * @param xMetersPerSecond forward field velocity
-     * @param yMetersPerSecond left field velocity
-     * @param headingRadiansPerSecond angular velocity
-     * @param seconds timestep in seconds
+     * @param xVelocity forward field velocity
+     * @param yVelocity left field velocity
+     * @param headingVelocity angular velocity
+     * @param seconds timestep
      * @return this session
      */
     public SimulationSession drivePose(
-            double xMetersPerSecond,
-            double yMetersPerSecond,
-            double headingRadiansPerSecond,
-            double seconds) {
-        coordinator.drivePose(xMetersPerSecond, yMetersPerSecond, headingRadiansPerSecond, seconds);
+            LinearVelocity xVelocity,
+            LinearVelocity yVelocity,
+            AngularVelocity headingVelocity,
+            Time seconds) {
+        coordinator.drivePose(
+                xVelocity.in(Units.MetersPerSecond),
+                yVelocity.in(Units.MetersPerSecond),
+                headingVelocity.in(Units.RadiansPerSecond),
+                seconds.in(Units.Seconds));
         return this;
     }
 
     /**
      * Advances simulated hardware and physics.
      *
-     * @param seconds timestep in seconds
+     * @param seconds timestep
      */
-    public void step(double seconds) {
-        coordinator.step(this, seconds);
+    public void step(Time seconds) {
+        coordinator.step(this, seconds.in(Units.Seconds));
     }
 
     /**

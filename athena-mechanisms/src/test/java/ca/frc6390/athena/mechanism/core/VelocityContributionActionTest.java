@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanism.core;
 import edu.wpi.first.math.geometry.Rotation2d;
 import static edu.wpi.first.units.Units.RadiansPerSecond;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,7 +41,7 @@ class VelocityContributionActionTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
         private final RobotVelocityPool velocity = new RobotVelocityPool();
         private final RobotVelocityPool.Channel aimVelocity = velocity.channel();
-        private final Action drive = motor.voltage(0.0);
+        private final Action drive = motor.voltage(Units.Volts.of(0.0));
         private final Action aim;
 
         private TestMechanism(java.util.function.Supplier<RobotVelocity> target) {

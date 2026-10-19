@@ -102,7 +102,7 @@ public final class BatteryResistanceEstimator {
     public double initialOhms() { return initialOhms; }
 
     private static double clamp(double value) {
-        if (!Double.isFinite(value)) return PowerPolicy.DEFAULT_BATTERY_OHMS;
+        if (!Double.isFinite(value)) return PowerPolicy.DEFAULT_BATTERY_RESISTANCE.in(edu.wpi.first.units.Units.Ohms);
         return Math.max(MIN_OHMS, Math.min(MAX_OHMS, value));
     }
 }

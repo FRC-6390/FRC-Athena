@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.model;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,7 +20,7 @@ class MechanismModelTest {
     private static MechanismModel model(MotionKind kind, double kA) {
         MotorConstants constants = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
         return new MechanismModel(kind, 0.5, 0.4, 2.0, kA, 0.3, 0.1, FrictionTable.EMPTY, Double.NaN,
-                Double.NaN, 0.0, constants.torqueConstant(), constants.resistanceOhms(), 2,
+                Double.NaN, 0.0, constants.torqueConstantNmPerAmp(), constants.resistance().in(Units.Ohms), 2,
                 List.of("ctre/kraken-x60", "ctre/kraken-x60"), 10.0, Map.of("kV", 0.01), 0.99, 500);
     }
 
@@ -50,9 +51,9 @@ class MechanismModelTest {
         MechanismModel model = model(MotionKind.ROTARY, 0.5);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
 
-        double expected = 0.5 / (2.0 * Math.PI) * 2 * 10.0 * kraken.torqueConstant() / kraken.resistanceOhms();
+        double expected = 0.5 / (2.0 * Math.PI) * 2 * 10.0 * kraken.torqueConstantNmPerAmp() / kraken.resistance().in(Units.Ohms);
         assertEquals(expected, model.inertia(), 1.0e-12);
-        assertEquals(OptionalDouble.of(expected), model.momentOfInertia());
+        assertEquals(expected, model.momentOfInertia().orElseThrow().in(Units.KilogramSquareMeters), 1.0e-12);
         assertFalse(model(MotionKind.LINEAR, 0.5).momentOfInertia().isPresent());
         assertFalse(MechanismModel.empty(MotionKind.ROTARY).momentOfInertia().isPresent());
     }
@@ -64,7 +65,7 @@ class MechanismModelTest {
 
         SimModel armed = SimModel.arm(motor).model(model);
 
-        assertEquals(model.inertia(), armed.momentOfInertia().orElseThrow(), 1.0e-12);
+        assertEquals(model.inertia(), armed.momentOfInertia().orElseThrow().in(Units.KilogramSquareMeters), 1.0e-12);
         assertFalse(SimModel.arm(motor).model(model(MotionKind.LINEAR, 0.5)).momentOfInertia().isPresent());
     }
 

@@ -115,7 +115,7 @@ class ConstructorDeclaredPositionActionTest {
         private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.015, 0.0, 0.0)
-                .constraint(Constraints.range(Range.degrees(-136.0, 204.0)))
+                .constraint(Constraints.range(Range.of(Units.Degrees.of(-136.0), Units.Degrees.of(204.0))))
                 .constraint(Constraints.require(() -> true))
                 .planner(MotionPlanners.boundedAngular(360.0))
                 .profile(MotionProfiles.trapezoid(700.0, 1000.0));

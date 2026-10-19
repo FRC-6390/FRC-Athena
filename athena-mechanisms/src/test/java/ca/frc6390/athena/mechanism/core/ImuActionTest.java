@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.ImuKinds;
@@ -62,7 +63,7 @@ class ImuActionTest {
                 return handle;
             }
         };
-        Action resetHeading = imu.setYaw(0.0);
+        Action resetHeading = imu.setYaw(Units.Degrees.of(0.0));
         HookBinding hook = Events.when(() -> true).active().onStart(resetHeading);
         handle.yawDegrees = 42.0;
 
@@ -76,7 +77,7 @@ class ImuActionTest {
         ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 1);
         RecordingImuHandle handle = new RecordingImuHandle(imu);
         AtomicReference<Double> allianceHeading = new AtomicReference<>(0.0);
-        HookBinding hook = Events.autonomousInit().onStart(imu.setYaw(allianceHeading::get));
+        HookBinding hook = Events.autonomousInit().onStart(imu.setYaw(() -> Units.Degrees.of(allianceHeading.get())));
         ActionContext context = new ActionContext() {
             @Override
             public ImuHandle imu(ImuDevice requested) {
@@ -160,7 +161,7 @@ class ImuActionTest {
 
         private ImuMechanism(ImuDevice imu) {
             this.imu = imu;
-            setHeading = imu.setYaw(90.0);
+            setHeading = imu.setYaw(Units.Degrees.of(90.0));
         }
     }
 
@@ -172,7 +173,7 @@ class ImuActionTest {
         private AutoHeadingMechanism(ImuDevice imu) {
             this.imu = imu;
             driverHeading = imu.relative();
-            alignHeading = Events.autonomousInit().onStart(driverHeading.setYaw(() -> -180.0));
+            alignHeading = Events.autonomousInit().onStart(driverHeading.setYaw(() -> Units.Degrees.of(-180.0)));
         }
     }
 
@@ -184,7 +185,7 @@ class ImuActionTest {
         private InvertedImuMechanism(ImuDevice imu) {
             this.imu = imu;
             heading = imu.inverted();
-            setHeading = heading.setYaw(90.0);
+            setHeading = heading.setYaw(Units.Degrees.of(90.0));
         }
     }
 
@@ -196,7 +197,7 @@ class ImuActionTest {
         private ReusableAutoHeadingMechanism(ImuDevice imu, AtomicReference<Double> allianceHeading) {
             this.imu = imu;
             driverHeading = imu.relative();
-            alignHeading = Events.autonomousExit().onStart(driverHeading.setYaw(allianceHeading::get));
+            alignHeading = Events.autonomousExit().onStart(driverHeading.setYaw(() -> Units.Degrees.of(allianceHeading.get())));
         }
     }
 

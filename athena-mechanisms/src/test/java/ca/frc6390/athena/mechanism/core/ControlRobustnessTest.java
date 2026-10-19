@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -37,7 +38,7 @@ class ControlRobustnessTest {
     void untilWithinComparesAgainstTheRangeConstrainedTarget() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 5.0;
-        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 5.0)));
+        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))));
         Action raise = arm.position(10.0).untilWithin(0.1);
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm));
 
@@ -176,7 +177,7 @@ class ControlRobustnessTest {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 350.0;
         ControlBinding<?> turret = Controls.position(ARM)
-                .constraint(Constraints.range(Range.of(0.0, 400.0)))
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(400.0))))
                 .planner(MotionPlanners.boundedAngular(360.0));
         RuntimeOverrides overrides = new RuntimeOverrides();
         overrides.maximumPosition(turret, 5.0);
@@ -205,9 +206,9 @@ class ControlRobustnessTest {
     @Test
     void nonOverlappingRangesFailWhenTheBindingIsDeclaredAndTuningIsCached() {
         assertThrows(IllegalArgumentException.class, () -> Controls.position(ARM)
-                .constraint(Constraints.range(Range.of(0.0, 1.0)))
-                .constraint(Constraints.range(Range.of(2.0, 3.0))));
-        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(0.0, 1.0)));
+                .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))))
+                .constraint(Constraints.range(Range.of(Units.Value.of(2.0), Units.Value.of(3.0)))));
+        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
         RuntimeOverrides overrides = new RuntimeOverrides();
         assertSame(overrides.tuning(arm), overrides.tuning(arm));
     }
@@ -261,7 +262,7 @@ class ControlRobustnessTest {
                 .feedback(ARM_ENCODER)
                 .loop(ControlLoops.targetTransform(binding -> context -> ControlOutput.position(context.target())))
                 .pid(0.144, 0.0, 0.006)
-                .constraints(Constraints.range(Range.of(-270.0, 270.0)), Constraints.motion(180.0, 540.0))
+                .constraints(Constraints.range(Range.of(Units.Value.of(-270.0), Units.Value.of(270.0))), Constraints.motion(180.0, 540.0))
                 .planner(MotionPlanners.boundedAngular(360.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(turret, ARM_ENCODER))

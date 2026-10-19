@@ -9,14 +9,15 @@ import java.util.Objects;
  * threshold, the motor's current cap is reduced by {@code shedFraction} (0.5 halves it).
  *
  * @param shedFraction fraction of the cap removed while sagging, in {@code (0, 1]}
- * @param thresholdVolts battery voltage below which the response applies
+ * @param threshold battery voltage below which the response applies
  */
-public record Sag(double shedFraction, double thresholdVolts) {
+public record Sag(double shedFraction, Voltage threshold) {
     public Sag {
         if (!(shedFraction > 0.0 && shedFraction <= 1.0)) {
             throw new IllegalArgumentException("Sag shed fraction must be in (0, 1].");
         }
-        if (!Double.isFinite(thresholdVolts) || thresholdVolts <= 0.0) {
+        Objects.requireNonNull(threshold, "threshold");
+        if (!Double.isFinite(threshold.in(Units.Volts)) || threshold.in(Units.Volts) <= 0.0) {
             throw new IllegalArgumentException("Sag threshold must be a positive finite voltage.");
         }
     }
@@ -42,7 +43,7 @@ public record Sag(double shedFraction, double thresholdVolts) {
         /** Completes the declaration with the bus voltage below which the response applies. */
         public Sag below(Voltage voltage) {
             Objects.requireNonNull(voltage, "voltage");
-            return new Sag(fraction, voltage.in(Units.Volts));
+            return new Sag(fraction, voltage);
         }
     }
 }

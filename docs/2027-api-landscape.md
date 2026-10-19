@@ -167,7 +167,7 @@ Robot code reads runtime-owned sensor snapshots directly from declarations. Read
 double armPosition = armEncoder.position();
 double armVelocity = armEncoder.velocity();
 double moduleAngle = moduleEncoder.absolutePosition();
-double heading = imu.yawDegrees();
+Angle heading = imu.yaw();
 boolean atHome = homeSwitch.active();
 Optional<PoseSnapshot> cameraPose = camera.pose().value();
 Optional<TargetMeasurementSample> target = camera.targets().latest();

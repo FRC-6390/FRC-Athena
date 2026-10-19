@@ -77,7 +77,7 @@ public final class Constraints {
                 throw new IllegalArgumentException("Range limits measure " + dimension.name()
                         + " and cannot be applied to " + unit.name() + ".");
             }
-            return range(Range.of(unit.fromBaseUnits(minimumBase), unit.fromBaseUnits(maximumBase)));
+            return range(Range.of(unit.ofBaseUnits(minimumBase), unit.ofBaseUnits(maximumBase)));
         }
     }
 
@@ -246,29 +246,48 @@ public final class Constraints {
                 .anyMatch(constraint -> constraint.stage() == stage);
     }
 
-    /** Returns the intersection of declared position ranges, or an unbounded range. */
+    /**
+     * Returns the intersection of declared position ranges, or an unbounded range. The result is
+     * expressed in the unit of the first bounded range; other bounds are converted through base units.
+     */
     public static Range positionRange(List<? extends Constraint<Double>> constraints) {
-        double minimum = -Double.MAX_VALUE;
-        double maximum = Double.MAX_VALUE;
+        Range bounded = intersectBounds(constraints);
+        return bounded == null ? Range.ofUnit(edu.wpi.first.units.Units.Value, -Double.MAX_VALUE, Double.MAX_VALUE)
+                : bounded;
+    }
+
+    /** Returns the intersection of the bounded ranges in these constraints, or {@code null} when none is bounded. */
+    private static Range intersectBounds(List<? extends Constraint<?>> constraints) {
+        Unit unit = null;
+        double low = -Double.MAX_VALUE;
+        double high = Double.MAX_VALUE;
+        boolean bounded = false;
         if (constraints != null) {
-            for (Constraint<Double> constraint : constraints) {
-                if (constraint instanceof RangeConstraint bounded) {
-                    minimum = Math.max(minimum, bounded.range().minimum());
-                    maximum = Math.min(maximum, bounded.range().maximum());
+            for (Constraint<?> constraint : constraints) {
+                Range range = null;
+                if (constraint instanceof RangeConstraint rangeConstraint) {
+                    range = rangeConstraint.range();
                 } else if (constraint instanceof ConstraintGroup<?> group) {
-                    @SuppressWarnings("unchecked")
-                    List<? extends Constraint<Double>> children =
-                            (List<? extends Constraint<Double>>) (List<?>) group.constraints();
-                    Range nested = positionRange(children);
-                    minimum = Math.max(minimum, nested.minimum());
-                    maximum = Math.min(maximum, nested.maximum());
+                    range = intersectBounds(group.constraints());
                 }
+                if (range == null) {
+                    continue;
+                }
+                if (unit == null) {
+                    unit = range.unit();
+                }
+                low = Math.max(low, range.minimum().baseUnitMagnitude());
+                high = Math.min(high, range.maximum().baseUnitMagnitude());
+                bounded = true;
             }
         }
-        if (maximum < minimum) {
+        if (!bounded) {
+            return null;
+        }
+        if (high < low) {
             throw new IllegalArgumentException("Control position constraints do not overlap.");
         }
-        return Range.of(minimum, maximum);
+        return Range.ofUnit(unit, unit.fromBaseUnits(low), unit.fromBaseUnits(high));
     }
 
     /** Returns the strictest declared motion limits, or {@code null} when absent. */

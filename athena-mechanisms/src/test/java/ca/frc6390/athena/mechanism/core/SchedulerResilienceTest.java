@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.core;
 
 import static edu.wpi.first.units.Units.RadiansPerSecond;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -153,7 +154,7 @@ class SchedulerResilienceTest {
     @Test
     void failedHookImuMutationIsReportedAndDoesNotPoisonEdgeState() {
         FailingMutationContext context = new FailingMutationContext();
-        HookBinding hook = Events.when(() -> true).active().onStart(context.imu.setYaw(0.0));
+        HookBinding hook = Events.when(() -> true).active().onStart(context.imu.setYaw(Units.Degrees.of(0.0)));
         HookRuntime runtime = new HookRuntime();
 
         runtime.run(EventContext.empty(), context, hook);

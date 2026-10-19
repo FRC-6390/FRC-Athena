@@ -11,19 +11,19 @@ import java.util.function.DoubleSupplier;
 public final class DriveTrain implements Mechanism {
     public final MotorDevice leftLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 1)
             .brake()
-            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(Constants.Drive.CURRENT_LIMIT_AMPS));
     public final MotorDevice leftFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 2)
             .follow(leftLeader)
             .brake()
-            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(Constants.Drive.CURRENT_LIMIT_AMPS));
     public final MotorDevice rightLeader = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3)
             .inverted()
             .brake()
-            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(Constants.Drive.CURRENT_LIMIT_AMPS));
     public final MotorDevice rightFollower = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 4)
             .follow(rightLeader)
             .brake()
-            .currentLimit(Constants.Drive.CURRENT_LIMIT_AMPS);
+            .currentLimit(edu.wpi.first.units.Units.Amps.of(Constants.Drive.CURRENT_LIMIT_AMPS));
 
     private final SimModel leftSimulation = SimModel.motor(leftLeader, leftFollower)
             .encoder(leftLeader.encoder());

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.hardware.signal;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,13 +14,13 @@ import org.junit.jupiter.api.Test;
 class MotorStallModelTest {
     @Test
     void knownMotorDefaultsToModelBasedDetectionWithoutAFixedVoltageThreshold() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(120);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(Units.Amps.of(120));
         FakeHandle handle = new FakeHandle(motor);
         try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-stall"), handle)) {
             assertTrue(ignored != null);
             MotorStallSignal stall = motor.stall();
             assertTrue(stall.modelBased());
-            assertEquals(MotorStallSignal.MODEL_DURATION_SECONDS, stall.durationSeconds(), 1.0e-12);
+            assertEquals(MotorStallSignal.MODEL_DURATION_SECONDS, stall.duration().in(Units.Seconds), 1.0e-12);
 
             // A loaded motor drawing current at 3 V that is not moving counts as a stall.
             handle.appliedVoltage = 3.0;
@@ -31,7 +32,7 @@ class MotorStallModelTest {
 
     @Test
     void reverseDriveStallsAndRunsLikeForward() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(40);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(Units.Amps.of(40));
         FakeHandle handle = new FakeHandle(motor);
         try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-stall-reverse"), handle)) {
             assertTrue(ignored != null);
@@ -50,7 +51,7 @@ class MotorStallModelTest {
 
     @Test
     void freeRunningMotorIsNotAStall() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).statorCurrentLimit(120);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 2).statorCurrentLimit(Units.Amps.of(120));
         FakeHandle handle = new FakeHandle(motor);
         try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-free"), handle)) {
             assertTrue(ignored != null);
@@ -70,7 +71,7 @@ class MotorStallModelTest {
 
     @Test
     void zeroAppliedVoltageIsNeverAStall() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3).statorCurrentLimit(120);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3).statorCurrentLimit(Units.Amps.of(120));
         FakeHandle handle = new FakeHandle(motor);
         try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-zero"), handle)) {
             assertTrue(ignored != null);
@@ -83,20 +84,20 @@ class MotorStallModelTest {
 
     @Test
     void existingOverridesSwitchToTheFixedThresholdDetector() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4).statorCurrentLimit(40);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4).statorCurrentLimit(Units.Amps.of(40));
         FakeHandle handle = new FakeHandle(motor);
         try (AutoCloseable ignored = motor.bindRuntime(new RuntimeScope("model-override"), handle)) {
             assertTrue(ignored != null);
             assertFalse(motor.stall().atCurrentLimit(0.9).modelBased());
-            assertFalse(motor.stall().velocityBelow(1.0).modelBased());
-            assertFalse(motor.stall().commandedVoltageAbove(1.0).modelBased());
-            assertTrue(motor.stall().forSeconds(0.3).modelBased());
+            assertFalse(motor.stall().velocityBelow(Units.RotationsPerSecond.of(1.0)).modelBased());
+            assertFalse(motor.stall().commandedVoltageAbove(Units.Volts.of(1.0)).modelBased());
+            assertTrue(motor.stall().forTime(Units.Seconds.of(0.3)).modelBased());
         }
     }
 
     @Test
     void unknownMotorKeepsTheLegacyDetector() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.MINION, 5).statorCurrentLimit(40);
+        MotorDevice motor = MotorDevice.of(MotorKinds.MINION, 5).statorCurrentLimit(Units.Amps.of(40));
         assertFalse(motor.stall().modelBased());
     }
 

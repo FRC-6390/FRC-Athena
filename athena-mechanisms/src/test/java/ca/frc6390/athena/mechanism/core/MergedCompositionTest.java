@@ -18,7 +18,7 @@ class MergedCompositionTest {
     @Test
     void thenFluentAndStaticFormsProduceTheSameType() {
         Action first = MOTOR.percent(0.2);
-        Action second = MOTOR.voltage(3.0);
+        Action second = MOTOR.voltage(Units.Volts.of(3.0));
 
         Actions.Then fluent = assertInstanceOf(Actions.Then.class, first.then(second));
         Actions.Then fixed = assertInstanceOf(Actions.Then.class, Actions.then(first, second));
@@ -49,7 +49,7 @@ class MergedCompositionTest {
     @Test
     void continuationAfterAChainedContinuationSequencesInsteadOfReplacingIt() {
         Action body = MOTOR.percent(0.2);
-        Action first = MOTOR.voltage(1.0);
+        Action first = MOTOR.voltage(Units.Volts.of(1.0));
         Action second = MOTOR.neutral();
 
         Actions.Then chained = assertInstanceOf(Actions.Then.class, body.until(NEVER).then(first).then(second));

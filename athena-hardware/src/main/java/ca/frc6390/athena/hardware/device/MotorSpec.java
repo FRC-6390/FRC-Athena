@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.device;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.power.MotorThermalSpec;
+import edu.wpi.first.units.Units;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Optional;
@@ -81,13 +82,17 @@ public record MotorSpec(
 
     /** Electrical constants derived from this row (R, Kt, Kv). */
     public MotorConstants constants() {
-        return MotorConstants.of(stallTorqueNm, stallCurrentAmps, freeCurrentAmps, freeSpeedRpm);
+        return MotorConstants.of(
+                Units.NewtonMeters.of(stallTorqueNm),
+                Units.Amps.of(stallCurrentAmps),
+                Units.Amps.of(freeCurrentAmps),
+                Units.RPM.of(freeSpeedRpm));
     }
 
     /** Thermal constants: winding resistance and speed constant come from {@link #constants()}. */
     public MotorThermalSpec thermalSpec() {
         MotorConstants constants = constants();
-        return new MotorThermalSpec(constants.resistanceOhms(), constants.speedConstant(),
+        return new MotorThermalSpec(constants.resistance().in(Units.Ohms), constants.speedConstantRadPerSecPerVolt(),
                 heatCapacityJoulesPerCelsius, coolingSeconds, ambientCelsius, maxWindingCelsius);
     }
 }

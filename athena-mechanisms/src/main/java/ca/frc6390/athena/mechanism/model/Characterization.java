@@ -230,7 +230,7 @@ public final class Characterization implements TelemetrySource {
 
     /** Largest voltage any test applies. Must be positive and finite. Ramps stop at it; steps hold it. */
     public Characterization maxVoltage(Voltage volts) {
-        return copy(withSettings(s -> new Settings(positive(UnitConversions.value(volts, Units.Volts), "maxVoltage"),
+        return copy(withSettings(s -> new Settings(positive(volts.in(Units.Volts), "maxVoltage"),
                 s.rampVoltsPerSecond(), s.timeoutSeconds(), s.minNormalized(), s.maxNormalized(),
                 s.learnContinuously(), s.driftTolerance(), s.gearRatio(), s.payloadGate())));
     }
@@ -241,7 +241,7 @@ public final class Characterization implements TelemetrySource {
      */
     public Characterization rampRate(edu.wpi.first.units.measure.Velocity<edu.wpi.first.units.VoltageUnit> rate) {
         return copy(withSettings(s -> new Settings(s.maxVolts(),
-                positive(UnitConversions.rate(rate, Units.Volts), "rampRate"),
+                positive(rate.baseUnitMagnitude() / UnitConversions.baseScale(Units.Volts), "rampRate"),
                 s.timeoutSeconds(), s.minNormalized(), s.maxNormalized(), s.learnContinuously(),
                 s.driftTolerance(), s.gearRatio(), s.payloadGate())));
     }
@@ -249,7 +249,7 @@ public final class Characterization implements TelemetrySource {
     /** Per-test safety timeout. Must be positive. A held test ends at the timeout and does not restart until released. */
     public Characterization timeout(Time time) {
         return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(),
-                positive(UnitConversions.value(time, Units.Seconds), "timeout"),
+                positive(time.in(Units.Seconds), "timeout"),
                 s.minNormalized(), s.maxNormalized(), s.learnContinuously(), s.driftTolerance(), s.gearRatio(),
                 s.payloadGate())));
     }
@@ -275,8 +275,8 @@ public final class Characterization implements TelemetrySource {
             throw new IllegalArgumentException("Characterization range must be a " + expected
                     + " measure for this binding's feedback.");
         }
-        double low = UnitConversions.value(min, base);
-        double high = UnitConversions.value(max, base);
+        double low = base.fromBaseUnits(min.baseUnitMagnitude());
+        double high = base.fromBaseUnits(max.baseUnitMagnitude());
         if (!(low < high)) {
             throw new IllegalArgumentException("Characterization range minimum must be below its maximum.");
         }
@@ -559,8 +559,8 @@ public final class Characterization implements TelemetrySource {
         if (output != null) {
             MotorConstants constants = MotorConstants.forKind(output.kind()).orElse(null);
             if (constants != null) {
-                torque = constants.torqueConstant();
-                resistance = constants.resistanceOhms();
+                torque = constants.torqueConstantNmPerAmp();
+                resistance = constants.resistance().in(Units.Ohms);
             }
         }
         return new MechanismModel(kind, staticVolts, fit.kineticStaticVolts(), fit.kV(), fit.kA(), fit.kG(),

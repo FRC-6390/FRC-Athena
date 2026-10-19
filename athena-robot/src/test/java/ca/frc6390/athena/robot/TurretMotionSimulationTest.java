@@ -86,14 +86,14 @@ class TurretMotionSimulationTest {
     }
 
     private static final class TurretMechanism implements Mechanism {
-        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(25);
+        private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(Units.Amps.of(25));
         private final EncoderDevice angle = motor.encoder()
                 .gearing(GearRatio.reduction(100.0, 1.0))
                 .measures(Units.Degrees);
         private final SimModel simulation = SimModel.motor(motor)
                 .gearRatio(GearRatio.reduction(100.0, 1.0))
-                .momentOfInertia(0.5)
-                .range(Range.rotations(-0.75, 0.75));
+                .momentOfInertia(Units.KilogramSquareMeters.of(0.5))
+                .range(Range.of(Units.Rotations.of(-0.75), Units.Rotations.of(0.75)));
         private final ImuDevice chassisImu = ImuDevice.of(ImuKinds.PIGEON_2, 17);
         private final ControlBinding<?> fieldHeading = Controls.position(motor)
                 .feedback(angle)
@@ -101,7 +101,7 @@ class TurretMotionSimulationTest {
                 .loop(ControlLoops.targetTransform(binding -> context ->
                         ControlOutput.position(context.target() - chassisImu.angleDegrees())))
                 .pid(0.144, 0.0, 0.006)
-                .constraints(Constraints.range(Range.degrees(-270.0, 270.0)), Constraints.motion(180.0, 540.0))
+                .constraints(Constraints.range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))), Constraints.motion(180.0, 540.0))
                 .planner(MotionPlanners.boundedAngular(360.0));
         private final Action neutral = fieldHeading.neutral();
     }
