@@ -44,8 +44,8 @@ import org.junit.jupiter.api.Test;
 
 class WpilibLocalizationParityTest {
     private static final double PARITY_TOLERANCE = 1.0e-8;
-    private static final MeasurementStdDevs STATE_STD_DEVS = MeasurementStdDevs.of(0.08, 0.08, 0.04);
-    private static final MeasurementStdDevs DEFAULT_VISION_STD_DEVS = MeasurementStdDevs.of(0.7, 0.7, 0.4);
+    private static final MeasurementStdDevs STATE_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.08), Meters.of(0.08), Radians.of(0.04));
+    private static final MeasurementStdDevs DEFAULT_VISION_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.7), Meters.of(0.7), Radians.of(0.4));
 
     @Test
     void odometryOnlyMatchesWpilibFrameByFrame() {
@@ -68,12 +68,12 @@ class WpilibLocalizationParityTest {
 
         rig.step(0.0, distances(0.0, 0.0, 0.0, 0.0), angles(0.0, 0.0, 0.0, 0.0), 0.0);
         rig.step(0.5, distances(0.5, 0.5, 0.5, 0.5), angles(0.0, 0.0, 0.0, 0.0), 0.0,
-                vision(0.46, 0.03, 0.01, 0.5, MeasurementStdDevs.of(0.15, 0.18, 0.12), frontCamera));
+                vision(0.46, 0.03, 0.01, 0.5, MeasurementStdDevs.of(Meters.of(0.15), Meters.of(0.18), Radians.of(0.12)), frontCamera));
         rig.step(1.0, distances(1.0, 1.0, 1.0, 1.0), angles(0.0, 0.0, 0.0, 0.0), 2.0);
         rig.step(1.5, distances(1.5, 1.5, 1.5, 1.5), angles(0.0, 0.0, 0.0, 0.0), 4.0,
-                vision(0.92, -0.04, 0.02, 0.9, MeasurementStdDevs.of(0.10, 0.12, 0.08), rearCamera));
+                vision(0.92, -0.04, 0.02, 0.9, MeasurementStdDevs.of(Meters.of(0.10), Meters.of(0.12), Radians.of(0.08)), rearCamera));
         rig.step(2.0, distances(2.0, 2.0, 2.0, 2.0), angles(0.0, 0.0, 0.0, 0.0), 6.0,
-                vision(1.96, 0.08, 0.10, 2.0, MeasurementStdDevs.of(0.25, 0.20, 0.15), frontCamera));
+                vision(1.96, 0.08, 0.10, 2.0, MeasurementStdDevs.of(Meters.of(0.25), Meters.of(0.20), Radians.of(0.15)), frontCamera));
         rig.step(2.5, distances(2.5, 2.5, 2.5, 2.5), angles(0.0, 0.0, 0.0, 0.0), 8.0);
     }
 
@@ -94,15 +94,15 @@ class WpilibLocalizationParityTest {
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
         rig.stepAthenaOnly(0.02, vision(5.02, 2.01, 0.2, 0.02,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
-        assertEquals(0.0, rig.athena.pose().xMeters(), 1.0e-9);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        assertEquals(0.0, rig.athena.pose().getX(), 1.0e-9);
 
         rig.stepAthenaOnly(0.04, vision(5.01, 2.0, 0.2, 0.04,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), camera));
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
 
-        assertTrue(rig.athena.pose().xMeters() > 0.25);
+        assertTrue(rig.athena.pose().getX() > 0.25);
     }
 
     @Test
@@ -110,10 +110,10 @@ class WpilibLocalizationParityTest {
         ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY, true);
 
         rig.stepAthenaOnly(0.0, vision(1.0, 0.0, Math.PI, 0.0,
-                MeasurementStdDevs.of(0.1, 0.1, 0.01), new Object()));
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.01)), new Object()));
 
-        assertTrue(rig.athena.pose().xMeters() > 0.0);
-        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-6);
+        assertTrue(rig.athena.pose().getX() > 0.0);
+        assertEquals(0.0, rig.athena.pose().getRotation().getRadians(), 1.0e-6);
     }
 
     @Test
@@ -124,13 +124,13 @@ class WpilibLocalizationParityTest {
                 Math.toRadians(35.0));
 
         rig.stepAthenaOnly(0.0, vision(1.0, 0.0, Math.PI, 0.0,
-                MeasurementStdDevs.of(0.1, 0.1, 0.05), new Object()));
-        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), new Object()));
+        assertEquals(0.0, rig.athena.pose().getRotation().getRadians(), 1.0e-9);
 
         rig.stepAthenaOnly(0.02, vision(1.0, 0.0, Math.toRadians(10.0), 0.02,
-                MeasurementStdDevs.of(0.1, 0.1, 0.05), new Object()));
-        assertTrue(rig.athena.pose().headingRadians() > 0.0);
-        assertTrue(rig.athena.pose().headingRadians() < Math.toRadians(10.0));
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), new Object()));
+        assertTrue(rig.athena.pose().getRotation().getRadians() > 0.0);
+        assertTrue(rig.athena.pose().getRotation().getRadians() < Math.toRadians(10.0));
     }
 
     @Test
@@ -142,15 +142,15 @@ class WpilibLocalizationParityTest {
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 0.0, Math.PI / 2.0, 0.00,
-                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), camera));
         rig.stepAthenaOnly(0.02, vision(1.0, 0.0, Math.PI / 2.0, 0.02,
-                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
-        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), camera));
+        assertEquals(0.0, rig.athena.pose().getRotation().getRadians(), 1.0e-9);
 
         rig.stepAthenaOnly(0.04, vision(1.0, 0.0, Math.PI / 2.0, 0.04,
-                MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+                MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), camera));
 
-        assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+        assertTrue(rig.athena.pose().getRotation().getRadians() > Math.toRadians(10.0));
     }
 
     @Test
@@ -163,15 +163,15 @@ class WpilibLocalizationParityTest {
         Object cameras = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 1.0, Math.toRadians(90.0), 0.00,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), cameras));
         rig.stepAthenaOnly(0.02, vision(8.0, 6.0, Math.toRadians(90.0), 0.02,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
-        assertEquals(0.0, rig.athena.pose().headingRadians(), 1.0e-9);
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), cameras));
+        assertEquals(0.0, rig.athena.pose().getRotation().getRadians(), 1.0e-9);
 
         rig.stepAthenaOnly(0.04, vision(3.0, 7.0, Math.toRadians(90.0), 0.04,
-                MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
+                MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), cameras));
 
-        assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+        assertTrue(rig.athena.pose().getRotation().getRadians() > Math.toRadians(10.0));
     }
 
     /** A camera whose ambiguity is too high is rejected by name, and the status says why. */
@@ -193,7 +193,7 @@ class WpilibLocalizationParityTest {
     void innovationGatedFrameIsRecoveringThenOkOnceSelfConsistent() {
         ParityRig rig = new ParityRig(9.0);
         String camera = "Turret";
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
 
         // The robot is at the origin; a multi-tag frame at (5, 2) is far outside the innovation gate.
         rig.stepAthenaOnly(0.00, multiTag(5.0, 2.0, 0.0, 0.00, stdDevs, camera));
@@ -217,7 +217,7 @@ class WpilibLocalizationParityTest {
     void frameFromTheFutureIsUnsyncedAndDoesNotLockTheCameraOut() {
         ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY);
         String camera = "Side";
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
 
         rig.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 3.2, stdDevs, camera));
         var status = statusOf(rig, camera);
@@ -235,7 +235,7 @@ class WpilibLocalizationParityTest {
     void cameraWithoutNewFramesBecomesStale() {
         ParityRig rig = new ParityRig(Double.POSITIVE_INFINITY);
         String camera = "Climber";
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
         rig.stepAthenaOnly(1.00, multiTag(5.0, 2.0, 0.0, 1.00, stdDevs, camera));
         assertEquals(VisionSourceStatus.State.OK, statusOf(rig, camera).state());
 
@@ -255,31 +255,31 @@ class WpilibLocalizationParityTest {
     void frameTakenWhileSpinningIsRejectedWithItsRate() {
         ParityRig rig = new ParityRig(kalman -> kalman.maxVisionAngularVelocity(RadiansPerSecond.of(3.0)));
         String camera = "Intake";
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
 
         rig.stepAthenaOnly(0.0, new VisionSample[] {
-                multiTagWithSpeed(5.0, 2.0, 0.0, 0.0, stdDevs, camera, new RobotVelocity(0.0, 0.0, 4.1))});
+                multiTagWithSpeed(5.0, 2.0, 0.0, 0.0, stdDevs, camera, RobotVelocity.robot(MetersPerSecond.of(0.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(4.1)))});
         var status = statusOf(rig, camera);
         assertEquals(VisionSourceStatus.State.REJECTED, status.state());
         assertEquals("spinning 4.1 rad/s > 3.0", status.reason());
-        assertEquals(0.0, rig.athena.pose().xMeters(), 1e-9, "the spinning frame did not move the estimate");
+        assertEquals(0.0, rig.athena.pose().getX(), 1e-9, "the spinning frame did not move the estimate");
     }
 
     /** Speed scaling trusts a frame less while driving: the same frame moves the estimate less. */
     @Test
     void visionStdDevSpeedScalingMovesTheEstimateLessWhenDriving() {
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.3, 0.3, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.3), Meters.of(0.3), Radians.of(0.1));
         ParityRig plain = new ParityRig(UnaryOperator.identity());
         ParityRig scaled = new ParityRig(kalman -> kalman.visionStdDevSpeedScaling(1.0, 0.0));
-        RobotVelocity driving = new RobotVelocity(3.0, 0.0, 0.0);
+        RobotVelocity driving = RobotVelocity.robot(MetersPerSecond.of(3.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(0.0));
 
         plain.stepAthenaOnly(0.0, new VisionSample[] {
                 multiTagWithSpeed(1.0, 0.0, 0.0, 0.0, stdDevs, "Intake", driving)});
         scaled.stepAthenaOnly(0.0, new VisionSample[] {
                 multiTagWithSpeed(1.0, 0.0, 0.0, 0.0, stdDevs, "Intake", driving)});
 
-        double plainX = plain.athena.pose().xMeters();
-        double scaledX = scaled.athena.pose().xMeters();
+        double plainX = plain.athena.pose().getX();
+        double scaledX = scaled.athena.pose().getX();
         assertTrue(plainX > 0.0 && scaledX > 0.0, "both pull toward the vision pose");
         assertTrue(scaledX < plainX, "scaled=" + scaledX + " plain=" + plainX);
     }
@@ -287,7 +287,7 @@ class WpilibLocalizationParityTest {
     /** A Kalman estimate is unseeded at boot, stays unseeded without vision, and is seeded by a reset or a vision frame. */
     @Test
     void seededTracksResetAndAcceptedVisionOnly() {
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
 
         ParityRig idle = new ParityRig();
         idle.stepAthenaOnly(0.00, new VisionSample[0]);
@@ -313,28 +313,28 @@ class WpilibLocalizationParityTest {
         boolean[] disabled = {true};
         ParityRig rig = new ParityRig(kalman -> kalman.seedFromVisionWhileDisabled(() -> disabled[0]));
         String camera = "Intake";
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
 
         rig.stepAthenaOnly(0.00, new VisionSample[] {multiTagWithSpeed(5.0, 2.0, 0.3, 0.00, stdDevs, camera,
                 RobotVelocity.zero())});
-        assertEquals(5.0, rig.athena.pose().xMeters(), 1e-9, "seeded to the multi-tag pose");
-        assertEquals(2.0, rig.athena.pose().yMeters(), 1e-9);
-        assertEquals(0.3, rig.athena.pose().headingRadians(), 1e-9, "heading seeded too");
+        assertEquals(5.0, rig.athena.pose().getX(), 1e-9, "seeded to the multi-tag pose");
+        assertEquals(2.0, rig.athena.pose().getY(), 1e-9);
+        assertEquals(0.3, rig.athena.poseSnapshot().headingRadians(), 1e-9, "heading seeded too");
 
         rig.stepAthenaOnly(0.05, new VisionSample[] {multiTagWithSpeed(9.0, 9.0, 0.3, 0.05, stdDevs, camera,
                 RobotVelocity.zero())});
-        assertTrue(Math.abs(rig.athena.pose().xMeters() - 9.0) > 0.5,
+        assertTrue(Math.abs(rig.athena.pose().getX() - 9.0) > 0.5,
                 "within 0.25 s of the last seed the frame takes the normal, damped update");
 
         rig.stepAthenaOnly(0.30, new VisionSample[] {multiTagWithSpeed(7.0, 4.0, 0.3, 0.30, stdDevs, camera,
                 RobotVelocity.zero())});
-        assertEquals(7.0, rig.athena.pose().xMeters(), 1e-9, "a seed is allowed again after 0.25 s");
-        assertEquals(4.0, rig.athena.pose().yMeters(), 1e-9);
+        assertEquals(7.0, rig.athena.pose().getX(), 1e-9, "a seed is allowed again after 0.25 s");
+        assertEquals(4.0, rig.athena.pose().getY(), 1e-9);
 
         disabled[0] = false;
         rig.stepAthenaOnly(0.60, new VisionSample[] {multiTagWithSpeed(1.0, 1.0, 0.3, 0.60, stdDevs, camera,
                 RobotVelocity.zero())});
-        assertTrue(Math.abs(rig.athena.pose().xMeters() - 1.0) > 0.5, "enabled robots never seed");
+        assertTrue(Math.abs(rig.athena.pose().getX() - 1.0) > 0.5, "enabled robots never seed");
     }
 
     /**
@@ -348,7 +348,7 @@ class WpilibLocalizationParityTest {
         ParityRig direct = new ParityRig(2, true);
         ParityRig fused = new ParityRig(2, false);
         java.util.Random noise = new java.util.Random(2026);
-        MeasurementStdDevs cameraStdDevs = MeasurementStdDevs.of(0.45, 0.45, Math.toRadians(8.0));
+        MeasurementStdDevs cameraStdDevs = MeasurementStdDevs.of(Meters.of(0.45), Meters.of(0.45), Radians.of(Math.toRadians(8.0)));
         double directError = 0.0;
         double fusedError = 0.0;
         int steps = 15;
@@ -364,8 +364,8 @@ class WpilibLocalizationParityTest {
             }
             direct.stepCameras(t, frames);
             fused.stepCameras(t, frames);
-            directError += squaredError(direct.athena.pose());
-            fusedError += squaredError(fused.athena.pose());
+            directError += squaredError(direct.athena.poseSnapshot());
+            fusedError += squaredError(fused.athena.poseSnapshot());
         }
         assertTrue(directError < fusedError,
                 "transient error direct=" + Math.sqrt(directError) + " fused=" + Math.sqrt(fusedError));
@@ -407,12 +407,12 @@ class WpilibLocalizationParityTest {
             }
         };
         ParityRig named = new ParityRig(UnaryOperator.identity(), glare);
-        named.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(0.2, 0.2, 0.1), "Named"));
+        named.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), "Named"));
         assertEquals("filter glare", statusOf(named, "Named").reason());
 
         LocalizationFilter unnamed = (localization, measurement, pose) -> false;
         ParityRig positional = new ParityRig(UnaryOperator.identity(), VisionFilters.maxAmbiguity(1.0), unnamed);
-        positional.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(0.2, 0.2, 0.1), "Plain"));
+        positional.stepAthenaOnly(0.0, multiTag(5.0, 2.0, 0.0, 0.0, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), "Plain"));
         assertEquals("filter #2", statusOf(positional, "Plain").reason());
     }
 
@@ -462,7 +462,7 @@ class WpilibLocalizationParityTest {
             Object source,
             RobotVelocity speeds) {
         return new VisionSample(new PoseSnapshot(xMeters, yMeters, headingRadians), speeds, timestampSeconds,
-                0.02, ambiguity, 1, 2.0, MeasurementStdDevs.of(0.9, 0.9, Math.toRadians(12.0)), source);
+                0.02, ambiguity, 1, 2.0, MeasurementStdDevs.of(Meters.of(0.9), Meters.of(0.9), Radians.of(Math.toRadians(12.0))), source);
     }
 
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
@@ -479,7 +479,7 @@ class WpilibLocalizationParityTest {
         ParityRig rig = new ParityRig(9.0, false, Math.toRadians(35.0));
         Object camera = new Object();
         java.util.Random noise = new java.util.Random(6390);
-        MeasurementStdDevs singleTag = MeasurementStdDevs.of(0.9, 0.9, Math.toRadians(12.0));
+        MeasurementStdDevs singleTag = MeasurementStdDevs.of(Meters.of(0.9), Meters.of(0.9), Radians.of(Math.toRadians(12.0)));
         for (int i = 0; i < 100; i++) {
             double t = i * 0.05;
             rig.stepAthenaOnly(t, vision(
@@ -488,7 +488,7 @@ class WpilibLocalizationParityTest {
                     Math.PI + noise.nextGaussian() * Math.toRadians(3.0),
                     t - 0.03, singleTag, camera));
         }
-        PoseSnapshot pose = rig.athena.pose();
+        PoseSnapshot pose = rig.athena.poseSnapshot();
         assertEquals(13.0, pose.xMeters(), 0.3, "x after 5 s of single-tag vision");
         assertEquals(4.0, pose.yMeters(), 0.3, "y after 5 s of single-tag vision");
         assertEquals(0.0, Math.abs(Math.cos(pose.headingRadians()) + 1.0), 0.05, "heading after 5 s: " + Math.toDegrees(pose.headingRadians()));
@@ -502,14 +502,14 @@ class WpilibLocalizationParityTest {
     void oneFutureTimestampDoesNotLockOutACamera() {
         ParityRig rig = new ParityRig(9.0);
         Object camera = new Object();
-        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
         rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.0, 4000.0, multiTag, camera));
         for (int i = 1; i <= 50; i++) {
             double t = i * 0.05;
             rig.stepAthenaOnly(t, vision(5.0, 2.0, 0.0, t - 0.03, multiTag, camera));
         }
-        assertEquals(5.0, rig.athena.pose().xMeters(), 0.2);
-        assertEquals(2.0, rig.athena.pose().yMeters(), 0.2);
+        assertEquals(5.0, rig.athena.pose().getX(), 0.2);
+        assertEquals(2.0, rig.athena.pose().getY(), 0.2);
     }
 
     @Test
@@ -520,10 +520,10 @@ class WpilibLocalizationParityTest {
         rig.visionSource.camera = camera;
         assertTrue(Double.isNaN(camera.reportedRobotHeading().in(Radians)));
 
-        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, MeasurementStdDevs.of(0.1, 0.1, 0.05), camera));
+        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), camera));
         rig.stepAthenaOnly(0.02);
 
-        assertEquals(rig.athena.pose().headingRadians(), camera.reportedRobotHeading().in(Radians), 1.0e-12);
+        assertEquals(rig.athena.poseSnapshot().headingRadians(), camera.reportedRobotHeading().in(Radians), 1.0e-12);
         assertTrue(camera.reportedRobotHeading().in(Radians) > 0.0);
     }
 
@@ -587,8 +587,8 @@ class WpilibLocalizationParityTest {
             visionStage = Localizations.filter().input(visionSource).filter(visionFilters);
             athena = kalmanTuning.apply(Localizations.kalman()
                     .input(odometry, visionStage)
-                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
-                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians())));
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.raw().xMeters()), Radians.of(STATE_STD_DEVS.raw().headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.raw().xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.raw().headingRadians())));
         }
 
         /**
@@ -606,8 +606,8 @@ class WpilibLocalizationParityTest {
                     : Localizations.kalman().input(odometry, Localizations.covarianceIntersection()
                             .input(inputs.toArray(PoseSignal[]::new)));
             athena = athena
-                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
-                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians()));
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.raw().xMeters()), Radians.of(STATE_STD_DEVS.raw().headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.raw().xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.raw().headingRadians()));
         }
 
         private ParityRig(double innovationGate) {
@@ -636,8 +636,8 @@ class WpilibLocalizationParityTest {
             visionStage = Localizations.filter().input(configuredVision);
             athena = Localizations.kalman()
                     .input(odometry, visionStage)
-                    .stateStdDevs(Meters.of(STATE_STD_DEVS.xMeters()), Radians.of(STATE_STD_DEVS.headingRadians()))
-                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.headingRadians()))
+                    .stateStdDevs(Meters.of(STATE_STD_DEVS.raw().xMeters()), Radians.of(STATE_STD_DEVS.raw().headingRadians()))
+                    .defaultVisionStdDevs(Meters.of(DEFAULT_VISION_STD_DEVS.raw().xMeters()), Radians.of(DEFAULT_VISION_STD_DEVS.raw().headingRadians()))
                     .maxHeadingDisagreement(Radians.of(maxHeadingResidualRadians))
                     .maxNormalizedVisionResidual(innovationGate);
         }
@@ -673,20 +673,20 @@ class WpilibLocalizationParityTest {
             Rotation2d heading = new Rotation2d(odometry.heading().in(edu.wpi.first.units.Units.Radians));
             SwerveModulePosition[] positions = wpilibPositions();
             if (wpilib == null || pendingReset != null) {
-                PoseSnapshot initial = pendingReset == null ? odometry.pose() : pendingReset;
+                PoseSnapshot initial = pendingReset == null ? odometry.poseSnapshot() : pendingReset;
                 wpilib = new SwerveDrivePoseEstimator(
                         wpilibKinematics,
                         heading,
                         positions,
                         toWpilib(initial),
                         VecBuilder.fill(
-                                STATE_STD_DEVS.xMeters(),
-                                STATE_STD_DEVS.yMeters(),
-                                STATE_STD_DEVS.headingRadians()),
+                                STATE_STD_DEVS.raw().xMeters(),
+                                STATE_STD_DEVS.raw().yMeters(),
+                                STATE_STD_DEVS.raw().headingRadians()),
                         VecBuilder.fill(
-                                DEFAULT_VISION_STD_DEVS.xMeters(),
-                                DEFAULT_VISION_STD_DEVS.yMeters(),
-                                DEFAULT_VISION_STD_DEVS.headingRadians()));
+                                DEFAULT_VISION_STD_DEVS.raw().xMeters(),
+                                DEFAULT_VISION_STD_DEVS.raw().yMeters(),
+                                DEFAULT_VISION_STD_DEVS.raw().headingRadians()));
                 pendingReset = null;
             }
             wpilib.updateWithTime(timestampSeconds, heading, positions);
@@ -695,11 +695,11 @@ class WpilibLocalizationParityTest {
                         toWpilib(sample.pose()),
                         sample.timestampSeconds(),
                         VecBuilder.fill(
-                                sample.stdDevs().xMeters(),
-                                sample.stdDevs().yMeters(),
-                                sample.stdDevs().headingRadians()));
+                                sample.stdDevs().raw().xMeters(),
+                                sample.stdDevs().raw().yMeters(),
+                                sample.stdDevs().raw().headingRadians()));
             }
-            assertPoseParity(timestampSeconds, athena.pose(), wpilib.getEstimatedPosition());
+            assertPoseParity(timestampSeconds, athena.poseSnapshot(), wpilib.getEstimatedPosition());
         }
 
         private void reset(PoseSnapshot pose) {
