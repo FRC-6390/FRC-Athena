@@ -234,18 +234,4 @@ public class ButtonSignal extends ControlSignal {
         ControlSignal processed = super.debounce(rising, falling);
         return new ButtonSignal(owner(), processed.name(), processed::sample, gate(), null);
     }
-
-    // Compatibility aliases retained for existing robot projects.
-    public ButtonSignal onActive(DeviceAction action) { return onPress(action); }
-    public ButtonSignal onActive(ActionBinding action) { return onPress(action); }
-    public ButtonSignal onActive(Runnable action) { return onPress(action); }
-    public ButtonSignal whileActive(DeviceAction action) { return whileHeld(action); }
-    public ButtonSignal whileActive(ActionBinding action) { return whileHeld(action); }
-    public ButtonSignal whileActive(Runnable action) { return whileHeld(action); }
-    public ButtonSignal onDeactive(DeviceAction action) { return onRelease(action); }
-    public ButtonSignal onDeactive(ActionBinding action) { return onRelease(action); }
-    public ButtonSignal onDeactive(Runnable action) { return onRelease(action); }
-    public ButtonSignal whileDeactive(DeviceAction action) { super.whileFalse(action); return this; }
-    public ButtonSignal whileDeactive(ActionBinding action) { super.whileFalse(action); return this; }
-    public ButtonSignal whileDeactive(Runnable action) { super.whileFalse(action); return this; }
 }

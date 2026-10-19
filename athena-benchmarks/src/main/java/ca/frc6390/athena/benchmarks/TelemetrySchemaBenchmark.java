@@ -29,6 +29,7 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
+import edu.wpi.first.units.Units;
 
 /** Measures the cached telemetry schema and nested trace costs independently of NT4. */
 @BenchmarkMode(Mode.AverageTime)
@@ -120,7 +121,7 @@ public class TelemetrySchemaBenchmark {
 
         private AxisMechanism(int index) {
             motor = MotorDevice.of(MotorKinds.KRAKEN_X60, index + 1);
-            encoder = motor.encoder().conversion(360.0);
+            encoder = motor.encoder().measures(Units.Degrees);
             position = Controls.position(motor)
                     .feedback(encoder)
                     .pid(0.1, 0.0, 0.0)

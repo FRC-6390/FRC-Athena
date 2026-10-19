@@ -38,11 +38,9 @@ class EncoderDeviceUnitsTest {
         EncoderDevice byDouble = EncoderDevice.of(EncoderKinds.CANCODER, 2).reduction(10.0);
         EncoderDevice byGearing = EncoderDevice.of(EncoderKinds.CANCODER, 2)
                 .gearing(GearRatio.reduction(10.0, 1.0));
-        EncoderDevice legacy = EncoderDevice.of(EncoderKinds.CANCODER, 2).gearRatio(0.1);
 
-        assertEquals(legacy.gearRatio(), byDouble.gearRatio(), 1e-12);
-        assertEquals(0.1, byGearing.gearRatio(), 1e-12);
-        assertEquals(legacy.positionFromRotations(10.0), byDouble.positionFromRotations(10.0), 1e-12);
+        assertEquals(0.1, byDouble.gearRatio(), 0.0);
+        assertEquals(0.1, byGearing.gearRatio(), 0.0);
         assertEquals(1.0, byDouble.positionFromRotations(10.0), 1e-9);
     }
 
@@ -67,7 +65,7 @@ class EncoderDeviceUnitsTest {
 
     @Test
     void legacyDeclarationsHaveNoMeasuredUnitAndKeepOldConversions() {
-        EncoderDevice legacy = EncoderDevice.of(EncoderKinds.CANCODER, 2).gearRatio(5.0).conversion(360.0);
+        EncoderDevice legacy = EncoderDevice.of(EncoderKinds.CANCODER, 2).reduction(0.2).conversion(360.0);
 
         assertNull(legacy.measuresUnit());
         assertEquals(EncoderUnit.RAW, legacy.units());

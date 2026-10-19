@@ -19,6 +19,7 @@ import ca.frc6390.athena.sim.hardware.SimMotorHandle.CommandKind;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 class ConstructorDeclaredPositionActionTest {
     @Test
@@ -109,8 +110,8 @@ class ConstructorDeclaredPositionActionTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 87);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 88)
                 .inverted()
-                .gearRatio(1.0 / 7.0)
-                .conversion(360.0);
+                .reduction(7.0)
+                .measures(Units.Degrees);
         private final ControlBinding<?> position = Controls.position(motor)
                 .feedback(encoder)
                 .pid(0.015, 0.0, 0.0)

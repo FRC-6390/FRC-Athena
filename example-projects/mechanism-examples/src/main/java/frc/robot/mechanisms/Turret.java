@@ -7,7 +7,6 @@ import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -19,6 +18,7 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import frc.robot.Constants;
+import edu.wpi.first.units.Units;
 
 public final class Turret implements Mechanism {
     /** 100:1 turret reduction from the Kraken X44 pinion to the ring gear. */
@@ -27,8 +27,7 @@ public final class Turret implements Mechanism {
     private final MotorDevice motor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 16).brake().currentLimit(25);
     private final EncoderDevice angle = motor.encoder()
             .gearing(GEARING)
-            .conversion(360.0)
-            .units(EncoderUnit.DEGREES);
+            .measures(Units.Degrees);
     private final ImuDevice chassisImu = Constants.RIO.imu(ImuKinds.PIGEON_2, 17);
     private final Range travel = Range.degrees(-270.0, 270.0);
 

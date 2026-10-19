@@ -13,7 +13,7 @@ import java.util.Objects;
  * when the motor draws at least twice its free-run current, and its measured speed is below 20% of
  * the no-load speed that the applied voltage would produce, for at least 0.1 s.</p>
  *
- * <p>The <em>legacy</em> detector uses fixed thresholds. It is selected by
+ * <p>The fixed-threshold detector uses fixed thresholds. It is selected by
  * {@link #atCurrentLimit(double)}, {@link #velocityBelow(double)} or
  * {@link #commandedVoltageAbove(double)}, and it is used when the motor model has no constants.</p>
  */
@@ -51,7 +51,7 @@ public record MotorStallSignal(
         }
     }
 
-    /** Creates the legacy fixed-threshold detector. */
+    /** Creates the fixed-threshold detector. */
     public MotorStallSignal(
             MotorDevice motor,
             double currentLimitFraction,
@@ -74,19 +74,19 @@ public record MotorStallSignal(
         return constants != null;
     }
 
-    /** Switches to the legacy detector with a current-limit fraction. */
+    /** Switches to the fixed-threshold detector with a current-limit fraction. */
     public MotorStallSignal atCurrentLimit(double fraction) {
         return new MotorStallSignal(motor, fraction, velocityThresholdRotationsPerSecond,
                 commandedVoltageThreshold, durationSeconds, rearmSeconds, null);
     }
 
-    /** Switches to the legacy detector with a velocity threshold. */
+    /** Switches to the fixed-threshold detector with a velocity threshold. */
     public MotorStallSignal velocityBelow(double rotationsPerSecond) {
         return new MotorStallSignal(motor, currentLimitFraction, rotationsPerSecond,
                 commandedVoltageThreshold, durationSeconds, rearmSeconds, null);
     }
 
-    /** Sets the minimum open-loop command, expressed as equivalent volts. Switches to the legacy detector. */
+    /** Sets the minimum open-loop command, expressed as equivalent volts. Switches to the fixed-threshold detector. */
     public MotorStallSignal commandedVoltageAbove(double volts) {
         return new MotorStallSignal(motor, currentLimitFraction, velocityThresholdRotationsPerSecond,
                 volts, durationSeconds, rearmSeconds, null);

@@ -2,7 +2,6 @@ package ca.frc6390.athena.drivetrain.swerve;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -23,6 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Twist2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.units.Units;
 
 /**
  * Production swerve kinematics shared by drive actions, odometry, and optional simulation.
@@ -271,9 +271,9 @@ public final class SwerveKinematics implements SimModel.Source {
 
     private static EncoderDevice distanceEncoder(SwerveModule module) {
         return module.drive.get().encoder()
-                .gearRatio(GearRatio.reduction(module.model().driveReduction(), 1.0))
-                .wheelDiameterMeters(module.model().wheelDiameterMeters())
-                .units(EncoderUnit.METERS);
+                .reduction(module.model().driveReduction())
+                .measures(Units.Meters)
+                .travelPerRevolution(Units.Meters.of(Math.PI * module.model().wheelDiameterMeters()));
     }
 
     private final class SwerveSimulationRuntime implements SimModel.Runtime {

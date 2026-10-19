@@ -1,8 +1,6 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.device.GearRatio;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
@@ -15,6 +13,7 @@ import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import java.util.Objects;
+import edu.wpi.first.units.Units;
 
 /**
  * Base type for a swerve module declared as a specialized mechanism.
@@ -62,9 +61,9 @@ public abstract class SwerveModule implements MechanismTemplate {
         }
 
         EncoderDevice driveDistance = drive.get().encoder()
-                .gearRatio(GearRatio.reduction(model.driveReduction(), 1.0))
-                .wheelDiameterMeters(model.wheelDiameterMeters())
-                .units(EncoderUnit.METERS);
+                .reduction(model.driveReduction())
+                .measures(Units.Meters)
+                .travelPerRevolution(Units.Meters.of(Math.PI * model.wheelDiameterMeters()));
 
         driveVelocity = Controls.velocity(drive.get())
                 .feedback(driveDistance);

@@ -194,20 +194,10 @@ public record EncoderDevice(
                 baselineConfigApplied, measuresUnit);
     }
 
-    public EncoderDevice gearRatio(double gearRatio) {
-        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
-                baselineConfigApplied, measuresUnit);
-    }
-
-    public EncoderDevice gearRatio(GearRatio gearRatio) {
-        Objects.requireNonNull(gearRatio, "gearRatio");
-        return gearRatio(gearRatio.ratio());
-    }
-
     /**
-     * Typed alternative to {@link #gearRatio(double)} that reads like the reduction on the robot: a
-     * value of 10 means ten sensor rotations per mechanism rotation (a 10:1 reduction). Equivalent to
-     * {@code gearRatio(1.0 / reduction)}, the same as {@code GearRatio.reduction(10.0, 1.0)}.
+     * Declares the reduction: a value of 10 means ten sensor rotations per mechanism rotation (a 10:1
+     * reduction). Stores {@code 1.0 / reduction}, the same declaration as
+     * {@code gearing(GearRatio.reduction(10.0, 1.0))}.
      *
      * @param reduction sensor rotations per mechanism rotation, finite and non-zero
      * @return updated declaration
@@ -216,17 +206,23 @@ public record EncoderDevice(
         if (!Double.isFinite(reduction) || reduction == 0.0) {
             throw new IllegalArgumentException("Encoder reduction must be finite and non-zero.");
         }
-        return gearRatio(1.0 / reduction);
+        return withGearRatio(1.0 / reduction);
     }
 
     /**
-     * Typed alternative to {@link #gearRatio(GearRatio)}.
+     * Declares the sensor-to-mechanism gearing from a {@link GearRatio}.
      *
      * @param gearing sensor-to-mechanism gearing
      * @return updated declaration
      */
     public EncoderDevice gearing(GearRatio gearing) {
-        return gearRatio(gearing);
+        Objects.requireNonNull(gearing, "gearing");
+        return withGearRatio(gearing.ratio());
+    }
+
+    private EncoderDevice withGearRatio(double gearRatio) {
+        return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
+                baselineConfigApplied, measuresUnit);
     }
 
     /**
@@ -286,17 +282,6 @@ public record EncoderDevice(
     public EncoderDevice conversion(double conversion) {
         return new EncoderDevice(source, isInverted, gearRatio, conversion, offset, units, failurePolicy,
                 baselineConfigApplied, measuresUnit);
-    }
-
-    public EncoderDevice wheelDiameterMeters(double diameterMeters) {
-        if (!Double.isFinite(diameterMeters) || diameterMeters <= 0.0) {
-            throw new IllegalArgumentException("Wheel diameter must be positive.");
-        }
-        return conversion(Math.PI * diameterMeters);
-    }
-
-    public EncoderDevice wheelDiameterInches(double diameterInches) {
-        return wheelDiameterMeters(diameterInches * 0.0254);
     }
 
     public EncoderDevice units(EncoderUnit units) {

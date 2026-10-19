@@ -8,7 +8,6 @@ import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.model.Characterization;
@@ -22,13 +21,13 @@ import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import edu.wpi.first.units.Units;
 
 /** Identified models, running estimates and history survive a restart through the persistent store. */
 class ModelPersistenceTest {
     private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 2)
-            .conversion(360.0)
-            .units(EncoderUnit.DEGREES);
+            .measures(Units.Degrees);
     private static final String KEY = "turret/angle/characterization";
 
     @TempDir

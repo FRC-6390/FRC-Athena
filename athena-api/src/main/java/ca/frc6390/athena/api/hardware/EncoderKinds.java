@@ -7,7 +7,7 @@ public enum EncoderKinds implements EncoderKind {
     /** CTRE CANcoder absolute encoder. */
     CANCODER("ctre:cancoder"),
 
-    /** REV through-bore V1 absolute PWM encoder (legacy key retained for compatibility). */
+    /** REV through-bore V1 absolute PWM encoder (key kept for existing robot code). */
     REV_THROUGH_BORE("rev:through-bore"),
 
     /** REV through-bore V2 absolute PWM encoder. */

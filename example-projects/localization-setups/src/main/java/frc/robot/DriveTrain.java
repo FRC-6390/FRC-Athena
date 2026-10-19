@@ -8,13 +8,13 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModule;
 import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwerveOdometry;
 import ca.frc6390.athena.hardware.device.ImuDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.units.Units;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
@@ -81,7 +81,7 @@ public final class DriveTrain implements Mechanism {
                 .steer.brake().fill(Constants.RIO.motor(MotorKinds.KRAKEN_X44, steerMotorId))
                 .angle.fill(Constants.RIO.encoder(EncoderKinds.CANCODER, encoderId)
                         .offset(angleOffsetRotations)
-                        .units(EncoderUnit.ROTATIONS))
+                        .measures(Units.Rotations))
                 .driveMaxSpeedMetersPerSecond(MAX_SPEED_METERS_PER_SECOND)
                 .steerPid(22.8, 0.0, 0.0);
     }
