@@ -1,6 +1,9 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import static edu.wpi.first.units.Units.Amps;
+
 import ca.frc6390.athena.hardware.backend.FocPolicy;
+import edu.wpi.first.units.measure.Current;
 
 /**
  * CTRE-specific motor options stored in Athena motor declarations. Prefer the
@@ -8,20 +11,20 @@ import ca.frc6390.athena.hardware.backend.FocPolicy;
  * values set here override their direct equivalents.
  */
 public final class CtreMotorOptions {
-    private int supplyCurrentLimitAmps;
-    private int statorCurrentLimitAmps;
-    private int torqueCurrentLimitAmps;
+    private double supplyCurrentLimitAmps;
+    private double statorCurrentLimitAmps;
+    private double torqueCurrentLimitAmps;
     private FocPolicy focPolicy = FocPolicy.DISABLED;
 
     /**
      * Sets the supply-side current limit, overriding both the direct supply limit
      * and portable current limit on the motor declaration.
      *
-     * @param amps limit in amps; negative values are treated as unset
+     * @param limit limit; negative values are treated as unset
      * @return this options object
      */
-    public CtreMotorOptions supplyCurrentLimit(int amps) {
-        supplyCurrentLimitAmps = sanitize(amps);
+    public CtreMotorOptions supplyCurrentLimit(Current limit) {
+        supplyCurrentLimitAmps = sanitize(limit);
         return this;
     }
 
@@ -29,11 +32,11 @@ public final class CtreMotorOptions {
      * Sets the stator-side current limit, overriding the direct stator limit on the
      * motor declaration.
      *
-     * @param amps limit in amps; negative values are treated as disabled
+     * @param limit limit; negative values are treated as disabled
      * @return this options object
      */
-    public CtreMotorOptions statorCurrentLimit(int amps) {
-        statorCurrentLimitAmps = sanitize(amps);
+    public CtreMotorOptions statorCurrentLimit(Current limit) {
+        statorCurrentLimitAmps = sanitize(limit);
         return this;
     }
 
@@ -41,11 +44,11 @@ public final class CtreMotorOptions {
      * Sets symmetric forward and reverse torque-current limits. This setting is
      * supported by TalonFX and rejected by TalonFXS.
      *
-     * @param amps limit in amps; negative values are treated as disabled
+     * @param limit limit; negative values are treated as disabled
      * @return this options object
      */
-    public CtreMotorOptions torqueCurrentLimit(int amps) {
-        torqueCurrentLimitAmps = sanitize(amps);
+    public CtreMotorOptions torqueCurrentLimit(Current limit) {
+        torqueCurrentLimitAmps = sanitize(limit);
         return this;
     }
 
@@ -63,28 +66,28 @@ public final class CtreMotorOptions {
     /**
      * Returns supply current limit.
      *
-     * @return amps, or zero when unset
+     * @return limit, or zero when unset
      */
-    public int supplyCurrentLimitAmps() {
-        return supplyCurrentLimitAmps;
+    public Current supplyCurrentLimit() {
+        return Amps.of(supplyCurrentLimitAmps);
     }
 
     /**
      * Returns stator current limit.
      *
-     * @return amps, or zero when unset
+     * @return limit, or zero when unset
      */
-    public int statorCurrentLimitAmps() {
-        return statorCurrentLimitAmps;
+    public Current statorCurrentLimit() {
+        return Amps.of(statorCurrentLimitAmps);
     }
 
     /**
      * Returns torque current limit.
      *
-     * @return amps, or zero when unset
+     * @return limit, or zero when unset
      */
-    public int torqueCurrentLimitAmps() {
-        return torqueCurrentLimitAmps;
+    public Current torqueCurrentLimit() {
+        return Amps.of(torqueCurrentLimitAmps);
     }
 
     /**
@@ -96,7 +99,8 @@ public final class CtreMotorOptions {
         return focPolicy;
     }
 
-    private int sanitize(int amps) {
-        return Math.max(0, amps);
+    private static double sanitize(Current limit) {
+        double amps = limit == null ? 0.0 : limit.in(Amps);
+        return Double.isNaN(amps) ? 0.0 : Math.max(0.0, amps);
     }
 }

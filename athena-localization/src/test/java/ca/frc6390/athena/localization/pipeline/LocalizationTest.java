@@ -1,5 +1,8 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -127,8 +130,8 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.01, 0.01, 0.01), new Object());
         Localization localization = Localizations.covarianceIntersection()
                 .input(signal(older, newest, stale))
-                .groupWithinSeconds(0.03)
-                .maxTranslationDisagreementMeters(3.0);
+                .groupWithin(Seconds.of(0.03))
+                .maxTranslationDisagreement(Meters.of(3.0));
 
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
         assertTrue(fused.pose().xMeters() >= 1.0 && fused.pose().xMeters() <= 3.0);
@@ -152,9 +155,9 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.1, 0.1, 0.1), new Object());
         Localization localization = Localizations.covarianceIntersection()
                 .input(signal(firstGood, secondGood, newestOutlier))
-                .groupWithinSeconds(0.03)
-                .maxTranslationDisagreementMeters(0.5)
-                .maxHeadingDisagreementRadians(0.25);
+                .groupWithin(Seconds.of(0.03))
+                .maxTranslationDisagreement(Meters.of(0.5))
+                .maxHeadingDisagreement(Radians.of(0.25));
 
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
 
@@ -171,8 +174,8 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).translationOnly();
         Localization localization = Localizations.covarianceIntersection()
                 .input(first, opposite)
-                .maxTranslationDisagreementMeters(0.5)
-                .maxHeadingDisagreementRadians(0.25);
+                .maxTranslationDisagreement(Meters.of(0.5))
+                .maxHeadingDisagreement(Radians.of(0.25));
 
         PoseMeasurementSample fused = (PoseMeasurementSample) localization.measurements().get(0);
 
@@ -236,8 +239,8 @@ class LocalizationTest {
                                 MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
                         sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
                                 MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
-                .groupWithinSeconds(0.2)
-                .maxTranslationDisagreementMeters(0.5);
+                .groupWithin(Seconds.of(0.2))
+                .maxTranslationDisagreement(Meters.of(0.5));
 
         PoseMeasurementSample ambiguityWinner =
                 (PoseMeasurementSample) lowerAmbiguity.measurements().get(0);
@@ -253,8 +256,8 @@ class LocalizationTest {
                                 MeasurementStdDevs.of(0.2, 0.2, 0.1), secondA),
                         sample(8.1, 1.0, 0.0, 1.00, 0.05, 1, 2.0,
                                 MeasurementStdDevs.of(0.2, 0.2, 0.1), secondB)))
-                .groupWithinSeconds(0.2)
-                .maxTranslationDisagreementMeters(0.5);
+                .groupWithin(Seconds.of(0.2))
+                .maxTranslationDisagreement(Meters.of(0.5));
 
         PoseMeasurementSample newestWinner = (PoseMeasurementSample) newer.measurements().get(0);
         assertTrue(newestWinner.pose().xMeters() >= 8.0);
@@ -268,8 +271,8 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object())).headingOnly();
         Localization localization = Localizations.covarianceIntersection()
                 .input(first, second)
-                .maxTranslationDisagreementMeters(0.5)
-                .maxHeadingDisagreementRadians(0.1)
+                .maxTranslationDisagreement(Meters.of(0.5))
+                .maxHeadingDisagreement(Radians.of(0.1))
                 .minimumSourceCount(2);
 
         assertEquals(1, localization.measurements().size());
@@ -332,10 +335,10 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
         Localization latency = Localizations.filter()
                 .input(signal(frame))
-                .filter(VisionFilters.maxLatencySeconds(0.1));
+                .filter(VisionFilters.maxLatency(Seconds.of(0.1)));
         Localization age = Localizations.filter()
                 .input(signal(frame))
-                .filter(VisionFilters.maxAgeSeconds(0.1));
+                .filter(VisionFilters.maxAge(Seconds.of(0.1)));
 
         assertEquals(1, latency.measurements().size());
         assertEquals(1, latency.refresh(null, 1.05, 0.02).measurements().size());
@@ -354,10 +357,10 @@ class LocalizationTest {
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
         Localization latency = Localizations.filter()
                 .input(signal(unsynced, slightSkew))
-                .filter(VisionFilters.maxLatencySeconds(0.1));
+                .filter(VisionFilters.maxLatency(Seconds.of(0.1)));
         Localization age = Localizations.filter()
                 .input(signal(unsynced, slightSkew))
-                .filter(VisionFilters.maxAgeSeconds(0.1));
+                .filter(VisionFilters.maxAge(Seconds.of(0.1)));
 
         assertEquals(List.of(slightSkew), latency.refresh(null, 1.0, 0.02).measurements());
         assertEquals(List.of(slightSkew), age.refresh(null, 1.0, 0.02).measurements());

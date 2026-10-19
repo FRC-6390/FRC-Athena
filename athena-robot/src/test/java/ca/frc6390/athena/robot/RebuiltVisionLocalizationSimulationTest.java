@@ -1,5 +1,9 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Radians;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -41,7 +45,7 @@ class RebuiltVisionLocalizationSimulationTest {
     void rebuiltFourCameraPipelineCorrectsLargeInitialOdometryError() {
         SimulationSession simulation = SimulationSession.create()
                 .visionField(VisionSimulationField.of(
-                        VisionSimulationTarget.aprilTag(1, 3.5, 4.0, 1.3, Math.PI)))
+                        VisionSimulationTarget.aprilTag(1, Meters.of(3.5), Meters.of(4.0), Meters.of(1.3), Radians.of(Math.PI))))
                 .resetPose(new PoseSnapshot(2.0, 4.0, 0.0));
         RebuiltLocalization mechanism = new RebuiltLocalization();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
@@ -72,7 +76,7 @@ class RebuiltVisionLocalizationSimulationTest {
     void movingRobotDrivesGroundTruthOdometryAndCameraFusionForwardTogether() {
         SimulationSession simulation = SimulationSession.create()
                 .visionField(VisionSimulationField.of(
-                        VisionSimulationTarget.aprilTag(1, 5.0, 4.0, 1.3, Math.PI)))
+                        VisionSimulationTarget.aprilTag(1, Meters.of(5.0), Meters.of(4.0), Meters.of(1.3), Radians.of(Math.PI))))
                 .resetPose(new PoseSnapshot(2.0, 4.0, 0.0));
         RebuiltLocalization mechanism = new RebuiltLocalization();
         mechanism.odometry.reset(new PoseSnapshot(2.0, 4.0, 0.0));
@@ -137,16 +141,16 @@ class RebuiltVisionLocalizationSimulationTest {
         private final Action drive = kinematics.drive(() -> RobotVelocity.robot(0.8, 0.0, 0.35));
 
         private final CameraDevice intakeCamera = Cameras.photonVision("Intake")
-                .mount(new CameraMountPose(0.2413, -0.32, 0.38989, 0.0, 10.0, 0.0))
+                .mount(new CameraMountPose(Meters.of(0.2413), Meters.of(-0.32), Meters.of(0.38989), Degrees.of(0.0), Degrees.of(10.0), Degrees.of(0.0)))
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE);
         private final CameraDevice turretCamera = Cameras.photonVision("Turret")
-                .mount(new CameraMountPose(-0.04, -0.335, 0.219964, 90.0, 0.0, 0.0))
+                .mount(new CameraMountPose(Meters.of(-0.04), Meters.of(-0.335), Meters.of(0.219964), Degrees.of(90.0), Degrees.of(0.0), Degrees.of(0.0)))
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE);
         private final CameraDevice climberCamera = Cameras.photonVision("Climber")
-                .mount(new CameraMountPose(-0.31, 0.0, 0.219964, 180.0, 0.0, 0.0))
+                .mount(new CameraMountPose(Meters.of(-0.31), Meters.of(0.0), Meters.of(0.219964), Degrees.of(180.0), Degrees.of(0.0), Degrees.of(0.0)))
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE);
         private final CameraDevice sideCamera = Cameras.photonVision("Side")
-                .mount(new CameraMountPose(-0.13, 0.33, 0.199898, -90.0, 0.0, 0.0))
+                .mount(new CameraMountPose(Meters.of(-0.13), Meters.of(0.33), Meters.of(0.199898), Degrees.of(-90.0), Degrees.of(0.0), Degrees.of(0.0)))
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE);
 
         private final PoseSignal intakePose = configured(intakeCamera);
@@ -156,28 +160,28 @@ class RebuiltVisionLocalizationSimulationTest {
         private final Localization filteredVision = Localizations.filter()
                 .input(intakePose, turretPose, climberPose, sidePose)
                 .filter(VisionFilters.finitePoseAndTimestamp())
-                .filter(VisionFilters.maxLatencySeconds(0.15))
+                .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
-                .filter(VisionFilters.maxAverageTagDistanceMeters(5.0))
+                .filter(VisionFilters.maxAverageTagDistance(Meters.of(5.0)))
                 .filter(LocalizationFilters.inside(Rectangle2d.field(16.541, 8.0692)))
                 .name("filteredVision");
         private final Localization fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision.translationOnly())
-                .groupWithinSeconds(0.10)
-                .maxTranslationDisagreementMeters(0.75)
+                .groupWithin(Seconds.of(0.10))
+                .maxTranslationDisagreement(Meters.of(0.75))
                 .name("fusedVision");
         private final Localization headingCandidates = Localizations.filter()
                 .input(filteredVision)
                 .name("headingCandidates");
         private final Localization fusedHeading = Localizations.covarianceIntersection()
                 .input(headingCandidates.headingOnly())
-                .groupWithinSeconds(0.10)
-                .maxHeadingDisagreementRadians(Math.toRadians(20.0))
+                .groupWithin(Seconds.of(0.10))
+                .maxHeadingDisagreement(Radians.of(Math.toRadians(20.0)))
                 .name("fusedHeading");
         private final Localization estimatedFieldPose = Localizations.kalman()
                 .input(odometry, fusedVision, fusedHeading)
-                .stateStdDevs(0.08, Math.toRadians(8.0))
-                .defaultVisionStdDevs(0.9, Math.toRadians(25.0))
+                .stateStdDevs(Meters.of(0.08), Degrees.of(8.0))
+                .defaultVisionStdDevs(Meters.of(0.9), Degrees.of(25.0))
                 .maxNormalizedVisionResidual(9.0)
                 .name("estimatedFieldPose");
 

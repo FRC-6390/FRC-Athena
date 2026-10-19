@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vendor.limelight;
 
+import static edu.wpi.first.units.Units.Meters;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,12 +24,12 @@ class LimelightCameraAdapterTest {
         LimelightPoseSignal signal = device.pose()
                 .megatag2Blue()
                 .tags(3, 4)
-                .trustDistance(5.5);
+                .trustDistance(Meters.of(5.5));
         Map<String, Object> metadata = signal.metadata();
 
         assertEquals("megatag2-blue", signal.poseMode());
         assertEquals(List.of(3, 4), signal.tags());
-        assertEquals(5.5, signal.trustDistanceMeters(), 1.0e-9);
+        assertEquals(5.5, signal.trustDistance().in(Meters), 1.0e-9);
         assertEquals("megatag2-blue", metadata.get("poseMode"));
         assertEquals(List.of(3, 4), metadata.get("tags"));
         assertEquals(5.5, (Double) metadata.get("trustDistanceMeters"), 1.0e-9);

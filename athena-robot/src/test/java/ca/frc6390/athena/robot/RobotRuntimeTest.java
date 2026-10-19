@@ -1,5 +1,8 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -359,7 +362,7 @@ class RobotRuntimeTest {
         PathPreview preview = runtime.selectedAutoPreviews().get(0).paths().get(0);
 
         assertEquals(1, preview.poses().size());
-        assertEquals(new PathPreview.Pose(1.0, 2.0, 0.25), preview.poses().get(0));
+        assertEquals(new PathPreview.Pose(Meters.of(1.0), Meters.of(2.0), Radians.of(0.25)), preview.poses().get(0));
         assertTrue(preview.events().isEmpty());
     }
 
@@ -577,7 +580,7 @@ class RobotRuntimeTest {
         Measurement measurement = Measurements.pose(new PoseSnapshot(2.0, 1.0, 0.25));
         CameraDevice camera = Cameras.photonVision("recovering")
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE)
-                .onRecovery(RecoveryPolicy.retryEverySeconds(0.1).healthySamples(1))
+                .onRecovery(RecoveryPolicy.retryEvery(Seconds.of(0.1)).healthySamples(1))
                 .bindPose(() -> {
                     if (reads.incrementAndGet() == 1) throw new IllegalStateException("camera offline");
                     return List.of(measurement);
@@ -931,10 +934,10 @@ class RobotRuntimeTest {
             }
             @Override public java.util.Optional<PathPreview> preview(PathAction path) {
                 return java.util.Optional.of(new PathPreview(path.key(), List.of(
-                        new PathPreview.Pose(1.0, 2.0, 0.25),
-                        new PathPreview.Pose(3.0, 4.0, 0.5)), List.of(
-                        new PathPreview.Event("shoot", 0.5,
-                                new PathPreview.Pose(2.0, 3.0, 0.4)))));
+                        new PathPreview.Pose(Meters.of(1.0), Meters.of(2.0), Radians.of(0.25)),
+                        new PathPreview.Pose(Meters.of(3.0), Meters.of(4.0), Radians.of(0.5))), List.of(
+                        new PathPreview.Event("shoot", Seconds.of(0.5),
+                                new PathPreview.Pose(Meters.of(2.0), Meters.of(3.0), Radians.of(0.4))))));
             }
         };
         private final AutoChooser autos = Autos.chooser("Reset Preview")

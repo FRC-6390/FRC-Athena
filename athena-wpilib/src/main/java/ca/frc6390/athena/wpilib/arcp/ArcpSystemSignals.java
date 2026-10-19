@@ -1,5 +1,8 @@
 package ca.frc6390.athena.wpilib.arcp;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.arcp.ArcpCycle;
 import ca.frc6390.athena.arcp.ArcpDictEntry;
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
@@ -375,15 +378,15 @@ final class ArcpSystemSignals {
                 cycle.set(channel.reasonId, reason);
                 channel.lastReason = reason;
             }
-            channel.lastAccepted = publishIfChanged(cycle, channel.acceptedId, status.acceptedPerSecond(), channel.lastAccepted);
-            channel.lastRejected = publishIfChanged(cycle, channel.rejectedId, status.rejectedPerSecond(), channel.lastRejected);
+            channel.lastAccepted = publishIfChanged(cycle, channel.acceptedId, status.acceptedRate().in(Hertz), channel.lastAccepted);
+            channel.lastRejected = publishIfChanged(cycle, channel.rejectedId, status.rejectedRate().in(Hertz), channel.lastRejected);
             channel.lastFrameAgeMs = publishIfChanged(cycle, channel.frameAgeId,
-                    status.frameAgeSeconds() * 1000.0, channel.lastFrameAgeMs);
+                    status.frameAge().in(Milliseconds), channel.lastFrameAgeMs);
             if (channel.lastTagCount == null || channel.lastTagCount != status.tagCount()) {
                 cycle.setLong(channel.tagCountId, status.tagCount());
                 channel.lastTagCount = (long) status.tagCount();
             }
-            channel.lastSeconds = publishIfChanged(cycle, channel.secondsId, status.secondsSinceAccepted(),
+            channel.lastSeconds = publishIfChanged(cycle, channel.secondsId, status.sinceAccepted().in(Seconds),
                     channel.lastSeconds);
             if (status.timeSync() != null && !status.timeSync().equals(channel.lastTimeSync)) {
                 cycle.setBoolean(channel.timeSyncId, status.timeSync());

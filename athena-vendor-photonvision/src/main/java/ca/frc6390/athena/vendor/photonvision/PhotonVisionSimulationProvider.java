@@ -1,5 +1,11 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Radians;
+
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import ca.frc6390.athena.runtime.measurement.Measurement;
 import ca.frc6390.athena.runtime.measurement.MeasurementStdDevs;
@@ -72,7 +78,7 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
         /** Ambiguity reported for a mirrored single-tag pose. */
         private static final double MIRRORED_AMBIGUITY = 0.6;
         private static final VisionSimulationTarget DEFAULT_TARGET =
-                VisionSimulationTarget.aprilTag(1, 5.0, 0.0, 1.0, 0.0);
+                VisionSimulationTarget.aprilTag(1, Meters.of(5.0), Meters.of(0.0), Meters.of(1.0), Radians.of(0.0));
 
         private final VisionSystemSim visionSystem = createVisionSystem();
         private final Map<String, PhotonCameraSim> cameras = new LinkedHashMap<>();
@@ -80,6 +86,16 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
         private final List<TimedPose> history = new ArrayList<>();
         private final VisionSimulationField field;
         private final VisionSimNoise noise;
+        // Noise model values converted once from the typed noise declaration, so the per-frame path stays primitive.
+        private final double framePeriod;
+        private final double maxRangeMeters;
+        private final double dropProbability;
+        private final double singleTagMultiplier;
+        private final double translationStdMeters;
+        private final double headingStdRadians;
+        private final double ambiguityFlipProbability;
+        private final double latencyMeanMs;
+        private final double jitterMs;
         private double nextClockSeconds = 0.0;
 
         PhotonVisionSimulation(List<CameraDevice> cameras, VisionSimulationField field) {
@@ -88,6 +104,16 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
                     ? VisionSimulationField.of(DEFAULT_TARGET).noise(safeField.noise())
                     : safeField;
             this.noise = this.field.noise();
+            double fps = noise.fps().in(Hertz);
+            this.framePeriod = Double.isInfinite(fps) ? 0.0 : 1.0 / fps;
+            this.maxRangeMeters = noise.maxRange().in(Meters);
+            this.dropProbability = noise.dropProbability();
+            this.singleTagMultiplier = noise.singleTagMultiplier();
+            this.translationStdMeters = noise.translationStdAt1m().in(Meters);
+            this.headingStdRadians = noise.headingStdAt1m().in(Radians);
+            this.ambiguityFlipProbability = noise.ambiguityFlipProbability();
+            this.latencyMeanMs = noise.latency().in(Milliseconds);
+            this.jitterMs = noise.jitter().in(Milliseconds);
             if (cameras != null) {
                 cameras.stream()
                         .filter(Objects::nonNull)
@@ -195,14 +221,14 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
         }
 
         private double framePeriodSeconds() {
-            return Double.isInfinite(noise.fps()) ? 0.0 : 1.0 / noise.fps();
+            return framePeriod;
         }
 
         private void capture(CameraChannel channel, double captureSeconds, double now) {
             CameraDevice camera = channel.camera;
             PoseSnapshot truth = poseAt(captureSeconds);
             CameraMountPose mount = safeMount(camera.mountPose());
-            List<VisibleTarget> visible = visibleTargets(truth, mount, field.targets(), noise.maxRangeMeters());
+            List<VisibleTarget> visible = visibleTargets(truth, mount, field.targets(), maxRangeMeters);
 
             // Every random draw happens on every capture so the stream stays aligned across configurations.
             double dropRoll = channel.random.nextDouble();
@@ -212,18 +238,18 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
             double noiseHeading = channel.random.nextGaussian();
             double latencyNoise = channel.random.nextGaussian();
 
-            if (visible.isEmpty() || dropRoll < noise.dropProbability()) {
+            if (visible.isEmpty() || dropRoll < dropProbability) {
                 return;
             }
             boolean modelled = !noise.isPerfect();
             int targetCount = visible.size();
             boolean singleTag = targetCount == 1;
             double averageDistance = visible.stream().mapToDouble(VisibleTarget::distanceMeters).average().orElse(0.0);
-            double spread = averageDistance * averageDistance * (singleTag ? noise.singleTagMultiplier() : 1.0);
-            double sigmaXy = noise.translationStdAt1m() * spread;
-            double sigmaHeading = Math.toRadians(noise.headingStdDegAt1m()) * spread;
+            double spread = averageDistance * averageDistance * (singleTag ? singleTagMultiplier : 1.0);
+            double sigmaXy = translationStdMeters * spread;
+            double sigmaHeading = headingStdRadians * spread;
 
-            boolean mirrored = singleTag && flipRoll < noise.ambiguityFlipProbability();
+            boolean mirrored = singleTag && flipRoll < ambiguityFlipProbability;
             PoseSnapshot base = mirrored ? mirror(truth, visible.get(0).target()) : truth;
             PoseSnapshot measured = new PoseSnapshot(
                     base.xMeters() + noiseX * sigmaXy,
@@ -238,7 +264,7 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
                                 ? SINGLE_TAG_AMBIGUITY + SINGLE_TAG_AMBIGUITY_PER_METER * averageDistance
                                 : MULTI_TAG_AMBIGUITY;
             }
-            double latencySeconds = Math.max(0.0, noise.latencyMs() + noise.jitterMs() * latencyNoise) / 1000.0;
+            double latencySeconds = Math.max(0.0, latencyMeanMs + jitterMs * latencyNoise) / 1000.0;
 
             PoseMeasurementSample pose = Measurements.pose(measured)
                     .timing(captureSeconds, latencySeconds)
@@ -362,13 +388,13 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
                 return null;
             }
             double targetAngle = Math.atan2(dy, dx);
-            double cameraYaw = robotPose.headingRadians() + Math.toRadians(mount.yawDegrees());
+            double cameraYaw = robotPose.headingRadians() + Math.toRadians(mount.yaw().in(Degrees));
             double yawDegrees = Math.toDegrees(normalizeRadians(targetAngle - cameraYaw));
             if (Math.abs(yawDegrees) > DEFAULT_FOV_DEGREES * 0.5) {
                 return null;
             }
-            double pitchDegrees = Math.toDegrees(Math.atan2(target.heightMeters() - mount.zMeters(), distance))
-                    - mount.pitchDegrees();
+            double pitchDegrees = Math.toDegrees(Math.atan2(target.height().in(Meters) - mount.z().in(Meters), distance))
+                    - mount.pitch().in(Degrees);
             PhotonVisionTarget measurement = PhotonVisionTarget.aprilTag(
                     target.id(),
                     yawDegrees,
@@ -394,23 +420,23 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
         }
 
         private static SimCameraProperties defaultProperties(VisionSimNoise noise) {
-            double fps = Double.isInfinite(noise.fps()) ? NATIVE_FPS_FALLBACK : noise.fps();
+            double fps = Double.isInfinite(noise.fps().in(Hertz)) ? NATIVE_FPS_FALLBACK : noise.fps().in(Hertz);
             SimCameraProperties properties = new SimCameraProperties();
             properties.setCalibration(DEFAULT_WIDTH, DEFAULT_HEIGHT, Rotation2d.fromDegrees(DEFAULT_FOV_DEGREES))
                     .setFPS(fps)
-                    .setAvgLatencyMs(noise.latencyMs())
-                    .setLatencyStdDevMs(noise.jitterMs());
+                    .setAvgLatencyMs(noise.latency().in(Milliseconds))
+                    .setLatencyStdDevMs(noise.jitter().in(Milliseconds));
             return properties;
         }
 
         private static Transform3d transform(CameraMountPose pose) {
             CameraMountPose safePose = pose == null || !pose.isFinite() ? CameraMountPose.identity() : pose;
             return new Transform3d(
-                    new Translation3d(safePose.xMeters(), safePose.yMeters(), safePose.zMeters()),
+                    new Translation3d(safePose.x().in(Meters), safePose.y().in(Meters), safePose.z().in(Meters)),
                     new Rotation3d(
-                            Math.toRadians(safePose.rollDegrees()),
-                            Math.toRadians(safePose.pitchDegrees()),
-                            Math.toRadians(safePose.yawDegrees())));
+                            safePose.roll().in(Radians),
+                            safePose.pitch().in(Radians),
+                            safePose.yaw().in(Radians)));
         }
 
         private static VisionSystemSim createVisionSystem() {

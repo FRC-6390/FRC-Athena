@@ -1,5 +1,7 @@
 package frc.robot.examples;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -14,8 +16,8 @@ public final class SimulationHarness {
     private final SimulationSession session = SimulationSession.create()
             .model("testMotor", SimModel.motor(motor))
             .visionField(VisionSimulationField.of(
-                    VisionSimulationTarget.aprilTag(1, 1.0, 1.0, 1.3, 0.0),
-                    VisionSimulationTarget.aprilTag(2, 15.0, 7.0, 1.3, Math.PI)))
+                    VisionSimulationTarget.aprilTag(1, Meters.of(1.0), Meters.of(1.0), Meters.of(1.3), Radians.of(0.0)),
+                    VisionSimulationTarget.aprilTag(2, Meters.of(15.0), Meters.of(7.0), Meters.of(1.3), Radians.of(Math.PI))))
             .resetPose(new PoseSnapshot(2.0, 4.0, 0.0));
 
     public SimulationHarness() {

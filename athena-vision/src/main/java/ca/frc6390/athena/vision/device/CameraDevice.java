@@ -3,6 +3,9 @@ package ca.frc6390.athena.vision.device;
 import java.util.List;
 import java.util.function.Supplier;
 
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
+
 import ca.frc6390.athena.api.hardware.CameraKind;
 import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.api.RecoveryPolicy;
@@ -73,22 +76,22 @@ public interface CameraDevice {
     /**
      * Returns a copy with a mount pose.
      *
-     * @param xMeters x position
-     * @param yMeters y position
-     * @param zMeters z position
-     * @param yawDegrees yaw
-     * @param pitchDegrees pitch
-     * @param rollDegrees roll
+     * @param x forward position
+     * @param y left position
+     * @param z up position
+     * @param yaw yaw
+     * @param pitch pitch
+     * @param roll roll
      * @return updated camera device
      */
     default CameraDevice mount(
-            double xMeters,
-            double yMeters,
-            double zMeters,
-            double yawDegrees,
-            double pitchDegrees,
-            double rollDegrees) {
-        return mount(new CameraMountPose(xMeters, yMeters, zMeters, yawDegrees, pitchDegrees, rollDegrees));
+            Distance x,
+            Distance y,
+            Distance z,
+            Angle yaw,
+            Angle pitch,
+            Angle roll) {
+        return mount(new CameraMountPose(x, y, z, yaw, pitch, roll));
     }
 
     /**

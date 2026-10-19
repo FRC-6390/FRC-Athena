@@ -40,6 +40,17 @@ import java.util.Set;
 import ca.frc6390.athena.vision.device.RobotHeadingAware;
 import java.util.function.BooleanSupplier;
 
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
+
 /** One inspectable pose-processing node in a localization graph. */
 public final class Localization implements PoseSignal {
     enum Strategy {
@@ -154,21 +165,21 @@ public final class Localization implements PoseSignal {
                 maxHeadingDisagreementRadians, innovationGate, stateStdDevs, defaultVisionStdDevs);
     }
 
-    public Localization groupWithinSeconds(double seconds) {
-        return configured(debugName, publishNetworkTables, nonNegative(seconds, "Group window"),
+    public Localization groupWithin(Time window) {
+        return configured(debugName, publishNetworkTables, nonNegative(window.in(Seconds), "Group window"),
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
                 stateStdDevs, defaultVisionStdDevs);
     }
 
-    public Localization maxTranslationDisagreementMeters(double meters) {
+    public Localization maxTranslationDisagreement(Distance distance) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
-                nonNegative(meters, "Translation disagreement"), maxHeadingDisagreementRadians,
+                nonNegative(distance.in(Meters), "Translation disagreement"), maxHeadingDisagreementRadians,
                 innovationGate, stateStdDevs, defaultVisionStdDevs);
     }
 
-    public Localization maxHeadingDisagreementRadians(double radians) {
+    public Localization maxHeadingDisagreement(Angle heading) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
-                maxTranslationDisagreementMeters, nonNegative(radians, "Heading disagreement"),
+                maxTranslationDisagreementMeters, nonNegative(heading.in(Radians), "Heading disagreement"),
                 innovationGate, stateStdDevs, defaultVisionStdDevs);
     }
 
@@ -189,16 +200,21 @@ public final class Localization implements PoseSignal {
                 nonNegative(maximum, "Normalized vision residual"), stateStdDevs, defaultVisionStdDevs);
     }
 
-    public Localization stateStdDevs(double translationMeters, double headingRadians) {
+    public Localization stateStdDevs(Distance translation, Angle heading) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
-                MeasurementStdDevs.of(translationMeters, translationMeters, headingRadians), defaultVisionStdDevs);
+                stdDevs(translation, heading), defaultVisionStdDevs);
     }
 
-    public Localization defaultVisionStdDevs(double translationMeters, double headingRadians) {
+    public Localization defaultVisionStdDevs(Distance translation, Angle heading) {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
-                stateStdDevs, MeasurementStdDevs.of(translationMeters, translationMeters, headingRadians));
+                stateStdDevs, stdDevs(translation, heading));
+    }
+
+    private static MeasurementStdDevs stdDevs(Distance translation, Angle heading) {
+        double translationMeters = translation.in(Meters);
+        return MeasurementStdDevs.of(translationMeters, translationMeters, heading.in(Radians));
     }
 
     /**
@@ -226,11 +242,11 @@ public final class Localization implements PoseSignal {
      * @param radiansPerSecond maximum rotation speed in rad/s; infinity disables the gate
      * @return updated node
      */
-    public Localization maxVisionAngularVelocity(double radiansPerSecond) {
+    public Localization maxVisionAngularVelocity(AngularVelocity limit) {
         return withTuning(new KalmanTuning(
                 tuning.speedScaleLinear(),
                 tuning.speedScaleAngular(),
-                nonNegative(radiansPerSecond, "Maximum angular velocity"),
+                nonNegative(limit.in(RadiansPerSecond), "Maximum angular velocity"),
                 tuning.seedWhileDisabled()));
     }
 
@@ -356,10 +372,6 @@ public final class Localization implements PoseSignal {
         return reset(new PoseSnapshot(pose.getX(), pose.getY(), pose.getRotation().getRadians()));
     }
 
-    public ActionBinding reset(double xMeters, double yMeters, double headingRadians) {
-        return reset(new PoseSnapshot(xMeters, yMeters, headingRadians));
-    }
-
     public ActionBinding resetTo(PoseSignal other) {
         Objects.requireNonNull(other, "other");
         return reset(other.pose());
@@ -389,11 +401,16 @@ public final class Localization implements PoseSignal {
      * Returns the runtime timestamp of the cycle currently being evaluated by this node.
      *
      * <p>Filters can use this as "now" (for example to reject stale camera frames). It is
-     * {@code NaN} when the node is evaluated outside a runtime refresh.</p>
+     * {@code NaN} seconds when the node is evaluated outside a runtime refresh.</p>
      *
-     * @return cycle timestamp in seconds, or NaN
+     * @return cycle timestamp, or NaN seconds
      */
-    public double cycleTimestampSeconds() {
+    public Time cycleTimestamp() {
+        return Seconds.of(evaluatingSeconds());
+    }
+
+    /** Primitive form of {@link #cycleTimestamp()} for per-frame filters in this package. */
+    double evaluatingSeconds() {
         synchronized (state) {
             return state.evaluatingTimestamp;
         }
@@ -453,8 +470,9 @@ public final class Localization implements PoseSignal {
         if (!Double.isFinite(heading)) {
             return;
         }
+        Angle reported = Radians.of(heading);
         for (RobotHeadingAware camera : cameras) {
-            camera.reportRobotHeading(timestampSeconds, heading);
+            camera.reportRobotHeading(timestampSeconds, reported);
         }
     }
 
@@ -954,14 +972,14 @@ public final class Localization implements PoseSignal {
         private void publish(VisionSourceStatus status) {
             state.set(status.state().name());
             reason.set(status.reason());
-            acceptedPerSecond.set(status.acceptedPerSecond());
-            rejectedPerSecond.set(status.rejectedPerSecond());
-            if (Double.isFinite(status.frameAgeSeconds())) {
-                frameAgeMs.set(status.frameAgeSeconds() * 1000.0);
+            acceptedPerSecond.set(status.acceptedRate().in(Hertz));
+            rejectedPerSecond.set(status.rejectedRate().in(Hertz));
+            if (Double.isFinite(status.frameAge().in(Seconds))) {
+                frameAgeMs.set(status.frameAge().in(Milliseconds));
             }
             tagCount.set(status.tagCount());
-            if (Double.isFinite(status.secondsSinceAccepted())) {
-                secondsSinceAccepted.set(status.secondsSinceAccepted());
+            if (Double.isFinite(status.sinceAccepted().in(Seconds))) {
+                secondsSinceAccepted.set(status.sinceAccepted().in(Seconds));
             }
             // Only cameras that can tell whether their clock is synced get a TimeSync topic.
             if (status.timeSync() != null) {

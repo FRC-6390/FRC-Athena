@@ -1,5 +1,9 @@
 package frc.robot.examples;
 
+import static edu.wpi.first.units.Units.Amps;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -20,18 +24,18 @@ public final class HardwareConnections {
 
     public static final Object CAN_MOTOR = CANIVORE.motor(MotorKinds.KRAKEN_X60, 1)
             .vendor(CtreMotorOptions.class, options -> options
-                    .supplyCurrentLimit(40)
-                    .statorCurrentLimit(80)
-                    .torqueCurrentLimit(100)
+                    .supplyCurrentLimit(Amps.of(40))
+                    .statorCurrentLimit(Amps.of(80))
+                    .torqueCurrentLimit(Amps.of(100))
                     .foc(FocPolicy.ENABLE_IF_AVAILABLE));
     public static final Object REV_MOTOR = RIO.motor(MotorKinds.NEO, 2)
             .vendor(RevMotorOptions.class, options -> options
-                    .smartCurrentLimit(35)
-                    .voltageCompensation(12.0)
-                    .openLoopRampSeconds(0.1)
-                    .closedLoopRampSeconds(0.05)
-                    .forwardSoftLimitRotations(100.0)
-                    .reverseSoftLimitRotations(-2.0));
+                    .smartCurrentLimit(Amps.of(35))
+                    .voltageCompensation(Volts.of(12.0))
+                    .openLoopRamp(Seconds.of(0.1))
+                    .closedLoopRamp(Seconds.of(0.05))
+                    .forwardSoftLimit(Rotations.of(100.0))
+                    .reverseSoftLimit(Rotations.of(-2.0)));
     public static final Object CAN_ENCODER = CANIVORE.encoder(EncoderKinds.CANCODER, 3);
     public static final Object PWM_ENCODER = RIO.dio(0).encoder(EncoderKinds.REV_THROUGH_BORE_V2);
     public static final Object QUADRATURE_ENCODER = RIO.quadrature(1, 2, 3)

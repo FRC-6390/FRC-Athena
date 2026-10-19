@@ -1,5 +1,10 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Milliseconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,8 +37,8 @@ class PhotonVisionSimulationNoiseTest {
         for (double distance : List.of(2.0, 4.0)) {
             List<Sample> samples = run(multiTagField(distance), noise(), 120.0);
             double dAvg = Math.hypot(distance, 0.25);
-            double sigmaXy = noise().translationStdAt1m() * dAvg * dAvg;
-            double sigmaHeading = Math.toRadians(noise().headingStdDegAt1m()) * dAvg * dAvg;
+            double sigmaXy = noise().translationStdAt1m().in(Meters) * dAvg * dAvg;
+            double sigmaHeading = noise().headingStdAt1m().in(Radians) * dAvg * dAvg;
 
             Stats x = Stats.of(samples, s -> s.pose().pose().xMeters());
             Stats y = Stats.of(samples, s -> s.pose().pose().yMeters());
@@ -61,8 +66,8 @@ class PhotonVisionSimulationNoiseTest {
         Stats far = null;
         for (double distance : List.of(2.0, 4.0)) {
             List<Sample> samples = run(singleTagField(distance), noise().ambiguityFlipProbability(0.0), 120.0);
-            double sigmaXy = noise().singleTagMultiplier() * noise().translationStdAt1m() * distance * distance;
-            double sigmaHeading = Math.toRadians(noise().headingStdDegAt1m()) * noise().singleTagMultiplier()
+            double sigmaXy = noise().singleTagMultiplier() * noise().translationStdAt1m().in(Meters) * distance * distance;
+            double sigmaHeading = noise().headingStdAt1m().in(Radians) * noise().singleTagMultiplier()
                     * distance * distance;
             Stats x = Stats.of(samples, s -> s.pose().pose().xMeters());
             Stats y = Stats.of(samples, s -> s.pose().pose().yMeters());
@@ -116,8 +121,8 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void framesArriveAtTheConfiguredRateOverTwoSeconds() {
-        VisionSimNoise thirtyFps = noise().fps(30.0).dropProbability(0.0);
-        VisionSimNoise tenFps = noise().fps(10.0).dropProbability(0.0);
+        VisionSimNoise thirtyFps = noise().fps(Hertz.of(30.0)).dropProbability(0.0);
+        VisionSimNoise tenFps = noise().fps(Hertz.of(10.0)).dropProbability(0.0);
 
         assertEquals(60, distinctCaptures(run(singleTagField(2.0), thirtyFps, 2.5), 2.0));
         assertEquals(20, distinctCaptures(run(singleTagField(2.0), tenFps, 2.5), 2.0));
@@ -125,7 +130,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void timestampsAreCaptureTimesAndLatencyIsReported() {
-        VisionSimNoise fixedLatency = noise().fps(30.0).latencyMs(25.0).jitterMs(0.0).dropProbability(0.0);
+        VisionSimNoise fixedLatency = noise().fps(Hertz.of(30.0)).latency(Milliseconds.of(25.0)).jitter(Milliseconds.of(0.0)).dropProbability(0.0);
         List<Sample> samples = run(singleTagField(2.0), fixedLatency, 3.0);
 
         assertTrue(samples.size() > 60);
@@ -141,7 +146,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void latencyJitterIsZeroMeanAndNonNegative() {
-        List<Sample> samples = run(singleTagField(2.0), noise().fps(30.0).dropProbability(0.0), 60.0);
+        List<Sample> samples = run(singleTagField(2.0), noise().fps(Hertz.of(30.0)).dropProbability(0.0), 60.0);
 
         double mean = samples.stream().mapToDouble(s -> s.pose().latencySeconds()).average().orElse(Double.NaN);
         double min = samples.stream().mapToDouble(s -> s.pose().latencySeconds()).min().orElse(Double.NaN);
@@ -152,7 +157,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void dropProbabilityRemovesFramesAtTheConfiguredRate() {
-        List<Sample> samples = run(singleTagField(2.0), noise().fps(30.0).dropProbability(0.25), 120.0);
+        List<Sample> samples = run(singleTagField(2.0), noise().fps(Hertz.of(30.0)).dropProbability(0.25), 120.0);
 
         double delivered = samples.size() / (120.0 * 30.0);
         assertTrue(Math.abs(delivered - 0.75) < 0.03, () -> "delivered fraction " + delivered);
@@ -160,7 +165,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void tagsBeyondMaxRangeAreNotSeen() {
-        VisionSimNoise limited = noise().maxRangeMeters(3.0).dropProbability(0.0);
+        VisionSimNoise limited = noise().maxRange(Meters.of(3.0)).dropProbability(0.0);
 
         assertTrue(!run(singleTagField(2.0), limited, 5.0).isEmpty());
         assertEquals(0, run(singleTagField(5.0), limited, 5.0).size());
@@ -180,7 +185,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void perfectNoiseReproducesExactPosesOnEveryUpdate() {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera), multiTagField(2.0).noise(VisionSimNoise.perfect()));
         CameraDevice bound = simulation.bind(camera);
@@ -204,7 +209,7 @@ class PhotonVisionSimulationNoiseTest {
 
     @Test
     void configuredSingleTagStdDevsOverrideSimulatedStdDevs() {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera), singleTagField(2.0).noise(noise()));
         CameraDevice bound = simulation.bind(camera);
@@ -229,16 +234,16 @@ class PhotonVisionSimulationNoiseTest {
 
     private static VisionSimulationField multiTagField(double distance) {
         return VisionSimulationField.of(
-                VisionSimulationTarget.aprilTag(1, distance, 0.25, 1.0, Math.PI),
-                VisionSimulationTarget.aprilTag(2, distance, -0.25, 1.0, Math.PI));
+                VisionSimulationTarget.aprilTag(1, Meters.of(distance), Meters.of(0.25), Meters.of(1.0), Radians.of(Math.PI)),
+                VisionSimulationTarget.aprilTag(2, Meters.of(distance), Meters.of(-0.25), Meters.of(1.0), Radians.of(Math.PI)));
     }
 
     private static VisionSimulationField singleTagField(double distance) {
-        return VisionSimulationField.of(VisionSimulationTarget.aprilTag(1, distance, 0.0, 1.0, Math.PI));
+        return VisionSimulationField.of(VisionSimulationTarget.aprilTag(1, Meters.of(distance), Meters.of(0.0), Meters.of(1.0), Radians.of(Math.PI)));
     }
 
     private static List<Sample> run(VisionSimulationField field, VisionSimNoise noise, double seconds) {
-        CameraDevice camera = Cameras.photonVision("front").mount(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        CameraDevice camera = Cameras.photonVision("front").mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera), field.noise(noise));
         CameraDevice bound = simulation.bind(camera);

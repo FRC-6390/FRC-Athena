@@ -1,5 +1,8 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.auto.AutoPreview;
 import ca.frc6390.athena.auto.PathPreview;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -75,7 +78,7 @@ public final class AutoPreviewPublisher implements AutoCloseable {
             combined.addAll(List.of(poses));
             for (PathPreview.Event event : path.events()) {
                 events.add(pose(event.pose()));
-                labels.add(path.key() + " | " + event.name() + " | " + event.timeSeconds() + "s");
+                labels.add(path.key() + " | " + event.name() + " | " + event.time().in(Seconds) + "s");
             }
         }
         pathPublishers.forEach((name, publisher) -> {
@@ -87,7 +90,7 @@ public final class AutoPreviewPublisher implements AutoCloseable {
     }
 
     private static Pose2d pose(PathPreview.Pose pose) {
-        return new Pose2d(pose.xMeters(), pose.yMeters(), Rotation2d.fromRadians(pose.headingRadians()));
+        return new Pose2d(pose.x().in(Meters), pose.y().in(Meters), Rotation2d.fromRadians(pose.heading().in(Radians)));
     }
 
     private static String signature(AutoPreview preview) {

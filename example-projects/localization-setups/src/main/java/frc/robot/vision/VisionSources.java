@@ -1,5 +1,7 @@
 package frc.robot.vision;
 
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.vision.device.CameraDevice;
@@ -14,11 +16,11 @@ import java.util.List;
 
 public final class VisionSources {
     public final LimelightDevice frontLimelight = Cameras.limelight("limelight-front")
-            .mount(new CameraMountPose(0.32, 0.18, 0.62, 0.0, -18.0, 0.0));
+            .mount(new CameraMountPose(Meters.of(0.32), Meters.of(0.18), Meters.of(0.62), Degrees.of(0.0), Degrees.of(-18.0), Degrees.of(0.0)));
     public final PhotonVisionDevice rearPhoton = Cameras.photonVision("photon-rear")
-            .mount(new CameraMountPose(-0.28, -0.18, 0.55, 180.0, -12.0, 0.0));
+            .mount(new CameraMountPose(Meters.of(-0.28), Meters.of(-0.18), Meters.of(0.55), Degrees.of(180.0), Degrees.of(-12.0), Degrees.of(0.0)));
     public final HeliosDevice driverHelios = Cameras.helios("10.63.90.11")
-            .mount(new CameraMountPose(0.0, 0.0, 0.7, 0.0, -20.0, 0.0));
+            .mount(new CameraMountPose(Meters.of(0.0), Meters.of(0.0), Meters.of(0.7), Degrees.of(0.0), Degrees.of(-20.0), Degrees.of(0.0)));
     public final CameraDevice customCamera = Cameras.camera(
             () -> "team:target-camera", "custom-target-camera")
             .bindTargets(() -> List.of(Measurements.target(42, 3.5, -8.0, 2.7, 0.95)));

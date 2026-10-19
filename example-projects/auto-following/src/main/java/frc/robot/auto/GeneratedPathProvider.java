@@ -1,5 +1,7 @@
 package frc.robot.auto;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.auto.PathPreview;
 import ca.frc6390.athena.auto.PathProvider;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -71,8 +73,8 @@ public final class GeneratedPathProvider implements PathProvider {
             return Optional.empty();
         }
         return Optional.of(new PathPreview(path.key(), List.of(
-                new PathPreview.Pose(0.0, 0.0, 0.0),
-                new PathPreview.Pose(1.0, 0.0, 0.0),
-                new PathPreview.Pose(2.0, 0.0, 0.0))));
+                new PathPreview.Pose(Meters.of(0.0), Meters.of(0.0), Radians.of(0.0)),
+                new PathPreview.Pose(Meters.of(1.0), Meters.of(0.0), Radians.of(0.0)),
+                new PathPreview.Pose(Meters.of(2.0), Meters.of(0.0), Radians.of(0.0)))));
     }
 }

@@ -1,5 +1,9 @@
 package frc.robot.localization;
 
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.localization.pipeline.LocalizationFilters;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
 import ca.frc6390.athena.localization.pipeline.Localization;
@@ -43,25 +47,25 @@ public final class LocalizationExamples implements Mechanism {
         filteredVision = Localizations.filter()
                 .input(vision.limelightPose, vision.photonPose, vision.heliosPose)
                 .filter(VisionFilters.finitePoseAndTimestamp())
-                .filter(VisionFilters.maxLatencySeconds(0.15))
+                .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
-                .filter(VisionFilters.maxAverageTagDistanceMeters(6.0))
+                .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
                 .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
                 .name("filteredVision");
         fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision)
-                .groupWithinSeconds(0.03)
-                .maxTranslationDisagreementMeters(0.75)
-                .maxHeadingDisagreementRadians(Math.toRadians(20.0))
+                .groupWithin(Seconds.of(0.03))
+                .maxTranslationDisagreement(Meters.of(0.75))
+                .maxHeadingDisagreement(Degrees.of(20.0))
                 .name("fusedVision");
         weightedFieldPose = Localizations.weightedAverage()
                 .input(odometry, filteredVision)
-                .filter(LocalizationFilters.maxPoseJump(odometry, 1.0))
+                .filter(LocalizationFilters.maxPoseJump(odometry, Meters.of(1.0)))
                 .publishNetworkTables()
                 .name("weightedFieldPose");
         latestCameraPose = Localizations.latestValid()
                 .input(vision.limelightPose, vision.photonPose)
-                .filter(LocalizationFilters.latencyLessThan(0.25))
+                .filter(LocalizationFilters.latencyLessThan(Seconds.of(0.25)))
                 .name("latestCameraPose");
         limelightStage = cameraStage(vision.limelightPose, "limelightStage");
         photonStage = cameraStage(vision.photonPose, "photonStage");
@@ -71,10 +75,10 @@ public final class LocalizationExamples implements Mechanism {
         // taken while rotating fast; seeding snaps to a multi-tag pose while disabled, so auto starts from a good pose.
         estimatedFieldPose = Localizations.kalman()
                 .input(odometry, limelightStage, photonStage, heliosStage)
-                .stateStdDevs(0.08, Math.toRadians(3.0))
-                .defaultVisionStdDevs(0.7, Math.toRadians(20.0))
+                .stateStdDevs(Meters.of(0.08), Degrees.of(3.0))
+                .defaultVisionStdDevs(Meters.of(0.7), Degrees.of(20.0))
                 .visionStdDevSpeedScaling(0.5, 0.25)
-                .maxVisionAngularVelocity(3.0)
+                .maxVisionAngularVelocity(RadiansPerSecond.of(3.0))
                 .maxNormalizedVisionResidual(9.0)
                 .seedFromVisionWhileDisabled(DriverStation::isDisabled)
                 .publishNetworkTables()
@@ -86,9 +90,9 @@ public final class LocalizationExamples implements Mechanism {
         return Localizations.filter()
                 .input(camera)
                 .filter(VisionFilters.finitePoseAndTimestamp())
-                .filter(VisionFilters.maxLatencySeconds(0.15))
+                .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
-                .filter(VisionFilters.maxAverageTagDistanceMeters(6.0))
+                .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
                 .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
                 .name(name);
     }

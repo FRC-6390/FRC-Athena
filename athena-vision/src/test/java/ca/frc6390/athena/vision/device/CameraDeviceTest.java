@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vision.device;
 
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -35,7 +38,7 @@ class CameraDeviceTest {
     void mountCopiesConfigurationAndRuntimeBindingReachesPreviouslyDeclaredSignals() {
         CameraDevice original = Cameras.photonVision("front");
         PoseSignal declaredSignal = original.pose();
-        CameraMountPose mount = new CameraMountPose(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+        CameraMountPose mount = new CameraMountPose(Meters.of(1.0), Meters.of(2.0), Meters.of(3.0), Degrees.of(4.0), Degrees.of(5.0), Degrees.of(6.0));
         Measurement pose = Measurements.pose(new PoseSnapshot(2.0, 3.0, 0.5));
 
         CameraDevice mounted = original.mount(mount);
@@ -56,7 +59,7 @@ class CameraDeviceTest {
 
         assertEquals(CameraMountPose.identity(), camera.mountPose());
 
-        mount[0] = new CameraMountPose(0.1, -0.2, 0.3, 45.0, 0.0, 0.0);
+        mount[0] = new CameraMountPose(Meters.of(0.1), Meters.of(-0.2), Meters.of(0.3), Degrees.of(45.0), Degrees.of(0.0), Degrees.of(0.0));
 
         assertEquals(mount[0], camera.mountPose());
     }
@@ -201,7 +204,7 @@ class CameraDeviceTest {
         PoseMeasurementSample pose = Measurements.pose(new PoseSnapshot(4.0, 2.0, 0.25));
         CameraDevice camera = Cameras.photonVision("paced-recovery")
                 .failurePolicy(FailurePolicy.DISABLE_DEVICE)
-                .onRecovery(RecoveryPolicy.retryEverySeconds(0.1).healthySamples(1))
+                .onRecovery(RecoveryPolicy.retryEvery(Seconds.of(0.1)).healthySamples(1))
                 .bindPose(() -> {
                     if (reads.incrementAndGet() == 1) throw new IllegalStateException("network dropped");
                     return List.of(pose);

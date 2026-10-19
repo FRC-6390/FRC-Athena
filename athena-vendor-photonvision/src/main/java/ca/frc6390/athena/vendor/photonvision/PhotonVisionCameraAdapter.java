@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -194,7 +196,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
                 new PhotonPoseEstimatorClient(
                         poseEstimator, poseStrategy, device::mountPose, referencePose, device::singleTagHeadingEnabled,
-                        device::reportedRobotHeadingRadians),
+                        () -> device.reportedRobotHeading().in(Radians)),
                 Timer::getFPGATimestamp);
     }
 
@@ -817,7 +819,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 device::mountPose,
                 null,
                 device::singleTagHeadingEnabled,
-                device::reportedRobotHeadingRadians);
+                () -> device.reportedRobotHeading().in(Radians));
     }
 
     /**
@@ -836,11 +838,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     private static Transform3d transform(CameraMountPose mount) {
         CameraMountPose safe = mount == null || !mount.isFinite() ? CameraMountPose.identity() : mount;
         return new Transform3d(
-                new Translation3d(safe.xMeters(), safe.yMeters(), safe.zMeters()),
+                new Translation3d(safe.x().in(Meters), safe.y().in(Meters), safe.z().in(Meters)),
                 new Rotation3d(
-                        Math.toRadians(safe.rollDegrees()),
-                        Math.toRadians(safe.pitchDegrees()),
-                        Math.toRadians(safe.yawDegrees())));
+                        safe.roll().in(Radians),
+                        safe.pitch().in(Radians),
+                        safe.yaw().in(Radians)));
     }
 
     /**

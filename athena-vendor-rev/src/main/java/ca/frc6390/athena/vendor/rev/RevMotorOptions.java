@@ -1,5 +1,16 @@
 package ca.frc6390.athena.vendor.rev;
 
+import static edu.wpi.first.units.Units.Amps;
+import static edu.wpi.first.units.Units.Milliseconds;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
+
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Time;
+import edu.wpi.first.units.measure.Voltage;
+
 /**
  * REV-specific motor options stored in Athena motor declarations.
  */
@@ -11,7 +22,7 @@ public final class RevMotorOptions {
         REV_THROUGH_BORE_V2
     }
 
-    private int smartCurrentLimitAmps;
+    private double smartCurrentLimitAmps;
     private boolean preserveDeviceCurrentLimit;
     private double openLoopRampSeconds;
     private boolean openLoopRampConfigured;
@@ -20,13 +31,13 @@ public final class RevMotorOptions {
     private boolean resetSafeParameters;
     private boolean persistParameters = true;
     private int primaryEncoderCountsPerRevolution;
-    private int primaryEncoderSignalPeriodMs;
-    private int absoluteEncoderSignalPeriodMs;
+    private double primaryEncoderSignalPeriodMs;
+    private double absoluteEncoderSignalPeriodMs;
     private int absoluteEncoderAverageDepth;
     private AbsoluteEncoderProfile absoluteEncoderProfile = AbsoluteEncoderProfile.GENERIC;
     private double voltageCompensationVolts;
     private boolean voltageCompensationConfigured;
-    private int telemetrySignalPeriodMs;
+    private double telemetrySignalPeriodMs;
     private double forwardSoftLimitRotations = Double.NaN;
     private boolean forwardSoftLimitConfigured;
     private double reverseSoftLimitRotations = Double.NaN;
@@ -41,11 +52,11 @@ public final class RevMotorOptions {
     /**
      * Sets smart current limit.
      *
-     * @param amps limit in amps
+     * @param limit limit; negative values are treated as zero
      * @return this options object
      */
-    public RevMotorOptions smartCurrentLimit(int amps) {
-        smartCurrentLimitAmps = Math.max(0, amps);
+    public RevMotorOptions smartCurrentLimit(Current limit) {
+        smartCurrentLimitAmps = sanitize(limit == null ? Double.NaN : limit.in(Amps));
         return this;
     }
 
@@ -65,11 +76,11 @@ public final class RevMotorOptions {
     /**
      * Sets open-loop ramp time.
      *
-     * @param seconds ramp seconds
+     * @param ramp time to ramp to full output; non-finite or negative values are treated as zero
      * @return this options object
      */
-    public RevMotorOptions openLoopRampSeconds(double seconds) {
-        openLoopRampSeconds = sanitize(seconds);
+    public RevMotorOptions openLoopRamp(Time ramp) {
+        openLoopRampSeconds = sanitize(ramp == null ? Double.NaN : ramp.in(Seconds));
         openLoopRampConfigured = true;
         return this;
     }
@@ -77,11 +88,11 @@ public final class RevMotorOptions {
     /**
      * Sets closed-loop ramp time.
      *
-     * @param seconds ramp seconds
+     * @param ramp time to ramp to full output; non-finite or negative values are treated as zero
      * @return this options object
      */
-    public RevMotorOptions closedLoopRampSeconds(double seconds) {
-        closedLoopRampSeconds = sanitize(seconds);
+    public RevMotorOptions closedLoopRamp(Time ramp) {
+        closedLoopRampSeconds = sanitize(ramp == null ? Double.NaN : ramp.in(Seconds));
         closedLoopRampConfigured = true;
         return this;
     }
@@ -107,15 +118,21 @@ public final class RevMotorOptions {
         return this;
     }
 
-    /** Sets the integrated/primary encoder status period; zero keeps the REV default. */
-    public RevMotorOptions primaryEncoderSignalPeriodMs(int periodMs) {
-        primaryEncoderSignalPeriodMs = Math.max(0, periodMs);
+    /**
+     * Sets the integrated/primary encoder status period; zero keeps the REV default. The SPARK takes whole
+     * milliseconds, so the period is rounded to the nearest millisecond when applied.
+     */
+    public RevMotorOptions primaryEncoderSignalPeriod(Time period) {
+        primaryEncoderSignalPeriodMs = sanitize(period == null ? Double.NaN : period.in(Milliseconds));
         return this;
     }
 
-    /** Sets the attached absolute encoder status period; zero keeps the REV default. */
-    public RevMotorOptions absoluteEncoderSignalPeriodMs(int periodMs) {
-        absoluteEncoderSignalPeriodMs = Math.max(0, periodMs);
+    /**
+     * Sets the attached absolute encoder status period; zero keeps the REV default. The SPARK takes whole
+     * milliseconds, so the period is rounded to the nearest millisecond when applied.
+     */
+    public RevMotorOptions absoluteEncoderSignalPeriod(Time period) {
+        absoluteEncoderSignalPeriodMs = sanitize(period == null ? Double.NaN : period.in(Milliseconds));
         return this;
     }
 
@@ -135,28 +152,31 @@ public final class RevMotorOptions {
     }
 
     /** Enables voltage compensation at the requested nominal voltage; zero disables it. */
-    public RevMotorOptions voltageCompensation(double volts) {
-        voltageCompensationVolts = sanitize(volts);
+    public RevMotorOptions voltageCompensation(Voltage nominal) {
+        voltageCompensationVolts = sanitize(nominal == null ? Double.NaN : nominal.in(Volts));
         voltageCompensationConfigured = true;
         return this;
     }
 
-    /** Sets applied-output, bus-voltage, and output-current status periods. */
-    public RevMotorOptions telemetrySignalPeriodMs(int periodMs) {
-        telemetrySignalPeriodMs = Math.max(0, periodMs);
+    /**
+     * Sets applied-output, bus-voltage, and output-current status periods. The SPARK takes whole milliseconds, so
+     * the period is rounded to the nearest millisecond when applied.
+     */
+    public RevMotorOptions telemetrySignalPeriod(Time period) {
+        telemetrySignalPeriodMs = sanitize(period == null ? Double.NaN : period.in(Milliseconds));
         return this;
     }
 
-    /** Enables the SPARK forward soft limit in raw primary-encoder rotations. */
-    public RevMotorOptions forwardSoftLimitRotations(double rotations) {
-        forwardSoftLimitRotations = finiteOrNaN(rotations);
+    /** Enables the SPARK forward soft limit in primary-encoder rotations. */
+    public RevMotorOptions forwardSoftLimit(Angle limit) {
+        forwardSoftLimitRotations = finiteOrNaN(limit == null ? Double.NaN : limit.in(Rotations));
         forwardSoftLimitConfigured = true;
         return this;
     }
 
-    /** Enables the SPARK reverse soft limit in raw primary-encoder rotations. */
-    public RevMotorOptions reverseSoftLimitRotations(double rotations) {
-        reverseSoftLimitRotations = finiteOrNaN(rotations);
+    /** Enables the SPARK reverse soft limit in primary-encoder rotations. */
+    public RevMotorOptions reverseSoftLimit(Angle limit) {
+        reverseSoftLimitRotations = finiteOrNaN(limit == null ? Double.NaN : limit.in(Rotations));
         reverseSoftLimitConfigured = true;
         return this;
     }
@@ -180,30 +200,30 @@ public final class RevMotorOptions {
     /**
      * Returns smart current limit.
      *
-     * @return amps, or zero when unset
+     * @return limit, or zero when unset
      */
-    public int smartCurrentLimitAmps() {
-        return smartCurrentLimitAmps;
+    public Current smartCurrentLimit() {
+        return Amps.of(smartCurrentLimitAmps);
     }
 
     /**
-     * Returns open-loop ramp seconds.
+     * Returns open-loop ramp time.
      *
-     * @return seconds
+     * @return ramp time
      */
-    public double openLoopRampSeconds() {
-        return openLoopRampSeconds;
+    public Time openLoopRamp() {
+        return Seconds.of(openLoopRampSeconds);
     }
 
     boolean openLoopRampConfigured() { return openLoopRampConfigured; }
 
     /**
-     * Returns closed-loop ramp seconds.
+     * Returns closed-loop ramp time.
      *
-     * @return seconds
+     * @return ramp time
      */
-    public double closedLoopRampSeconds() {
-        return closedLoopRampSeconds;
+    public Time closedLoopRamp() {
+        return Seconds.of(closedLoopRampSeconds);
     }
 
     boolean closedLoopRampConfigured() { return closedLoopRampConfigured; }
@@ -216,25 +236,25 @@ public final class RevMotorOptions {
 
     public int primaryEncoderCountsPerRevolution() { return primaryEncoderCountsPerRevolution; }
 
-    public int primaryEncoderSignalPeriodMs() { return primaryEncoderSignalPeriodMs; }
+    public Time primaryEncoderSignalPeriod() { return Milliseconds.of(primaryEncoderSignalPeriodMs); }
 
-    public int absoluteEncoderSignalPeriodMs() { return absoluteEncoderSignalPeriodMs; }
+    public Time absoluteEncoderSignalPeriod() { return Milliseconds.of(absoluteEncoderSignalPeriodMs); }
 
     public int absoluteEncoderAverageDepth() { return absoluteEncoderAverageDepth; }
 
     public AbsoluteEncoderProfile absoluteEncoderProfile() { return absoluteEncoderProfile; }
 
-    public double voltageCompensationVolts() { return voltageCompensationVolts; }
+    public Voltage voltageCompensation() { return Volts.of(voltageCompensationVolts); }
 
     boolean voltageCompensationConfigured() { return voltageCompensationConfigured; }
 
-    public int telemetrySignalPeriodMs() { return telemetrySignalPeriodMs; }
+    public Time telemetrySignalPeriod() { return Milliseconds.of(telemetrySignalPeriodMs); }
 
-    public double forwardSoftLimitRotations() { return forwardSoftLimitRotations; }
+    public Angle forwardSoftLimit() { return Rotations.of(forwardSoftLimitRotations); }
 
     boolean forwardSoftLimitConfigured() { return forwardSoftLimitConfigured; }
 
-    public double reverseSoftLimitRotations() { return reverseSoftLimitRotations; }
+    public Angle reverseSoftLimit() { return Rotations.of(reverseSoftLimitRotations); }
 
     boolean reverseSoftLimitConfigured() { return reverseSoftLimitConfigured; }
 
@@ -250,9 +270,10 @@ public final class RevMotorOptions {
 
     public boolean reverseLimitSwitchNormallyClosed() { return reverseLimitSwitchNormallyClosed; }
 
-    private double sanitize(double seconds) {
-        return Double.isFinite(seconds) ? Math.max(0.0, seconds) : 0.0;
+    private static double sanitize(double value) {
+        return Double.isFinite(value) ? Math.max(0.0, value) : 0.0;
     }
+
 
     private static double finiteOrNaN(double value) {
         return Double.isFinite(value) ? value : Double.NaN;
