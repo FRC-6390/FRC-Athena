@@ -49,7 +49,7 @@ public final class StagedArm implements Mechanism {
             .persistTuning(Calibration.class);
 
     /** Stalled without a model: a check that needs only the current and the commanded output. */
-    private final BindingCheck stalled = angle.feedbackStalled().forSeconds(0.5);
+    private final BindingCheck stalled = angle.feedbackStalled().forTime(edu.wpi.first.units.Units.Seconds.of(0.5));
 
     public final Action stow = angle.position(Degrees.of(0.0)).untilWithin(Degrees.of(2.0));
     public final Action lift = angle.position(Degrees.of(80.0)).untilWithin(Degrees.of(2.0));

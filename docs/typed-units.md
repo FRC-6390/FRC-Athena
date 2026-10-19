@@ -116,6 +116,50 @@ Durations are WPILib `Time` measures. The `double` seconds overloads are gone.
 `Action.untilSettled(double, Time)` keeps a `double` tolerance for now, so the tolerance is still
 in control units. Its typed form, `untilSettled(Measure, Time)`, is the one to use with unit-typed bindings.
 
+## Removed API in the small-mechanism migration
+
+These untyped forms are gone. The typed form is the only public form, except where the last table says otherwise.
+
+| Removed | Use instead |
+| --- | --- |
+| `TorqueVelocityGains.staticAmps(double)`, `staticAmps()` | `staticCurrent(Current)`, `staticCurrent()` |
+| `TorqueVelocityGains.loadEstimate(double)`, `loadTimeConstant()` returning `double` | `loadEstimate(Time)`, `loadTimeConstant()` returning `Time` |
+| `TorqueVelocityGains(double, double, double, double, double, double)` | `(double p, double i, double d, Current staticCurrent, double inertia, Time loadTimeConstant)` |
+| `Staging.Change.seconds()` (`double`) | `time()` (`Time`) |
+| `BindingCheck.forSeconds(double)`, `BindingCheck(..., double seconds, ...)` | `forTime(Time)`, `BindingCheck(..., Time duration, ...)` |
+| `EffortRequest(double currentLimitAmps)`, `currentLimitAmps()` | `EffortRequest(Current currentLimit)`, `currentLimit()`; `limitValue()` for the per-cycle double |
+| `EffortLimit.ceilingAmpsMax()` | `ceilingMax()` (`Current`) |
+| `MechanismModel.withPayloadDelta(double)` | `withPayloadDelta(Voltage)`. The delta is a change of kG, which is a volts amplitude, so it is not a mass. |
+| `MechanismModel.inertia()` returning `double` | `inertia()` returning `MomentOfInertia`; the measure is NaN when unknown, as before |
+| `MechanismDeviceActions.motorVoltage(MotorDevice, double)`, `DeviceActionFactory.motorVoltage(...)` | `motorVoltage(MotorDevice, Voltage)` |
+| `MechanismDeviceActions.imuSetYaw(ImuSource, double)`, `DeviceActionFactory.imuSetYaw(...)` | `imuSetYaw(ImuSource, Angle)` |
+| `MotionPlanners.boundedAngular(double period)` | `boundedAngular(Angle period, AngleUnit unit)`; the period is converted to `unit` once, so pass the binding's unit |
+| `RecordMetadata.at(double)` | `at(Time)`. Per-cycle recorder code uses the package-private `atSeconds(double)`. |
+| `ControlOutput.voltage(double)` (team form) | `ControlOutput.voltage(Voltage)`. See the last table for the primitive form that remains. |
+
+## Internals left primitive
+
+These stay `double` because they run every control cycle, or because no WPILib unit fits. Converting them would allocate a
+measure per cycle.
+
+| Member | Why it stays primitive |
+| --- | --- |
+| `MechanismScheduler`, `MechanismRuntime` `nowSeconds` / `dt` | per-cycle clock (`EventContext(nowSeconds, dtSeconds, ...)` too) |
+| `Staging.evaluate(double nowSeconds, ...)`, `Staging` transition `nowSeconds` | per-cycle clock; the transition builds the `Time` for `Change` |
+| `PidController.calculate(measurement, target, dtSeconds)`, `PersistentStore.flushIfDue(nowSeconds)`, `TelemetryPersistence.periodic(nowSeconds, ...)` | per-cycle |
+| `PathRuntime` `context.timeInStateSeconds()`, `hasElapsed` | per-cycle clock |
+| `MotionReference(position, velocity, acceleration)`, `MotionProfileRuntime.step(..., dtSeconds)` | per-cycle reference; the units come from the binding |
+| `MotionProfile(double, double)`, `MotionProfiles.trapezoid(double, double)`, `ControlBinding.profile(MotionProfile)` | a raw binding has no unit, so the profile is in feedback units. Typed bindings use `Constraints.motion(Measure, Measure)`. |
+| `MechanismModel.gravityVolts(double)`, `feedforwardVolts(double, ...)` | per-cycle feedforward |
+| `MechanismModel.payloadDelta()`, `MotorVoltage(motor, double)`, `ImuSetYaw(imu, double)`, `ControlVoltage(...)`, `RecordMetadata(double, ...)` record components | record carriers for the per-cycle `Output` and `ImuYawMutation` interfaces; the typed factories are the API |
+| `DeviceAction` `motorVoltage(MotorDevice, DoubleSupplier)`, `imuSetYaw(ImuSource, DoubleSupplier)` | per-cycle suppliers. A `Supplier<Voltage>` would allocate a measure every cycle. |
+| `EffortLimit.threshold()` (N m) | WPILib has no torque unit |
+| `BindingCheck` clock (`DoubleSupplier`) | per-cycle monotonic clock |
+
+Still `double` in the public API, owned by another change: `ControlOutput.voltage(double)` (kept because `FeedforwardGains` and `PidGains`
+use it), `Actions.voltage(ControlBinding, double)` and `ControlBinding.voltage(double)`, `Constraints.motion(double, double)`,
+`Controls.position(motor)` raw bindings, and `MechanismDeviceActions.encoderSetPosition(EncoderDevice, double)`.
+
 ## Motion kind
 
 `ControlBinding.motionKind()` returns `MotionKind.ROTARY` for angle units, `MotionKind.LINEAR` for
