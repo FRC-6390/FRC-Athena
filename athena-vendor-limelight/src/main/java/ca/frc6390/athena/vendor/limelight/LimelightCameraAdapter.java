@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vendor.limelight;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
+
 import java.util.List;
 import java.util.Objects;
 
@@ -292,7 +295,7 @@ public final class LimelightCameraAdapter implements CameraAdapter {
                 0.0,
                 targetCount,
                 averageTagDistanceMeters,
-                MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+                MeasurementStdDevs.of(Meters.of(Double.POSITIVE_INFINITY), Meters.of(Double.POSITIVE_INFINITY), Radians.of(Double.POSITIVE_INFINITY)),
                 source));
     }
 

@@ -86,8 +86,8 @@ class CameraDeviceTest {
         AtomicInteger targetReads = new AtomicInteger();
         PoseMeasurementSample firstPose = Measurements.pose(new PoseSnapshot(1.0, 0.0, 0.0));
         PoseMeasurementSample secondPose = Measurements.pose(new PoseSnapshot(2.0, 0.0, 0.0));
-        TargetMeasurementSample firstTarget = Measurements.target(1, 10.0, 2.0, 3.0, 0.9);
-        TargetMeasurementSample secondTarget = Measurements.target(2, 20.0, 4.0, 6.0, 0.8);
+        TargetMeasurementSample firstTarget = Measurements.target(1, Degrees.of(10.0), Degrees.of(2.0), Meters.of(3.0), 0.9);
+        TargetMeasurementSample secondTarget = Measurements.target(2, Degrees.of(20.0), Degrees.of(4.0), Meters.of(6.0), 0.8);
         CameraDevice camera = Cameras.photonVision("cache")
                 .bindPose(() -> List.of(poseReads.incrementAndGet() == 1 ? firstPose : secondPose))
                 .bindTargets(() -> List.of(targetReads.incrementAndGet() == 1 ? firstTarget : secondTarget));
@@ -111,7 +111,7 @@ class CameraDeviceTest {
         assertEquals(List.of(firstPose), cachedPoseSignal.measurements());
         assertEquals(List.of(firstTarget), graphTargets);
         assertEquals(firstPose, camera.pose().measurement().orElseThrow());
-        assertEquals(firstPose.pose(), camera.pose().value().orElseThrow());
+        assertEquals(new edu.wpi.first.math.geometry.Pose2d(1.0, 0.0, new edu.wpi.first.math.geometry.Rotation2d(0.0)), camera.pose().value().orElseThrow());
         assertEquals(firstTarget, camera.targets().latest().orElseThrow());
         assertEquals(List.of(firstTarget), camera.targets().values());
         assertTrue(camera.targets().hasTarget());

@@ -51,8 +51,8 @@ class PhotonVisionSimulationNoiseTest {
             assertWithin(y.std(), sigmaXy, 0.08, "multi y std at " + distance + " m");
             assertWithin(heading.std(), sigmaHeading, 0.08, "multi heading std at " + distance + " m");
             for (Sample sample : samples) {
-                assertEquals(sigmaXy, sample.pose().stdDevs().xMeters(), 1.0e-9);
-                assertEquals(sigmaHeading, sample.pose().stdDevs().headingRadians(), 1.0e-9);
+                assertEquals(sigmaXy, sample.pose().stdDevs().raw().xMeters(), 1.0e-9);
+                assertEquals(sigmaHeading, sample.pose().stdDevs().raw().headingRadians(), 1.0e-9);
                 assertEquals(2, sample.pose().targetCount());
                 assertEquals(dAvg, sample.pose().averageTargetDistanceMeters(), 1.0e-9);
                 assertEquals(0.02, sample.pose().ambiguity(), 1.0e-9);
@@ -203,7 +203,7 @@ class PhotonVisionSimulationNoiseTest {
             assertEquals(now, pose.timestampSeconds(), 0.0);
             assertEquals(0.0, pose.latencySeconds(), 0.0);
             assertEquals(0.0, pose.ambiguity(), 0.0);
-            assertEquals(Double.POSITIVE_INFINITY, pose.stdDevs().xMeters());
+            assertEquals(Double.POSITIVE_INFINITY, pose.stdDevs().raw().xMeters());
         }
     }
 
@@ -217,14 +217,14 @@ class PhotonVisionSimulationNoiseTest {
         List<Measurement> measurements = new ArrayList<>();
         for (int k = 0; k <= 120; k++) {
             simulation.update(TRUTH, k * DT);
-            measurements.addAll(bound.pose().singleTagStdDevs(0.9, 0.9, 0.2).measurements());
+            measurements.addAll(bound.pose().singleTagStdDevs(Meters.of(0.9), Meters.of(0.9), Radians.of(0.2)).measurements());
         }
 
         assertTrue(!measurements.isEmpty());
         for (Measurement measurement : measurements) {
             PoseMeasurementSample pose = (PoseMeasurementSample) measurement;
-            assertEquals(0.9, pose.stdDevs().xMeters(), 1.0e-9);
-            assertEquals(0.2, pose.stdDevs().headingRadians(), 1.0e-9);
+            assertEquals(0.9, pose.stdDevs().raw().xMeters(), 1.0e-9);
+            assertEquals(0.2, pose.stdDevs().raw().headingRadians(), 1.0e-9);
         }
     }
 
