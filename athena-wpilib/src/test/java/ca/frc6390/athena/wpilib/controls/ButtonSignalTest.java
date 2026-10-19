@@ -14,10 +14,10 @@ class ButtonSignalTest {
     void mapsTheFourButtonOperationsToHookPhases() {
         boolean[] active = {false};
         ButtonSignal button = new ButtonSignal("test", () -> active[0])
-                .onActive(() -> {})
-                .whileActive(() -> {})
-                .onDeactive(() -> {})
-                .whileDeactive(() -> {});
+                .onPress(() -> {})
+                .whileHeld(() -> {})
+                .onRelease(() -> {});
+        button.whileFalse(() -> {});
 
         assertEquals(
                 List.of(Phase.ON_START, Phase.WHILE_ACTIVE, Phase.ON_END, Phase.WHILE_INACTIVE),
@@ -30,7 +30,7 @@ class ButtonSignalTest {
     @Test
     void acceptsRuntimeActionBindings() {
         ActionBinding resetPose = context -> {};
-        ButtonSignal button = new ButtonSignal("test", () -> true).onActive(resetPose);
+        ButtonSignal button = new ButtonSignal("test", () -> true).onPress(resetPose);
 
         assertEquals(resetPose, button.binding().actions().get(0).action());
     }

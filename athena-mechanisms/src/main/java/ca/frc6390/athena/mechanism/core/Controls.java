@@ -72,7 +72,7 @@ public final class Controls {
         return outputs(ControlMode.VELOCITY, output, additionalOutputs);
     }
 
-    public static ControlBinding<?> of(ControlMode mode) {
+    static ControlBinding<?> of(ControlMode mode) {
         return new ControlBinding<>(mode, null, 0, null, null, null, null);
     }
 

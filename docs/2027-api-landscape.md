@@ -104,7 +104,7 @@ flowchart TD
 | `SensorKind` | removed | REMOVE | Rebuilt uses direct devices and signals, not sensor configs. |
 | `BlockDirection` | removed | REMOVE | Old sensor-config API. |
 | `AxisKind` | removed | REMOVE | Axis API is not used by Rebuilt. |
-| `ControlMode` in `mechanism.core` | removed | REMOVE | Old public control-mode surface. |
+| `ControlMode` in `mechanism.core` | `ControlMode` | KEEP | Live binding mode of `ControlBinding`. `Controls.of(ControlMode)` is package-private. |
 | `ControlMode` in `mechanism.spec` | removed | REMOVE | Duplicate old spec surface. |
 | `BlockPolicy` | removed | REMOVE | Rule API is removed. |
 | `Direction` | removed | REMOVE | Old output resolver public surface. |
@@ -130,7 +130,7 @@ flowchart TD
 | `AnalogInputRef` | removed | REMOVE | Not used by Rebuilt. |
 | `AnalogInputs` | removed | REMOVE | Not used by Rebuilt. |
 | `ControllerRef` | removed | REMOVE | Rebuilt uses a local controls wrapper, not Athena controller refs. |
-| `Controllers` | removed | REMOVE | Not used by Rebuilt. |
+| `Controllers` | `Controllers` | KEEP | Used by Rebuilt and the examples (`Controllers.xbox`, `Controllers.playstation`). |
 | `ButtonRef` | removed | REMOVE | Not used by Rebuilt. |
 | `ControllerAxisRef` | removed | REMOVE | Not used by Rebuilt. |
 | `CameraRef` | `CameraDevice` | RENAME | Base public camera declaration. |
@@ -334,7 +334,7 @@ The old DTO/builder layer is not a 2027 API category. Rebuilt uses declarations 
 
 | Current API | Final API | Status | Reason |
 | --- | --- | --- | --- |
-| `MotorSpec` | removed | REMOVE | Replace with `MotorDevice` fields and runtime lowering. |
+| `MotorSpec` | `MotorSpec` | KEEP | Nominal constants table read by `MotorConstants` and `MotorThermalSpec`. |
 | `EncoderSpec` | removed | REMOVE | Replace with `EncoderDevice` fields and runtime lowering. |
 | `ImuSpec` | removed | REMOVE | Replace with `ImuDevice` fields and runtime lowering. |
 | `CameraSpec` | removed | REMOVE | Replace with `CameraDevice` fields and runtime lowering. |
@@ -371,9 +371,9 @@ Runtimes execute. Robot code should touch one public runtime host, not a collect
 | `MechanismRegistry` | `RobotRuntime` | RENAME | Rebuilt wraps it as `AthenaRobot`; make that library-owned. |
 | `MechanismRuntime` | package-private `MechanismRuntime` | INTERNAL | Execution detail required by root `RobotRuntime`; not public API. |
 | `MechanismController` | removed | REMOVE | Not used by Rebuilt. |
-| `ControlLoopRuntime` | `ControlLoopRuntime` | KEEP INTERNAL | Execution detail required by `ControlLoop`. |
+| `ControlLoopRuntime` | `ControlLoopRuntime` | KEEP | Public interface; execution detail required by `ControlLoop`. |
 | missing worker policy | `RuntimeWorker`, `RuntimeWorkers` | ADD | Optional root-owned worker configuration for snapshot tasks; default runtime stays single-threaded. |
-| `PathRuntime` | `PathRuntime` | KEEP INTERNAL | Execution detail required by `PathAction`. |
+| `PathRuntime` | `PathRuntime` | KEEP | Public interface; used by `athena-auto` and the path providers. |
 | `AthenaTimedRobot` | `AthenaRobot` | RENAME | WPILib runtime host should own lifecycle and `RobotRuntime`. |
 | `CommandRunner` | removed | REMOVE | Old command execution surface. |
 | `WpilibCommandScheduler` | removed | REMOVE | Rebuilt controls use WPILib commands directly. |
@@ -457,7 +457,7 @@ Only adapters needed by Rebuilt stay public. Most source/sink APIs are not curre
 | `PathPlannerAutos` | removed | REMOVE | Old catalog name. Use `Paths.pathPlanner`. |
 | `PhotonVisionCameraAdapter` | `PhotonVisionCameraAdapter` | KEEP INTERNAL | Backend for `PhotonVisionDevice`. |
 | `LimelightCameraAdapter` | `LimelightCameraAdapter` | KEEP INTERNAL | Backend for `LimelightDevice`. |
-| `HeliOSCameraAdapter` | `HeliOSCameraAdapter` | KEEP INTERNAL | Backend for `HeliosDevice`. |
+| `HeliOSCameraAdapter` | `HeliOSCameraAdapter` | KEEP INTERNAL | Backend for `HeliosDevice`. The HeliOS backend class is not in this build. |
 | `HeliOSCameraProvider` | removed | REMOVE | Old provider surface. |
 | `HeliOSProvider` | removed | REMOVE | Old provider surface. |
 | `TelemetrySink` | removed | REMOVE | Not used by Rebuilt. |
@@ -485,7 +485,7 @@ Catalogs are public only when they create the kept robot API.
 | `AnalogInputs` | removed | REMOVE | Not used by Rebuilt. |
 | `Booleans` | removed | REMOVE | Not used by Rebuilt. |
 | `Numbers` | removed | REMOVE | Not used by Rebuilt. |
-| `Controllers` | removed | REMOVE | Rebuilt local controls wrapper replaces it. |
+| `Controllers` | `Controllers` | KEEP | Used by Rebuilt and the examples. |
 | `Sensors` | removed | REMOVE | Not used by Rebuilt. |
 | `Axes` | removed | REMOVE | Rebuilt does not use public axis API. |
 | `Rules` | removed | REMOVE | Rebuilt does not use public rules. |

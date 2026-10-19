@@ -58,9 +58,8 @@ operator.rightBumper()
 operator.a().onPress(arm.score);
 ```
 
-The existing `onActive`, `whileActive`, `onDeactive`, and `whileDeactive` names remain available for
-source compatibility. New code should prefer `onPress`, `whileHeld`, and `onRelease`, or the generic
-`onTrue`, `whileTrue`, `onFalse`, and `whileFalse` signal methods.
+Button bindings use `onPress`, `whileHeld`, and `onRelease`. The generic `onTrue`, `whileTrue`,
+`onFalse`, and `whileFalse` signal methods are available on every signal, including buttons.
 
 ## Toggle state
 

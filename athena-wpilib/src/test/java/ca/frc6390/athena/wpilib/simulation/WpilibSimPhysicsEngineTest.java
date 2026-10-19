@@ -13,7 +13,6 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveKinematics;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.HardwareBus;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
@@ -27,6 +26,7 @@ import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 class WpilibSimPhysicsEngineTest {
     @Test
@@ -35,9 +35,9 @@ class WpilibSimPhysicsEngineTest {
         double wheelDiameterMeters = 0.1016;
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 101);
         EncoderDevice driveDistance = motor.encoder()
-                .gearRatio(GearRatio.reduction(reduction, 1.0))
-                .wheelDiameterMeters(wheelDiameterMeters)
-                .units(EncoderUnit.METERS);
+                .reduction(reduction)
+                .measures(Units.Meters)
+                .travelPerRevolution(Units.Meters.of(Math.PI * wheelDiameterMeters));
         SimulationSession session = sessionWith(
                 "geared-drive",
                 SimModel.motor(motor)

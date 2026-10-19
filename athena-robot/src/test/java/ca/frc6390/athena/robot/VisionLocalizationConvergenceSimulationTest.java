@@ -14,7 +14,6 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveOdometry;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.localization.pipeline.Localization;
 import ca.frc6390.athena.localization.pipeline.LocalizationFilters;
@@ -41,6 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 /**
  * End-to-end vision localization in the headless simulation: a swerve drivetrain with odometry, two simulated
@@ -380,7 +380,7 @@ class VisionLocalizationConvergenceSimulationTest {
             TestModule module = new TestModule();
             module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId));
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
-            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).units(EncoderUnit.ROTATIONS));
+            module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId).measures(Units.Rotations));
             return module
                     .driveMaxSpeedMetersPerSecond(5.0)
                     .steerPid(12.0, 0.0, 0.0);

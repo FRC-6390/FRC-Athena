@@ -20,8 +20,6 @@ import ca.frc6390.athena.hardware.power.MotorThermalSpec;
 import ca.frc6390.athena.hardware.power.PowerProfile;
 import ca.frc6390.athena.hardware.power.Thermal;
 import ca.frc6390.athena.hardware.power.ThermalModel;
-import edu.wpi.first.units.Units;
-import edu.wpi.first.units.measure.Temperature;
 
 /**
  * Reusable motor declaration for robot constants.
@@ -160,16 +158,6 @@ public record MotorDevice(
     /** Returns the derate curve in effect: the declared curve or the motor kind default. */
     public Thermal thermalCurve() {
         return thermal != null ? thermal : MotorThermalSpec.forKind(kind).defaultDerate();
-    }
-
-    /**
-     * Returns the fused winding temperature estimate: the vendor reading when the controller reports one,
-     * otherwise the lumped model. Before the motor is bound to a runtime this is the ambient temperature.
-     *
-     * @return temperature
-     */
-    public Temperature temperature() {
-        return Units.Celsius.of(temperatureCelsius());
     }
 
     /** Returns the fused winding temperature estimate in Celsius. */

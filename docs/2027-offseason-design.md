@@ -109,7 +109,7 @@ staging (B9) can cap/override at the motion and effort layers.
 ### B0. Typed units
 - Use WPILib units (`edu.wpi.first.units`).
 - `EncoderDevice` gains `.measures(AngleUnit | DistanceUnit)` and `.reduction(double)` /
-  `.gearing(GearRatio)` typed alternatives to `.conversion(...)`/`.gearRatio(...)` (old methods stay).
+  `.gearing(GearRatio)` typed alternatives to `.gearRatio(...)`; `gearRatio` and `wheelDiameterMeters` are removed.
 - `Controls.position(motor, Unit)` / `Controls.velocity(motor, Unit)` overloads return
   `ControlBinding<U>` where `U` is the unit type (`AngleUnit`, `DistanceUnit`). Existing
   `Controls.position(motor)` keeps returning a binding usable with raw doubles.
@@ -225,7 +225,7 @@ public final Action endgame = SHOOT.update(p -> p.share(0.5));
 ### B8. Thermal
 - `MotorDevice.thermal(Thermal.derate(Temperature start, Temperature end, double minFraction))`.
   Default when absent: derate only, documented default curve per motor kind.
-- `MotorDevice.temperature()` signal (model estimate fused with vendor-reported temperature when
+- `MotorDevice.temperatureCelsius()` signal (model estimate fused with vendor-reported temperature when
   available), `thermalLoad()` fraction.
 - Thermal never brakes/holds/locks out by itself. Any stronger behaviour is B9.
 

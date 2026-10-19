@@ -29,7 +29,6 @@ import ca.frc6390.athena.hardware.device.DigitalInputDevice;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.runtime.HardwareGraph;
 import ca.frc6390.athena.hardware.sim.SimModel;
@@ -68,6 +67,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import edu.wpi.first.units.Units;
 
 class RobotRuntimeTest {
     @Test
@@ -1057,7 +1057,7 @@ class RobotRuntimeTest {
             module.drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId));
             module.steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId));
             module.angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, angleId)
-                    .units(EncoderUnit.ROTATIONS));
+                    .measures(Units.Rotations));
             return module;
         }
     }

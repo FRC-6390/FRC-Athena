@@ -1,4 +1,4 @@
-/** Browser file and keyboard helpers shared by the classic canvas, recordings and the new shell. */
+/** Browser file and keyboard helpers shared by the canvas views, recordings and the app shell. */
 
 export function downloadJsonFile(filename: string, contents: string) {
   const blob = new Blob([contents], { type: 'application/json;charset=utf-8' });

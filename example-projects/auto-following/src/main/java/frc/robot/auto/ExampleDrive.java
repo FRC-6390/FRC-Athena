@@ -9,13 +9,13 @@ import ca.frc6390.athena.drivetrain.swerve.SwerveModules;
 import ca.frc6390.athena.drivetrain.swerve.SwervePathFollower;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.units.Units;
 
 /** Minimal swerve mechanism showing the kinematics-owned path API. */
 public final class ExampleDrive implements Mechanism {
@@ -54,7 +54,7 @@ public final class ExampleDrive implements Mechanism {
                 .drive.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, driveId).brake())
                 .steer.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, steerId).brake())
                 .angle.fill(EncoderDevice.of(EncoderKinds.CANCODER, encoderId)
-                        .units(EncoderUnit.ROTATIONS))
+                        .measures(Units.Rotations))
                 .driveMaxSpeedMetersPerSecond(MAX_SPEED)
                 .steerPid(12.0, 0.0, 0.0);
     }

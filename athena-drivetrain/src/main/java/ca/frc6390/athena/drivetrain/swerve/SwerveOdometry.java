@@ -1,8 +1,6 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.device.GearRatio;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.HardwareMeasurementSignal;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
@@ -15,6 +13,7 @@ import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.ResettablePoseSignal;
 import java.util.List;
 import java.util.Objects;
+import edu.wpi.first.units.Units;
 
 /** Runtime-refreshed odometry derived from measured swerve module travel and IMU heading. */
 public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSignal, ResettablePoseSignal {
@@ -240,9 +239,9 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
 
     private static EncoderDevice distanceEncoder(SwerveModule module) {
         return module.drive.get().encoder()
-                .gearRatio(GearRatio.reduction(module.model().driveReduction(), 1.0))
-                .wheelDiameterMeters(module.model().wheelDiameterMeters())
-                .units(EncoderUnit.METERS);
+                .reduction(module.model().driveReduction())
+                .measures(Units.Meters)
+                .travelPerRevolution(Units.Meters.of(Math.PI * module.model().wheelDiameterMeters()));
     }
 
     private static double wrapRadians(double radians) {

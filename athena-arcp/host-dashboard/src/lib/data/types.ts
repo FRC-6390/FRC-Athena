@@ -2,7 +2,7 @@
  * Client model for the ARCP v2 data layer (design appendix E1-W, section E3).
  *
  * Wire values are decoded into these shapes; UI code consumes only these types and
- * never touches bytes or the v1 snapshot types.
+ * never touches bytes or wire-level types.
  */
 
 /** Numeric type tags from appendix E1-W "typeTag values". */
