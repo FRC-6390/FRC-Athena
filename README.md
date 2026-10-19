@@ -225,9 +225,9 @@ MotorDevice followerD = RIO.motor(MotorKinds.NEO, 14).follow(leader);
 
 MotorDevice configuredNeo = RIO.motor(MotorKinds.NEO, 15)
         .vendor(RevMotorOptions.class, rev -> rev
-                .voltageCompensation(12.0)
-                .telemetrySignalPeriodMs(20)
-                .forwardSoftLimitRotations(100.0));
+                .voltageCompensation(Volts.of(12.0))
+                .telemetrySignalPeriod(Milliseconds.of(20))
+                .forwardSoftLimit(Rotations.of(100.0)));
 
 EncoderDevice angle = CANIVORE.encoder(EncoderKinds.CANCODER, 9);
 ImuDevice pigeon = RIO.imu(ImuKinds.PIGEON_2, 0);

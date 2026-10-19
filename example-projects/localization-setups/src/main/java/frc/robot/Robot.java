@@ -1,5 +1,7 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.wpilib.lifecycle.AthenaRobot;
 import frc.robot.localization.LocalizationExamples;
 import frc.robot.vision.VisionSources;
@@ -18,8 +20,8 @@ public final class Robot extends AthenaRobot {
         // Simulation only: the tags that simulated PhotonVision/Limelight/Helios cameras see. The sim robot starts at
         // the origin facing +X, so the first two tags are straight ahead and the third is off to the side.
         simulationVisionField(VisionSimulationField.of(
-                VisionSimulationTarget.aprilTag(1, 3.0, 0.0, 1.3, Math.PI),
-                VisionSimulationTarget.aprilTag(2, 4.0, 1.0, 1.3, Math.PI),
-                VisionSimulationTarget.aprilTag(3, 5.0, -1.5, 1.3, Math.PI)));
+                VisionSimulationTarget.aprilTag(1, Meters.of(3.0), Meters.of(0.0), Meters.of(1.3), Radians.of(Math.PI)),
+                VisionSimulationTarget.aprilTag(2, Meters.of(4.0), Meters.of(1.0), Meters.of(1.3), Radians.of(Math.PI)),
+                VisionSimulationTarget.aprilTag(3, Meters.of(5.0), Meters.of(-1.5), Meters.of(1.3), Radians.of(Math.PI))));
     }
 }

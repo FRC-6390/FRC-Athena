@@ -36,9 +36,9 @@ keeps the variance of one camera and throws away the gain from the others. Feedi
 ```java
 estimatedFieldPose = Localizations.kalman()
         .input(odometry, limelightStage, photonStage, heliosStage)   // one input per camera
-        .defaultVisionStdDevs(0.7, Math.toRadians(20.0))
+        .defaultVisionStdDevs(Meters.of(0.7), Degrees.of(20.0))
         .visionStdDevSpeedScaling(0.5, 0.25)            // trust frames less while driving or turning
-        .maxVisionAngularVelocity(3.0)                  // drop frames taken while spinning faster than 3 rad/s
+        .maxVisionAngularVelocity(RadiansPerSecond.of(3.0))   // drop frames taken while spinning faster than 3 rad/s
         .seedFromVisionWhileDisabled(DriverStation::isDisabled)   // multi-tag pose snaps in while disabled
         .publishNetworkTables()
         .name("estimatedFieldPose");
