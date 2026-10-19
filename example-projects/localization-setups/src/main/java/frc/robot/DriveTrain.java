@@ -20,9 +20,11 @@ import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.Units;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 /** Swerve sensor layout used by the localization examples. */
 public final class DriveTrain implements Mechanism {
@@ -49,28 +51,25 @@ public final class DriveTrain implements Mechanism {
             .enabled(DriverStation::isTeleopEnabled);
     public final RobotVelocityPool.Channel targetingVelocity = velocity.channel()
             .enabled(DriverStation::isTeleopEnabled);
-    private DoubleSupplier fieldHeadingRadians = () -> heading.yaw().in(edu.wpi.first.units.Units.Radians);
+    private Supplier<Rotation2d> fieldHeading = () -> Rotation2d.fromRadians(heading.yaw().in(edu.wpi.first.units.Units.Radians));
     public final Action pooledDrive = kinematics.drive(
             velocity,
-            () -> fieldHeadingRadians.getAsDouble());
+            () -> fieldHeading.get());
 
     public Action drive(
             DoubleSupplier forward,
             DoubleSupplier strafe,
             DoubleSupplier rotation,
             BooleanSupplier fieldOriented,
-            DoubleSupplier fieldHeadingRadians) {
-        this.fieldHeadingRadians = fieldHeadingRadians;
+            Supplier<Rotation2d> fieldHeading) {
+        this.fieldHeading = fieldHeading;
         driverVelocity.set(() -> {
             RobotVelocity requested = RobotVelocity.robot(
                     MetersPerSecond.of(linearSpeed(forward.getAsDouble())),
                     MetersPerSecond.of(linearSpeed(strafe.getAsDouble())),
                     RadiansPerSecond.of(rotationSpeed(rotation.getAsDouble())));
             if (fieldOriented.getAsBoolean()) {
-                requested = RobotVelocity.field(
-                        MetersPerSecond.of(requested.raw().xMetersPerSecond()),
-                        MetersPerSecond.of(requested.raw().yMetersPerSecond()),
-                        RadiansPerSecond.of(requested.raw().angularRadiansPerSecond()));
+                requested = RobotVelocity.field(requested.x(), requested.y(), requested.angular());
             }
             return requested;
         });

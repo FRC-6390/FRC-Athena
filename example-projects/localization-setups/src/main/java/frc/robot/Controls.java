@@ -51,6 +51,6 @@ public final class Controls implements Mechanism {
                 strafe,
                 rotation,
                 () -> fieldOriented,
-                () -> localization.pose().getRotation().getRadians()));
+                () -> localization.pose().getRotation()));
     }
 }

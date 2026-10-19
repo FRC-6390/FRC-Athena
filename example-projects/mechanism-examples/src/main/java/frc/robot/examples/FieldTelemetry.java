@@ -29,7 +29,7 @@ public final class FieldTelemetry implements Mechanism, TelemetrySource {
     public Map<String, TelemetryValue> telemetry() {
         return Map.of(
                 "field/robotKeepout", TelemetryValue.geometry(Circle2d.of(Meters.of(4.0), Meters.of(4.0), Meters.of(0.75))),
-                "field/loadingZone", TelemetryValue.geometry(new Rectangle2d(0.0, 0.0, 2.0, 3.0)),
+                "field/loadingZone", TelemetryValue.geometry(Rectangle2d.of(Meters.of(0.0), Meters.of(0.0), Meters.of(2.0), Meters.of(3.0))),
                 "field/scoringZone", TelemetryValue.geometry(Polygon2d.of(
                         new Translation2d(13.0, 2.0),
                         new Translation2d(16.0, 1.0),

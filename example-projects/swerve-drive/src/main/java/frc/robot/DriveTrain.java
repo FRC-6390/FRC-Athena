@@ -25,6 +25,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.units.Units;
 
 public final class DriveTrain implements Mechanism {
@@ -57,7 +58,7 @@ public final class DriveTrain implements Mechanism {
             .enabled(DriverStation::isAutonomousEnabled);
     public final Action pooledDrive = kinematics.drive(
             velocity,
-            () -> heading.yaw().in(edu.wpi.first.units.Units.Radians));
+            () -> Rotation2d.fromRadians(heading.yaw().in(edu.wpi.first.units.Units.Radians)));
 
     public Action drive(
             DoubleSupplier forward,
@@ -70,10 +71,7 @@ public final class DriveTrain implements Mechanism {
                     MetersPerSecond.of(linearSpeed(strafe.getAsDouble())),
                     RadiansPerSecond.of(rotationSpeed(rotation.getAsDouble())));
             if (fieldOriented.getAsBoolean()) {
-                requested = RobotVelocity.field(
-                        MetersPerSecond.of(requested.raw().xMetersPerSecond()),
-                        MetersPerSecond.of(requested.raw().yMetersPerSecond()),
-                        RadiansPerSecond.of(requested.raw().angularRadiansPerSecond()));
+                requested = RobotVelocity.field(requested.x(), requested.y(), requested.angular());
             }
             return requested;
         });

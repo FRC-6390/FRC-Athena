@@ -1,5 +1,8 @@
 package frc.robot.vision;
 
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
+
 import ca.frc6390.athena.runtime.measurement.Measurements;
 import ca.frc6390.athena.vision.device.CameraDevice;
 import ca.frc6390.athena.vision.runtime.CameraAdapter;
@@ -15,6 +18,6 @@ public final class ExampleCameraAdapter implements CameraAdapter {
     @Override
     public CameraDevice bind(CameraDevice camera) {
         return camera.bindTargets(() -> List.of(
-                Measurements.target(42, 0.0, -10.0, 2.5, 0.9)));
+                Measurements.target(42, Degrees.of(0.0), Degrees.of(-10.0), Meters.of(2.5), 0.9)));
     }
 }
