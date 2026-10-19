@@ -5,7 +5,8 @@ plain doubles. The unit is part of the declaration: targets, feedback, constrain
 interpolation points are converted to base-unit doubles once, when the robot declares the
 mechanism. The control loop still works on primitive doubles and never allocates measures.
 
-Untyped code keeps working. `Controls.position(motor)` and `EncoderDevice.conversion(...)` are unchanged.
+Plain-double controls such as `Controls.position(motor)` keep working. Encoder declarations use the typed
+builders below.
 
 ## Declaring a unit-typed encoder
 
@@ -17,13 +18,12 @@ EncoderDevice turretEncoder = EncoderDevice.of(EncoderKinds.CANCODER, 4)
 ```
 
 - `measures(AngleUnit)` declares the unit `position()` and `velocity()` are reported in. It sets the
-  conversion to one full revolution in that unit (360 for degrees). Call `conversion(...)` afterwards
-  to override it.
+  conversion to one full revolution in that unit (360 for degrees).
 - `measures(DistanceUnit)` declares a linear encoder. Set the travel per revolution with
   `travelPerRevolution(Distance)`, for example `travelPerRevolution(Inches.of(4 * Math.PI))`.
-- `reduction(double)` reads as the reduction on the robot (10 means 10:1). `gearing(GearRatio)` is the
-  typed alternative to `gearRatio(GearRatio)`. The old `gearRatio(...)` and `conversion(...)` methods
-  still exist.
+- `reduction(double)` reads as the reduction on the robot (10 means 10:1). `gearing(GearRatio)` takes a
+  `GearRatio` object instead (for example one shared constant). The untyped `gearRatio(...)` and
+  `wheelDiameterMeters(...)` builders are removed.
 
 ## Declaring a unit-typed control
 

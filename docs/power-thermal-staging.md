@@ -138,7 +138,7 @@ MotorDevice arm = MotorDevice.of(MotorKinds.KRAKEN_X60, 44).currentLimit(80)
 
 ### Temperature estimate
 
-`motor.temperature()` (typed) and `motor.temperatureCelsius()` return the fused estimate:
+`motor.temperatureCelsius()` returns the fused estimate:
 
 - **Model.** `dT/dt = I^2 R / C - (T - T_ambient) / tau`, with `I` the stator current. Constants come
   from `MotorThermalSpec`.

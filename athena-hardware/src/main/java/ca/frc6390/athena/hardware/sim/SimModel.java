@@ -115,13 +115,6 @@ public final class SimModel {
         return compose(this, Objects.requireNonNull(other, "other"));
     }
 
-    /**
-     * Compatibility constructor for provider-backed leaves.
-     */
-    public static SimModel of(BuiltIn kind) {
-        return leaf(kind == null ? BuiltIn.MOTOR : kind, false);
-    }
-
     private static SimModel leaf(BuiltIn kind, boolean gravity) {
         return new SimModel(
                 Objects.requireNonNull(kind, "kind"),
