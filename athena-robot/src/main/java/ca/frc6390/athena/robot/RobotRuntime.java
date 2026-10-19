@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Radians;
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.auto.AutoPlan;
 import ca.frc6390.athena.auto.AutoPreview;
@@ -530,7 +532,7 @@ public final class RobotRuntime implements AutoCloseable {
                 if (path.resetsOdometry()) {
                     provider.preview(path).flatMap(preview -> preview.poses().stream().findFirst())
                             .ifPresent(pose -> simulationSession.resetPose(new PoseSnapshot(
-                                    pose.xMeters(), pose.yMeters(), pose.headingRadians())));
+                                    pose.x().in(Meters), pose.y().in(Meters), pose.heading().in(Radians))));
                 }
                 delegate.initialize(path, context);
             }

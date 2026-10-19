@@ -1,5 +1,10 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Hertz;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Radians;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -71,9 +76,9 @@ class VisionLocalizationConvergenceSimulationTest {
     private static final double RUN_SECONDS = 10.0;
     /** Tags placed 3 m from the start pose. Front (yaw 0) sees tags 1 and 2; rear (yaw 180) sees only tag 3. */
     private static final VisionSimulationField FIELD = VisionSimulationField.of(
-            VisionSimulationTarget.aprilTag(1, 2.18094, 3.52614, 1.3, Math.PI),
-            VisionSimulationTarget.aprilTag(2, 2.01142, 2.23857, 1.3, Math.PI),
-            VisionSimulationTarget.aprilTag(3, 7.59808, 1.0, 1.3, Math.PI))
+            VisionSimulationTarget.aprilTag(1, Meters.of(2.18094), Meters.of(3.52614), Meters.of(1.3), Radians.of(Math.PI)),
+            VisionSimulationTarget.aprilTag(2, Meters.of(2.01142), Meters.of(2.23857), Meters.of(1.3), Radians.of(Math.PI)),
+            VisionSimulationTarget.aprilTag(3, Meters.of(7.59808), Meters.of(1.0), Meters.of(1.3), Radians.of(Math.PI)))
             .noise(VisionSimNoise.realistic());
 
     @Test
@@ -107,8 +112,8 @@ class VisionLocalizationConvergenceSimulationTest {
         VisionSourceStatus rear = status(robot.estimate, "Rear");
         assertEquals(VisionSourceStatus.State.OK, front.state(), () -> "Front status: " + front);
         assertEquals(VisionSourceStatus.State.OK, rear.state(), () -> "Rear status: " + rear);
-        assertTrue(front.acceptedPerSecond() > 0.0, () -> "Front accepted nothing: " + front);
-        assertTrue(rear.acceptedPerSecond() > 0.0, () -> "Rear accepted nothing: " + rear);
+        assertTrue(front.acceptedRate().in(Hertz) > 0.0, () -> "Front accepted nothing: " + front);
+        assertTrue(rear.acceptedRate().in(Hertz) > 0.0, () -> "Rear accepted nothing: " + rear);
         assertEquals(2, front.tagCount(), () -> "Front should see two tags: " + front);
         assertEquals(1, rear.tagCount(), () -> "Rear should see one tag (heading-constrained path): " + rear);
     }
@@ -157,7 +162,7 @@ class VisionLocalizationConvergenceSimulationTest {
                         + convergence.firstConvergedSeconds() + " s");
         assertWithinTolerance(robot.estimate.pose(), simulation.pose());
         VisionSourceStatus front2 = status(robot.estimate, "Front");
-        assertTrue(front2.acceptedPerSecond() > 0.0, () -> "Front camera stayed locked out: " + front2);
+        assertTrue(front2.acceptedRate().in(Hertz) > 0.0, () -> "Front camera stayed locked out: " + front2);
         assertEquals(2, stamped.stampedCameras(), "both cameras must have delivered a future-stamped frame");
     }
 
@@ -236,11 +241,11 @@ class VisionLocalizationConvergenceSimulationTest {
     }
 
     private static CameraMountPose frontMount() {
-        return new CameraMountPose(0.3, 0.0, 0.5, 0.0, -15.0, 0.0);
+        return new CameraMountPose(Meters.of(0.3), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(-15.0), Degrees.of(0.0));
     }
 
     private static CameraMountPose rearMount() {
-        return new CameraMountPose(-0.3, 0.0, 0.5, 180.0, -15.0, 0.0);
+        return new CameraMountPose(Meters.of(-0.3), Meters.of(0.0), Meters.of(0.5), Degrees.of(180.0), Degrees.of(-15.0), Degrees.of(0.0));
     }
 
     private static PhotonVisionDevice photonCamera(String name, CameraMountPose mount) {
@@ -354,8 +359,8 @@ class VisionLocalizationConvergenceSimulationTest {
             rearStage = stage(rearPose, "rearStage");
             estimate = Localizations.kalman()
                     .input(odometry, frontStaged ? frontStage : frontPose, rearStage)
-                    .stateStdDevs(0.08, Math.toRadians(8.0))
-                    .defaultVisionStdDevs(0.9, Math.toRadians(25.0))
+                    .stateStdDevs(Meters.of(0.08), Degrees.of(8.0))
+                    .defaultVisionStdDevs(Meters.of(0.9), Degrees.of(25.0))
                     .maxNormalizedVisionResidual(9.0)
                     .name("estimatedFieldPose");
         }
@@ -369,9 +374,9 @@ class VisionLocalizationConvergenceSimulationTest {
             return Localizations.filter()
                     .input(camera)
                     .filter(VisionFilters.finitePoseAndTimestamp())
-                    .filter(VisionFilters.maxLatencySeconds(0.15))
+                    .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                     .filter(VisionFilters.maxAmbiguity(0.20))
-                    .filter(VisionFilters.maxAverageTagDistanceMeters(5.0))
+                    .filter(VisionFilters.maxAverageTagDistance(Meters.of(5.0)))
                     .filter(LocalizationFilters.inside(Rectangle2d.field(16.541, 8.0692)))
                     .name(name);
         }
