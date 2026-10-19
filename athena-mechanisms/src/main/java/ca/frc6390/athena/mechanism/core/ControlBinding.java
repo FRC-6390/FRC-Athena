@@ -18,7 +18,6 @@ import ca.frc6390.athena.mechanism.control.PidGains;
 import ca.frc6390.athena.mechanism.control.TorqueVelocityGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanner;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.model.AccelerationEstimator;
 import ca.frc6390.athena.mechanism.model.BindingCheck;
 import ca.frc6390.athena.mechanism.model.Characterization;
@@ -671,11 +670,6 @@ public record ControlBinding<U extends Unit>(
         Objects.requireNonNull(target, "target");
         validateTolerance(tolerance);
         return () -> isAt(target.getAsDouble(), tolerance);
-    }
-
-    /** Creates a WPILib-compatible SysId routine for this control and its feedback. */
-    public ControlSysId sysId() {
-        return ControlSysId.forControl(this);
     }
 
     /**

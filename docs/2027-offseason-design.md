@@ -9,7 +9,7 @@ This document is the single source of truth for the off-season work. Each sectio
 
 1. **Declarations, not calls.** Robot code declares typed fields on a `Mechanism` (devices, signals,
    bindings, Actions, policies). The runtime discovers them by introspection, exactly as it already
-   does for `Action`, `ControlSysId`, `SimModel`, `AutoChooser` and `@Telemetry` fields.
+   does for `Action`, `Characterization`, `SimModel`, `AutoChooser` and `@Telemetry` fields.
 2. **No string keys.** Names and storage keys come from the mechanism tree / field path. Groups are
    identified by classes or team-defined enums, never strings.
 3. **Typed policies.** Behaviour choices are typed values on the declaration (like
@@ -130,7 +130,7 @@ public final Characterization characterization = angle.characterization()
         .learnContinuously(true);
 public final MechanismModel model = characterization.model();
 ```
-- `Characterization` is a declaration discovered like `ControlSysId`; it expands into dashboard
+- `Characterization` is a declaration discovered like other field declarations; it expands into dashboard
   Actions: `Quasistatic{Forward,Reverse}`, `Dynamic{Forward,Reverse}`, `FrictionSweep`,
   `Backlash`, `Latency`, optional `Thermal`. All run through the normal scheduler with the
   binding's constraints active, and never exceed `maxVoltage`/`rampRate`.
@@ -148,7 +148,7 @@ public final MechanismModel model = characterization.model();
   configurable tolerance band relative to the baseline publishes an alert.
 - `characterization.adoptRunningEstimate()` Action and `rebaseline()` Action.
 - `MechanismModel` is a value usable by `SimModel` (`SimModel.arm/elevator/flywheel(...).model(m)`).
-- Replaces fitting role of `ControlSysId` (keep `ControlSysId` working; it may delegate).
+- Replaces the fitting role of the former `ControlSysId`, which was removed; `Characterization` is the only characterization API.
 
 ### B2. Passive payload learning
 - `characterization.payloadWhen(BooleanSupplier)` collects loaded samples only while true and

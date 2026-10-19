@@ -11,22 +11,46 @@ value. The model drives feedforward, simulation inertia, external-load estimates
 public final ControlBinding<?> turret = Controls.position(turretMotor).feedback(turretEncoder);
 
 public final Characterization characterization = turret.characterization()
-        .maxVoltage(4.0)            // no test ever applies more than this
-        .rampRate(0.5)              // quasistatic ramp, volts per second
-        .learnContinuously(true)    // recursive least squares on normal operation
-        .driftTolerance(0.25)       // 25% band against the baseline
-        .gearRatio(10.0);           // motor turns per mechanism turn
+        .gravity(Gravity.NONE)                          // turret: no gravity load
+        .maxVoltage(Volts.of(4.0))                      // no test ever applies more than this
+        .rampRate(Volts.per(Seconds).of(0.5))           // quasistatic ramp
+        .timeout(Seconds.of(10.0))                      // per-test safety timeout
+        .range(Degrees.of(-90.0), Degrees.of(90.0))     // stop a test that leaves the travel range
+        .learnContinuously(true)                        // recursive least squares on normal operation
+        .driftTolerance(0.25)                           // 25% band against the baseline
+        .gearRatio(10.0);                               // motor turns per mechanism turn
 
 public final MechanismModel model = characterization.model();
 public final ControlBinding<?> turretControl = turret.model(characterization);
 ```
 
-`characterization()` is a declaration. Athena discovers it on the mechanism the same way it discovers
-`ControlSysId`. The dashboard gets these Actions under the field name:
+`characterization()` is the only characterization API. It is a declaration: Athena discovers the field on the
+mechanism and publishes its Actions under the field name. Limits are typed WPILib measures. `maxVoltage` takes a
+`Voltage`, `rampRate` a volts-per-second measure, `timeout` a `Time`, and `range` an `Angle` pair (rotary) or a
+`Distance` pair (linear). A range whose measure kind does not match the binding's feedback (angle for an angular encoder, distance for a linear one) is rejected when declared.
+
+Gravity model (`Gravity`), chosen by default from the binding and overridable with `gravity(...)`:
+
+| Gravity | Model term | Typical mechanism |
+| --- | --- | --- |
+| `NONE` | none (kG = 0) | flywheels, rollers, turrets; the default for `ControlMode.VELOCITY` |
+| `CONSTANT` | constant volts | elevator; the default for linear position bindings |
+| `COSINE` | `kG * cos(2 pi p + offset)` | arm, hood; the default for rotary position bindings |
+
+Results: `model()` (active), `baseline()`, `fitRuns()`, `payload()`, `kS()` and `kG()` (typed `Voltage`), `kV()` and
+`kA()` (volts per base unit per second, and per base unit per second squared).
+
+Export: every test sample also goes to a `SysIdLog`. By default the WPILib log provider (`athena-wpilib`) is
+used when installed, under `logName(...)` or the output motor's name. `exportTo(SysIdLog)` replaces it, for example
+in tests.
+
+The whole routine runs as one action, `routine()`: forward quasistatic, reverse quasistatic, forward dynamic, reverse
+dynamic. Fit afterwards with `fitModel()`. The dashboard gets these Actions under the field name:
 
 | Action | What it does |
 | --- | --- |
 | `QuasistaticForward`, `QuasistaticReverse` | Held voltage ramp, from rest, up to `maxVoltage`. |
+| `Routine` | The four tests in one action: quasistatic forward and reverse, then dynamic forward and reverse. |
 | `DynamicForward`, `DynamicReverse` | Step to `maxVoltage`. The step response also gives latency. |
 | `FrictionSweep` | Forward then reverse ramp. Friction-versus-position and breakaway come from it. |
 | `Backlash` | Forward then reverse ramp. Lost motion is measured at the reversal. |

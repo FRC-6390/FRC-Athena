@@ -150,7 +150,7 @@ final class OutputApplier {
             MotorDevice motor = output.request().motor();
             applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
         }
-        if (output.output() instanceof Actions.ControlSysIdVoltage sysId) {
+        if (output.output() instanceof CharacterizationRoutine.Voltage sysId) {
             double fallbackVoltage = applied.output() instanceof Output.Voltage voltage ? voltage.volts() : 0.0;
             RuntimeHardwareAccess.call(context, () -> {
                 sysId.routine().record(context, sysId.state(), fallbackVoltage);

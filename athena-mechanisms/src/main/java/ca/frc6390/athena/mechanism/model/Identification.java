@@ -86,19 +86,37 @@ public final class Identification {
      * {@code [sign(v), v, a, cos(2 pi p), sin(2 pi p)]}, linear rows are {@code [sign(v), v, a, 1]}.
      * The sign is 0 inside the deadband.
      */
-    public static double[] features(MotionKind kind, double position, double velocity,
+    public static double[] features(Gravity gravity, double position, double velocity,
             double acceleration, double deadband) {
         double sign = velocity > deadband ? 1.0 : velocity < -deadband ? -1.0 : 0.0;
-        if (kind == MotionKind.ROTARY) {
-            double angle = TWO_PI * position;
-            return new double[] {sign, velocity, acceleration, Math.cos(angle), Math.sin(angle)};
-        }
-        return new double[] {sign, velocity, acceleration, 1.0};
+        return switch (gravity) {
+            case NONE -> new double[] {sign, velocity, acceleration};
+            case CONSTANT -> new double[] {sign, velocity, acceleration, 1.0};
+            case COSINE -> {
+                double angle = TWO_PI * position;
+                yield new double[] {sign, velocity, acceleration, Math.cos(angle), Math.sin(angle)};
+            }
+        };
     }
 
-    /** Number of regressor columns used for the kind of motion. */
+    /** Regressor row for the default gravity of a motion kind. */
+    public static double[] features(MotionKind kind, double position, double velocity,
+            double acceleration, double deadband) {
+        return features(Gravity.of(kind), position, velocity, acceleration, deadband);
+    }
+
+    /** Number of regressor columns for a gravity model. */
+    public static int columns(Gravity gravity) {
+        return switch (gravity) {
+            case NONE -> 3;
+            case CONSTANT -> 4;
+            case COSINE -> 5;
+        };
+    }
+
+    /** Number of regressor columns for the default gravity of a motion kind. */
     public static int columns(MotionKind kind) {
-        return kind == MotionKind.ROTARY ? 5 : 4;
+        return columns(Gravity.of(kind));
     }
 
     /**
@@ -118,6 +136,12 @@ public final class Identification {
     /** Fits kS (kinetic), kV, kA and gravity by OLS on samples moving faster than the deadband. */
     public static FeedforwardFit fitFeedforward(List<CharacterizationSample> samples, MotionKind kind,
             double deadband) {
+        return fitFeedforward(samples, Gravity.of(kind), deadband);
+    }
+
+    /** Fits kS (kinetic), kV, kA and the gravity model by OLS on samples moving faster than the deadband. */
+    public static FeedforwardFit fitFeedforward(List<CharacterizationSample> samples, Gravity kind,
+            double deadband) {
         List<double[]> rows = new ArrayList<>();
         List<Double> targets = new ArrayList<>();
         for (CharacterizationSample sample : samples) {
@@ -133,16 +157,25 @@ public final class Identification {
         double kG;
         double offset;
         double gravitySe;
-        if (kind == MotionKind.ROTARY) {
-            double gc = beta[3];
-            double gs = beta[4];
-            kG = Math.hypot(gc, gs);
-            offset = Math.atan2(-gs, gc);
-            gravitySe = Math.max(se[3], se[4]);
-        } else {
-            kG = beta[3];
-            offset = 0.0;
-            gravitySe = se[3];
+        switch (kind) {
+            case NONE -> {
+                kG = 0.0;
+                offset = 0.0;
+                gravitySe = 0.0;
+            }
+            case COSINE -> {
+                double gc = beta[3];
+                double gs = beta[4];
+                kG = Math.hypot(gc, gs);
+                offset = Math.atan2(-gs, gc);
+                gravitySe = Math.max(se[3], se[4]);
+            }
+            case CONSTANT -> {
+                kG = beta[3];
+                offset = 0.0;
+                gravitySe = se[3];
+            }
+            default -> throw new IllegalStateException("Unhandled gravity " + kind);
         }
         Map<String, Double> errors = new LinkedHashMap<>();
         errors.put("kineticStatic", se[0]);
@@ -155,10 +188,15 @@ public final class Identification {
 
     /** Returns the gravity term of a fit at a position, in volts. */
     public static double gravityVolts(MotionKind kind, double kG, double offsetRadians, double position) {
-        if (kind == MotionKind.ROTARY) {
-            return kG * Math.cos(TWO_PI * position + offsetRadians);
-        }
-        return kG;
+        return gravityVolts(Gravity.of(kind), kG, offsetRadians, position);
+    }
+
+    public static double gravityVolts(Gravity kind, double kG, double offsetRadians, double position) {
+        return switch (kind) {
+            case NONE -> 0.0;
+            case CONSTANT -> kG;
+            case COSINE -> kG * Math.cos(TWO_PI * position + offsetRadians);
+        };
     }
 
     /**
@@ -166,6 +204,12 @@ public final class Identification {
      * each ramp gives the voltage needed to start moving. Gravity is subtracted at that position.
      */
     public static OptionalDouble staticFriction(List<CharacterizationSample> samples, MotionKind kind,
+            FeedforwardFit fit, double velocityThreshold) {
+        return staticFriction(samples, Gravity.of(kind), fit, velocityThreshold);
+    }
+
+    /** Static friction from breakaway for a gravity model. See the motion-kind overload. */
+    public static OptionalDouble staticFriction(List<CharacterizationSample> samples, Gravity kind,
             FeedforwardFit fit, double velocityThreshold) {
         double sum = 0.0;
         int events = 0;
@@ -196,6 +240,12 @@ public final class Identification {
      * {@code sign(v) * (V - kV v - kA a - gravity) - kS}. Empty input gives an empty table.
      */
     public static FrictionTable frictionTable(List<CharacterizationSample> samples, MotionKind kind,
+            FeedforwardFit fit, double deadband, int bins) {
+        return frictionTable(samples, Gravity.of(kind), fit, deadband, bins);
+    }
+
+    /** Kinetic friction offset versus position for a gravity model. See the motion-kind overload. */
+    public static FrictionTable frictionTable(List<CharacterizationSample> samples, Gravity kind,
             FeedforwardFit fit, double deadband, int bins) {
         if (bins <= 0) {
             throw new IllegalArgumentException("Friction table needs at least one bin.");
@@ -309,6 +359,18 @@ public final class Identification {
      */
     public static PayloadEstimate payload(List<CharacterizationSample> holds, MotionKind kind,
             FeedforwardFit baseline, double staticVolts) {
+        return payload(holds, Gravity.of(kind), baseline, staticVolts);
+    }
+
+    /**
+     * Payload estimate for a gravity model. Without gravity ({@link Gravity#NONE}) there is no
+     * position-dependent load to estimate, so the result is zero with NaN standard error.
+     */
+    public static PayloadEstimate payload(List<CharacterizationSample> holds, Gravity kind,
+            FeedforwardFit baseline, double staticVolts) {
+        if (kind == Gravity.NONE) {
+            return new PayloadEstimate(0.0, Double.NaN, 0.0, holds.size());
+        }
         double[][] rows = new double[holds.size()][1];
         double[] targets = new double[holds.size()];
         for (int i = 0; i < holds.size(); i++) {
@@ -316,7 +378,7 @@ public final class Identification {
             double direction = hold.state() == SysIdState.QUASISTATIC_REVERSE ? -1.0 : 1.0;
             targets[i] = hold.voltage() - direction * staticVolts
                     - baseline.kV() * hold.velocity() - baseline.kA() * hold.acceleration();
-            rows[i][0] = kind == MotionKind.ROTARY
+            rows[i][0] = kind == Gravity.COSINE
                     ? Math.cos(TWO_PI * hold.position() + baseline.gravityOffsetRadians())
                     : 1.0;
         }

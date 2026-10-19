@@ -3,6 +3,7 @@ package frc.robot.mechanisms;
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.DegreesPerSecond;
 import static edu.wpi.first.units.Units.DegreesPerSecondPerSecond;
+import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Volts;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
@@ -62,7 +63,7 @@ public final class SingleJointArm implements Mechanism {
     /** Identifies the arm from motion tests. The dashboard gets QuasistaticForward, DynamicForward, and so on. */
     public final Characterization characterization = position.characterization()
             .maxVoltage(Volts.of(4.0))
-            .rampRate(0.5)
+            .rampRate(Volts.per(Seconds).of(0.5))
             .learnContinuously(true)
             .driftTolerance(0.25)
             .gearRatio(10.0)

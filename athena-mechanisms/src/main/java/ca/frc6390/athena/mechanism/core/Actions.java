@@ -10,8 +10,6 @@ import ca.frc6390.athena.mechanism.effort.EffortRequest;
 import edu.wpi.first.units.Measure;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.signal.MotorStallSignal;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
-import ca.frc6390.athena.mechanism.sysid.SysIdState;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.control.RobotVelocityPool;
 import java.util.ArrayList;
@@ -160,11 +158,6 @@ public final class Actions {
     public static Action dynamic(Supplier<Output> output) {
         Objects.requireNonNull(output, "output");
         return dynamic(ctx -> output.get());
-    }
-
-    /** Creates one direction of a control-binding SysId routine. */
-    public static Action sysId(ControlSysId routine, SysIdState state) {
-        return new ControlSysIdAction(routine, state);
     }
 
     /**
@@ -794,31 +787,6 @@ public final class Actions {
         @Override
         public double volts() {
             return requireFinite(voltsSupplier.getAsDouble(), "Control voltage");
-        }
-    }
-
-    public record ControlSysIdAction(ControlSysId routine, SysIdState state) implements Action {
-        public ControlSysIdAction {
-            Objects.requireNonNull(routine, "routine");
-            Objects.requireNonNull(state, "state");
-            if (state == SysIdState.NONE) {
-                throw new IllegalArgumentException("A SysId action requires an active test state.");
-            }
-        }
-
-        ControlSysIdVoltage output(double elapsedSeconds) {
-            return new ControlSysIdVoltage(routine, state, routine.voltage(state, elapsedSeconds));
-        }
-    }
-
-    public record ControlSysIdVoltage(
-            ControlSysId routine,
-            SysIdState state,
-            double volts) implements Action, Output.Voltage {
-        public ControlSysIdVoltage {
-            Objects.requireNonNull(routine, "routine");
-            Objects.requireNonNull(state, "state");
-            requireFinite(volts, "SysId voltage");
         }
     }
 

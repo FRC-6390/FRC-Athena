@@ -45,9 +45,9 @@ public final class Controls implements Mechanism {
                 .whileTrue(robot.shooter.distanceShot)
                 .onFalse(robot.shooter.stop);
 
-        sysId.a().whileActive(robot.turret.sysId.quasistaticForward()).onDeactive(robot.turret.neutral);
-        sysId.b().whileActive(robot.turret.sysId.quasistaticReverse()).onDeactive(robot.turret.neutral);
-        sysId.x().whileActive(robot.turret.sysId.dynamicForward()).onDeactive(robot.turret.neutral);
-        sysId.y().whileActive(robot.turret.sysId.dynamicReverse()).onDeactive(robot.turret.neutral);
+        sysId.a().whileActive(robot.turret.characterization.quasistaticForward()).onDeactive(robot.turret.neutral);
+        sysId.b().whileActive(robot.turret.characterization.quasistaticReverse()).onDeactive(robot.turret.neutral);
+        sysId.x().whileActive(robot.turret.characterization.dynamicForward()).onDeactive(robot.turret.neutral);
+        sysId.y().whileActive(robot.turret.characterization.dynamicReverse()).onDeactive(robot.turret.neutral);
     }
 }

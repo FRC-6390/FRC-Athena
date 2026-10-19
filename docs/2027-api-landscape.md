@@ -266,6 +266,7 @@ Bindings connect robot declarations to runtime behavior.
 | `ActionRef` | `ActionBinding` | RENAME | Used by `Actions.doOnce` and `Actions.run`; keep if those Actions stay. |
 | `MotorFollowerRef` | `MotorFollowerBinding` | RENAME | Follower behavior is a hardware relationship. |
 | `ControlRef` | `ControlBinding` | RENAME | Needed for drivetrain composite controls. |
+| `ControlSysId`, `ControlBinding.sysId()`, `Actions.ControlSysId*` | `Characterization`, `ControlBinding.characterization()` | RENAME | The only characterization API. The SysId routine engine is internal (`CharacterizationRoutine`); `SysIdLog`, `SysIdSample`, `SysIdUnit`, `SysIdState` and the WPILib log provider stay as the export format. |
 | `Control` | `Controls` | RENAME | Public catalog for `ControlBinding`. |
 | `ControlLoopRef` | `ControlLoop` | RENAME | Public control-loop declaration. |
 | `ControlLoopBinding` | `ControlLoopBinding` | KEEP | Correct name. |

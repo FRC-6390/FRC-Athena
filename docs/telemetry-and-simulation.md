@@ -45,17 +45,20 @@ private final Action zeroForTesting = encoder.setPosition(0.0);
 Each action also publishes its Athena type, running state, and completion state. Dashboard commands
 do not run while the robot is disabled.
 
-A public `ControlSysId` field expands into all four characterization actions automatically; robot
-code does not create WPILib command wrappers or four duplicate action fields:
+A public `Characterization` field expands into its test actions automatically; robot code does not
+create WPILib command wrappers or duplicate action fields:
 
 ```java
 private final ControlBinding driveControl = Controls.velocity(driveMotor)
         .feedback(driveEncoder);
-public final ControlSysId sysId = driveControl.sysId().name("drive");
+public final Characterization drive = driveControl.characterization()
+        .maxVoltage(Volts.of(6.0));
 ```
 
-This publishes `Actions/sysId/QuasistaticForward`, `QuasistaticReverse`, `DynamicForward`, and
-`DynamicReverse`. As with ordinary actions, a non-public SysId field requires `@Telemetry` to opt in.
+This publishes `Actions/drive/QuasistaticForward`, `QuasistaticReverse`, `DynamicForward`, `DynamicReverse`,
+`Routine` and the other characterization Actions (see `docs/characterization-and-models.md`). As with ordinary
+actions, a non-public characterization field requires `@Telemetry` to opt in. The telemetry values of the
+declaration are published under its field name as well.
 
 ### Devices and controls
 

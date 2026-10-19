@@ -1441,7 +1441,7 @@ final class MechanismRuntime {
             if (node.terminal && (action instanceof Actions.Computed
                     || action instanceof Actions.HardwareComputed
                     || action instanceof Actions.VelocityContribution
-                    || action instanceof Actions.ControlSysIdAction)) {
+                    || action instanceof CharacterizationRoutine.Test)) {
                 return;
             }
             // Leaves, computed ownership, cycles, and conditional branches reserve their full static
@@ -1546,7 +1546,7 @@ final class MechanismRuntime {
                 }
                 return schedule.result(child.output(), child.complete(), child.context());
             }
-            if (action instanceof Actions.ControlSysIdAction sysId) {
+            if (action instanceof CharacterizationRoutine.Test sysId) {
                 if (node.terminal) return schedule.result(null, true, local);
                 if (sysId.routine().timedOut(local.timeInStateSeconds())) {
                     sysId.routine().end();
@@ -2205,7 +2205,7 @@ final class MechanismRuntime {
             }
 
             private void reset() {
-                if (runtime != null && runtime.entered && action instanceof Actions.ControlSysIdAction sysId) {
+                if (runtime != null && runtime.entered && action instanceof CharacterizationRoutine.Test sysId) {
                     sysId.routine().end();
                 }
                 if (action instanceof Actions.VelocityContribution contribution) {

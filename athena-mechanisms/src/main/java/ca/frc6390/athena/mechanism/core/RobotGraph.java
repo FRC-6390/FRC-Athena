@@ -18,7 +18,6 @@ import java.util.function.DoubleSupplier;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import ca.frc6390.athena.mechanism.model.Characterization;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.persist.Locks;
 import ca.frc6390.athena.mechanism.staging.Staging;
 
@@ -173,23 +172,6 @@ final class RobotGraph {
                     } catch (IllegalAccessException exception) {
                         throw new IllegalStateException("Unable to inspect characterization field "
                                 + field.getName(), exception);
-                    }
-                }
-                if (ControlSysId.class.isAssignableFrom(field.getType())
-                        && action instanceof Actions.ControlSysIdAction sysIdAction) {
-                    try {
-                        if (!field.canAccess(Modifier.isStatic(field.getModifiers()) ? null : mechanism)) {
-                            field.setAccessible(true);
-                        }
-                        Object value = field.get(Modifier.isStatic(field.getModifiers()) ? null : mechanism);
-                        if (value != sysIdAction.routine()) continue;
-                        Telemetry annotation = field.getAnnotation(Telemetry.class);
-                        String prefix = annotation == null
-                                ? field.getName() : AnnotatedTelemetry.name(field.getName(), annotation);
-                        return name.startsWith(prefix + "/")
-                                && (Modifier.isPublic(field.getModifiers()) || annotation != null);
-                    } catch (IllegalAccessException exception) {
-                        throw new IllegalStateException("Unable to inspect SysId field " + field.getName(), exception);
                     }
                 }
                 if (!Action.class.isAssignableFrom(field.getType())) continue;

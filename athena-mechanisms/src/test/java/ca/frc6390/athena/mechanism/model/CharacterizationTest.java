@@ -1,9 +1,13 @@
 package ca.frc6390.athena.mechanism.model;
 
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -20,6 +24,7 @@ import ca.frc6390.athena.mechanism.core.ControlBinding;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.MechanismScheduler;
+import ca.frc6390.athena.mechanism.sysid.SysIdState;
 import ca.frc6390.athena.mechanism.model.DriftMonitor.DriftReport;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -91,8 +96,9 @@ class CharacterizationTest {
     @Test
     void exposesNamedActionsForIntrospection() {
         Characterization characterization = Characterization.of(rawControl());
-        assertEquals(10, characterization.actions().size());
+        assertEquals(11, characterization.actions().size());
         assertTrue(characterization.actions().containsKey("QuasistaticForward"));
+        assertTrue(characterization.actions().containsKey("Routine"));
         assertTrue(characterization.actions().containsKey("AdoptRunningEstimate"));
         assertTrue(characterization.actions().containsValue(characterization.latency()));
     }
@@ -253,6 +259,45 @@ class CharacterizationTest {
                 Double.NaN, Double.NaN, 0.0, 0.0, 0.0, 0, List.of(), 1.0, Map.of(), 0.0, 0);
     }
 
+    @Test
+    void velocityBindingsDefaultToNoGravityAndFitWithoutAGravityTerm() {
+        Characterization characterization = Characterization.of(Controls.velocity(MOTOR).feedback(ENCODER));
+        assertEquals(Gravity.NONE, characterization.gravity());
+
+        Random random = new Random(7);
+        List<CharacterizationSample> samples = new ArrayList<>();
+        for (int i = 0; i < 400; i++) {
+            double velocity = (random.nextDouble() * 2.0 - 1.0) * 6.0;
+            double acceleration = (random.nextDouble() * 2.0 - 1.0) * 3.0;
+            double voltage = 0.4 * Math.signum(velocity) + 2.0 * velocity + 0.2 * acceleration;
+            samples.add(new CharacterizationSample(SysIdState.DYNAMIC_FORWARD, i * DT, voltage,
+                    i * DT * velocity, velocity, acceleration, Double.NaN));
+        }
+        Identification.FeedforwardFit fit = Identification.fitFeedforward(samples, Gravity.NONE, 0.02);
+        assertEquals(0.0, fit.kG(), 1.0e-9);
+        assertEquals(2.0, fit.kV(), 1.0e-6);
+        assertEquals(0.2, fit.kA(), 1.0e-6);
+        assertEquals(0.4, fit.kineticStaticVolts(), 1.0e-6);
+    }
+
+    @Test
+    void gravityCanBeChosenPerDeclaration() {
+        Characterization characterization = Characterization.of(rawControl()).gravity(Gravity.CONSTANT);
+        assertEquals(Gravity.CONSTANT, characterization.gravity());
+        assertEquals(Gravity.CONSTANT, Characterization.of(rawControl()).gravity(Gravity.CONSTANT).gravity());
+        assertEquals(Gravity.COSINE, Gravity.of(MotionKind.ROTARY));
+    }
+
+    @Test
+    void typedRangeRequiresTheMotionKindOfTheBinding() {
+        Characterization rotary = Characterization.of(rawControl());
+        assertThrows(IllegalArgumentException.class,
+                () -> rotary.range(Meters.of(0.0), Meters.of(1.0)));
+        assertThrows(IllegalArgumentException.class,
+                () -> rotary.range(Degrees.of(10.0), Degrees.of(-10.0)));
+        rotary.range(Degrees.of(-90.0), Degrees.of(90.0));
+    }
+
     private static ControlBinding<?> rawControl() {
         return Controls.position(MOTOR).feedback(ENCODER);
     }
@@ -297,8 +342,8 @@ class CharacterizationTest {
 
         private CharacterizationMechanism(double[] clock) {
             characterization = rawControl().characterization()
-                    .rampRate(0.5)
-                    .maxVoltage(4.0)
+                    .rampRate(Volts.per(Seconds).of(0.5))
+                    .maxVoltage(Volts.of(4.0))
                     .clock(() -> clock[0]);
             quasistaticForward = characterization.quasistaticForward();
             quasistaticReverse = characterization.quasistaticReverse();

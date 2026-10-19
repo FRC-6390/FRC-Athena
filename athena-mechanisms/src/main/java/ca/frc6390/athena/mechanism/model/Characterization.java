@@ -3,51 +3,72 @@ package ca.frc6390.athena.mechanism.model;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorConstants;
-import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.units.MotionKind;
+import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
+import ca.frc6390.athena.mechanism.core.CharacterizationRoutine;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
+import ca.frc6390.athena.mechanism.core.ControlMode;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.mechanism.model.DriftMonitor.DriftReport;
 import ca.frc6390.athena.mechanism.model.ExcitationGate.ExcitationCriteria;
 import ca.frc6390.athena.mechanism.model.Identification.FeedforwardFit;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
 import ca.frc6390.athena.mechanism.sysid.SysIdLog;
+import ca.frc6390.athena.mechanism.sysid.SysIdLogProvider;
 import ca.frc6390.athena.mechanism.sysid.SysIdSample;
 import ca.frc6390.athena.mechanism.sysid.SysIdState;
-import edu.wpi.first.units.Measure;
+import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.Units;
-import ca.frc6390.athena.hardware.units.UnitConversions;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.ServiceConfigurationError;
+import java.util.ServiceLoader;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.function.UnaryOperator;
 
 /**
- * Characterization declaration for one control binding: runnable test Actions, identified model,
- * continuous learning, passive payload learning, and model history.
+ * The one characterization API for a control binding: the four SysId tests, a whole-routine action, safety limits,
+ * the identified model, continuous learning, passive payload learning, model history, and the log export.
  *
- * <p>Declare it as a field. The introspector expands it into Actions named
- * {@code <field>/QuasistaticForward}, {@code QuasistaticReverse}, {@code DynamicForward},
- * {@code DynamicReverse}, {@code FrictionSweep}, {@code Backlash}, {@code Latency}, {@code FitModel},
- * {@code AdoptRunningEstimate} and {@code Rebaseline}.</p>
+ * <p>Declare it as a field, next to the binding:</p>
+ * <pre>{@code
+ * public final Characterization shooter = velocity.characterization()
+ *         .maxVoltage(Volts.of(6.0))
+ *         .rampRate(Volts.of(1.0).per(Seconds).of(1.0))  // see rampRate(...) for the accepted form
+ *         .timeout(Seconds.of(8.0))
+ *         .gravity(Gravity.NONE);
+ * }</pre>
  *
- * <p>Settings methods return a new declaration. The collected data and the active model are shared
+ * <p>The introspector expands the field into Actions named {@code <field>/QuasistaticForward},
+ * {@code QuasistaticReverse}, {@code DynamicForward}, {@code DynamicReverse}, {@code Routine},
+ * {@code FrictionSweep}, {@code Backlash}, {@code Latency}, {@code FitModel}, {@code AdoptRunningEstimate} and
+ * {@code Rebaseline}.</p>
+ *
+ * <p>Settings methods return a new declaration. The collected data, the exported log and the active model are shared
  * between the declarations that come from one {@code ControlBinding.characterization()} call.</p>
  */
 public final class Characterization implements TelemetrySource {
-    /** Largest voltage the tests apply unless {@link #maxVoltage(double)} says otherwise. */
+    /** Largest voltage the tests apply unless {@link #maxVoltage(Voltage)} says otherwise. */
     public static final double DEFAULT_MAX_VOLTAGE = 4.0;
     /** Quasistatic ramp rate in volts per second. */
     public static final double DEFAULT_RAMP_RATE = 0.5;
+    /** Per-test safety timeout in seconds. */
+    public static final double DEFAULT_TIMEOUT = 10.0;
     /** Seconds of enabled time after which a disable snapshots the model. */
     public static final double HISTORY_MIN_ENABLED_SECONDS = 30.0;
     /** Minimum samples in the test data before a fit is attempted. */
@@ -80,12 +101,27 @@ public final class Characterization implements TelemetrySource {
     public record Payload(double deltaKG, double standardError, int samples, boolean confident) {
     }
 
+    /** Declared settings. Immutable; each settings call builds a new declaration from a copy. */
+    private record Settings(
+            double maxVolts,
+            double rampVoltsPerSecond,
+            double timeoutSeconds,
+            double minNormalized,
+            double maxNormalized,
+            boolean learnContinuously,
+            double driftTolerance,
+            double gearRatio,
+            BooleanSupplier payloadGate) {
+    }
+
     /** Mutable data shared by the declarations derived from one binding. */
     private static final class State {
+        Gravity gravity;
         MechanismModel active;
         MechanismModel baseline;
         ModelStorage storage = new InMemoryModelStorage();
         String storageKey;
+        String logName;
         DoubleSupplier clock = MonotonicClock.SYSTEM;
         final Deque<CharacterizationSample> runs = new ArrayDeque<>();
         final Deque<CharacterizationSample> holds = new ArrayDeque<>();
@@ -94,51 +130,53 @@ public final class Characterization implements TelemetrySource {
         RecursiveLeastSquares running;
         final ModelHistory history = new ModelHistory(HISTORY_CAPACITY);
         String excitation = "not learning";
-        boolean observing;
+        SysIdLog export;
+        boolean exportResolved;
     }
 
     private final ControlBinding<?> control;
-    private final double maxVoltage;
-    private final double rampRate;
-    private final boolean learnContinuously;
-    private final double driftTolerance;
-    private final double gearRatio;
-    private final BooleanSupplier payloadGate;
+    private final Settings settings;
     private final State state;
-    private final ControlSysId routine;
+    private final RunLog runLog;
+    private final CharacterizationRoutine engine;
     private final Map<String, Action> actions;
 
-    private Characterization(
-            ControlBinding<?> control,
-            double maxVoltage,
-            double rampRate,
-            boolean learnContinuously,
-            double driftTolerance,
-            double gearRatio,
-            BooleanSupplier payloadGate,
-            State state) {
+    private Characterization(ControlBinding<?> control, Settings settings, State state, RunLog runLog) {
         this.control = control;
-        this.maxVoltage = maxVoltage;
-        this.rampRate = rampRate;
-        this.learnContinuously = learnContinuously;
-        this.driftTolerance = driftTolerance;
-        this.gearRatio = gearRatio;
-        this.payloadGate = payloadGate;
+        this.settings = settings;
         this.state = state;
-        this.routine = control.sysId()
-                .rampRate(rampRate)
-                .maxVoltage(maxVoltage)
-                .stepVoltage(maxVoltage)
-                .logger(new RunLog());
+        this.runLog = runLog;
+        this.engine = CharacterizationRoutine.forControl(control, runLog)
+                .withRampRate(settings.rampVoltsPerSecond())
+                .withMaxVoltage(settings.maxVolts())
+                .withTimeout(settings.timeoutSeconds())
+                .withRange(settings.minNormalized(), settings.maxNormalized());
         this.actions = buildActions();
     }
 
     /** Creates the declaration for a binding. Used by {@code ControlBinding.characterization()}. */
     public static Characterization of(ControlBinding<?> control) {
         Objects.requireNonNull(control, "control");
-        return new Characterization(control, DEFAULT_MAX_VOLTAGE, DEFAULT_RAMP_RATE, false,
-                DriftMonitor.DEFAULT_TOLERANCE, gearFromFeedback(control), null,
-                newState(control.motionKind()));
+        State state = new State();
+        state.gravity = defaultGravity(control);
+        state.active = MechanismModel.empty(control.motionKind());
+        state.baseline = null;
+        state.running = newRunning(state.gravity);
+        Settings settings = new Settings(DEFAULT_MAX_VOLTAGE, DEFAULT_RAMP_RATE, DEFAULT_TIMEOUT,
+                Double.NaN, Double.NaN, false, DriftMonitor.DEFAULT_TOLERANCE, gearFromFeedback(control),
+                null);
+        return new Characterization(control, settings, state, new RunLog(control, state));
+    }
+
+    /**
+     * Gravity model used when the declaration does not set one. Velocity bindings have no gravity term. Position
+     * bindings use the cosine model for rotary mechanisms and a constant for linear ones.
+     */
+    static Gravity defaultGravity(ControlBinding<?> control) {
+        if (control.mode() == ControlMode.VELOCITY) {
+            return Gravity.NONE;
+        }
+        return Gravity.of(control.motionKind());
     }
 
     /**
@@ -152,7 +190,7 @@ public final class Characterization implements TelemetrySource {
             return 1.0;
         }
         double unitsPerRevolution;
-        if (encoder.measuresUnit() instanceof edu.wpi.first.units.AngleUnit) {
+        if (encoder.measuresUnit() instanceof AngleUnit) {
             unitsPerRevolution = encoder.measuresUnit() == Units.Degrees ? 360.0
                     : encoder.measuresUnit() == Units.Radians ? 2.0 * Math.PI : 1.0;
         } else if (encoder.units() == EncoderUnit.DEGREES) {
@@ -171,78 +209,151 @@ public final class Characterization implements TelemetrySource {
         return 1.0 / mechanismTurnsPerRawTurn;
     }
 
-    private static State newState(MotionKind kind) {
-        State state = new State();
-        state.active = MechanismModel.empty(kind);
-        state.baseline = null;
-        state.running = newRunning(kind);
-        return state;
-    }
-
-    private static RecursiveLeastSquares newRunning(MotionKind kind) {
-        return new RecursiveLeastSquares(Identification.columns(kind), FORGETTING_FACTOR, INITIAL_COVARIANCE);
+    private static RecursiveLeastSquares newRunning(Gravity gravity) {
+        return new RecursiveLeastSquares(Identification.columns(gravity), FORGETTING_FACTOR, INITIAL_COVARIANCE);
     }
 
     private Map<String, Action> buildActions() {
-        Action quasistaticForward = routine.quasistaticForward();
-        Action quasistaticReverse = routine.quasistaticReverse();
+        Action quasistaticForward = engine.quasistaticForward();
+        Action quasistaticReverse = engine.quasistaticReverse();
+        Action dynamicForward = engine.dynamicForward();
+        Action dynamicReverse = engine.dynamicReverse();
         Map<String, Action> map = new LinkedHashMap<>();
         map.put("QuasistaticForward", quasistaticForward);
         map.put("QuasistaticReverse", quasistaticReverse);
-        map.put("DynamicForward", routine.dynamicForward());
-        map.put("DynamicReverse", routine.dynamicReverse());
+        map.put("DynamicForward", dynamicForward);
+        map.put("DynamicReverse", dynamicReverse);
+        map.put("Routine", Actions.then(Actions.then(Actions.then(quasistaticForward, quasistaticReverse),
+                dynamicForward), dynamicReverse));
         map.put("FrictionSweep", Actions.then(quasistaticForward, quasistaticReverse));
         map.put("Backlash", Actions.then(quasistaticForward, quasistaticReverse));
-        map.put("Latency", routine.dynamicForward());
+        map.put("Latency", dynamicForward);
         map.put("FitModel", Actions.run(this::doFitModel));
         map.put("AdoptRunningEstimate", Actions.run(this::doAdoptRunningEstimate));
         map.put("Rebaseline", Actions.run(this::doRebaseline));
         return map;
     }
 
-    // ----- settings -----
+    // ----- settings: safety limits (typed) -----
 
-    /** Largest voltage any test applies. Must be positive. */
-    public Characterization maxVoltage(double volts) {
-        requirePositive(volts, "maxVoltage");
-        return copy(volts, rampRate, learnContinuously, driftTolerance, gearRatio, payloadGate);
+    /** Largest voltage any test applies. Must be positive and finite. Ramps stop at it; steps hold it. */
+    public Characterization maxVoltage(Voltage volts) {
+        return copy(withSettings(s -> new Settings(positive(UnitConversions.value(volts, Units.Volts), "maxVoltage"),
+                s.rampVoltsPerSecond(), s.timeoutSeconds(), s.minNormalized(), s.maxNormalized(),
+                s.learnContinuously(), s.driftTolerance(), s.gearRatio(), s.payloadGate())));
     }
 
-    /** Largest voltage any test applies, as a WPILib voltage measure (for example {@code Volts.of(4)}). */
-    public Characterization maxVoltage(Measure<?> volts) {
-        return maxVoltage(UnitConversions.value(volts, Units.Volts));
+    /**
+     * Quasistatic ramp rate, as a voltage per time. Built with {@code Volts.of(1).per(Seconds).of(0.5)} style
+     * measures or any measure of volts per second; the dimension is checked when the setting is applied.
+     */
+    public Characterization rampRate(edu.wpi.first.units.measure.Velocity<edu.wpi.first.units.VoltageUnit> rate) {
+        return copy(withSettings(s -> new Settings(s.maxVolts(),
+                positive(UnitConversions.rate(rate, Units.Volts), "rampRate"),
+                s.timeoutSeconds(), s.minNormalized(), s.maxNormalized(), s.learnContinuously(),
+                s.driftTolerance(), s.gearRatio(), s.payloadGate())));
     }
 
-    /** Quasistatic ramp rate in volts per second. */
-    public Characterization rampRate(double voltsPerSecond) {
-        requirePositive(voltsPerSecond, "rampRate");
-        return copy(maxVoltage, voltsPerSecond, learnContinuously, driftTolerance, gearRatio, payloadGate);
+    /** Per-test safety timeout. Must be positive. A held test ends at the timeout and does not restart until released. */
+    public Characterization timeout(Time time) {
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(),
+                positive(UnitConversions.value(time, Units.Seconds), "timeout"),
+                s.minNormalized(), s.maxNormalized(), s.learnContinuously(), s.driftTolerance(), s.gearRatio(),
+                s.payloadGate())));
+    }
+
+    /**
+     * Travel range for a rotary mechanism. A test ends one cycle after the position leaves [min, max]. Both bounds are
+     * required; the range is measured from the feedback position, so it must match the mechanism's rotation.
+     */
+    public Characterization range(Angle min, Angle max) {
+        return withRange(min, max, MotionKind.ROTARY, Units.Rotations);
+    }
+
+    /** Travel range for a linear mechanism. A test ends one cycle after the position leaves [min, max]. */
+    public Characterization range(Distance min, Distance max) {
+        return withRange(min, max, MotionKind.LINEAR, Units.Meters);
+    }
+
+    private Characterization withRange(edu.wpi.first.units.Measure<?> min,
+            edu.wpi.first.units.Measure<?> max, MotionKind expected, edu.wpi.first.units.Unit base) {
+        Objects.requireNonNull(min, "min");
+        Objects.requireNonNull(max, "max");
+        if (engine.unit().angular() != (expected == MotionKind.ROTARY)) {
+            throw new IllegalArgumentException("Characterization range must be a " + expected
+                    + " measure for this binding's feedback.");
+        }
+        double low = UnitConversions.value(min, base);
+        double high = UnitConversions.value(max, base);
+        if (!(low < high)) {
+            throw new IllegalArgumentException("Characterization range minimum must be below its maximum.");
+        }
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(), s.timeoutSeconds(),
+                low, high, s.learnContinuously(), s.driftTolerance(), s.gearRatio(), s.payloadGate())));
+    }
+
+    // ----- settings: model and logging -----
+
+    /** Chooses the gravity model fitted by the tests. The default follows the binding; see {@link Gravity}. */
+    public Characterization gravity(Gravity gravity) {
+        Objects.requireNonNull(gravity, "gravity");
+        state.gravity = gravity;
+        state.running = newRunning(gravity);
+        state.gate.reset();
+        return this;
+    }
+
+    /** Name of the routine in the exported log. Defaults to the output motor's name. */
+    public Characterization logName(String name) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Characterization log name must not be blank.");
+        }
+        state.logName = name;
+        return this;
+    }
+
+    /**
+     * Sends every test sample to {@code log} (for example a custom logger or a test recorder) instead of the default
+     * WPILib log. Set this before the first test runs.
+     */
+    public Characterization exportTo(SysIdLog log) {
+        state.export = Objects.requireNonNull(log, "log");
+        state.exportResolved = true;
+        return this;
     }
 
     /** Enables recursive least-squares learning from normal operation. Never replaces the active model. */
     public Characterization learnContinuously(boolean enabled) {
-        return copy(maxVoltage, rampRate, enabled, driftTolerance, gearRatio, payloadGate);
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(), s.timeoutSeconds(),
+                s.minNormalized(), s.maxNormalized(), enabled, s.driftTolerance(), s.gearRatio(),
+                s.payloadGate())));
     }
 
     /** Relative band (for example 0.25 for 25%) beyond which a parameter counts as drifted. */
     public Characterization driftTolerance(double fraction) {
         requirePositive(fraction, "driftTolerance");
-        return copy(maxVoltage, rampRate, learnContinuously, fraction, gearRatio, payloadGate);
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(), s.timeoutSeconds(),
+                s.minNormalized(), s.maxNormalized(), s.learnContinuously(), fraction, s.gearRatio(),
+                s.payloadGate())));
     }
 
     /**
      * Motor turns per mechanism turn (the reduction). Used to convert the identified inertia and
-     * to report external load in motor-side terms. Defaults to 1.
+     * to report external load in motor-side terms. Defaults to the feedback encoder's reduction, else 1.
      */
     public Characterization gearRatio(double motorPerMechanism) {
         requirePositive(motorPerMechanism, "gearRatio");
-        return copy(maxVoltage, rampRate, learnContinuously, driftTolerance, motorPerMechanism, payloadGate);
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(), s.timeoutSeconds(),
+                s.minNormalized(), s.maxNormalized(), s.learnContinuously(), s.driftTolerance(),
+                motorPerMechanism, s.payloadGate())));
     }
 
     /** Collects payload samples only while the supplier is true (for example while holding a game piece). */
     public Characterization payloadWhen(BooleanSupplier loaded) {
-        return copy(maxVoltage, rampRate, learnContinuously, driftTolerance, gearRatio,
-                Objects.requireNonNull(loaded, "loaded"));
+        Objects.requireNonNull(loaded, "loaded");
+        return copy(withSettings(s -> new Settings(s.maxVolts(), s.rampVoltsPerSecond(), s.timeoutSeconds(),
+                s.minNormalized(), s.maxNormalized(), s.learnContinuously(), s.driftTolerance(), s.gearRatio(),
+                loaded)));
     }
 
     /** Overrides the excitation thresholds used by continuous learning. */
@@ -295,9 +406,23 @@ public final class Characterization implements TelemetrySource {
         return this;
     }
 
-    private Characterization copy(double maxVoltage, double rampRate, boolean learn, double drift,
-            double gear, BooleanSupplier payload) {
-        return new Characterization(control, maxVoltage, rampRate, learn, drift, gear, payload, state);
+    private static UnaryOperator<Settings> withSettings(UnaryOperator<Settings> edit) {
+        return edit;
+    }
+
+    private Characterization copy(UnaryOperator<Settings> edit) {
+        return new Characterization(control, edit.apply(settings), state, runLog);
+    }
+
+    private static double positive(double value, String name) {
+        requirePositive(value, name);
+        return value;
+    }
+
+    private static void requirePositive(double value, String name) {
+        if (!(value > 0.0) || !Double.isFinite(value)) {
+            throw new IllegalArgumentException("Characterization " + name + " must be positive and finite.");
+        }
     }
 
     // ----- actions -----
@@ -320,6 +445,14 @@ public final class Characterization implements TelemetrySource {
     /** Reverse step to {@code -maxVoltage}. */
     public Action dynamicReverse() {
         return actions.get("DynamicReverse");
+    }
+
+    /**
+     * The whole routine in one action: forward quasistatic, reverse quasistatic, forward dynamic, reverse dynamic.
+     * Hold it to run all four; each test uses the limits above. Fit afterwards with {@link #fitModel()}.
+     */
+    public Action routine() {
+        return actions.get("Routine");
     }
 
     /** Forward then reverse quasistatic ramps. Gives the friction table and the breakaway points. */
@@ -362,7 +495,7 @@ public final class Characterization implements TelemetrySource {
         return control;
     }
 
-    // ----- models -----
+    // ----- results -----
 
     /** Returns the active model. */
     public MechanismModel model() {
@@ -372,6 +505,29 @@ public final class Characterization implements TelemetrySource {
     /** Returns the drift baseline, or null before the first fit or defaults. */
     public MechanismModel baseline() {
         return state.baseline;
+    }
+
+    /** Static friction kS of the active model, as a voltage. */
+    public Voltage kS() {
+        return Units.Volts.of(state.active.kineticFrictionVolts());
+    }
+
+    /** Gravity amplitude kG of the active model, as a voltage (zero for {@link Gravity#NONE}). */
+    public Voltage kG() {
+        return Units.Volts.of(state.active.kG());
+    }
+
+    /**
+     * Velocity feedforward kV of the active model, in volts per (base unit per second). Base units are rotations
+     * for rotary bindings and meters for linear ones.
+     */
+    public double kV() {
+        return state.active.kV();
+    }
+
+    /** Acceleration feedforward kA of the active model, in volts per (base unit per second squared). */
+    public double kA() {
+        return state.active.kA();
     }
 
     /** Returns the collected test samples, oldest first. Storage is bounded; the oldest samples drop first. */
@@ -390,11 +546,12 @@ public final class Characterization implements TelemetrySource {
                     + runs.size() + " samples, need " + MIN_RUN_SAMPLES + ").");
         }
         MotionKind kind = control.motionKind();
+        Gravity gravity = state.gravity;
         double deadband = Identification.DEFAULT_VELOCITY_DEADBAND;
-        FeedforwardFit fit = Identification.fitFeedforward(runs, kind, deadband);
-        double staticVolts = Identification.staticFriction(runs, kind, fit, STATIC_BREAKAWAY_SPEED)
+        FeedforwardFit fit = Identification.fitFeedforward(runs, gravity, deadband);
+        double staticVolts = Identification.staticFriction(runs, gravity, fit, STATIC_BREAKAWAY_SPEED)
                 .orElse(fit.kineticStaticVolts());
-        FrictionTable table = Identification.frictionTable(runs, kind, fit, deadband, FRICTION_BINS);
+        FrictionTable table = Identification.frictionTable(runs, gravity, fit, deadband, FRICTION_BINS);
         double backlash = Identification.backlash(runs, deadband).orElse(Double.NaN);
         double latency = Identification.latency(runs, LATENCY_SPEED).orElse(Double.NaN);
         Payload payload = payload();
@@ -416,22 +573,21 @@ public final class Characterization implements TelemetrySource {
         }
         return new MechanismModel(kind, staticVolts, fit.kineticStaticVolts(), fit.kV(), fit.kA(), fit.kG(),
                 fit.gravityOffsetRadians(), table, backlash, latency, payloadDelta, torque, resistance,
-                kinds.size(), kinds, gearRatio, fit.standardErrors(), fit.rSquared(), fit.samples());
+                kinds.size(), kinds, settings.gearRatio(), fit.standardErrors(), fit.rSquared(), fit.samples());
     }
 
     /** Estimate of the external payload from holding samples, with confidence. */
     public Payload payload() {
         List<CharacterizationSample> holds = List.copyOf(state.holds);
-        MotionKind kind = control.motionKind();
-        if (holds.size() < MIN_PAYLOAD_SAMPLES) {
+        if (holds.size() < MIN_PAYLOAD_SAMPLES || state.gravity == Gravity.NONE) {
             return new Payload(0.0, Double.NaN, holds.size(), false);
         }
         MechanismModel base = state.active;
         FeedforwardFit baseline = new FeedforwardFit(base.kineticFrictionVolts(), base.kV(), base.kA(),
                 base.kG(), base.gravityOffsetRadians(), Map.of(), 0.0, 0.0, 0);
-        Identification.PayloadEstimate estimate = Identification.payload(holds, kind, baseline,
+        Identification.PayloadEstimate estimate = Identification.payload(holds, state.gravity, baseline,
                 base.staticFrictionVolts());
-        boolean spread = kind != MotionKind.ROTARY || cosineSpread(holds) >= MIN_COS_SPREAD;
+        boolean spread = state.gravity != Gravity.COSINE || cosineSpread(holds) >= MIN_COS_SPREAD;
         boolean significant = Double.isFinite(estimate.standardError()) && estimate.standardError() > 0.0
                 && Math.abs(estimate.deltaKG()) > 2.0 * estimate.standardError();
         boolean confident = spread && significant;
@@ -448,12 +604,20 @@ public final class Characterization implements TelemetrySource {
         double[] c = state.running.coefficients();
         double kG;
         double offset;
-        if (control.motionKind() == MotionKind.ROTARY) {
-            kG = Math.hypot(c[3], c[4]);
-            offset = Math.atan2(-c[4], c[3]);
-        } else {
-            kG = c[3];
-            offset = 0.0;
+        switch (state.gravity) {
+            case NONE -> {
+                kG = 0.0;
+                offset = 0.0;
+            }
+            case CONSTANT -> {
+                kG = c[3];
+                offset = 0.0;
+            }
+            case COSINE -> {
+                kG = Math.hypot(c[3], c[4]);
+                offset = Math.atan2(-c[4], c[3]);
+            }
+            default -> throw new IllegalStateException("Unhandled gravity " + state.gravity);
         }
         return new MechanismModel(active.motionKind(), active.staticFrictionVolts(), c[0], c[1], c[2], kG,
                 offset, active.friction(), active.backlash(), active.latencySeconds(),
@@ -464,12 +628,17 @@ public final class Characterization implements TelemetrySource {
 
     /** Compares the running estimate with the baseline. */
     public DriftReport drift() {
-        return DriftMonitor.evaluate(state.baseline, runningEstimate(), driftTolerance);
+        return DriftMonitor.evaluate(state.baseline, runningEstimate(), settings.driftTolerance());
     }
 
     /** Returns whether continuous learning is enabled. */
     public boolean learnContinuously() {
-        return learnContinuously;
+        return settings.learnContinuously();
+    }
+
+    /** Returns the gravity model in effect. */
+    public Gravity gravity() {
+        return state.gravity;
     }
 
     /** Returns the history of snapshots. */
@@ -493,7 +662,7 @@ public final class Characterization implements TelemetrySource {
 
     /** Motor turns per mechanism turn in effect (encoder-derived unless overridden). */
     double gearRatio() {
-        return gearRatio;
+        return settings.gearRatio();
     }
 
     /** Returns the store key set by {@link #persistAs}, or null when the characterization is not persisted. */
@@ -528,16 +697,16 @@ public final class Characterization implements TelemetrySource {
                 || !Double.isFinite(velocity) || !Double.isFinite(acceleration)) {
             return;
         }
-        MotionKind kind = control.motionKind();
         double deadband = Identification.DEFAULT_VELOCITY_DEADBAND;
-        if (learnContinuously) {
-            double[] regressor = Identification.features(kind, position, velocity, acceleration, deadband);
+        if (settings.learnContinuously()) {
+            double[] regressor = Identification.features(state.gravity, position, velocity, acceleration, deadband);
             ExcitationGate.Decision decision = state.gate.offer(regressor, velocity, acceleration);
             state.excitation = decision.reason();
             if (decision.accepted()) {
                 state.running.update(regressor, appliedVolts);
             }
         }
+        BooleanSupplier payloadGate = settings.payloadGate();
         if (payloadGate != null && payloadGate.getAsBoolean() && Math.abs(velocity) <= deadband) {
             SysIdState hold = directionHint < 0.0 ? SysIdState.QUASISTATIC_REVERSE : SysIdState.QUASISTATIC_FORWARD;
             addBounded(state.holds, new CharacterizationSample(hold, state.clock.getAsDouble(),
@@ -594,19 +763,35 @@ public final class Characterization implements TelemetrySource {
     }
 
     private void reseedRunning(MechanismModel model) {
-        MotionKind kind = control.motionKind();
-        state.running = newRunning(kind);
-        double[] seed;
-        if (kind == MotionKind.ROTARY) {
-            seed = new double[] {
+        Gravity gravity = state.gravity;
+        state.running = newRunning(gravity);
+        double[] seed = switch (gravity) {
+            case NONE -> new double[] {model.kineticFrictionVolts(), model.kV(), model.kA()};
+            case CONSTANT -> new double[] {model.kineticFrictionVolts(), model.kV(), model.kA(), model.kG()};
+            case COSINE -> new double[] {
                 model.kineticFrictionVolts(), model.kV(), model.kA(),
                 model.kG() * Math.cos(model.gravityOffsetRadians()),
                 -model.kG() * Math.sin(model.gravityOffsetRadians())};
-        } else {
-            seed = new double[] {model.kineticFrictionVolts(), model.kV(), model.kA(), model.kG()};
-        }
+        };
         state.running.seed(seed);
         state.gate.reset();
+    }
+
+    private static SysIdLog discoverExport(String routine, String motor) {
+        Iterator<SysIdLogProvider> providers = ServiceLoader.load(SysIdLogProvider.class).iterator();
+        while (true) {
+            try {
+                if (!providers.hasNext()) {
+                    return null;
+                }
+                SysIdLog log = providers.next().open(routine, motor);
+                if (log != null) {
+                    return log;
+                }
+            } catch (ServiceConfigurationError error) {
+                throw new IllegalStateException("Unable to load the Athena SysId log provider.", error);
+            }
+        }
     }
 
     private static String motorKey(MotorDevice motor) {
@@ -636,26 +821,43 @@ public final class Characterization implements TelemetrySource {
         }
     }
 
-    private static void requirePositive(double value, String name) {
-        if (!(value > 0.0) || !Double.isFinite(value)) {
-            throw new IllegalArgumentException("Characterization " + name + " must be positive and finite.");
-        }
-    }
-
     /**
-     * Receives the SysId routine's samples and converts them into run data. A sample's state is measured after
-     * the previous cycle's command has acted, so the acceleration between two samples is produced by the earlier
-     * command. Each run row therefore pairs that command with the acceleration of its interval, and with the
-     * interval's mean position and velocity. The first sample of a run has no interval and is not stored.
+     * Receives the routine's samples: converts them into run data and forwards each raw sample to the export log.
+     * A sample's state is measured after the previous cycle's command has acted, so the acceleration between two
+     * samples is produced by the earlier command. Each run row therefore pairs that command with the acceleration of
+     * its interval, and with the interval's mean position and velocity. The first sample of a run has no interval and
+     * is not stored.
      */
-    private final class RunLog implements SysIdLog {
+    private static final class RunLog implements SysIdLog {
+        private final ControlBinding<?> control;
+        private final State owner;
+
+        RunLog(ControlBinding<?> control, State owner) {
+            this.control = control;
+            this.owner = owner;
+        }
+
+        /** Resolves the export log on first use: the explicit one, else the WPILib log provider when one is installed. */
+        private SysIdLog exportLog() {
+            if (!owner.exportResolved) {
+                owner.exportResolved = true;
+                String routine = owner.logName != null ? owner.logName : control.output().defaultName();
+                owner.export = discoverExport(routine, control.output().defaultName());
+            }
+            return owner.export;
+        }
+
         @Override
         public synchronized void record(SysIdSample sample) {
-            double now = state.clock.getAsDouble();
+            SysIdLog export = exportLog();
+            if (export != null) {
+                export.record(sample);
+            }
+            double now = owner.clock.getAsDouble();
             CharacterizationSample raw = new CharacterizationSample(sample.state(), now,
                     sample.appliedVoltage(), sample.position(), sample.velocity(), 0.0, sample.currentAmps());
-            CharacterizationSample previous = state.previousRun;
-            state.previousRun = raw;
+            CharacterizationSample previous = owner.previousRun;
+            owner.previousRun = raw;
             if (previous == null || previous.state() != sample.state()) {
                 return;
             }
@@ -670,12 +872,15 @@ public final class Characterization implements TelemetrySource {
                     0.5 * (previous.velocity() + raw.velocity()),
                     acceleration,
                     previous.currentAmps());
-            addBounded(state.runs, converted, RUN_CAPACITY);
+            addBounded(owner.runs, converted, RUN_CAPACITY);
         }
 
         @Override
         public synchronized void end() {
-            state.previousRun = null;
+            owner.previousRun = null;
+            if (owner.export != null) {
+                owner.export.end();
+            }
         }
     }
 }

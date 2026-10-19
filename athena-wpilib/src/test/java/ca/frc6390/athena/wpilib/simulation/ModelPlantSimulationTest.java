@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.simulation;
 
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -164,8 +166,8 @@ class ModelPlantSimulationTest {
             // A rotations-typed binding makes the characterization rotary, so gravity is fitted.
             ControlBinding<?> angle = Controls.position(motor, Units.Rotations).feedback(encoder);
             characterization = angle.characterization()
-                    .rampRate(0.5)
-                    .maxVoltage(4.0)
+                    .rampRate(Volts.per(Seconds).of(0.5))
+                    .maxVoltage(Volts.of(4.0))
                     .clock(() -> clock[0]);
             quasistaticForward = characterization.quasistaticForward();
             quasistaticReverse = characterization.quasistaticReverse();

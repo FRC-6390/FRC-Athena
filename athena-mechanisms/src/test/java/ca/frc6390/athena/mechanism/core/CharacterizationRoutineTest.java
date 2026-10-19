@@ -11,7 +11,13 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Velocity;
+import edu.wpi.first.units.VoltageUnit;
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
+import ca.frc6390.athena.mechanism.model.Characterization;
 import ca.frc6390.athena.mechanism.sysid.SysIdLog;
 import ca.frc6390.athena.mechanism.sysid.SysIdSample;
 import ca.frc6390.athena.mechanism.sysid.SysIdState;
@@ -21,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class ControlSysIdTest {
+class CharacterizationRoutineTest {
     private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
     private static final MotorDevice FOLLOWER = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
     private static final EncoderDevice ENCODER = EncoderDevice.of(EncoderKinds.CANCODER, 2)
@@ -60,10 +66,10 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        ControlSysId sysId = control.sysId()
-                .stepVoltage(6.0)
-                .timeout(0.5)
-                .logger(log);
+        Characterization sysId = control.characterization()
+                .maxVoltage(Volts.of(6.0))
+                .timeout(Seconds.of(0.5))
+                .exportTo(log);
         TestMechanism mechanism = new TestMechanism(control, sysId.dynamicReverse());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
@@ -82,7 +88,7 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        ControlSysId sysId = control.sysId().logger(log);
+        Characterization sysId = control.characterization().exportTo(log);
         TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
@@ -108,7 +114,7 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        ControlSysId sysId = control.sysId().stepVoltage(4.0).timeout(0.1).logger(log);
+        Characterization sysId = control.characterization().maxVoltage(Volts.of(4.0)).timeout(Seconds.of(0.1)).exportTo(log);
         Action action = sysId.dynamicForward();
         HeldMechanism mechanism = new HeldMechanism(control, held, action);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
@@ -140,7 +146,7 @@ class ControlSysIdTest {
         ControlBinding<?> control = Controls.velocity(MOTOR, FOLLOWER).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
-                control.sysId().stepVoltage(6.0).logger(log).dynamicForward());
+                control.characterization().maxVoltage(Volts.of(6.0)).exportTo(log).dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
@@ -159,7 +165,7 @@ class ControlSysIdTest {
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
-                control.sysId().stepVoltage(4.25).logger(log).dynamicForward());
+                control.characterization().maxVoltage(Volts.of(4.25)).exportTo(log).dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
@@ -172,13 +178,13 @@ class ControlSysIdTest {
 
     @Test
     void sysIdRequiresAnOutputFeedbackAndPositiveConfiguration() {
-        assertThrows(IllegalStateException.class, () -> Controls.of(ControlMode.POSITION).sysId());
-        assertThrows(IllegalStateException.class, () -> Controls.position(MOTOR).sysId());
+        assertThrows(IllegalStateException.class, () -> Controls.of(ControlMode.POSITION).characterization());
+        assertThrows(IllegalStateException.class, () -> Controls.position(MOTOR).characterization());
 
-        ControlSysId sysId = Controls.position(MOTOR).feedback(ENCODER).sysId();
-        assertThrows(IllegalArgumentException.class, () -> sysId.rampRate(0.0));
-        assertThrows(IllegalArgumentException.class, () -> sysId.stepVoltage(-1.0));
-        assertThrows(IllegalArgumentException.class, () -> sysId.timeout(Double.NaN));
+        Characterization sysId = Controls.position(MOTOR).feedback(ENCODER).characterization();
+        assertThrows(IllegalArgumentException.class, () -> sysId.rampRate(voltsPerSecond(0.0)));
+        assertThrows(IllegalArgumentException.class, () -> sysId.maxVoltage(Volts.of(-1.0)));
+        assertThrows(IllegalArgumentException.class, () -> sysId.timeout(Seconds.of(Double.NaN)));
     }
 
     @Test
@@ -189,7 +195,7 @@ class ControlSysIdTest {
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
-                control.sysId().logger(log).dynamicForward());
+                control.characterization().exportTo(log).dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
@@ -203,7 +209,7 @@ class ControlSysIdTest {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        ControlSysId sysId = control.sysId().logger(log);
+        Characterization sysId = control.characterization().exportTo(log);
         MultiTestMechanism mechanism = new MultiTestMechanism(control, sysId);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
@@ -220,14 +226,40 @@ class ControlSysIdTest {
         assertEquals(1, log.endCalls);
     }
 
+    @Test
+    void travelRangeEndsTheTestOneCycleAfterThePositionLeavesIt() {
+        RecordingContext hardware = new RecordingContext();
+        hardware.encoder.positionRotations = 0.5;
+        RecordingLog log = new RecordingLog();
+        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        Characterization sysId = control.characterization()
+                .maxVoltage(Volts.of(4.0))
+                .range(Degrees.of(-90.0), Degrees.of(90.0))
+                .exportTo(log);
+        TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
+
+        scheduler.request(mechanism.test);
+        scheduler.teleopPeriodic(0.0, 0.02);
+        assertEquals(4.0, hardware.motor(MOTOR).voltage, 1.0e-9);
+        scheduler.teleopPeriodic(0.02, 0.02);
+
+        assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
+        assertEquals(1, log.endCalls);
+    }
+
+    private static Velocity<VoltageUnit> voltsPerSecond(double rate) {
+        return Units.Volts.per(Units.Seconds).of(rate);
+    }
+
     private static void assertTestOutput(SysIdState state, double expectedVoltage, double elapsedSeconds) {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        ControlSysId sysId = control.sysId()
-                .rampRate(0.5)
-                .stepVoltage(5.5)
-                .logger(log);
+        Characterization sysId = control.characterization()
+                .rampRate(voltsPerSecond(0.5))
+                .maxVoltage(Volts.of(5.5))
+                .exportTo(log);
         Action action = switch (state) {
             case QUASISTATIC_FORWARD -> sysId.quasistaticForward();
             case QUASISTATIC_REVERSE -> sysId.quasistaticReverse();
@@ -250,12 +282,12 @@ class ControlSysIdTest {
 
     private static final class SysIdMechanism implements Mechanism {
         private final ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
-        private final ControlSysId sysId;
+        private final Characterization sysId;
         private final Action quasistaticForward;
         private final HookBinding binding;
 
         private SysIdMechanism(boolean[] held, SysIdLog log) {
-            sysId = control.sysId().rampRate(2.0).logger(log);
+            sysId = control.characterization().rampRate(voltsPerSecond(2.0)).exportTo(log);
             quasistaticForward = sysId.quasistaticForward();
             binding = Events.when(() -> held[0]).active().whileActive(quasistaticForward);
         }
@@ -286,7 +318,7 @@ class ControlSysIdTest {
         private final Action forward;
         private final Action reverse;
 
-        private MultiTestMechanism(ControlBinding<?> control, ControlSysId sysId) {
+        private MultiTestMechanism(ControlBinding<?> control, Characterization sysId) {
             this.control = control;
             forward = sysId.dynamicForward();
             reverse = sysId.dynamicReverse();

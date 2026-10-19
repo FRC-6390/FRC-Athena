@@ -12,7 +12,7 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import java.util.List;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.model.Characterization;
 import org.junit.jupiter.api.Test;
 
 class TelemetrySchemaTest {
@@ -226,7 +226,7 @@ class TelemetrySchemaTest {
     private static final class SysIdMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
         private final ControlBinding<?> control = Controls.position(motor).feedback(motor.encoder());
-        public final ControlSysId sysId = control.sysId();
+        public final Characterization sysId = control.characterization();
     }
 
     private static final class CommissioningMechanism implements Mechanism {

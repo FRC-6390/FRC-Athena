@@ -17,7 +17,7 @@ public enum SysIdUnit {
         return angular;
     }
 
-    double normalizePosition(double value) {
+    public double normalizePosition(double value) {
         return switch (this) {
             case ROTATIONS, METERS -> value;
             case DEGREES -> value / 360.0;
@@ -25,7 +25,7 @@ public enum SysIdUnit {
         };
     }
 
-    double normalizeVelocity(double value) {
+    public double normalizeVelocity(double value) {
         return normalizePosition(value);
     }
 }

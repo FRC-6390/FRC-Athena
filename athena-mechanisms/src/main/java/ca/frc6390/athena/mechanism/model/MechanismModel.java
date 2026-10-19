@@ -88,7 +88,7 @@ public record MechanismModel(
      * @return volts
      */
     public double gravityVolts(double position) {
-        return Identification.gravityVolts(motionKind, kG + payloadDelta, gravityOffsetRadians, position);
+        return Identification.gravityVolts(Gravity.of(motionKind), kG + payloadDelta, gravityOffsetRadians, position);
     }
 
     /**

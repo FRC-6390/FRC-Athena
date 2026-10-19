@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import static edu.wpi.first.units.Units.Volts;
+
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
@@ -17,7 +19,8 @@ import ca.frc6390.athena.mechanism.core.ControlOutput;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
-import ca.frc6390.athena.mechanism.sysid.ControlSysId;
+import ca.frc6390.athena.mechanism.model.Characterization;
+import ca.frc6390.athena.mechanism.model.Gravity;
 import frc.robot.Constants;
 
 public final class Turret implements Mechanism {
@@ -54,5 +57,8 @@ public final class Turret implements Mechanism {
     public final Action left = fieldHeading.position(90.0).untilWithin(1.5);
     public final Action rear = fieldHeading.position(180.0).untilWithin(1.5);
     public final Action neutral = fieldHeading.neutral();
-    public final ControlSysId sysId = fieldHeading.sysId();
+    /** Identifies the turret: a rotary mechanism with no gravity load. Routine, quasistatic and dynamic actions. */
+    public final Characterization characterization = fieldHeading.characterization()
+            .gravity(Gravity.NONE)
+            .maxVoltage(Volts.of(4.0));
 }
