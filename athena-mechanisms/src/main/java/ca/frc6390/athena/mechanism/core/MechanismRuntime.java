@@ -1958,7 +1958,7 @@ final class MechanismRuntime {
             }
             double error = goal - measurement;
             if (target.mode() == ControlMode.POSITION && control.continuousRange() != null) {
-                double span = control.continuousRange().maximum() - control.continuousRange().minimum();
+                double span = control.continuousRange().maximumInUnit() - control.continuousRange().minimumInUnit();
                 error = Math.IEEEremainder(error, span);
             }
             if (Math.abs(error) > tolerance) {

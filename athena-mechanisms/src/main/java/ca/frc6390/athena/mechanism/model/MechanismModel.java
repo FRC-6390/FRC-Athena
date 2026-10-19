@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.model;
 
+import edu.wpi.first.units.measure.MomentOfInertia;
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.hardware.sim.SimDynamicsSource;
 import ca.frc6390.athena.hardware.sim.SimPlant;
 import ca.frc6390.athena.hardware.units.MotionKind;
@@ -131,9 +133,9 @@ public record MechanismModel(
 
     /** Returns {@link #inertia()} as an optional value for simulation. */
     @Override
-    public OptionalDouble momentOfInertia() {
+    public Optional<MomentOfInertia> momentOfInertia() {
         double inertia = inertia();
-        return Double.isFinite(inertia) ? OptionalDouble.of(inertia) : OptionalDouble.empty();
+        return Double.isFinite(inertia) ? Optional.of(edu.wpi.first.units.Units.KilogramSquareMeters.of(inertia)) : Optional.empty();
     }
 
     /**

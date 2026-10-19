@@ -61,7 +61,7 @@ class PowerRuntimeTest {
 
     @Test
     void sagShedsTheCapWithoutAnyConfigurationWrite() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 71).currentLimit(400);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 71).currentLimit(Units.Amps.of(400));
         Hardware hardware = new Hardware();
         PowerMotor handle = hardware.motor(motor);
         handle.appliedVolts = 12.0;               // demand = 12 / 0.033 ~= 364 A
@@ -91,7 +91,7 @@ class PowerRuntimeTest {
 
     @Test
     void userConfigurationChangeReachesTheCapOnTheNextCycle() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 72).currentLimit(60);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 72).currentLimit(Units.Amps.of(60));
         Hardware hardware = new Hardware();
         PowerMotor handle = hardware.motor(motor);
         RuntimeOverrides overrides = new RuntimeOverrides();
@@ -110,7 +110,7 @@ class PowerRuntimeTest {
 
     @Test
     void handlesWithoutRuntimeConfigurationAreCappedAndNeverWritten() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 73).currentLimit(400);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 73).currentLimit(Units.Amps.of(400));
         Hardware hardware = new Hardware();
         PowerMotor handle = hardware.motor(motor);
         handle.appliedVolts = 12.0;
@@ -124,7 +124,7 @@ class PowerRuntimeTest {
 
     @Test
     void profileSustainedCapIsPlannedAndReportedWithoutAWrite() {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 74).currentLimit(400)
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 74).currentLimit(Units.Amps.of(400))
                 .power(PowerProfile.of().sustained(Units.Amps.of(60)));
         Hardware hardware = new Hardware();
         PowerMotor handle = hardware.motor(motor);
@@ -142,7 +142,7 @@ class PowerRuntimeTest {
 
     @Test
     void thermalDerateScalesTheCapWhileHot() throws Exception {
-        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 75).currentLimit(100)
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 75).currentLimit(Units.Amps.of(100))
                 .thermal(Thermal.derate(Units.Celsius.of(40), Units.Celsius.of(60), 0.5));
         Hardware hardware = new Hardware();
         PowerMotor handle = hardware.motor(motor);
@@ -156,13 +156,13 @@ class PowerRuntimeTest {
             PowerRuntime power = runtime(12.5, PowerPolicy.defaults());
             List<MotorDevice> motors = List.of(motor);
             double now = 0.0;
-            for (int cycle = 0; cycle < 5000 && motor.temperatureCelsius() < 60.0; cycle++) {
+            for (int cycle = 0; cycle < 5000 && motor.temperature().in(Units.Celsius) < 60.0; cycle++) {
                 power.cycle(motors, hardware, overrides, now);
                 now += DT;
             }
-            assertTrue(motor.temperatureCelsius() >= 60.0, "motor heated: " + motor.temperatureCelsius());
+            assertTrue(motor.temperature().in(Units.Celsius) >= 60.0, "motor heated: " + motor.temperature().in(Units.Celsius));
             power.cycle(motors, hardware, overrides, now);
-            double expected = 100 * motor.thermalCurve().derateFraction(motor.temperatureCelsius());
+            double expected = 100 * motor.thermalCurve().derateFraction(motor.temperature());
             assertEquals(expected, power.capAmps(motor), 1e-6);
             assertTrue(power.capAmps(motor) < 100.0, "derated below declared 100 A");
             assertEquals("Thermal derate", power.snapshot().motors().get(0).status());

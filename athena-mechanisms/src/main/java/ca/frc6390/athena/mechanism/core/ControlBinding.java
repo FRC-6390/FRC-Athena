@@ -219,13 +219,13 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("Continuous input bounds must be finite and ordered.");
         }
         return new ControlBinding<>(mode, output, slot, followers, feedback, dependencies, loops,
-                constraints, profile, planner, null, isDisabled, sink, Range.of(minimum, maximum), unit, persistGroup, retarget, release);
+                constraints, profile, planner, null, isDisabled, sink, Range.ofUnit(unit == null ? edu.wpi.first.units.Units.Value : unit, minimum, maximum), unit, persistGroup, retarget, release);
     }
 
     /** Typed form of {@link #continuous(double, double)}; both bounds must measure this binding's unit. */
     public ControlBinding<U> continuous(Measure<?> minimum, Measure<?> maximum) {
         requireUnit("Typed continuous input");
-        return continuous(UnitConversions.value(minimum, unit), UnitConversions.value(maximum, unit));
+        return continuous(valueIn(minimum, unit), valueIn(maximum, unit));
     }
 
     /** Returns the motion kind of this binding: rotary for angle units, linear for distance units. */
@@ -784,7 +784,7 @@ public record ControlBinding<U extends Unit>(
      */
     public SlipCheck slipCheck(EncoderDevice second, GearRatio ratio, Measure<?> tolerance) {
         requireUnit("Typed slip tolerance");
-        return slipCheck(second, ratio, UnitConversions.value(tolerance, unit));
+        return slipCheck(second, ratio, valueIn(tolerance, unit));
     }
 
     /** Raw form of {@link #slipCheck(EncoderDevice, GearRatio, Measure)}; the tolerance is in binding units. */
@@ -814,7 +814,7 @@ public record ControlBinding<U extends Unit>(
 
     private static double appliedVoltage(MotorDevice motor) {
         try {
-            return motor.appliedVoltage();
+            return motor.appliedVoltageVolts();
         } catch (RuntimeException unavailable) {
             return Double.NaN;
         }
@@ -869,6 +869,26 @@ public record ControlBinding<U extends Unit>(
         return List.copyOf(converted);
     }
 
+    /** Converts a measure of this binding's dimension into a plain value in {@code target}. */
+    static double valueIn(Measure<?> measure, Unit target) {
+        Objects.requireNonNull(measure, "measure");
+        if (!UnitConversions.sameDimension(measure.unit(), target)) {
+            throw new IllegalArgumentException("Cannot express " + measure.unit().name() + " values in "
+                    + target.name() + ".");
+        }
+        return target.fromBaseUnits(measure.baseUnitMagnitude());
+    }
+
+    /** Converts a rate measure into a plain value in {@code target} per second. */
+    static double rateIn(Measure<?> rate, Unit target) {
+        Objects.requireNonNull(rate, "rate");
+        if (!UnitConversions.sameDimension(rate.unit(), UnitConversions.perSecond(target))) {
+            throw new IllegalArgumentException("Cannot express " + rate.unit().name() + " values in "
+                    + target.name() + " per second.");
+        }
+        return rate.baseUnitMagnitude() / UnitConversions.baseScale(target);
+    }
+
     private void requireUnit(String feature) {
         if (unit == null) {
             throw new IllegalStateException(feature + " require a unit-typed control binding "
@@ -883,14 +903,14 @@ public record ControlBinding<U extends Unit>(
     double modeValue(Measure<?> measure) {
         requireUnit("Typed targets");
         return mode == ControlMode.VELOCITY
-                ? UnitConversions.rate(measure, unit)
-                : UnitConversions.value(measure, unit);
+                ? rateIn(measure, unit)
+                : valueIn(measure, unit);
     }
 
     /** Converts a rate measure into this binding's unit per second (typed velocity limits). */
     double rateValue(Measure<?> measure) {
         requireUnit("Typed velocity limits");
-        return UnitConversions.rate(measure, unit);
+        return rateIn(measure, unit);
     }
 
     private static List<MotorDevice> motorList(MotorDevice output, List<MotorDevice> followers) {
@@ -989,13 +1009,13 @@ public record ControlBinding<U extends Unit>(
      */
     public Action position(Measure<?> position) {
         requireUnit("Typed position targets");
-        return position(UnitConversions.value(position, unit));
+        return position(valueIn(position, unit));
     }
 
     /** Typed velocity target, expressed as a rate of this binding's unit per second. */
     public Action velocity(Measure<?> velocity) {
         requireUnit("Typed velocity targets");
-        return velocity(UnitConversions.rate(velocity, unit));
+        return velocity(rateIn(velocity, unit));
     }
 
     /**

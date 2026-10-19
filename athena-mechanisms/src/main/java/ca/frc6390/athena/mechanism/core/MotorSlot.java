@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.measure.Current;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import java.util.Objects;
@@ -44,7 +45,7 @@ public final class MotorSlot<O> extends Slot<O, MotorDevice> {
         return configure(motor -> motor.neutralMode(neutralMode));
     }
 
-    public MotorSlot<O> currentLimit(int amps) {
+    public MotorSlot<O> currentLimit(Current amps) {
         return configure(motor -> motor.currentLimit(amps));
     }
 
@@ -54,7 +55,7 @@ public final class MotorSlot<O> extends Slot<O, MotorDevice> {
      * @param amps non-negative supply current limit in amps
      * @return this slot
      */
-    public MotorSlot<O> supplyCurrentLimit(int amps) {
+    public MotorSlot<O> supplyCurrentLimit(Current amps) {
         return configure(motor -> motor.supplyCurrentLimit(amps));
     }
 
@@ -64,7 +65,7 @@ public final class MotorSlot<O> extends Slot<O, MotorDevice> {
      * @param amps non-negative stator current limit in amps
      * @return this slot
      */
-    public MotorSlot<O> statorCurrentLimit(int amps) {
+    public MotorSlot<O> statorCurrentLimit(Current amps) {
         return configure(motor -> motor.statorCurrentLimit(amps));
     }
 

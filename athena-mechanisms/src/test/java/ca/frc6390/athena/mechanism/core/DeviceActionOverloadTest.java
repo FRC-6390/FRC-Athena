@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -15,7 +16,7 @@ import org.junit.jupiter.api.Test;
  * pair, and compose with {@code then} into Action values without casts.
  */
 class DeviceActionOverloadTest {
-    private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(40);
+    private static final MotorDevice MOTOR = MotorDevice.of(MotorKinds.KRAKEN_X60, 1).statorCurrentLimit(Units.Amps.of(40));
     private static final EncoderDevice ENCODER = MOTOR.encoder();
 
     @Test

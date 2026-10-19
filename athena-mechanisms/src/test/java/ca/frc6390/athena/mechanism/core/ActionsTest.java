@@ -55,7 +55,7 @@ class ActionsTest {
     @Test
     void deadlineActionsAccessorDoesNotCopyEachCall() {
         Action primary = MOTOR.percent(0.2);
-        Action other = MOTOR.voltage(3.0);
+        Action other = MOTOR.voltage(Units.Volts.of(3.0));
         Actions.Deadline deadline = Actions.deadline(primary, other);
 
         List<Action> actions = deadline.Actions();
@@ -75,7 +75,7 @@ class ActionsTest {
     @Test
     void timeoutIsAvailableOnDeviceActionsAndComposedActions() {
         Action timedDeviceAction = MOTOR.percent(0.2).timeout(0.5);
-        Action timedComposition = MOTOR.percent(0.2).then(MOTOR.voltage(3.0)).timeout(1.0);
+        Action timedComposition = MOTOR.percent(0.2).then(MOTOR.voltage(Units.Volts.of(3.0))).timeout(1.0);
 
         assertEquals(0.5, ((Actions.Timeout) timedDeviceAction).seconds());
         Actions.Timeout timeout = (Actions.Timeout) timedComposition;

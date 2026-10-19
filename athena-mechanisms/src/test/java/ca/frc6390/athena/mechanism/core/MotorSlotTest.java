@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -16,14 +17,14 @@ class MotorSlotTest {
         AtomicInteger configured = new AtomicInteger();
         MotorSlot<Object> slot = Slots.motor(owner, "drive", configured::incrementAndGet)
                 .brake()
-                .currentLimit(60)
+                .currentLimit(Units.Amps.of(60))
                 .inverted();
 
         Object returned = slot.fill(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
 
         assertSame(owner, returned);
         assertEquals(MotorNeutralMode.BRAKE, slot.get().neutralMode());
-        assertEquals(60, slot.get().currentLimitAmps());
+        assertEquals(60, slot.get().currentLimit().in(Units.Amps));
         assertEquals(true, slot.get().isInverted());
         assertEquals(1, configured.get());
     }
@@ -35,10 +36,10 @@ class MotorSlotTest {
                 .brake();
         slot.fill(MotorDevice.of(MotorKinds.KRAKEN_X44, 2).coast());
 
-        slot.coast().currentLimit(25);
+        slot.coast().currentLimit(Units.Amps.of(25));
 
         assertEquals(MotorNeutralMode.COAST, slot.get().neutralMode());
-        assertEquals(25, slot.get().currentLimitAmps());
+        assertEquals(25, slot.get().currentLimit().in(Units.Amps));
         assertEquals(3, configured.get());
     }
 }
