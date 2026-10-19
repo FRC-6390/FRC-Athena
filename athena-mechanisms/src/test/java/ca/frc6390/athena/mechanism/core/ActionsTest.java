@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -42,7 +44,7 @@ class ActionsTest {
         Action second = MOTOR.percent(0.4);
         Actions.Parallel parallel = Actions.parallel(first);
         Actions.Sequence sequence = Actions.sequence().run(first).run(second);
-        Actions.Cycle cycle = Actions.cycle().forTime(0.1, first).forTime(0.2, second);
+        Actions.Cycle cycle = Actions.cycle().forTime(Seconds.of(0.1), first).forTime(Seconds.of(0.2), second);
 
         assertSame(parallel.Actions(), parallel.Actions());
         assertSame(sequence.steps(), sequence.steps());
@@ -74,12 +76,12 @@ class ActionsTest {
 
     @Test
     void timeoutIsAvailableOnDeviceActionsAndComposedActions() {
-        Action timedDeviceAction = MOTOR.percent(0.2).timeout(0.5);
-        Action timedComposition = MOTOR.percent(0.2).then(MOTOR.voltage(Units.Volts.of(3.0))).timeout(1.0);
+        Action timedDeviceAction = MOTOR.percent(0.2).timeout(Seconds.of(0.5));
+        Action timedComposition = MOTOR.percent(0.2).then(MOTOR.voltage(Units.Volts.of(3.0))).timeout(Seconds.of(1.0));
 
-        assertEquals(0.5, ((Actions.Timeout) timedDeviceAction).seconds());
+        assertEquals(0.5, ((Actions.Timeout) timedDeviceAction).duration().in(Seconds));
         Actions.Timeout timeout = (Actions.Timeout) timedComposition;
-        assertEquals(1.0, timeout.seconds());
+        assertEquals(1.0, timeout.duration().in(Seconds));
         assertEquals(Actions.Then.class, timeout.action().getClass());
     }
 
@@ -87,9 +89,9 @@ class ActionsTest {
     void timeoutBoundsAFluentAction() {
         // Action.forTime(seconds) was removed: it read like Sequence.forTime(seconds, action) but meant
         // "time out after". Timed sequence steps use forTime(seconds, action); single actions use timeout.
-        Actions.Timeout timed = (Actions.Timeout) MOTOR.percent(0.2).timeout(0.5);
+        Actions.Timeout timed = (Actions.Timeout) MOTOR.percent(0.2).timeout(Seconds.of(0.5));
 
-        assertEquals(0.5, timed.seconds());
+        assertEquals(0.5, timed.duration().in(Seconds));
         assertEquals(MOTOR.percent(0.2).getClass(), timed.action().getClass());
     }
 
@@ -108,10 +110,10 @@ class ActionsTest {
         ControlBinding<?> position = Controls.position(MOTOR);
         Action target = position.position(1.0);
 
-        assertThrows(IllegalArgumentException.class, () -> target.settled(0.1));
+        assertThrows(IllegalArgumentException.class, () -> target.settled(Seconds.of(0.1)));
         assertThrows(IllegalArgumentException.class, () -> target.maxVelocity(5.0));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(-0.1));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Seconds.of(-0.1)));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Seconds.of(Double.NaN)));
         assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(-1.0));
         assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(Double.NaN));
     }
@@ -123,7 +125,7 @@ class ActionsTest {
 
         assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.5).maxVelocity(1.0));
         assertEquals(0.1, assertInstanceOf(Actions.WithinTolerance.class,
-                target.untilWithin(0.5).settled(0.1)).settleSeconds(), 1.0e-9);
+                target.untilWithin(0.5).settled(Seconds.of(0.1))).settleSeconds(), 1.0e-9);
     }
 
     @Test

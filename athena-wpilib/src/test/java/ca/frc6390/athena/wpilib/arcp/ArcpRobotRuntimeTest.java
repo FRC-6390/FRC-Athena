@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.arcp;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -478,7 +480,7 @@ class ArcpRobotRuntimeTest {
     static final class ArcpTestMechanism implements Mechanism {
         @Telemetry(writable = true, min = 0.0, max = 10.0, persist = true)
         double gain = 2.0;
-        public final Action run = Actions.waitSeconds(1.0);
+        public final Action run = Actions.waitSeconds(Seconds.of(1.0));
 
         @Telemetry("status/ready")
         boolean ready() {

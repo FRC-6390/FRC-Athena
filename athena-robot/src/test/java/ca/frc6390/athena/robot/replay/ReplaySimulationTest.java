@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot.replay;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -125,8 +127,8 @@ class ReplaySimulationTest {
                 .statorCurrentLimit(Units.Amps.of(50));
         private final Action intake;
         private final Action clearJam = Actions.sequence()
-                .forTime(0.12, roller.percent(-0.6))
-                .forTime(0.04, roller.neutral());
+                .forTime(Seconds.of(0.12), roller.percent(-0.6))
+                .forTime(Seconds.of(0.04), roller.neutral());
         private final HookBinding run;
         private final HookBinding recover = Events.when(roller.stall().forTime(Units.Seconds.of(0.06)))
                 .rising()

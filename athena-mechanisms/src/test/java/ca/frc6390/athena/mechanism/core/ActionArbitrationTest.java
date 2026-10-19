@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -43,7 +45,7 @@ class ActionArbitrationTest {
         for (Action conflicting : List.of(
                 Actions.parallel(ARM.percent(0.25), ARM.voltage(Units.Volts.of(4.0))),
                 Actions.race(ARM.percent(0.25), ARM.voltage(Units.Volts.of(4.0))),
-                Actions.deadline(Actions.waitSeconds(1.0).then(ARM.percent(0.25)), ARM.voltage(Units.Volts.of(4.0))))) {
+                Actions.deadline(Actions.waitSeconds(Seconds.of(1.0)).then(ARM.percent(0.25)), ARM.voltage(Units.Volts.of(4.0))))) {
             IllegalArgumentException error = assertThrows(
                     IllegalArgumentException.class, () -> scheduler.request(conflicting));
             String message = error.getMessage();
@@ -62,7 +64,7 @@ class ActionArbitrationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
         Action conflicting = Actions.sequence()
                 .start(ARM.percent(0.20))
-                .forTime(0.5, ARM.percent(0.80));
+                .forTime(Seconds.of(0.5), ARM.percent(0.80));
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class, () -> scheduler.request(conflicting));
@@ -100,7 +102,7 @@ class ActionArbitrationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext()).register(mechanism);
 
         assertDoesNotThrow(() -> scheduler.request(Actions.sequence()
-                .forTime(0.1, mechanism.firstArm)
+                .forTime(Seconds.of(0.1), mechanism.firstArm)
                 .then(mechanism.secondArm)));
         assertDoesNotThrow(() -> scheduler.request(Actions.parallel(
                 mechanism.firstArm, mechanism.rollers)));

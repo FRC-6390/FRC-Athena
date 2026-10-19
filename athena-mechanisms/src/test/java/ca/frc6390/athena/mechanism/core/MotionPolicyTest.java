@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -302,12 +304,12 @@ class MotionPolicyTest {
         assertFalse(Actions.isBounded(open));
         assertFalse(Actions.isBounded(Actions.waitUntil(() -> true)));
         assertTrue(Actions.isBounded(open.atMost(Duration.ofMillis(300))));
-        assertTrue(Actions.isBounded(Actions.timeout(open, 1.0)));
-        assertTrue(Actions.isBounded(Actions.sequence().forTime(1.0, open)));
+        assertTrue(Actions.isBounded(Actions.timeout(open, Seconds.of(1.0))));
+        assertTrue(Actions.isBounded(Actions.sequence().forTime(Seconds.of(1.0), open)));
         assertFalse(Actions.isBounded(Actions.sequence().until(() -> true, open)));
         assertTrue(Actions.isBounded(Actions.fault("stop")));
         assertTrue(Actions.isBounded(Actions.neutral()));
-        assertTrue(Actions.isBounded(Actions.waitSeconds(0.5)));
+        assertTrue(Actions.isBounded(Actions.waitSeconds(Seconds.of(0.5))));
         assertTrue(Actions.isBounded(Actions.race(open.atMost(Duration.ofSeconds(1)), open)));
         assertFalse(Actions.isBounded(Actions.parallel(open.atMost(Duration.ofSeconds(1)), open)));
     }
@@ -316,7 +318,7 @@ class MotionPolicyTest {
     void nestedInterruptPolicyIsRejected() {
         ControlBinding<?> arm = stationaryArm();
         Action policied = arm.position(1.0).atMost(Duration.ofSeconds(1)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action nested = Actions.parallel(policied, Actions.waitSeconds(0.1));
+        Action nested = Actions.parallel(policied, Actions.waitSeconds(Seconds.of(0.1)));
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext())
                 .register(new Holder(arm, ARM_ENCODER));
         assertThrows(IllegalArgumentException.class, () -> scheduler.request(nested));
@@ -325,16 +327,16 @@ class MotionPolicyTest {
     @Test
     void retargetPolicyRejectsNonControlActions() {
         assertThrows(IllegalArgumentException.class,
-                () -> Actions.waitSeconds(1.0).retarget(Retarget.SMOOTH));
+                () -> Actions.waitSeconds(Seconds.of(1.0)).retarget(Retarget.SMOOTH));
     }
 
     @Test
     void attemptUsesTheFirstSuccessfulStep() {
         boolean[] ran = {false, false, false};
         Action chain = Actions.attempt(Actions.run(() -> ran[0] = true))
-                .within(0.5)
+                .within(Seconds.of(0.5))
                 .orTry(Actions.run(() -> ran[1] = true))
-                .within(0.5)
+                .within(Seconds.of(0.5))
                 .orElse(Actions.run(() -> ran[2] = true));
         runChain(chain, 0.2);
         assertTrue(ran[0]);
@@ -346,9 +348,9 @@ class MotionPolicyTest {
     void attemptMovesOnWhenAStepMissesItsTimeLimit() {
         boolean[] ran = {false, false, false};
         Action chain = Actions.attempt(Actions.waitUntil(() -> false))
-                .within(0.1)
+                .within(Seconds.of(0.1))
                 .orTry(Actions.run(() -> ran[1] = true))
-                .within(0.5)
+                .within(Seconds.of(0.5))
                 .orElse(Actions.run(() -> ran[2] = true));
         runChain(chain, 0.5);
         assertTrue(ran[1], "the second attempt runs after the first times out");
@@ -359,9 +361,9 @@ class MotionPolicyTest {
     void attemptRunsTheFallbackWhenEveryStepFails() {
         boolean[] ran = {false};
         Action chain = Actions.attempt(Actions.waitUntil(() -> false))
-                .within(0.1)
+                .within(Seconds.of(0.1))
                 .orTry(Actions.waitUntil(() -> false))
-                .within(0.1)
+                .within(Seconds.of(0.1))
                 .orElse(Actions.run(() -> ran[0] = true));
         runChain(chain, 0.5);
         assertTrue(ran[0]);

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -286,8 +288,8 @@ class ActionFuzzTest {
 
     record Out(Raw raw, int ticks) implements Node {
         public Action build(Rig rig) {
-            if (raw == null) return Actions.waitSeconds(ticks * DT);
-            return raw.build().timeout(ticks * DT);
+            if (raw == null) return Actions.waitSeconds(Seconds.of(ticks * DT));
+            return raw.build().timeout(Seconds.of(ticks * DT));
         }
 
         public int duration() {
@@ -307,7 +309,7 @@ class ActionFuzzTest {
 
     record Wait(int ticks, boolean sequenceStep) implements Node {
         public Action build(Rig rig) {
-            return Actions.waitSeconds(ticks * DT);
+            return Actions.waitSeconds(Seconds.of(ticks * DT));
         }
 
         public int duration() {
@@ -427,7 +429,7 @@ class ActionFuzzTest {
 
     record Timeout(Node child, int ticks) implements Node {
         public Action build(Rig rig) {
-            return child.build(rig).timeout(ticks * DT);
+            return child.build(rig).timeout(Seconds.of(ticks * DT));
         }
 
         public int duration() {
@@ -547,10 +549,10 @@ class ActionFuzzTest {
             Actions.Sequence sequence = Actions.sequence();
             for (Node step : steps) {
                 if (step instanceof ForTime forTime) {
-                    sequence = sequence.forTime(forTime.ticks * DT,
+                    sequence = sequence.forTime(Seconds.of(forTime.ticks * DT),
                             forTime.raw == null ? Actions.waitUntil(() -> false) : forTime.raw.build());
                 } else if (step instanceof Wait wait && wait.sequenceStep()) {
-                    sequence = sequence.waitSeconds(wait.ticks() * DT);
+                    sequence = sequence.waitSeconds(Seconds.of(wait.ticks() * DT));
                 } else if (step instanceof DoOnce doOnce) {
                     sequence = sequence.doOnce(() -> rig.ran(doOnce));
                 } else {

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.choreo;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -46,10 +48,10 @@ class ChoreoPathProviderTest {
         FakeClient client = new FakeClient(Map.of("Score", trajectory()));
         AtomicInteger resetCalls = new AtomicInteger();
         AtomicInteger followCalls = new AtomicInteger();
-        Action reset = Actions.waitSeconds(0.0);
-        Action drive = Actions.waitSeconds(1.0);
-        Action intake = Actions.waitSeconds(2.0);
-        Action shoot = Actions.waitSeconds(3.0);
+        Action reset = Actions.waitSeconds(Seconds.of(0.0));
+        Action drive = Actions.waitSeconds(Seconds.of(1.0));
+        Action intake = Actions.waitSeconds(Seconds.of(2.0));
+        Action shoot = Actions.waitSeconds(Seconds.of(3.0));
         ChoreoPathProvider provider = new ChoreoPathProvider(
                 client,
                 Pose2d::new,
@@ -82,7 +84,7 @@ class ChoreoPathProviderTest {
         FakeClient client = new FakeClient(Map.of("Score", trajectory()));
         AtomicInteger resetCalls = new AtomicInteger();
         AtomicInteger followCalls = new AtomicInteger();
-        Action reset = Actions.waitSeconds(0.0);
+        Action reset = Actions.waitSeconds(Seconds.of(0.0));
         ChoreoPathProvider provider = new ChoreoPathProvider(
                 client,
                 Pose2d::new,

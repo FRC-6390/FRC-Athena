@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -189,7 +191,7 @@ class ActionLifecycleContractTest {
         private final MotorDevice arm = ARM;
         private final Action holdArm = arm.percent(0.25);
         private final Action overrideArm = arm.percent(-0.80);
-        private final Action timedArm = arm.percent(0.60).timeout(0.02);
+        private final Action timedArm = arm.percent(0.60).timeout(Seconds.of(0.02));
     }
 
     private static final class BranchMechanism implements Mechanism {

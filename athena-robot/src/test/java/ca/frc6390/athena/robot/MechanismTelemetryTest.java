@@ -1,5 +1,7 @@
 package ca.frc6390.athena.robot;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -263,7 +265,7 @@ class MechanismTelemetryTest {
     }
 
     private static final class DashboardMechanism implements Mechanism {
-        public final Action run = ca.frc6390.athena.mechanism.core.Actions.waitSeconds(1.0);
+        public final Action run = ca.frc6390.athena.mechanism.core.Actions.waitSeconds(Seconds.of(1.0));
         @Telemetry("calibration/zero")
         private final Action zero = ca.frc6390.athena.mechanism.core.Actions.neutral();
         private final Action internal = ca.frc6390.athena.mechanism.core.Actions.neutral();

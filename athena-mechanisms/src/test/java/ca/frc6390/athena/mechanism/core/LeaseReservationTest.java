@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,7 +34,7 @@ class LeaseReservationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
         scheduler.path(path, new OwnedPath(0.1, List.of(robot.pooledDrive), robot.pooledDrive));
         scheduler.declarationOwner(path, robot);
-        Action auto = Actions.sequence().run(path).forTime(10.0, robot.faceHub);
+        Action auto = Actions.sequence().run(path).forTime(Seconds.of(10.0), robot.faceHub);
 
         scheduler.teleopPeriodic(0.00, 0.02);
         scheduler.request(auto);
@@ -58,8 +60,8 @@ class LeaseReservationTest {
         scheduler.declarationOwner(path, robot);
         Action auto = Actions.sequence()
                 .run(path)
-                .forTime(0.1, INTAKE.percent(0.6))
-                .forTime(1.0, TURRET.percent(0.4));
+                .forTime(Seconds.of(0.1), INTAKE.percent(0.6))
+                .forTime(Seconds.of(1.0), TURRET.percent(0.4));
 
         // Homing starts at autonomous init; the auto is requested on the first periodic cycle.
         scheduler.periodic(
@@ -91,7 +93,7 @@ class LeaseReservationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
         Action auto = Actions.sequence()
                 .until(() -> advance[0], ARM.percent(0.3))
-                .forTime(1.0, ARM.percent(0.5));
+                .forTime(Seconds.of(1.0), ARM.percent(0.5));
 
         scheduler.teleopPeriodic(0.0, 0.02);
         assertEquals(-0.9, hardware.motor(ARM).percent, 1.0e-9);
@@ -112,7 +114,7 @@ class LeaseReservationTest {
         RecordingContext hardware = new RecordingContext();
         ArmRobot robot = new ArmRobot(new boolean[] {false});
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
-        Action auto = Actions.sequence().forTime(0.04, robot.collect).waitSeconds(10.0);
+        Action auto = Actions.sequence().forTime(Seconds.of(0.04), robot.collect).waitSeconds(Seconds.of(10.0));
 
         scheduler.request(auto);
         scheduler.teleopPeriodic(0.0, 0.02);
@@ -132,7 +134,7 @@ class LeaseReservationTest {
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
         Action auto = Actions.sequence()
                 .doOnce(() -> scheduler.request(robot.collect))
-                .waitSeconds(10.0);
+                .waitSeconds(Seconds.of(10.0));
 
         scheduler.request(auto);
         scheduler.teleopPeriodic(0.0, 0.02);
@@ -156,7 +158,7 @@ class LeaseReservationTest {
         Action auto = Actions.sequence()
                 .run(intakePath("IntakeA"))
                 .run(drivePath("DriveStep"))
-                .timeout(30.0);
+                .timeout(Seconds.of(30.0));
         assertConcurrentDriveHeldWhileDrivePathRuns(auto, 0.5, () -> done[0] = true);
     }
 
@@ -167,7 +169,7 @@ class LeaseReservationTest {
                 .run(intakePath("IntakeA"))
                 .then(intakePath("IntakeB"))
                 .then(drivePath("DriveThen").until(() -> done[0]).then(intakePath("IntakeY")))
-                .timeout(30.0);
+                .timeout(Seconds.of(30.0));
         assertConcurrentDriveHeldWhileDrivePathRuns(auto, 1000.0, () -> done[0] = true);
     }
 
@@ -179,7 +181,7 @@ class LeaseReservationTest {
                 .then(intakePath("IntakeB"))
                 .then(intakePath("IntakeC"))
                 .then(drivePath("DriveLate").until(() -> done[0]))
-                .timeout(30.0);
+                .timeout(Seconds.of(30.0));
         assertConcurrentDriveHeldWhileDrivePathRuns(auto, 1000.0, () -> done[0] = true);
     }
 

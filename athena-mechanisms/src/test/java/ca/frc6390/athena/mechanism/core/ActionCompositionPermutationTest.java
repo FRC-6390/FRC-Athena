@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -91,7 +93,7 @@ class ActionCompositionPermutationTest {
             for (GroupCase group : GroupCase.values()) {
                 for (int position = 0; position < 2; position++) {
                     Action wrapped = finite.factory.get();
-                    Action companion = Actions.waitSeconds(PERIOD_SECONDS);
+                    Action companion = Actions.waitSeconds(Seconds.of(PERIOD_SECONDS));
                     Action composition = position == 0
                             ? group.compose(wrapped, companion)
                             : group.compose(companion, wrapped);
@@ -113,9 +115,9 @@ class ActionCompositionPermutationTest {
             for (GroupCase inner : GroupCase.values()) {
                 for (int innerPosition = 0; innerPosition < 2; innerPosition++) {
                     Action innerGroup = inner.compose(
-                            Actions.waitSeconds(0.0),
-                            Actions.waitSeconds(PERIOD_SECONDS));
-                    Action outerCompanion = Actions.waitSeconds(2.0 * PERIOD_SECONDS);
+                            Actions.waitSeconds(Seconds.of(0.0)),
+                            Actions.waitSeconds(Seconds.of(PERIOD_SECONDS)));
+                    Action outerCompanion = Actions.waitSeconds(Seconds.of(2.0 * PERIOD_SECONDS));
                     Action composition = innerPosition == 0
                             ? outer.compose(innerGroup, outerCompanion)
                             : outer.compose(outerCompanion, innerGroup);
@@ -163,22 +165,22 @@ class ActionCompositionPermutationTest {
     }
 
     private static List<FiniteCase> finiteCases() {
-        Action stableWait = Actions.waitSeconds(PERIOD_SECONDS);
+        Action stableWait = Actions.waitSeconds(Seconds.of(PERIOD_SECONDS));
         return List.of(
                 new FiniteCase("doOnce", () -> Actions.doOnce(() -> { })),
-                new FiniteCase("waitSeconds", () -> Actions.waitSeconds(PERIOD_SECONDS)),
+                new FiniteCase("waitSeconds", () -> Actions.waitSeconds(Seconds.of(PERIOD_SECONDS))),
                 new FiniteCase("waitUntil", () -> Actions.waitUntil(ctx -> ctx.timeInStateSeconds() >= PERIOD_SECONDS)),
-                new FiniteCase("timeout", () -> Actions.timeout(Actions.neutral(), PERIOD_SECONDS)),
+                new FiniteCase("timeout", () -> Actions.timeout(Actions.neutral(), Seconds.of(PERIOD_SECONDS))),
                 new FiniteCase("until", () -> Actions.until(
                         ctx -> ctx.timeInStateSeconds() >= PERIOD_SECONDS, Actions.neutral())),
                 new FiniteCase("then", () -> Actions.then(Actions.doOnce(() -> { }),
-                        Actions.waitSeconds(PERIOD_SECONDS))),
+                        Actions.waitSeconds(Seconds.of(PERIOD_SECONDS)))),
                 new FiniteCase("sequence", () -> Actions.sequence()
                         .doOnce(() -> { })
-                        .waitSeconds(PERIOD_SECONDS)),
+                        .waitSeconds(Seconds.of(PERIOD_SECONDS))),
                 new FiniteCase("choice", () -> Actions.when(() -> true)
-                        .run(Actions.waitSeconds(PERIOD_SECONDS))
-                        .otherwise(Actions.neutral().timeout(PERIOD_SECONDS))),
+                        .run(Actions.waitSeconds(Seconds.of(PERIOD_SECONDS)))
+                        .otherwise(Actions.neutral().timeout(Seconds.of(PERIOD_SECONDS)))),
                 new FiniteCase("computed", () -> Actions.compute(() -> stableWait, new Object())),
                 new FiniteCase("hardwareComputed", () -> Actions.computeHardware(List.of(), ignored -> stableWait)));
     }
@@ -249,7 +251,7 @@ class ActionCompositionPermutationTest {
         private static Scenario waiting(int ticks) {
             int safeTicks = Math.max(0, ticks);
             return new Scenario(
-                    Actions.waitSeconds(safeTicks * PERIOD_SECONDS),
+                    Actions.waitSeconds(Seconds.of(safeTicks * PERIOD_SECONDS)),
                     safeTicks,
                     "wait(" + safeTicks + ")");
         }

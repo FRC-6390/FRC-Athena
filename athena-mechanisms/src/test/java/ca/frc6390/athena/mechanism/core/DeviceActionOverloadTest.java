@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -63,7 +65,7 @@ class DeviceActionOverloadTest {
     void chainedActionMethodsAfterDeclarationCompose() {
         Action base = MOTOR.percent(0.1);
         // Action-only methods must remain callable after a declaration is composed in.
-        Action chained = base.then(ENCODER.setPosition(0.0)).then(MOTOR.neutral()).timeout(2.0).until(() -> true);
+        Action chained = base.then(ENCODER.setPosition(0.0)).then(MOTOR.neutral()).timeout(Seconds.of(2.0)).until(() -> true);
         assertInstanceOf(Action.class, chained);
     }
 

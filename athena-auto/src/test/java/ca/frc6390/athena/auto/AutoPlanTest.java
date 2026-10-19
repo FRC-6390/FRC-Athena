@@ -1,5 +1,7 @@
 package ca.frc6390.athena.auto;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class AutoPlanTest {
     @Test
     void extractsOrderedPathsMarkersAndBothConditionalBranches() {
-        Action first = Paths.choreo("first").marker("collect", Actions.waitSeconds(0.2));
+        Action first = Paths.choreo("first").marker("collect", Actions.waitSeconds(Seconds.of(0.2)));
         Action action = Actions.sequence()
                 .run(first)
                 .then(Actions.when(() -> true)
@@ -49,13 +51,13 @@ class AutoPlanTest {
         Action armMove = arm.position(1.0)
                 .effort(Units.Amps.of(10))
                 .untilWithin(0.1)
-                .settled(0.2)
+                .settled(Seconds.of(0.2))
                 .maxVelocity(0.5);
         Action action = Actions.sequence()
-                .run(Actions.deadline(Paths.choreo("approach").marker("intake", Actions.waitSeconds(0.2)), armMove))
+                .run(Actions.deadline(Paths.choreo("approach").marker("intake", Actions.waitSeconds(Seconds.of(0.2))), armMove))
                 .then(Actions.race(
-                        Actions.waitSeconds(2.0),
-                        Paths.choreo("score").marker("shoot", Actions.timeout(motor.percent(0.5), 1.0))));
+                        Actions.waitSeconds(Seconds.of(2.0)),
+                        Paths.choreo("score").marker("shoot", Actions.timeout(motor.percent(0.5), Seconds.of(1.0)))));
 
         AutoPlan plan = AutoPlan.inspect(action);
         String steps = String.join("\n", plan.steps());

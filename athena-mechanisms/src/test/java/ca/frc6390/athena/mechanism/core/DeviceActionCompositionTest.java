@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -23,8 +25,8 @@ class DeviceActionCompositionTest {
     void deviceActionCompositionReturnsMechanismTypesWithoutReflection() {
         assertInstanceOf(MechanismDeviceActions.class, DeviceActionFactories.get());
 
-        Actions.Timeout timeout = assertInstanceOf(Actions.Timeout.class, MOTOR.percent(0.2).timeout(0.5));
-        assertEquals(0.5, timeout.seconds());
+        Actions.Timeout timeout = assertInstanceOf(Actions.Timeout.class, MOTOR.percent(0.2).timeout(Seconds.of(0.5)));
+        assertEquals(0.5, timeout.duration().in(Seconds));
 
         Actions.Then then = assertInstanceOf(Actions.Then.class, MOTOR.percent(0.2).then(MOTOR.neutral()));
         assertInstanceOf(Actions.MotorNeutral.class, then.next());

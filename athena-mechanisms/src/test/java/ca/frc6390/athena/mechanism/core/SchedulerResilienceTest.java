@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -21,7 +23,7 @@ class SchedulerResilienceTest {
     @Test
     void timeoutInterruptsRunningChildOnce() {
         RecordingPath path = new RecordingPath("timeout");
-        MechanismRuntime runtime = runtime(path.action.timeout(0.02), path);
+        MechanismRuntime runtime = runtime(path.action.timeout(Seconds.of(0.02)), path);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -33,7 +35,7 @@ class SchedulerResilienceTest {
     @Test
     void raceInterruptsRunningLoserOnce() {
         RecordingPath path = new RecordingPath("race");
-        MechanismRuntime runtime = runtime(Actions.race(Actions.waitSeconds(0.02), path.action), path);
+        MechanismRuntime runtime = runtime(Actions.race(Actions.waitSeconds(Seconds.of(0.02)), path.action), path);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -45,7 +47,7 @@ class SchedulerResilienceTest {
     @Test
     void deadlineInterruptsRunningCompanionOnce() {
         RecordingPath path = new RecordingPath("deadline");
-        MechanismRuntime runtime = runtime(Actions.deadline(Actions.waitSeconds(0.02), path.action), path);
+        MechanismRuntime runtime = runtime(Actions.deadline(Actions.waitSeconds(Seconds.of(0.02)), path.action), path);
 
         runtime.periodic(contextAt(0.0), EventContext.empty());
         runtime.periodic(contextAt(0.02), EventContext.empty());
@@ -105,7 +107,7 @@ class SchedulerResilienceTest {
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.Channel channel = pool.channel();
         Action contribution = Actions.contributeVelocity(
-                channel, () -> RobotVelocity.angular(1.0), Actions.waitSeconds(0.02));
+                channel, () -> RobotVelocity.angular(1.0), Actions.waitSeconds(Seconds.of(0.02)));
         MechanismRuntime runtime = MechanismRuntime.of(new TestMechanism(contribution), ActionContext.empty());
         runtime.set(contribution);
 

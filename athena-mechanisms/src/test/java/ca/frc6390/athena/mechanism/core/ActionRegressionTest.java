@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -46,8 +48,8 @@ class ActionRegressionTest {
     void onlyIfFalseSkipsInsideASequence() {
         Probe probe = new Probe();
         Action seq = Actions.sequence()
-                .run(Actions.onlyIf(() -> false, Actions.waitSeconds(0.1)))
-                .run(pct(arm, 0.4).timeout(1.0));
+                .run(Actions.onlyIf(() -> false, Actions.waitSeconds(Seconds.of(0.1))))
+                .run(pct(arm, 0.4).timeout(Seconds.of(1.0)));
         probe.scheduler.request(seq);
         for (int i = 0; i < 3; i++) probe.tick();
         assertEquals(0.4, probe.percent(arm), 1e-9, "false when() branch stalls the sequence forever");
@@ -58,8 +60,8 @@ class ActionRegressionTest {
         Probe probe = new Probe();
         boolean[] cond = {true};
         Action choice = Actions.either(() -> cond[0],
-                Actions.sequence().forTime(0.1, pct(arm, 0.2)).run(pct(arm, 0.6).timeout(1)),
-                pct(arm, -0.9).timeout(1));
+                Actions.sequence().forTime(Seconds.of(0.1), pct(arm, 0.2)).run(pct(arm, 0.6).timeout(Seconds.of(1))),
+                pct(arm, -0.9).timeout(Seconds.of(1)));
         probe.scheduler.request(choice);
         probe.tick();
         cond[0] = false;
@@ -70,7 +72,7 @@ class ActionRegressionTest {
     @Test
     void disabledTimeDoesNotCountTowardWaits() {
         Probe probe = new Probe();
-        Action seq = Actions.sequence().waitSeconds(1.0).run(pct(arm, 0.7).timeout(1));
+        Action seq = Actions.sequence().waitSeconds(Seconds.of(1.0)).run(pct(arm, 0.7).timeout(Seconds.of(1)));
         probe.scheduler.request(seq);
         probe.tick();
         for (int i = 0; i < 100; i++) probe.disabledTick();
@@ -80,8 +82,8 @@ class ActionRegressionTest {
 
     @Test
     void sequenceThenDoesNotMutateTheSharedSequence() {
-        Action base = Actions.sequence().run(pct(arm, 0.1).timeout(0.1));
-        Action a = ((Actions.Sequence) base).then(pct(roller, 0.2).timeout(0.1));
+        Action base = Actions.sequence().run(pct(arm, 0.1).timeout(Seconds.of(0.1)));
+        Action a = ((Actions.Sequence) base).then(pct(roller, 0.2).timeout(Seconds.of(0.1)));
         assertEquals(null, ((Actions.Sequence) base).next(), "then() mutated the shared sequence");
         assertEquals(false, a == base);
     }
@@ -95,7 +97,7 @@ class ActionRegressionTest {
         probe.scheduler.request(rollerRun);
         probe.tick();
         // A lease that re-requests (restarts) an older lease while evaluating.
-        Action kicker = Actions.cycle().run(Actions.doOnce(() -> probe.scheduler.request(other)).then(Actions.waitSeconds(0.04)));
+        Action kicker = Actions.cycle().run(Actions.doOnce(() -> probe.scheduler.request(other)).then(Actions.waitSeconds(Seconds.of(0.04))));
         probe.scheduler.request(kicker);
         for (int i = 0; i < 6; i++) {
             probe.tick();
@@ -138,9 +140,9 @@ class ActionRegressionTest {
         private final MotorDevice rollerMotor = roller;
         private final boolean[] pressed = {false};
         private final boolean[] held = {false};
-        private final Action pressAction = pct(arm, 0.3).timeout(0.06);
+        private final Action pressAction = pct(arm, 0.3).timeout(Seconds.of(0.06));
         private final Action heldAction = Actions.sequence()
-                .forTime(0.04, pct(roller, 0.2))
+                .forTime(Seconds.of(0.04), pct(roller, 0.2))
                 .run(pct(roller, 0.6));
         private final HookBinding onPress = Events.when(() -> pressed[0]).rising().onStart(pressAction);
         private final HookBinding whileHeld = Events.when(() -> held[0]).active().whileActive(heldAction);

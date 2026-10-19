@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,13 +31,13 @@ class ActionStructureTest {
                         "SEQUENCE", List.of("step", "step", "then")),
                 // timeout() wraps what was built so far in a Timeout stage of a new sequence.
                 new Case("sequence with timeout",
-                        Actions.sequence().run(leaf).timeout(3.0),
+                        Actions.sequence().run(leaf).timeout(Seconds.of(3.0)),
                         "SEQUENCE", List.of("step")),
                 new Case("sequence timeout stage",
-                        Actions.sequence().run(leaf).timeout(3.0).children().get(0).action(),
+                        Actions.sequence().run(leaf).timeout(Seconds.of(3.0)).children().get(0).action(),
                         "TIMEOUT 3.0s", List.of("body")),
                 new Case("cycle",
-                        Actions.cycle().run(leaf).forTime(0.1, other),
+                        Actions.cycle().run(leaf).forTime(Seconds.of(0.1), other),
                         "CYCLE", List.of("step", "step")),
                 new Case("parallel",
                         Actions.parallel(leaf, other),
@@ -53,7 +55,7 @@ class ActionStructureTest {
                         Actions.when(NEVER).run(leaf),
                         "CONDITIONAL", List.of("true")),
                 new Case("timeout",
-                        Actions.timeout(leaf, 2.0),
+                        Actions.timeout(leaf, Seconds.of(2.0)),
                         "TIMEOUT 2.0s", List.of("body")),
                 new Case("until",
                         Actions.until(NEVER, leaf),
@@ -68,7 +70,7 @@ class ActionStructureTest {
                         position.position(1.0).untilWithin(0.1),
                         "WITHIN 0.1", List.of("body")),
                 new Case("within tolerance settled and velocity limited",
-                        position.position(1.0).untilWithin(0.1).settled(0.2).maxVelocity(3.0),
+                        position.position(1.0).untilWithin(0.1).settled(Seconds.of(0.2)).maxVelocity(3.0),
                         "WITHIN 0.1 settled 0.2s maxVelocity 3.0", List.of("body")),
                 new Case("interruptible",
                         leaf.interruptible(Interrupt.ANYTIME),
@@ -77,7 +79,7 @@ class ActionStructureTest {
                         position.position(1.0).effort(Units.Amps.of(10)),
                         "POSITION 1.0 effort 10.0A", List.of()),
                 new Case("wait",
-                        Actions.waitSeconds(1.5),
+                        Actions.waitSeconds(Seconds.of(1.5)),
                         "WAIT 1.5s", List.of()),
                 new Case("motor leaf",
                         leaf,
@@ -106,7 +108,7 @@ class ActionStructureTest {
 
     @Test
     void pathMarkersAreChildrenAndTheLabelShowsResetMode() {
-        Actions.Timeout marker = (Actions.Timeout) Actions.timeout(MOTOR.percent(0.2), 1.0);
+        Actions.Timeout marker = (Actions.Timeout) Actions.timeout(MOTOR.percent(0.2), Seconds.of(1.0));
         PathAction path = new PathAction("choreo", "first").marker("collect", marker);
 
         assertEquals(List.of("marker:collect"), roles(path));

@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -116,7 +118,7 @@ class LifecycleActionTest {
                 .until(() -> ++cycles[0] >= 2)
                 .onEnd(interrupted -> events.add("end:" + interrupted))
                 .build();
-        Action auto = Actions.sequence().run(step).forTime(0.04, ARM.percent(0.5));
+        Action auto = Actions.sequence().run(step).forTime(Seconds.of(0.04), ARM.percent(0.5));
 
         scheduler.request(auto);
         scheduler.teleopPeriodic(0.0, 0.02);
@@ -137,7 +139,7 @@ class LifecycleActionTest {
                 .onEnd(interrupted -> events.add("end:" + interrupted))
                 .build();
 
-        scheduler.request(Actions.race(watch, Actions.waitSeconds(0.04)));
+        scheduler.request(Actions.race(watch, Actions.waitSeconds(Seconds.of(0.04))));
         for (int cycle = 0; cycle < 5; cycle++) scheduler.teleopPeriodic(cycle * 0.02, 0.02);
 
         // The lifecycle executes in the cycle the wait completes, before the race ends it.
@@ -152,7 +154,7 @@ class LifecycleActionTest {
         Action spin = Actions.lifecycle("spin")
                 .onEnd(interrupted -> events.add("end:" + interrupted))
                 .build()
-                .timeout(0.04);
+                .timeout(Seconds.of(0.04));
 
         scheduler.request(spin);
         for (int cycle = 0; cycle < 5; cycle++) scheduler.teleopPeriodic(cycle * 0.02, 0.02);

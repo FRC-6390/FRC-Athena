@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.staging;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -57,7 +59,7 @@ class StagingTest {
     @Test
     void worstTrueStageIsEnteredImmediatelyAndCapsFollowStage() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         flags.strained = true;
         flags.hot = true;
@@ -69,7 +71,7 @@ class StagingTest {
     @Test
     void exitRequiresConditionFalseForExitAfter() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         flags.hot = true;
         staging.evaluate(0.0, host);
@@ -84,7 +86,7 @@ class StagingTest {
     @Test
     void conditionFlickerRestartsExitDelay() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         flags.hot = true;
         staging.evaluate(0.0, host);
@@ -103,7 +105,7 @@ class StagingTest {
     @Test
     void worstRemainingTrueStageIsEnteredAfterExitDelay() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         flags.strained = true;
         flags.hot = true;
@@ -118,7 +120,7 @@ class StagingTest {
     @Test
     void overrideForcesInitialStageUntilReleased() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         flags.hot = true;
         flags.override = true;
@@ -132,7 +134,7 @@ class StagingTest {
     @Test
     void stageActionsAreRequestedOnEntryAndCancelledOnExit() {
         Flags flags = new Flags();
-        Action hotAction = Actions.waitSeconds(1);
+        Action hotAction = Actions.waitSeconds(Seconds.of(1));
         Staging<Health> staging = staging(flags, hotAction);
         Host host = new Host();
         flags.hot = true;
@@ -147,7 +149,7 @@ class StagingTest {
     @Test
     void modifiersApplyOnlyWhileTheirStageIsCurrent() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         assertTrue(staging.activeModifiers().isEmpty());
         flags.strained = true;
@@ -170,8 +172,8 @@ class StagingTest {
     @Test
     void gatedStagingIsActiveOnlyWhileGateActionRuns() {
         Flags flags = new Flags();
-        Action gate = Actions.waitSeconds(2);
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Action gate = Actions.waitSeconds(Seconds.of(2));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         Host host = new Host();
         staging.gate(gate);
         flags.hot = true;
@@ -190,9 +192,9 @@ class StagingTest {
     @Test
     void invalidDeclarationsAreRejected() {
         Flags flags = new Flags();
-        Staging<Health> staging = staging(flags, Actions.waitSeconds(1));
+        Staging<Health> staging = staging(flags, Actions.waitSeconds(Seconds.of(1)));
         assertThrows(IllegalArgumentException.class,
-                () -> staging.stage(Health.HOT, () -> true, Actions.waitSeconds(1)));
+                () -> staging.stage(Health.HOT, () -> true, Actions.waitSeconds(Seconds.of(1))));
         assertThrows(IllegalArgumentException.class,
                 () -> staging.stage(Health.NORMAL, () -> true, ANGLE.limitEffort(0.5)));
         assertThrows(IllegalArgumentException.class, () -> ANGLE.limitEffort(1.5));

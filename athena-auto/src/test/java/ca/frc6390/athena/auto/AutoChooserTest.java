@@ -1,5 +1,7 @@
 package ca.frc6390.athena.auto;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,7 +36,7 @@ class AutoChooserTest {
 
     @Test
     void validatesDuplicateAndUnknownNames() {
-        Action action = Actions.waitSeconds(1.0);
+        Action action = Actions.waitSeconds(Seconds.of(1.0));
         AutoChooser chooser = Autos.chooser("Autos").defaultAuto("Score", action);
 
         assertThrows(IllegalArgumentException.class, () -> chooser.auto(" Score ", action));
@@ -43,7 +45,7 @@ class AutoChooserTest {
 
     @Test
     void ignoresStaleExternalDashboardSelections() {
-        Action action = Actions.waitSeconds(1.0);
+        Action action = Actions.waitSeconds(Seconds.of(1.0));
         AutoChooser chooser = Autos.chooser().defaultAuto("Current", action);
 
         assertEquals(false, chooser.selectIfPresent(null));
@@ -54,7 +56,7 @@ class AutoChooserTest {
 
     @Test
     void stopReturnsTheExactRunningAction() {
-        Action action = Actions.waitSeconds(1.0);
+        Action action = Actions.waitSeconds(Seconds.of(1.0));
         AutoChooser chooser = Autos.chooser("Autos").defaultAuto("Score", action);
 
         chooser.start();
@@ -65,7 +67,7 @@ class AutoChooserTest {
 
     @Test
     void namesAutosFromPathOrActionTypeWhenNoLabelIsGiven() {
-        Action wait = Actions.waitSeconds(1.0);
+        Action wait = Actions.waitSeconds(Seconds.of(1.0));
         Action path = Actions.sequence().run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "ScoreTwo"));
         AutoChooser chooser = Autos.chooser()
                 .defaultAuto(path)
@@ -79,13 +81,13 @@ class AutoChooserTest {
     void disambiguatesDerivedNamesWhenAutosShareAFirstPath() {
         Action first = Actions.sequence()
                 .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
-                .waitSeconds(1.0);
+                .waitSeconds(Seconds.of(1.0));
         Action second = Actions.sequence()
                 .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
-                .waitSeconds(2.0);
+                .waitSeconds(Seconds.of(2.0));
         Action third = Actions.sequence()
                 .run(new ca.frc6390.athena.mechanism.core.PathAction("choreo", "Start"))
-                .waitSeconds(3.0);
+                .waitSeconds(Seconds.of(3.0));
 
         AutoChooser chooser = Autos.chooser().defaultAuto(first).auto(second).auto(third);
 

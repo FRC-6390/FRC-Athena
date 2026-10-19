@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -105,7 +107,7 @@ class MechanismRuntimeTest {
         DeclaredMotorMechanism mechanism = new DeclaredMotorMechanism(MOTOR);
         MechanismScheduler scheduler = MechanismScheduler.create(actions).register(mechanism)
                 .traceLevel(MechanismTraceLevel.CAPTURE).tracePeriodSeconds(0.0);
-        Action routine = Actions.sequence().forTime(0.02, MOTOR.percent(0.5));
+        Action routine = Actions.sequence().forTime(Seconds.of(0.02), MOTOR.percent(0.5));
         scheduler.request(routine);
 
         scheduler.teleopPeriodic(0.0, 0.02);
@@ -282,7 +284,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
                 Actions.sequence()
-                        .forTime(0.5, MOTOR.percent(0.25))
+                        .forTime(Seconds.of(0.5), MOTOR.percent(0.25))
                         .then(MOTOR.voltage(Units.Volts.of(6.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -301,11 +303,11 @@ class MechanismRuntimeTest {
     void delayedForTimeUsesStepEntryInsteadOfNestedChildEntry() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         Action changingChild = Actions.sequence()
-                .forTime(0.1, MOTOR.percent(0.4))
+                .forTime(Seconds.of(0.1), MOTOR.percent(0.4))
                 .then(MOTOR.percent(0.5));
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
-                .waitSeconds(10.0)
-                .forTime(5.0, changingChild)
+                .waitSeconds(Seconds.of(10.0))
+                .forTime(Seconds.of(5.0), changingChild)
                 .then(MOTOR.voltage(Units.Volts.of(7.0))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -325,10 +327,10 @@ class MechanismRuntimeTest {
     void nestedSequencesAndParallelsPreserveTheirOwnLifecycle() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
         Action firstBranch = Actions.sequence()
-                .forTime(0.2, MOTOR.percent(0.2));
+                .forTime(Seconds.of(0.2), MOTOR.percent(0.2));
         Action secondBranch = Actions.sequence()
-                .forTime(0.1, CHILD_MOTOR.percent(0.3))
-                .forTime(0.1, CHILD_MOTOR.percent(0.4));
+                .forTime(Seconds.of(0.1), CHILD_MOTOR.percent(0.3))
+                .forTime(Seconds.of(0.1), CHILD_MOTOR.percent(0.4));
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
                 .run(Actions.parallel(firstBranch, secondBranch))
                 .then(Actions.parallel(
@@ -353,11 +355,11 @@ class MechanismRuntimeTest {
     void cycleForTimeUsesCycleStepEntryAroundNestedActions() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         Action changingChild = Actions.sequence()
-                .forTime(0.1, MOTOR.percent(0.2))
+                .forTime(Seconds.of(0.1), MOTOR.percent(0.2))
                 .then(MOTOR.percent(0.3));
         TestMechanism mechanism = new TestMechanism(Actions.cycle()
-                .forTime(0.5, changingChild)
-                .forTime(0.5, MOTOR.percent(0.8)));
+                .forTime(Seconds.of(0.5), changingChild)
+                .forTime(Seconds.of(0.5), MOTOR.percent(0.8)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -373,9 +375,9 @@ class MechanismRuntimeTest {
     void sequenceStartCarriesActionThroughFollowingStagesAndReleasesWithSequence() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR, CHILD_MOTOR);
         Action routine = Actions.sequence()
-                .forTime(0.5, MOTOR.percent(0.2))
+                .forTime(Seconds.of(0.5), MOTOR.percent(0.2))
                 .start(CHILD_MOTOR.percent(0.6))
-                .waitSeconds(0.2)
+                .waitSeconds(Seconds.of(0.2))
                 .then(MOTOR.percent(0.8));
         TestMechanism mechanism = new TestMechanism(routine);
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
@@ -431,7 +433,7 @@ class MechanismRuntimeTest {
     void timeoutAndConditionMoveToNextState() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
-                Actions.timeout(MOTOR.percent(0.4), 0.3)
+                Actions.timeout(MOTOR.percent(0.4), Seconds.of(0.3))
                         .then(Actions.until(ctx -> ctx.nowSeconds() >= 1.0, MOTOR.percent(0.6))
                                 .then(MOTOR.voltage(Units.Volts.of(7.0)))));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
@@ -451,9 +453,9 @@ class MechanismRuntimeTest {
     void fluentTimeoutCanWrapAnEntireThenChain() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(
-                Actions.waitSeconds(0.2)
+                Actions.waitSeconds(Seconds.of(0.2))
                         .then(MOTOR.percent(0.4))
-                        .timeout(0.5));
+                        .timeout(Seconds.of(0.5)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
 
@@ -547,7 +549,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
-                .run(position.position(10.0).untilSettled(0.25, 0.1))
+                .run(position.position(10.0).untilSettled(0.25, Seconds.of(0.1)))
                 .then(MOTOR.percent(0.7)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -566,7 +568,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
-                .run(position.position(10.0).untilWithin(0.25).settled(0.1))
+                .run(position.position(10.0).untilWithin(0.25).settled(Seconds.of(0.1)))
                 .then(MOTOR.percent(0.7)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -590,7 +592,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         ControlBinding<?> position = Controls.position(MOTOR).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
-                .run(position.position(10.0).untilWithin(0.25).settled(0.1).maxVelocity(5.0))
+                .run(position.position(10.0).untilWithin(0.25).settled(Seconds.of(0.1)).maxVelocity(5.0))
                 .then(MOTOR.percent(0.7)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -815,7 +817,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
                 .doOnce(() -> actions.events++)
-                .forTime(0.02, MOTOR.percent(0.2))
+                .forTime(Seconds.of(0.02), MOTOR.percent(0.2))
                 .then(Actions.sequence()
                         .doOnce(() -> actions.events++)
                         .then(MOTOR.percent(0.8))));
@@ -836,7 +838,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         TestMechanism mechanism = new TestMechanism(Actions.sequence()
                 .doOnce(() -> actions.events++)
-                .then(Actions.waitSeconds(0.1))
+                .then(Actions.waitSeconds(Seconds.of(0.1)))
                 .then(Actions.doOnce(() -> actions.events++)));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -954,9 +956,9 @@ class MechanismRuntimeTest {
         MultiParentMechanism parent = new MultiParentMechanism(first, second);
         MechanismScheduler runtime = MechanismScheduler.create(actions).register(parent);
         Action requested = Actions.sequence()
-                .forTime(0.1, Actions.parallel(
+                .forTime(Seconds.of(0.1), Actions.parallel(
                         CHILD_MOTOR.percent(0.2),
-                        Actions.sequence().forTime(0.1, SECOND_CHILD_MOTOR.percent(0.3))))
+                        Actions.sequence().forTime(Seconds.of(0.1), SECOND_CHILD_MOTOR.percent(0.3))))
                 .then(Actions.parallel(
                         CHILD_MOTOR.percent(0.7),
                         SECOND_CHILD_MOTOR.percent(0.8)));
