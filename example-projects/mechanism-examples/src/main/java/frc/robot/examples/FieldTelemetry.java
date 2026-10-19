@@ -1,11 +1,13 @@
 package frc.robot.examples;
 
+import static edu.wpi.first.units.Units.Meters;
+
 import ca.frc6390.athena.mechanism.core.Mechanism;
 import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.runtime.geometry.Circle2d;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import ca.frc6390.athena.runtime.geometry.Polygon2d;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
 import java.util.Map;
@@ -26,13 +28,13 @@ public final class FieldTelemetry implements Mechanism, TelemetrySource {
     @Override
     public Map<String, TelemetryValue> telemetry() {
         return Map.of(
-                "field/robotKeepout", TelemetryValue.geometry(Circle2d.of(4.0, 4.0, 0.75)),
+                "field/robotKeepout", TelemetryValue.geometry(Circle2d.of(Meters.of(4.0), Meters.of(4.0), Meters.of(0.75))),
                 "field/loadingZone", TelemetryValue.geometry(new Rectangle2d(0.0, 0.0, 2.0, 3.0)),
                 "field/scoringZone", TelemetryValue.geometry(Polygon2d.of(
-                        new Point2d(13.0, 2.0),
-                        new Point2d(16.0, 1.0),
-                        new Point2d(16.0, 7.0),
-                        new Point2d(13.0, 6.0))),
+                        new Translation2d(13.0, 2.0),
+                        new Translation2d(16.0, 1.0),
+                        new Translation2d(16.0, 7.0),
+                        new Translation2d(13.0, 6.0))),
                 "computed/rangeSquared", TelemetryValue.number(() -> maximumRangeMeters * maximumRangeMeters));
     }
 }

@@ -1,5 +1,8 @@
 package frc.robot.vision;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Mechanism;
@@ -30,16 +33,16 @@ public final class TargetingExamples implements Mechanism {
         aim = Actions.compute(() -> {
             drive.targetingVelocity.set(targets.latest()
                     .map(target -> RobotVelocity.angular(
-                            clamp(-target.yawDegrees() * AIM_KP, 1.5)))
+                            RadiansPerSecond.of(clamp(-target.yawDegrees() * AIM_KP, 1.5))))
                     .orElseGet(RobotVelocity::zero));
             return drive.pooledDrive;
         }, drive.pooledDrive);
         approach = Actions.compute(() -> {
             drive.targetingVelocity.set(targets.latest()
                     .map(target -> RobotVelocity.robot(
-                            clamp((target.distanceMeters() - 1.5) * RANGE_KP, 2.0),
-                            0.0,
-                            clamp(-target.yawDegrees() * AIM_KP, 1.5)))
+                            MetersPerSecond.of(clamp((target.distanceMeters() - 1.5) * RANGE_KP, 2.0)),
+                            MetersPerSecond.of(0.0),
+                            RadiansPerSecond.of(clamp(-target.yawDegrees() * AIM_KP, 1.5))))
                     .orElseGet(RobotVelocity::zero));
             return drive.pooledDrive;
         }, drive.pooledDrive);

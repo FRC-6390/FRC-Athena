@@ -50,7 +50,7 @@ public final class LocalizationExamples implements Mechanism {
                 .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
-                .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.54), Meters.of(8.21))))
                 .name("filteredVision");
         fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision)
@@ -93,7 +93,7 @@ public final class LocalizationExamples implements Mechanism {
                 .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
-                .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.54), Meters.of(8.21))))
                 .name(name);
     }
 

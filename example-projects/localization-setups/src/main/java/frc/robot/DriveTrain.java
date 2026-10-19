@@ -1,5 +1,7 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 
 import static edu.wpi.first.units.Units.MetersPerSecond;
@@ -61,14 +63,14 @@ public final class DriveTrain implements Mechanism {
         this.fieldHeadingRadians = fieldHeadingRadians;
         driverVelocity.set(() -> {
             RobotVelocity requested = RobotVelocity.robot(
-                    linearSpeed(forward.getAsDouble()),
-                    linearSpeed(strafe.getAsDouble()),
-                    rotationSpeed(rotation.getAsDouble()));
+                    MetersPerSecond.of(linearSpeed(forward.getAsDouble())),
+                    MetersPerSecond.of(linearSpeed(strafe.getAsDouble())),
+                    RadiansPerSecond.of(rotationSpeed(rotation.getAsDouble())));
             if (fieldOriented.getAsBoolean()) {
                 requested = RobotVelocity.field(
-                        requested.xMetersPerSecond(),
-                        requested.yMetersPerSecond(),
-                        requested.angularRadiansPerSecond());
+                        MetersPerSecond.of(requested.raw().xMetersPerSecond()),
+                        MetersPerSecond.of(requested.raw().yMetersPerSecond()),
+                        RadiansPerSecond.of(requested.raw().angularRadiansPerSecond()));
             }
             return requested;
         });

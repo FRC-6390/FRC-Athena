@@ -28,19 +28,19 @@ public final class VisionSources {
     public final PoseSignal limelightPose = frontLimelight.pose()
             .megatag2Blue()
             .tags(7, 8)
-            .singleTagStdDevs(0.8, 0.8, Units.degreesToRadians(30.0))
-            .multiTagStdDevs(0.25, 0.25, Units.degreesToRadians(6.0))
-            .distanceStdDevScaling(2.0, 2.0);
+            .singleTagStdDevs(Meters.of(0.8), Meters.of(0.8), Units.degreesToRadians(30.0))
+            .multiTagStdDevs(Meters.of(0.25), Meters.of(0.25), Units.degreesToRadians(6.0))
+            .distanceStdDevScaling(Meters.of(2.0), 2.0);
     // Single-tag frames are solved with the robot heading (needs PhotonVisionCameraAdapter.defaultRobotHeading).
     public final PoseSignal photonPose = rearPhoton.pose()
             .multiTagOnCoprocessor().singleTagUsesHeading()
-            .singleTagStdDevs(0.7, 0.7, Units.degreesToRadians(25.0))
-            .multiTagStdDevs(0.18, 0.18, Units.degreesToRadians(4.0))
-            .distanceStdDevScaling(2.0, 2.0);
+            .singleTagStdDevs(Meters.of(0.7), Meters.of(0.7), Units.degreesToRadians(25.0))
+            .multiTagStdDevs(Meters.of(0.18), Meters.of(0.18), Units.degreesToRadians(4.0))
+            .distanceStdDevScaling(Meters.of(2.0), 2.0);
     public final PoseSignal heliosPose = driverHelios.pose()
-            .singleTagStdDevs(0.9, 0.9, Units.degreesToRadians(35.0))
-            .multiTagStdDevs(0.3, 0.3, Units.degreesToRadians(8.0))
-            .distanceStdDevScaling(1.5, 2.0);
+            .singleTagStdDevs(Meters.of(0.9), Meters.of(0.9), Units.degreesToRadians(35.0))
+            .multiTagStdDevs(Meters.of(0.3), Meters.of(0.3), Units.degreesToRadians(8.0))
+            .distanceStdDevScaling(Meters.of(1.5), 2.0);
     public final TargetSignal limelightTargets = frontLimelight.targets();
     public final TargetSignal photonTargets = rearPhoton.targets();
     public final TargetSignal customTargets = customCamera.targets();
