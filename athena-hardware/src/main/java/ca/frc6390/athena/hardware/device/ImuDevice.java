@@ -154,7 +154,7 @@ public record ImuDevice(
     }
 
     @Override
-    public void applyYaw(ActionContext context, double yawDegrees) {
+    public void applyYawDegrees(ActionContext context, double yawDegrees) {
         Objects.requireNonNull(context, "context").imu(this).setYawDegrees(yawDegrees);
     }
 

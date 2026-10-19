@@ -1,7 +1,7 @@
 package ca.frc6390.athena.hardware.sim;
 
+import edu.wpi.first.units.measure.MomentOfInertia;
 import java.util.Optional;
-import java.util.OptionalDouble;
 
 /**
  * Plant parameters a simulation model can take from an identified or declared source.
@@ -10,8 +10,8 @@ import java.util.OptionalDouble;
  * the model's own default unchanged.</p>
  */
 public interface SimDynamicsSource {
-    /** Returns the mechanism-side moment of inertia in base units (kg m^2 for rotary mechanisms). */
-    OptionalDouble momentOfInertia();
+    /** Returns the mechanism-side moment of inertia about its motion axis, when the source provides one. */
+    Optional<MomentOfInertia> momentOfInertia();
 
     /**
      * Returns the identified plant: friction, gravity, viscous and inertia terms the simulation applies

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.power;
 
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Resistance;
 import edu.wpi.first.units.measure.Time;
 import edu.wpi.first.units.measure.Voltage;
 import java.util.Objects;
@@ -25,10 +26,10 @@ import java.util.Objects;
  * </ul>
  */
 public final class PowerPolicy {
-    /** Default bus-voltage floor in volts. */
-    public static final double DEFAULT_FLOOR_VOLTS = 7.0;
-    /** Default battery internal resistance in ohms, used before estimation has enough excitation. */
-    public static final double DEFAULT_BATTERY_OHMS = 0.02;
+    /** Default bus-voltage floor. */
+    public static final Voltage DEFAULT_FLOOR = Units.Volts.of(7.0);
+    /** Default battery internal resistance, used before estimation has enough excitation. */
+    public static final Resistance DEFAULT_BATTERY_RESISTANCE = Units.Ohms.of(0.02);
 
     private final double floorVolts;
     private final double staggerSeconds;
@@ -42,7 +43,7 @@ public final class PowerPolicy {
 
     /** Returns the default policy. */
     public static PowerPolicy defaults() {
-        return new PowerPolicy(DEFAULT_FLOOR_VOLTS, 0.0, true);
+        return new PowerPolicy(DEFAULT_FLOOR.in(Units.Volts), 0.0, true);
     }
 
     /**
@@ -83,15 +84,24 @@ public final class PowerPolicy {
         return new PowerPolicy(floorVolts, staggerSeconds, enabled);
     }
 
-    /** Returns the bus-voltage floor in volts. */
+    /** Returns the bus-voltage floor. */
+    public Voltage floor() { return Units.Volts.of(floorVolts); }
+
+    /** Returns the stagger spacing (zero when disabled). */
+    public Time staggerStarts() { return Units.Seconds.of(staggerSeconds); }
+
+    /** Per-cycle primitive: bus-voltage floor in volts. Teams should use {@link #floor()}. */
     public double floorVolts() { return floorVolts; }
 
-    /** Returns the stagger spacing in seconds (zero when disabled). */
+    /** Per-cycle primitive: stagger spacing in seconds. Teams should use {@link #staggerStarts()}. */
     public double staggerSeconds() { return staggerSeconds; }
 
     /** Returns whether battery resistance is estimated online. */
     public boolean estimateBatteryResistance() { return estimateBatteryResistance; }
 
     /** Returns the battery resistance used before estimation is available. */
-    public double defaultBatteryOhms() { return DEFAULT_BATTERY_OHMS; }
+    public Resistance defaultBatteryResistance() { return DEFAULT_BATTERY_RESISTANCE; }
+
+    /** Per-cycle primitive: default battery resistance in ohms. Teams should use {@link #defaultBatteryResistance()}. */
+    public double defaultBatteryOhms() { return DEFAULT_BATTERY_RESISTANCE.in(Units.Ohms); }
 }

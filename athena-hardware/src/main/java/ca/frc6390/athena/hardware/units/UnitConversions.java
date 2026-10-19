@@ -1,14 +1,13 @@
 package ca.frc6390.athena.hardware.units;
 
-import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
 import java.util.Objects;
 
 /**
- * Declaration-time conversions between WPILib units and the primitive base-unit doubles Athena uses
- * in its control and output paths. Nothing here is meant to be called per cycle with a
- * {@link Measure}; callers convert once and keep the resulting {@code double}.
+ * Unit-dimension checks and factors between WPILib units. Measure values are converted with
+ * {@code Measure.in(Unit)}; this class only answers whether two units share a dimension and how
+ * base-unit magnitudes relate, for the primitive hot paths that cannot call {@code in}.
  */
 public final class UnitConversions {
     private UnitConversions() {
@@ -26,43 +25,6 @@ public final class UnitConversions {
         Objects.requireNonNull(first, "first");
         Objects.requireNonNull(second, "second");
         return first.getBaseUnit().equals(second.getBaseUnit());
-    }
-
-    /**
-     * Converts a measure into a plain value in {@code unit}.
-     *
-     * @param measure measure to convert
-     * @param unit target unit; must measure the same dimension as {@code measure}
-     * @return value expressed in {@code unit}
-     * @throws IllegalArgumentException when the dimensions differ
-     */
-    public static double value(Measure<?> measure, Unit unit) {
-        Objects.requireNonNull(measure, "measure");
-        Objects.requireNonNull(unit, "unit");
-        if (!sameDimension(measure.unit(), unit)) {
-            throw new IllegalArgumentException("Cannot express " + measure.unit().name() + " values in "
-                    + unit.name() + ".");
-        }
-        return unit.fromBaseUnits(measure.baseUnitMagnitude());
-    }
-
-    /**
-     * Converts a measure of rate (for example angular velocity) into a plain value in
-     * {@code unit} per second. The measure must measure the rate of {@code unit}'s dimension.
-     *
-     * @param rate rate measure
-     * @param unit position unit whose per-second rate is wanted
-     * @return value expressed in {@code unit} per second
-     * @throws IllegalArgumentException when the dimensions differ
-     */
-    public static double rate(Measure<?> rate, Unit unit) {
-        Objects.requireNonNull(rate, "rate");
-        Objects.requireNonNull(unit, "unit");
-        if (!sameDimension(rate.unit(), perSecond(unit))) {
-            throw new IllegalArgumentException("Cannot express " + rate.unit().name() + " values in "
-                    + unit.name() + " per second.");
-        }
-        return rate.baseUnitMagnitude() / baseScale(unit);
     }
 
     /**

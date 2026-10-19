@@ -17,13 +17,13 @@ class PowerProfileTest {
                 .rampLimit(Units.Amps.of(10), Units.Seconds.of(0.1))
                 .share(3.0)
                 .onSag(Sag.shed(0.5).below(Units.Volts.of(9)));
-        assertEquals(60.0, profile.sustainedAmps(), 1e-9);
-        assertEquals(90.0, profile.burstAmps(), 1e-9);
-        assertEquals(0.5, profile.burstSeconds(), 1e-9);
+        assertEquals(60.0, profile.sustainedCurrent().in(edu.wpi.first.units.Units.Amps), 1e-9);
+        assertEquals(90.0, profile.burstCurrent().in(edu.wpi.first.units.Units.Amps), 1e-9);
+        assertEquals(0.5, profile.burstDuration().in(edu.wpi.first.units.Units.Seconds), 1e-9);
         assertEquals(100.0, profile.rampAmpsPerSecond(), 1e-9);
         assertEquals(3.0, profile.share(), 1e-9);
         assertEquals(0.5, profile.sag().shedFraction(), 1e-9);
-        assertEquals(9.0, profile.sag().thresholdVolts(), 1e-9);
+        assertEquals(9.0, profile.sag().threshold().in(edu.wpi.first.units.Units.Volts), 1e-9);
     }
 
     @Test

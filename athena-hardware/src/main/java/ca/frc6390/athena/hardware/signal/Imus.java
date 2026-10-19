@@ -3,9 +3,11 @@ package ca.frc6390.athena.hardware.signal;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
 import ca.frc6390.athena.hardware.runtime.DeviceActionFactories;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 /**
  * Factories for derived and custom IMU sources.
@@ -38,22 +40,24 @@ public final class Imus {
                 Objects.requireNonNull(mount, "mount"));
     }
 
-    public static ImuSource yaw(DoubleSupplier yawDegrees) {
-        return new YawSource(Objects.requireNonNull(yawDegrees, "yawDegrees"));
+    /** Returns a source whose yaw is read from a supplier, relative to the yaw it had when first set. */
+    public static ImuSource yaw(Supplier<Angle> yaw) {
+        return new YawSource(Objects.requireNonNull(yaw, "yaw"));
     }
 
     @SuppressWarnings("unchecked")
-    static <T extends DeviceAction> T setYawAction(ImuSource source, double yawDegrees) {
-        if (!Double.isFinite(yawDegrees)) {
+    static <T extends DeviceAction> T setYawAction(ImuSource source, Angle yaw) {
+        double degrees = yaw.in(Units.Degrees);
+        if (!Double.isFinite(degrees)) {
             throw new IllegalArgumentException("IMU yaw must be finite.");
         }
-        return (T) DeviceActionFactories.get().imuSetYaw(source, yawDegrees);
+        return (T) DeviceActionFactories.get().imuSetYaw(source, degrees);
     }
 
     @SuppressWarnings("unchecked")
-    static <T extends DeviceAction> T setYawAction(ImuSource source, DoubleSupplier yawDegrees) {
-        Objects.requireNonNull(yawDegrees, "yawDegrees");
-        return (T) DeviceActionFactories.get().imuSetYaw(source, yawDegrees);
+    static <T extends DeviceAction> T setYawAction(ImuSource source, Supplier<Angle> yaw) {
+        Objects.requireNonNull(yaw, "yaw");
+        return (T) DeviceActionFactories.get().imuSetYaw(source, () -> yaw.get().in(Units.Degrees));
     }
 
     private abstract static class DerivedSource implements ImuSource {
@@ -173,7 +177,7 @@ public final class Imus {
         @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
 
         @Override
-        public void applyYaw(ActionContext context, double yawDegrees) {
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
             yawOffset = source.yawDegrees() - yawDegrees;
             angleOffset = source.angleDegrees() - yawDegrees;
         }
@@ -253,8 +257,8 @@ public final class Imus {
         @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
 
         @Override
-        public void applyYaw(ActionContext context, double yawDegrees) {
-            source.applyYaw(context, -yawDegrees);
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+            source.applyYawDegrees(context, -yawDegrees);
         }
     }
 
@@ -291,8 +295,8 @@ public final class Imus {
         @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
 
         @Override
-        public void applyYaw(ActionContext context, double yawDegrees) {
-            source.applyYaw(context, transform.sourceYaw(yawDegrees));
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+            source.applyYawDegrees(context, transform.sourceYaw(yawDegrees));
             angle.reset(yawDegrees);
         }
 
@@ -356,11 +360,11 @@ public final class Imus {
         @Override public double lastUpdateSeconds() { return source.lastUpdateSeconds(); }
 
         @Override
-        public void applyYaw(ActionContext context, double yawDegrees) {
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
             ImuMount.Orientation robot = orientation();
             ImuMount.Orientation sensor = mount.sensorOrientation(
                     robot.rollDegrees(), robot.pitchDegrees(), yawDegrees);
-            source.applyYaw(context, sensor.yawDegrees());
+            source.applyYawDegrees(context, sensor.yawDegrees());
             angle.reset(yawDegrees);
         }
 
@@ -411,16 +415,16 @@ public final class Imus {
     }
 
     private static final class YawSource extends DerivedSource {
-        private final DoubleSupplier source;
+        private final Supplier<Angle> source;
         private double offset;
 
-        private YawSource(DoubleSupplier source) {
+        private YawSource(Supplier<Angle> source) {
             this.source = source;
         }
 
         @Override
         public double yawDegrees() {
-            return source.getAsDouble() - offset;
+            return source.get().in(Units.Degrees) - offset;
         }
 
         @Override
@@ -429,8 +433,8 @@ public final class Imus {
         }
 
         @Override
-        public void applyYaw(ActionContext context, double yawDegrees) {
-            offset = source.getAsDouble() - yawDegrees;
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+            offset = source.get().in(Units.Degrees) - yawDegrees;
         }
     }
 }
