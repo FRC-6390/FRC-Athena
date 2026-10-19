@@ -17,13 +17,18 @@ EncoderDevice turretEncoder = EncoderDevice.of(EncoderKinds.CANCODER, 4)
         .reduction(10.0);            // 10 sensor rotations per mechanism rotation
 ```
 
-- `measures(AngleUnit)` declares the unit `position()` and `velocity()` are reported in. It sets the
-  conversion to one full revolution in that unit (360 for degrees).
+Every encoder declares the unit it measures. `EncoderDevice.of(...)` starts as rotations (one sensor
+revolution is one rotation); `measures(...)` changes it.
+
+- `measures(AngleUnit)` declares the unit `position()` and `velocity()` are reported in. It sets one full
+  revolution in that unit (360 for degrees).
 - `measures(DistanceUnit)` declares a linear encoder. Set the travel per revolution with
   `travelPerRevolution(Distance)`, for example `travelPerRevolution(Inches.of(4 * Math.PI))`.
 - `reduction(double)` reads as the reduction on the robot (10 means 10:1). `gearing(GearRatio)` takes a
-  `GearRatio` object instead (for example one shared constant). The untyped `gearRatio(...)` and
-  `wheelDiameterMeters(...)` builders are removed.
+  `GearRatio` object instead (for example one shared constant).
+- `rotationsFromPosition(Measure)` converts a typed position into raw sensor rotations. The measure must be in
+  the encoder's dimension; it is converted to the declared unit first. `measure(double)` wraps a value in the
+  declared unit when a stored double is all there is.
 
 ## Declaring a unit-typed control
 
@@ -74,9 +79,23 @@ Binding a unit-typed control to an encoder whose unit differs fails when the mec
 Control unit Degrees does not match encoder ctre:cancoder_... which measures Rotations (position feedback).
 ```
 
-An encoder that declares no `measures(...)` is also rejected for a typed binding.
 Raw bindings (`Controls.position(motor)`) have no unit, so typed methods on them throw
-`IllegalStateException`, and any encoder can be used as feedback.
+`IllegalStateException`, and any encoder can be used as feedback. Arm feedforward on a raw binding needs an
+angle unit from the encoder's `measures(...)`.
+
+## Removed encoder API
+
+The encoder declaration is typed-only. These members are gone:
+
+| Removed | Use instead |
+| --- | --- |
+| `EncoderDevice.conversion(double)` | `measures(AngleUnit)` (one revolution in that unit) or `measures(DistanceUnit).travelPerRevolution(Distance)` |
+| `EncoderDevice.units(EncoderUnit)` | `measures(AngleUnit)` or `measures(DistanceUnit)` |
+| `EncoderDevice.units()` and the `EncoderUnit` enum | `measuresUnit()` (a WPILib `Unit`) |
+| `EncoderDevice(source, inverted, gear, conversion, offset, EncoderUnit[, failurePolicy[, baseline]])` | `new EncoderDevice(source, inverted, gear, conversion, offset, failurePolicy, baseline, measuresUnit)` with a WPILib unit |
+| `EncoderDevice.rotationsFromPosition(double)` | `rotationsFromPosition(Measure)`, for example `Degrees.of(90)`; or `rotationsFromPosition(encoder.measure(value))` for a stored double |
+| `EncoderUnit.RAW` | the default declaration (rotations, one revolution per raw turn) |
+| `EncoderUnit.METERS` | `measures(Units.Meters)` |
 
 ## Motion kind
 
@@ -89,6 +108,7 @@ pick the right formulas.
 | Need | Use |
 | --- | --- |
 | Declare encoder units | `EncoderDevice.measures(AngleUnit | DistanceUnit)`, `travelPerRevolution(Distance)` |
+| Raw encoder position to rotations | `EncoderDevice.rotationsFromPosition(Measure)` |
 | Typed binding | `Controls.position(motor, unit)`, `Controls.velocity(motor, unit)` |
 | Typed target | `position(Measure)`, `velocity(Measure)` |
 | Primitive supplier with unit | `position(DoubleSupplier, unit)`, `velocity(DoubleSupplier, unit)` |

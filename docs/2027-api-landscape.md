@@ -37,7 +37,7 @@ This is the current public API Rebuilt actually imports.
 
 - Hardware kinds: `MotorKinds`, `EncoderKinds`, `ImuKinds`, `CameraKinds`.
 - Hardware declarations: `MotorDevice`, `EncoderDevice`, `ImuDevice`, `DigitalInputDevice`, `HardwareBus`.
-- Hardware values: `GearRatio`, `Range`, `EncoderUnit`.
+- Hardware values: `GearRatio`, `Range`.
 - Simulation declarations: composable `SimModel` and `SimulationSession`.
 - Mechanisms: `Mechanism`, `Action`, `Actions`, `Events`, `HookBinding`, `EventContext`, `LifecycleMode`, `LifecyclePhase`, `RobotRuntime`, `PathAction`, `Paths`.
 - Control values: `ControlBinding`, `PidGains`, `FeedforwardGains`, `Constraint`, `MotionProfile`, `MotionPlanner`, `InterpolationModel`, `InterpolationKinds`.
@@ -95,7 +95,7 @@ flowchart TD
 | `AthenaEncoder` | `EncoderKinds` | RENAME | Built-in encoder kind catalog. |
 | `AthenaImu` | `ImuKinds` | RENAME | Built-in IMU kind catalog. |
 | `AthenaCamera` | `CameraKinds` | RENAME | Built-in camera kind catalog. |
-| `EncoderUnit` | `EncoderUnit` | KEEP | Rebuilt uses it for swerve angle units. |
+| `EncoderUnit` | removed | REMOVE | Encoder declarations are typed-only: `measures(...)` takes a WPILib unit, and `measuresUnit()` replaces `units()`. |
 | `InputSourceKind` | removed | REMOVE | Old config/spec lowering detail. |
 | `InputType` | removed | REMOVE | Old config/spec lowering detail. |
 | `EncoderSignalType` | removed | REMOVE | Old config/spec lowering detail. |
