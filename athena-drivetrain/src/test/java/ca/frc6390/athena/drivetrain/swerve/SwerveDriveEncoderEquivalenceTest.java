@@ -2,9 +2,9 @@ package ca.frc6390.athena.drivetrain.swerve;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ca.frc6390.athena.api.FailurePolicy;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import ca.frc6390.athena.hardware.device.GearRatio;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.encoder.EncoderUnit;
 import edu.wpi.first.units.Units;
@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Pins that the typed drive-distance encoder used by swerve modules reports the same position and
- * velocity as the untyped declaration it replaces, for real presets.
+ * velocity as the untyped declaration it replaced (gear 1/reduction, conversion PI * wheel diameter,
+ * meters), for real presets.
  */
 class SwerveDriveEncoderEquivalenceTest {
 
@@ -28,10 +29,9 @@ class SwerveDriveEncoderEquivalenceTest {
         for (SwerveModule module : modules) {
             SwerveModuleModel model = module.model();
             MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
-            EncoderDevice legacy = motor.encoder()
-                    .gearRatio(GearRatio.reduction(model.driveReduction(), 1.0))
-                    .wheelDiameterMeters(model.wheelDiameterMeters())
-                    .units(EncoderUnit.METERS);
+            EncoderDevice legacy = new EncoderDevice(motor.encoder().source(), false,
+                    1.0 / model.driveReduction(), Math.PI * model.wheelDiameterMeters(), 0.0,
+                    EncoderUnit.METERS, FailurePolicy.DISABLE_MECHANISM);
             EncoderDevice typed = motor.encoder()
                     .reduction(model.driveReduction())
                     .measures(Units.Meters)
