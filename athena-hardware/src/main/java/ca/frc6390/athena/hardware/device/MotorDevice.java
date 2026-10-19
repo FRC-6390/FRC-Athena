@@ -222,7 +222,7 @@ public record MotorDevice(
     /** Commands this motor to a fixed voltage. */
     @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T voltage(Voltage volts) {
-        return (T) DeviceActionFactories.get().motorVoltage(this, Objects.requireNonNull(volts, "volts").in(Units.Volts));
+        return (T) DeviceActionFactories.get().motorVoltage(this, Objects.requireNonNull(volts, "volts"));
     }
 
     /** Commands this motor to a voltage read when the action executes. */

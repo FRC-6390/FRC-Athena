@@ -3,7 +3,9 @@ package ca.frc6390.athena.hardware.runtime;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
+import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.Time;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.function.DoubleSupplier;
 
 /**
@@ -20,13 +22,13 @@ public interface DeviceActionFactory {
 
     DeviceAction motorPercent(MotorDevice motor, DoubleSupplier percent);
 
-    DeviceAction motorVoltage(MotorDevice motor, double volts);
+    DeviceAction motorVoltage(MotorDevice motor, Voltage volts);
 
     DeviceAction motorVoltage(MotorDevice motor, DoubleSupplier volts);
 
     DeviceAction encoderSetPosition(EncoderDevice encoder, double position);
 
-    DeviceAction imuSetYaw(ImuSource imu, double yawDegrees);
+    DeviceAction imuSetYaw(ImuSource imu, Angle yaw);
 
     DeviceAction imuSetYaw(ImuSource imu, DoubleSupplier yawDegrees);
 

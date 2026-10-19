@@ -58,7 +58,7 @@ public final class Actions {
 
     /** Label suffix describing a control's effort limit, empty when it has none. */
     static String effortLabel(EffortRequest effort) {
-        return effort == null || !effort.limited() ? "" : " effort " + effort.currentLimitAmps() + "A";
+        return effort == null || !effort.limited() ? "" : " effort " + effort.limitValue() + "A";
     }
 
     public static Action neutral() {
@@ -89,8 +89,8 @@ public final class Actions {
         return new DynamicControlPercent(control, percent);
     }
 
-    static Action voltage(MotorDevice motor, double volts) {
-        return new MotorVoltage(motor, volts);
+    static Action voltage(MotorDevice motor, edu.wpi.first.units.measure.Voltage volts) {
+        return new MotorVoltage(motor, volts.in(edu.wpi.first.units.Units.Volts));
     }
 
     static Action voltage(MotorDevice motor, DoubleSupplier volts) {
@@ -109,8 +109,8 @@ public final class Actions {
         return new EncoderSetPosition(encoder, position);
     }
 
-    static Action setYaw(ImuSource imu, double yawDegrees) {
-        return new ImuSetYaw(imu, yawDegrees);
+    static Action setYaw(ImuSource imu, edu.wpi.first.units.measure.Angle yaw) {
+        return new ImuSetYaw(imu, yaw.in(edu.wpi.first.units.Units.Degrees));
     }
 
     static Action setYaw(ImuSource imu, DoubleSupplier yawDegrees) {
