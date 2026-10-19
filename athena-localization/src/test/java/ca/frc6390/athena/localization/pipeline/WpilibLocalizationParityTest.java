@@ -817,6 +817,6 @@ class WpilibLocalizationParityTest {
         @Override public double linearAccelerationXG() { return 0.0; }
         @Override public double linearAccelerationYG() { return 0.0; }
         @Override public double linearAccelerationZG() { return 0.0; }
-        @Override public void applyYaw(ActionContext context, double yawDegrees) { this.yawDegrees = yawDegrees; }
+        @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { this.yawDegrees = yawDegrees; }
     }
 }

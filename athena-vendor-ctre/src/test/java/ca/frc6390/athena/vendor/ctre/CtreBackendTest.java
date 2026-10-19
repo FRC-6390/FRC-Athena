@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vendor.ctre;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -107,7 +108,7 @@ class CtreBackendTest {
     void genericCurrentLimitConfiguresCtreSupplyLimit() {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(
-                MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(37),
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 1).currentLimit(Units.Amps.of(37)),
                 new CtreMotorOptions(),
                 controller);
 
@@ -124,9 +125,9 @@ class CtreBackendTest {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(
                 MotorDevice.of(MotorKinds.KRAKEN_X60, 1)
-                        .currentLimit(37)
-                        .supplyCurrentLimit(45)
-                        .statorCurrentLimit(80),
+                        .currentLimit(Units.Amps.of(37))
+                        .supplyCurrentLimit(Units.Amps.of(45))
+                        .statorCurrentLimit(Units.Amps.of(80)),
                 new CtreMotorOptions(),
                 controller);
 
@@ -142,9 +143,9 @@ class CtreBackendTest {
         RecordingTalonController controller = new RecordingTalonController();
         CtreMotorHandle handle = new CtreMotorHandle(
                 MotorDevice.of(MotorKinds.KRAKEN_X60, 1)
-                        .currentLimit(37)
-                        .supplyCurrentLimit(42)
-                        .statorCurrentLimit(70),
+                        .currentLimit(Units.Amps.of(37))
+                        .supplyCurrentLimit(Units.Amps.of(42))
+                        .statorCurrentLimit(Units.Amps.of(70)),
                 new CtreMotorOptions()
                         .supplyCurrentLimit(45)
                         .statorCurrentLimit(80)

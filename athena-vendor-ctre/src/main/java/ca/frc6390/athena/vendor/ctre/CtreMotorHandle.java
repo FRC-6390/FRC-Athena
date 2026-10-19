@@ -121,12 +121,12 @@ public final class CtreMotorHandle implements MotorHandle {
             }
             int supplyLimit = options.supplyCurrentLimitAmps() > 0
                     ? options.supplyCurrentLimitAmps()
-                    : device.supplyCurrentLimitAmps() > 0
-                            ? device.supplyCurrentLimitAmps()
-                            : device.currentLimitAmps();
+                    : (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps)) > 0
+                            ? (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps))
+                            : (int) Math.round(device.currentLimit().in(edu.wpi.first.units.Units.Amps));
             int statorLimit = options.statorCurrentLimitAmps() > 0
                     ? options.statorCurrentLimitAmps()
-                    : device.statorCurrentLimitAmps();
+                    : (int) Math.round(device.statorCurrentLimit().in(edu.wpi.first.units.Units.Amps));
             if (!controller.configureCurrentLimits(
                     supplyLimit,
                     statorLimit,

@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot.replay;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -120,14 +121,14 @@ class ReplaySimulationTest {
     /** Same shape as the stall-clearing intake in MotorStallIntegrationTest, with a configurable command. */
     private static final class JamClearingIntake implements Mechanism {
         private final MotorDevice roller = MotorDevice.of(MotorKinds.KRAKEN_X44, 71)
-                .supplyCurrentLimit(35)
-                .statorCurrentLimit(50);
+                .supplyCurrentLimit(Units.Amps.of(35))
+                .statorCurrentLimit(Units.Amps.of(50));
         private final Action intake;
         private final Action clearJam = Actions.sequence()
                 .forTime(0.12, roller.percent(-0.6))
                 .forTime(0.04, roller.neutral());
         private final HookBinding run;
-        private final HookBinding recover = Events.when(roller.stall().forSeconds(0.06))
+        private final HookBinding recover = Events.when(roller.stall().forTime(Units.Seconds.of(0.06)))
                 .rising()
                 .onStart(clearJam);
 

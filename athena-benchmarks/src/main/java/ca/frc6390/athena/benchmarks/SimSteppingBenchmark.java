@@ -1,5 +1,6 @@
 package ca.frc6390.athena.benchmarks;
 
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.ImuKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -54,7 +55,7 @@ public class SimSteppingBenchmark {
                 session.model("axis-" + i, SimModel.flywheel(motor)
                         .encoder(encoder)
                         .gearRatio(GearRatio.reduction(12.0, 1.0))
-                        .momentOfInertia(0.002)
+                        .momentOfInertia(Units.KilogramSquareMeters.of(0.002))
                         .limit(limit, 3.0, 0.25));
                 MotorHandle handle = session.hardwareGraph().motor(motor);
                 handle.setPercentOutput(i % 2 == 0 ? 0.6 : -0.4);
@@ -69,7 +70,7 @@ public class SimSteppingBenchmark {
                 session.imu(ImuDevice.of(ImuKinds.PIGEON_2, i + 1))
                         .yawRateDegreesPerSecond(45.0);
             }
-            session.step(0.02);
+            session.step(Units.Seconds.of(0.02));
         }
     }
 
@@ -81,7 +82,7 @@ public class SimSteppingBenchmark {
      */
     @Benchmark
     public void step(SimState state, Blackhole blackhole) {
-        state.session.step(0.02);
+        state.session.step(Units.Seconds.of(0.02));
         blackhole.consume(state.session.encoder(state.lastEncoder).positionRotations());
     }
 }

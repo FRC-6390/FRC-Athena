@@ -45,7 +45,7 @@ class WpilibSimPhysicsEngineTest {
                         .gearRatio(GearRatio.reduction(reduction, 1.0)));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
-        session.step(1.0);
+        session.step(Units.Seconds.of(1.0));
 
         double wheelMetersPerSecond = driveDistance.velocityFromRotationsPerSecond(
                 session.encoder(driveDistance).velocityRotationsPerSecond());
@@ -61,7 +61,7 @@ class WpilibSimPhysicsEngineTest {
         SimulationSession session = sessionWith(engine, "motor", SimModel.motor(motor).encoder(encoder));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         assertTrue(session.motor(motor).integratedPositionRotations() > 0.0);
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
@@ -76,7 +76,7 @@ class WpilibSimPhysicsEngineTest {
             MotorDevice motor = MotorDevice.of(kind, id++);
             SimulationSession session = sessionWith(kind.name(), SimModel.motor(motor));
             session.hardwareGraph().motor(motor).setVoltage(6.0);
-            session.step(0.02);
+            session.step(Units.Seconds.of(0.02));
             assertTrue(Double.isFinite(session.motor(motor).integratedVelocityRotationsPerSecond()));
         }
     }
@@ -89,7 +89,7 @@ class WpilibSimPhysicsEngineTest {
         SimulationSession session = sessionWith(engine, "motor", SimModel.motor(motor));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         assertTrue(voltage.get() > 0.0);
         assertTrue(voltage.get() <= 12.0);
@@ -102,10 +102,10 @@ class WpilibSimPhysicsEngineTest {
                 .dio(2).encoder(EncoderKinds.REV_THROUGH_BORE);
         SimulationSession session = sessionWith("flywheel", SimModel.flywheel(motor)
                 .encoder(encoder)
-                .momentOfInertia(0.004));
+                .momentOfInertia(Units.KilogramSquareMeters.of(0.004)));
 
         session.hardwareGraph().motor(motor).setPercentOutput(1.0);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         assertTrue(session.motor(motor).integratedVelocityRotationsPerSecond() > 0.0);
         assertTrue(session.encoder(encoder).velocityRotationsPerSecond() > 0.0);
@@ -133,13 +133,13 @@ class WpilibSimPhysicsEngineTest {
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 3);
         SimModel model = SimModel.arm(motor)
                 .encoder(encoder)
-                .range(Range.rotations(-0.25, 0.25))
-                .lengthMeters(0.45)
-                .momentOfInertia(0.02);
+                .range(Range.of(Units.Rotations.of(-0.25), Units.Rotations.of(0.25)))
+                .length(edu.wpi.first.units.Units.Meters.of(0.45))
+                .momentOfInertia(Units.KilogramSquareMeters.of(0.02));
         SimulationSession session = sessionWith("arm", model);
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
         assertTrue(session.encoder(encoder).positionRotations() <= 0.25);
@@ -152,10 +152,10 @@ class WpilibSimPhysicsEngineTest {
                 .dio(4).encoder(EncoderKinds.REV_THROUGH_BORE);
         SimulationSession session = sessionWith("elevator", SimModel.elevator(motor)
                 .encoder(encoder)
-                .range(Range.of(0.0, 1.0)));
+                .range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
 
         session.hardwareGraph().motor(motor).setVoltage(12.0);
-        session.step(0.2);
+        session.step(Units.Seconds.of(0.2));
 
         assertTrue(session.encoder(encoder).positionRotations() > 0.0);
         assertTrue(session.encoder(encoder).positionRotations() <= 1.0);
@@ -173,7 +173,7 @@ class WpilibSimPhysicsEngineTest {
         setModule(frontRight, session, 1.0, 0.0);
         setModule(backLeft, session, 1.0, 0.0);
         setModule(backRight, session, 1.0, 0.0);
-        session.step(1.0);
+        session.step(Units.Seconds.of(1.0));
 
         assertEquals(1.0, session.pose().xMeters(), 1.0e-9);
         assertEquals(0.0, session.pose().yMeters(), 1.0e-9);
@@ -195,7 +195,7 @@ class WpilibSimPhysicsEngineTest {
         setModule(frontRight, session, moduleSpeed, 0.125);
         setModule(backLeft, session, moduleSpeed, 0.625);
         setModule(backRight, session, moduleSpeed, -0.125);
-        session.step(1.0);
+        session.step(Units.Seconds.of(1.0));
 
         assertEquals(0.0, session.pose().xMeters(), 1.0e-9);
         assertEquals(0.0, session.pose().yMeters(), 1.0e-9);
@@ -284,7 +284,7 @@ class WpilibSimPhysicsEngineTest {
         @SuppressWarnings("unused")
         private final SimModel simulation = SimModel.flywheel(motor)
                 .encoder(encoder)
-                .momentOfInertia(0.004);
+                .momentOfInertia(Units.KilogramSquareMeters.of(0.004));
         @SuppressWarnings("unused")
         private final Action initial = motor.percent(1.0);
     }

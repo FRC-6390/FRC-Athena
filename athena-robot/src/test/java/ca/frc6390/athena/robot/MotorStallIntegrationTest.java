@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot;
 
+import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -15,13 +16,13 @@ import org.junit.jupiter.api.Test;
 class MotorStallIntegrationTest {
     @Test
     void currentThresholdTracksTheConfiguredMotorLimit() {
-        MotorDevice fortyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(40);
-        MotorDevice sixtyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(60);
+        MotorDevice fortyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(Units.Amps.of(40));
+        MotorDevice sixtyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(Units.Amps.of(60));
 
         assertEquals(36.0, fortyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
         assertEquals(54.0, sixtyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
-        assertEquals(0, fortyAmpMotor.currentLimits().supplyAmps());
-        assertEquals(60, sixtyAmpMotor.currentLimits().statorAmps());
+        assertEquals(0, fortyAmpMotor.currentLimits().supply().in(Units.Amps));
+        assertEquals(60, sixtyAmpMotor.currentLimits().stator().in(Units.Amps));
     }
 
     @Test
@@ -51,14 +52,14 @@ class MotorStallIntegrationTest {
 
     private static final class JamClearingIntake implements Mechanism {
         private final MotorDevice roller = MotorDevice.of(MotorKinds.KRAKEN_X44, 71)
-                .supplyCurrentLimit(35)
-                .statorCurrentLimit(50);
+                .supplyCurrentLimit(Units.Amps.of(35))
+                .statorCurrentLimit(Units.Amps.of(50));
         private final Action intake = roller.percent(0.8);
         private final Action clearJam = Actions.sequence()
                 .forTime(0.12, roller.percent(-0.6))
                 .forTime(0.04, roller.neutral());
         private final HookBinding run = Events.teleopPeriodic().whileActive(intake);
-        private final HookBinding recover = Events.when(roller.stall().forSeconds(0.06))
+        private final HookBinding recover = Events.when(roller.stall().forTime(Units.Seconds.of(0.06)))
                 .rising()
                 .onStart(clearJam);
     }

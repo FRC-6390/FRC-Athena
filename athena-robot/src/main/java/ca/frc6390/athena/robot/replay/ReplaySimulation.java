@@ -1,5 +1,6 @@
 package ca.frc6390.athena.robot.replay;
 
+import edu.wpi.first.units.Units;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
@@ -241,18 +242,18 @@ public final class ReplaySimulation {
         for (String motor : inputs.motors) {
             String base = MOTOR_PREFIX + motor + "/";
             injector.motor(motor,
-                    cursor.f64(base + "positionRotations"),
-                    cursor.f64(base + "velocityRotationsPerSecond"),
-                    cursor.f64(base + "appliedVoltage"),
-                    cursor.f64(base + "supplyCurrentAmps"),
-                    cursor.f64(base + "statorCurrentAmps"));
+                    edu.wpi.first.units.Units.Rotations.of(cursor.f64(base + "positionRotations")),
+                    edu.wpi.first.units.Units.RotationsPerSecond.of(cursor.f64(base + "velocityRotationsPerSecond")),
+                    edu.wpi.first.units.Units.Volts.of(cursor.f64(base + "appliedVoltage")),
+                    edu.wpi.first.units.Units.Amps.of(cursor.f64(base + "supplyCurrentAmps")),
+                    edu.wpi.first.units.Units.Amps.of(cursor.f64(base + "statorCurrentAmps")));
         }
         for (String encoder : inputs.encoders) {
             String base = ENCODER_PREFIX + encoder + "/";
             injector.encoder(encoder,
-                    cursor.f64(base + "positionRotations"),
-                    cursor.f64(base + "absolutePositionRotations"),
-                    cursor.f64(base + "velocityRotationsPerSecond"));
+                    edu.wpi.first.units.Units.Rotations.of(cursor.f64(base + "positionRotations")),
+                    edu.wpi.first.units.Units.Rotations.of(cursor.f64(base + "absolutePositionRotations")),
+                    edu.wpi.first.units.Units.RotationsPerSecond.of(cursor.f64(base + "velocityRotationsPerSecond")));
         }
         for (String digital : inputs.digitalInputs) {
             injector.digitalInput(digital, cursor.bool(DIGITAL_PREFIX + digital + "/active"));
@@ -260,15 +261,15 @@ public final class ReplaySimulation {
         for (String imu : inputs.imus) {
             String base = IMU_PREFIX + imu + "/";
             injector.imu(imu,
-                    cursor.f64(base + "yawDegrees"),
-                    cursor.f64(base + "pitchDegrees"),
-                    cursor.f64(base + "rollDegrees"),
-                    cursor.f64(base + "yawRateDegreesPerSecond"),
-                    cursor.f64(base + "pitchRateDegreesPerSecond"),
-                    cursor.f64(base + "rollRateDegreesPerSecond"),
-                    cursor.f64(base + "linearAccelerationXG"),
-                    cursor.f64(base + "linearAccelerationYG"),
-                    cursor.f64(base + "linearAccelerationZG"));
+                    edu.wpi.first.units.Units.Degrees.of(cursor.f64(base + "yawDegrees")),
+                    edu.wpi.first.units.Units.Degrees.of(cursor.f64(base + "pitchDegrees")),
+                    edu.wpi.first.units.Units.Degrees.of(cursor.f64(base + "rollDegrees")),
+                    edu.wpi.first.units.Units.DegreesPerSecond.of(cursor.f64(base + "yawRateDegreesPerSecond")),
+                    edu.wpi.first.units.Units.DegreesPerSecond.of(cursor.f64(base + "pitchRateDegreesPerSecond")),
+                    edu.wpi.first.units.Units.DegreesPerSecond.of(cursor.f64(base + "rollRateDegreesPerSecond")),
+                    edu.wpi.first.units.Units.Gs.of(cursor.f64(base + "linearAccelerationXG")),
+                    edu.wpi.first.units.Units.Gs.of(cursor.f64(base + "linearAccelerationYG")),
+                    edu.wpi.first.units.Units.Gs.of(cursor.f64(base + "linearAccelerationZG")));
         }
     }
 

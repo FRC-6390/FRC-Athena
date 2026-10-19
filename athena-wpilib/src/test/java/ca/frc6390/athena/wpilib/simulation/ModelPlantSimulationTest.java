@@ -54,7 +54,7 @@ class ModelPlantSimulationTest {
                 .physicsEngine(new WpilibSimPhysicsEngine())
                 .model("arm", SimModel.arm(motor)
                         .encoder(encoder)
-                        .range(Range.rotations(-50.0, 50.0))
+                        .range(Range.of(Units.Rotations.of(-50.0), Units.Rotations.of(50.0)))
                         .model(model));
     }
 
@@ -70,7 +70,7 @@ class ModelPlantSimulationTest {
         for (int cycle = 0; cycle < 250; cycle++) {
             double volts = model.feedforwardVolts(session.encoder(encoder).positionRotations(), 0.0, 0.0, 0.0);
             session.hardwareGraph().motor(motor).setVoltage(volts);
-            session.step(DT);
+            session.step(Units.Seconds.of(DT));
         }
         assertEquals(start, session.encoder(encoder).positionRotations(), 0.005, "held by feedforward");
     }
@@ -82,7 +82,7 @@ class ModelPlantSimulationTest {
         SimulationSession session = armSession(motor, encoder, armModel(KG));
 
         session.hardwareGraph().motor(motor).setVoltage(0.0);
-        session.step(2.0);
+        session.step(Units.Seconds.of(2.0));
 
         // Gravity (1 V) exceeds breakaway friction (0.5 V) at the level position, so the arm moves.
         assertTrue(Math.abs(session.encoder(encoder).positionRotations()) > 0.05,
@@ -99,13 +99,13 @@ class ModelPlantSimulationTest {
 
         // 80% of breakaway: friction holds the arm at rest.
         session.hardwareGraph().motor(motor).setVoltage(0.8 * STATIC_FRICTION);
-        session.step(3.0);
+        session.step(Units.Seconds.of(3.0));
         assertEquals(0.0, session.encoder(encoder).positionRotations(), 1.0e-9, "below breakaway: no motion");
         assertEquals(0.0, session.encoder(encoder).velocityRotationsPerSecond(), 1.0e-9);
 
         // 150% of breakaway: the arm breaks away and moves.
         session.hardwareGraph().motor(motor).setVoltage(1.5 * STATIC_FRICTION);
-        session.step(1.0);
+        session.step(Units.Seconds.of(1.0));
         assertTrue(session.encoder(encoder).positionRotations() > 0.05,
                 "above breakaway the arm moves: " + session.encoder(encoder).positionRotations());
     }
@@ -122,7 +122,7 @@ class ModelPlantSimulationTest {
         RobotRuntime runtime = RobotRuntime.simulated(session).register(arm);
         // The simulation is the configured arm; the mechanism's characterization only reads and drives it.
         session.model("arm", SimModel.arm(arm.motor).encoder(arm.encoder)
-                .range(Range.rotations(-50.0, 50.0))
+                .range(Range.of(Units.Rotations.of(-50.0), Units.Rotations.of(50.0)))
                 .model(configured));
 
         run(runtime, clock, arm.quasistaticForward, 10.0);

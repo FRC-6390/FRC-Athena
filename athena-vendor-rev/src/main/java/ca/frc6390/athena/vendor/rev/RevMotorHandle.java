@@ -368,10 +368,10 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         if (vendorLimit > 0) {
             return vendorLimit;
         }
-        int supplyLimit = device.supplyCurrentLimitAmps() > 0
-                ? device.supplyCurrentLimitAmps()
-                : device.currentLimitAmps();
-        int statorLimit = device.statorCurrentLimitAmps();
+        int supplyLimit = (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps)) > 0
+                ? (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps))
+                : (int) Math.round(device.currentLimit().in(edu.wpi.first.units.Units.Amps));
+        int statorLimit = (int) Math.round(device.statorCurrentLimit().in(edu.wpi.first.units.Units.Amps));
         if (supplyLimit <= 0) {
             return statorLimit;
         }
