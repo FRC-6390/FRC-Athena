@@ -13,6 +13,7 @@ import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.api.hardware.MotorTechnology;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
+import ca.frc6390.athena.hardware.backend.OpenLoopCommandFilter;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import com.revrobotics.AbsoluteEncoder;
@@ -51,6 +52,10 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     private final SparkController controller;
     private boolean activated;
     private boolean inputsFresh;
+    private final OpenLoopCommandFilter openLoop = new OpenLoopCommandFilter();
+    /** Refreshes since the motor temperature was last read; see {@link #TEMPERATURE_REFRESH_PERIOD}. */
+    private int refreshesSinceTemperature = TEMPERATURE_REFRESH_PERIOD;
+    private final double[] electrical = new double[3];
     private boolean integratedEncoderEnabled;
     private boolean absoluteEncoderEnabled;
     private double positionRotations;
@@ -61,6 +66,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     private double supplyCurrentAmps;
     private double statorCurrentAmps;
     private double motorTemperatureCelsius = Double.NaN;
+    private boolean fatalFault;
 
     /**
      * Creates a REV motor handle using real REVLib Spark controllers.
@@ -92,6 +98,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     @Override
     public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         Objects.requireNonNull(configuration, "configuration");
+        openLoop.invalidate();
         if (!controller.configureRuntime(configuration, isBrushless(device))) {
             throw new IllegalStateException("Failed to configure " + device.defaultName());
         }
@@ -108,6 +115,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void activate() {
+        openLoop.invalidate();
         if (activated) {
             return;
         }
@@ -155,15 +163,22 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             absolutePositionRotations = controller.absolutePositionRotations();
             absoluteVelocityRotationsPerSecond = controller.absoluteVelocityRotationsPerSecond();
         }
-        appliedVoltage = controller.appliedVoltage();
-        supplyCurrentAmps = controller.supplyCurrentAmps();
-        statorCurrentAmps = controller.statorCurrentAmps();
-        motorTemperatureCelsius = controller.motorTemperatureCelsius();
+        controller.electrical(electrical);
+        appliedVoltage = electrical[0];
+        supplyCurrentAmps = electrical[1];
+        statorCurrentAmps = electrical[2];
+        // Each SPARK read is a JNI call on the roboRIO; temperature moves over seconds, so it is read less often.
+        if (++refreshesSinceTemperature >= TEMPERATURE_REFRESH_PERIOD) {
+            refreshesSinceTemperature = 0;
+            motorTemperatureCelsius = controller.motorTemperatureCelsius();
+        }
+        fatalFault = controller.fatalFault();
         inputsFresh = true;
     }
 
     @Override
     public void follow(MotorHandle leader, boolean inverted) {
+        openLoop.invalidate();
         if (!(leader instanceof RevMotorHandle revLeader)) {
             throw new IllegalArgumentException("REV motor " + device.defaultName()
                     + " can only follow another REV motor.");
@@ -173,18 +188,42 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
                 "configure follower");
     }
 
+    /** Leaves follower mode uninverted (a SPARK ignores direct commands while it follows). */
+    @Override
+    public void stopFollowing() {
+        openLoop.invalidate();
+        if (!controller.stopFollowing(device.inverted(false), options)) {
+            throw new IllegalStateException("Failed to leave follower mode for " + device.defaultName());
+        }
+    }
+
     @Override
     public void setPercentOutput(double percent) {
-        controller.setPercent(clamp(percent));
+        double safe = clamp(percent);
+        if (!openLoop.percent(safe)) return;
+        try {
+            controller.setPercent(safe);
+        } catch (RuntimeException exception) {
+            openLoop.invalidate();
+            throw exception;
+        }
     }
 
     @Override
     public void setVoltage(double volts) {
-        controller.setVoltage(finiteOrZero(volts));
+        double safe = finiteOrZero(volts);
+        if (!openLoop.voltage(safe)) return;
+        try {
+            controller.setVoltage(safe);
+        } catch (RuntimeException exception) {
+            openLoop.invalidate();
+            throw exception;
+        }
     }
 
     @Override
     public void setPositionTargetRotations(double rotations) {
+        openLoop.invalidate();
         controller.setPositionTarget(finiteOrZero(rotations));
     }
 
@@ -195,6 +234,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+        openLoop.invalidate();
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
     }
 
@@ -214,6 +254,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void stop() {
+        openLoop.invalidate();
         controller.stop();
     }
 
@@ -301,6 +342,16 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         return Double.isFinite(motorTemperatureCelsius)
                 ? java.util.OptionalDouble.of(motorTemperatureCelsius)
                 : java.util.OptionalDouble.empty();
+    }
+
+    /**
+     * Reports a SPARK fault that stops it from driving the motor (gate driver, motor type mismatch, ESC EEPROM
+     * or firmware), as captured by the latest {@link #refreshInputs()}. Transient faults (CAN, temperature,
+     * sensor, other) and warnings such as overcurrent or brownout do not count.
+     */
+    @Override
+    public boolean faulted() {
+        return fatalFault;
     }
 
     @Override
@@ -564,6 +615,8 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             throw new UnsupportedOperationException("Hardware following is unavailable.");
         }
 
+        default boolean stopFollowing(MotorDevice device, RevMotorOptions options) { return true; }
+
         default boolean enableIntegratedEncoder(RevMotorOptions options) { return true; }
 
         default boolean enableAbsoluteEncoder(RevMotorOptions options) { return true; }
@@ -586,11 +639,30 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
         default double statorCurrentAmps() { return outputCurrentAmps(); }
 
+        /**
+         * Reads applied voltage, supply current and stator current into {@code out[0..2]}. A SPARK derives all three
+         * from applied output, bus voltage and output current, so it reads each of those once.
+         */
+        default void electrical(double[] out) {
+            out[0] = appliedVoltage();
+            out[1] = supplyCurrentAmps();
+            out[2] = statorCurrentAmps();
+        }
+
         /** Motor temperature in Celsius, or NaN when the controller does not report one. */
         default double motorTemperatureCelsius() { return Double.NaN; }
 
+        /** Whether an active fault stops the controller from driving the motor. Reads cached status only. */
+        default boolean fatalFault() { return false; }
+
         default void close() {}
     }
+
+    /** Refreshes between motor temperature reads (200 ms at 50 Hz); the first refresh always reads it. */
+    static final int TEMPERATURE_REFRESH_PERIOD = 10;
+
+    /** {@link SparkBase.Faults} bits that stop a SPARK from driving: motor type, gate driver, ESC EEPROM, firmware. */
+    static final int FATAL_FAULT_BITS = 0x02 | 0x20 | 0x40 | 0x80;
 
     private static final class RevSparkController implements SparkController {
         private final SparkBase spark;
@@ -640,6 +712,12 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             SparkBaseConfig config = activationConfig(device, options, flex);
             config.follow(leaderId, inverted);
             return apply(config, options.resetSafeParameters(), options.persistParameters());
+        }
+
+        @Override
+        public boolean stopFollowing(MotorDevice device, RevMotorOptions options) {
+            // The activation config disables follower mode. Not persisted: flash keeps the declared follow setup.
+            return apply(activationConfig(device, options, flex), false, false);
         }
 
         @Override
@@ -752,7 +830,23 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
         @Override public double statorCurrentAmps() { return spark.getOutputCurrent(); }
 
+        @Override
+        public void electrical(double[] out) {
+            double appliedOutput = spark.getAppliedOutput();
+            double outputCurrent = spark.getOutputCurrent();
+            out[0] = appliedOutput * spark.getBusVoltage();
+            out[1] = Math.abs(appliedOutput) * outputCurrent;
+            out[2] = outputCurrent;
+        }
+
         @Override public double motorTemperatureCelsius() { return spark.getMotorTemperature(); }
+
+        @Override
+        public boolean fatalFault() {
+            // hasActiveFault() reads the cached status frame without allocating; getFaults() allocates, so it
+            // only runs on the rare cycle where some fault is active.
+            return spark.hasActiveFault() && (spark.getFaults().rawBits & FATAL_FAULT_BITS) != 0;
+        }
 
         @Override public void close() { spark.close(); }
 

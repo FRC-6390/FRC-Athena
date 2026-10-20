@@ -56,10 +56,11 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        // The connection check reads the frame timestamps of this batch, so refresh first.
+        controller.refreshSignals();
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE IMU is disconnected: " + device.defaultName());
         }
-        controller.refreshSignals();
         yawDegrees = controller.yawDegrees();
         pitchDegrees = controller.pitchDegrees();
         rollDegrees = controller.rollDegrees();
@@ -215,6 +216,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         private final StatusSignal<Double> gravityY;
         private final StatusSignal<Double> gravityZ;
         private final BaseStatusSignal[] signals;
+        private final SignalFreshness freshness;
 
         private PhoenixPigeon2Controller(ImuDevice device) {
             pigeon = new Pigeon2(device.id(), new CANBus(device.canbus()));
@@ -234,9 +236,10 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
                 yaw, pitch, roll, yawRate, pitchRate, rollRate,
                 accelerationX, accelerationY, accelerationZ, gravityX, gravityY, gravityZ
             };
+            freshness = new SignalFreshness(yaw);
         }
 
-        @Override public boolean isConnected() { return pigeon.isConnected(); }
+        @Override public boolean isConnected() { return freshness.connected(); }
 
         @Override
         public void refreshSignals() {

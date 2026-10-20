@@ -83,7 +83,7 @@ public record MotorConstants(
      * @return constants, or empty when the model has no built-in constants
      */
     public static Optional<MotorConstants> forKind(MotorKind kind) {
-        return MotorSpec.forKind(kind).map(MotorSpec::constants);
+        return MotorSpec.constantsForKind(kind);
     }
 
     /**

@@ -147,8 +147,8 @@ final class OutputResolver {
     }
 
     private void resolveStates(List<Action> actions, MechanismContext context, List<ResolvedOutput> outputs) {
-        for (Action action : actions) {
-            resolveState(action, context, outputs);
+        for (int index = 0; index < actions.size(); index++) {
+            resolveState(actions.get(index), context, outputs);
         }
     }
 
@@ -224,7 +224,12 @@ final class OutputResolver {
         if (motor != null && overrides.disabled(motor)) {
             return false;
         }
-        if (control != null && control.motors().stream().anyMatch(overrides::disabled)) return false;
+        if (control != null) {
+            List<MotorDevice> motors = control.motors();
+            for (int index = 0; index < motors.size(); index++) {
+                if (overrides.disabled(motors.get(index))) return false;
+            }
+        }
         return true;
     }
 

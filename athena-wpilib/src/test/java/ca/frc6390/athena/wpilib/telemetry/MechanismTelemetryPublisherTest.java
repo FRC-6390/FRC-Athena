@@ -152,6 +152,77 @@ class MechanismTelemetryPublisherTest {
     }
 
     @Test
+    void idleWritableValuesStillApplyADashboardWriteInTheNextPublish() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        var schema = runtime.mechanismTelemetrySchema();
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        String gainPath = "/Athena/Mechanisms/dashboardMechanism/Values/gain";
+        String runPath = "/Athena/Mechanisms/dashboardMechanism/Actions/run/running";
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            for (int index = 0; index <= 50; index++) publisher.publish(schema, index * 0.02);
+            long idle = instance.getEntry(gainPath).getLastChange();
+            assertEquals(0, mechanism.gainWrites.get());
+
+            instance.getEntry(gainPath).setDouble(2.5);
+            publisher.publish(schema, 1.02);
+            assertEquals(2.5, mechanism.gain, 1e-9, "the write applies in the first publish after it");
+            assertEquals(1, mechanism.gainWrites.get());
+
+            for (int index = 0; index < 20; index++) publisher.publish(schema, 1.04 + index * 0.02);
+            assertEquals(1, mechanism.gainWrites.get(), "no repeated write while the entry is unchanged");
+            assertTrue(instance.getEntry(gainPath).getLastChange() > idle);
+
+            // The robot changes the value: published in the next read-only period, without a callback.
+            mechanism.gain = 5.0;
+            publisher.publish(schema, 2.0);
+            assertEquals(5.0, instance.getEntry(gainPath).getDouble(-1.0), 1e-9);
+            assertEquals(1, mechanism.gainWrites.get());
+
+            // Action controls are watched the same way, after any number of idle publishes.
+            instance.getEntry(runPath).setBoolean(true);
+            publisher.publish(schema, 2.02);
+            assertTrue(runtime.isActionRunning(mechanism.run));
+            for (int index = 0; index < 10; index++) publisher.publish(schema, 2.04 + index * 0.02);
+            instance.getEntry(runPath).setBoolean(false);
+            publisher.publish(schema, 2.3);
+            assertEquals(false, runtime.isActionRunning(mechanism.run));
+        } finally {
+            instance.close();
+        }
+    }
+
+    @Test
+    void lockStatusFollowsTheSharedLockCondition() {
+        boolean[] inMatch = {false};
+        ca.frc6390.athena.mechanism.persist.TuningLocks locks = new ca.frc6390.athena.mechanism.persist.TuningLocks()
+                .define(ca.frc6390.athena.mechanism.persist.Locks.InMatch.class, () -> inMatch[0]);
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).tuningLocks(locks).register(mechanism);
+        var schema = runtime.mechanismTelemetrySchema();
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        String supply = "/Athena/Mechanisms/dashboardMechanism/Devices/motor/Config/SupplyCurrentLimit/Lock";
+        String stator = "/Athena/Mechanisms/dashboardMechanism/Devices/motor/Config/StatorCurrentLimit/Lock";
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)) {
+            publisher.publish(schema, 0.0);
+            assertEquals("InMatch (unlocked)", instance.getEntry(supply).getString(""));
+            assertEquals("InMatch (unlocked)", instance.getEntry(stator).getString(""));
+
+            inMatch[0] = true;
+            publisher.publish(schema, 0.02);
+            assertEquals("InMatch (locked)", instance.getEntry(supply).getString(""));
+            assertEquals("InMatch (locked)", instance.getEntry(stator).getString(""));
+
+            inMatch[0] = false;
+            publisher.publish(schema, 0.04);
+            assertEquals("InMatch (unlocked)", instance.getEntry(supply).getString(""));
+            assertEquals("InMatch (unlocked)", instance.getEntry(stator).getString(""));
+        } finally {
+            instance.close();
+        }
+    }
+
+    @Test
     void pressurePeriodThrottlesOnlyReadOnlyValues() {
         DashboardMechanism mechanism = new DashboardMechanism();
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);

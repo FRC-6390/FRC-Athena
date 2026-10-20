@@ -5,7 +5,6 @@ import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.Distance;
-import java.util.Comparator;
 import java.util.Optional;
 
 import static edu.wpi.first.units.Units.Meters;
@@ -14,10 +13,16 @@ import static edu.wpi.first.units.Units.Meters;
 public interface PoseSignal extends MeasurementSignal {
     /** Returns the newest typed pose measurement, if one is available. */
     default Optional<PoseMeasurementSample> measurement() {
-        return measurements().stream()
-                .filter(PoseMeasurementSample.class::isInstance)
-                .map(PoseMeasurementSample.class::cast)
-                .max(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds));
+        // The first of equally new samples wins, as with Stream.max.
+        PoseMeasurementSample newest = null;
+        for (Measurement measurement : measurements()) {
+            if (measurement instanceof PoseMeasurementSample sample
+                    && (newest == null
+                            || Double.compare(sample.timestampSeconds(), newest.timestampSeconds()) > 0)) {
+                newest = sample;
+            }
+        }
+        return Optional.ofNullable(newest);
     }
 
     /** Returns the newest pose value, if one is available. */

@@ -22,6 +22,8 @@ public final class MechanismTracePublisher implements AutoCloseable {
     private final NetworkTableInstance networkTables;
     private final StringSubscriber profileOverride;
     private final Map<String, Channel> channels = new LinkedHashMap<>();
+    /** Bound once: a {@code this::channel} reference at the call site would allocate on every publish. */
+    private final java.util.function.Function<String, Channel> channelFactory = this::channel;
     private Profile profile = Profile.SUMMARY;
     private String lastProfileOverride = "";
     private Profile resolvedProfile = Profile.SUMMARY;
@@ -53,9 +55,10 @@ public final class MechanismTracePublisher implements AutoCloseable {
         if (traces == null || activeProfile == Profile.OFF) {
             return;
         }
-        for (MechanismTraceSnapshot trace : traces) {
+        for (int index = 0, size = traces.size(); index < size; index++) {
+            MechanismTraceSnapshot trace = traces.get(index);
             if (trace != null) {
-                channels.computeIfAbsent(trace.mechanism(), this::channel).publish(trace, activeProfile);
+                channels.computeIfAbsent(trace.mechanism(), channelFactory).publish(trace, activeProfile);
             }
         }
     }

@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 import ca.frc6390.athena.api.hardware.CameraKinds;
+import ca.frc6390.athena.vendor.photonvision.PhotonVisionCameraAdapter.PhotonCameraClient.FrameSource;
 import edu.wpi.first.apriltag.AprilTag;
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -19,6 +21,7 @@ import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import org.photonvision.EstimatedRobotPose;
 import org.photonvision.PhotonPoseEstimator;
+import org.photonvision.targeting.PhotonPipelineResult;
 import org.photonvision.targeting.PhotonTrackedTarget;
 import org.photonvision.targeting.TargetCorner;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
@@ -441,4 +444,85 @@ class PhotonVisionCameraAdapterTest {
         }
     }
 
+    @Test
+    void backgroundReaderKeepsNewestFrameAndCountsOverflowDrops() throws InterruptedException {
+        AtomicInteger calls = new AtomicInteger();
+        int batches = PhotonVisionCameraAdapter.PhotonCameraClient.QUEUE_CAPACITY + 12;
+        FrameSource source = new FrameSource() {
+            @Override
+            public List<PhotonPipelineResult> unreadResults() {
+                int call = calls.incrementAndGet();
+                return call > batches ? List.of() : List.of(new PhotonPipelineResult(), new PhotonPipelineResult());
+            }
+
+            @Override
+            public boolean isConnected() {
+                return true;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        PhotonVisionCameraAdapter.PhotonCameraClient client =
+                new PhotonVisionCameraAdapter.PhotonCameraClient(source, true);
+        try {
+            awaitCalls(calls, batches + 1);
+
+            // Nothing drained yet: the queue keeps the newest QUEUE_CAPACITY frames and counts the rest as dropped.
+            assertEquals(12L, client.droppedFrames());
+            assertEquals(1, client.unreadResults(null).size());
+            assertTrue(client.unreadResults(null).isEmpty());
+        } finally {
+            client.close();
+        }
+    }
+
+    @Test
+    void backgroundReaderFailureIsRethrownOnTheRobotThread() throws InterruptedException {
+        AtomicInteger calls = new AtomicInteger();
+        FrameSource source = new FrameSource() {
+            @Override
+            public List<PhotonPipelineResult> unreadResults() {
+                if (calls.incrementAndGet() == 1) {
+                    throw new IllegalStateException("decode failed");
+                }
+                return List.of();
+            }
+
+            @Override
+            public boolean isConnected() {
+                return true;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        PhotonVisionCameraAdapter.PhotonCameraClient client =
+                new PhotonVisionCameraAdapter.PhotonCameraClient(source, true);
+        try {
+            IllegalStateException thrown = null;
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (thrown == null && System.nanoTime() < deadline) {
+                try {
+                    client.unreadResults(null);
+                    Thread.sleep(2);
+                } catch (IllegalStateException exception) {
+                    thrown = exception;
+                }
+            }
+            assertEquals("decode failed", thrown == null ? null : thrown.getMessage());
+        } finally {
+            client.close();
+        }
+    }
+
+    private static void awaitCalls(AtomicInteger calls, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (calls.get() < expected && System.nanoTime() < deadline) {
+            Thread.sleep(2);
+        }
+        assertTrue(calls.get() >= expected, "reader thread did not reach " + expected + " reads");
+    }
 }

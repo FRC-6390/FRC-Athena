@@ -217,6 +217,9 @@ final class SimModelRunner implements SimPhysicsEngine {
     private static MotorCommand command(MotorDevice motor, SimulationSession session) {
         Objects.requireNonNull(motor, "motor");
         SimMotorHandle runtime = session.motor(motor);
+        if (runtime != null && !runtime.connected()) {
+            return null;
+        }
         if (runtime != null && runtime.commandKind() != SimMotorHandle.CommandKind.NEUTRAL) {
             return new MotorCommand(runtime.commandKind(), runtime.commandValue());
         }

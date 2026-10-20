@@ -4,9 +4,7 @@ import edu.wpi.first.units.measure.Current;
 import static edu.wpi.first.units.Units.Hertz;
 import static edu.wpi.first.units.Units.Seconds;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,9 +37,9 @@ final class VisionDiagnostics {
 
     private static final class Track {
         final String name;
-        final ArrayDeque<Double> remembered = new ArrayDeque<>();
-        final ArrayDeque<Double> accepted = new ArrayDeque<>();
-        final ArrayDeque<Double> rejected = new ArrayDeque<>();
+        final Times remembered = new Times();
+        final Times accepted = new Times();
+        final Times rejected = new Times();
         double newestFrame = Double.NaN;
         Verdict newestVerdict = Verdict.reject("");
         int newestTagCount;
@@ -65,10 +63,8 @@ final class VisionDiagnostics {
         if (source instanceof ca.frc6390.athena.vision.device.CameraClock clock) {
             track.clock = clock;
         }
-        for (Double seen : track.remembered) {
-            if (seen == frameTimestampSeconds) {
-                return;
-            }
+        if (track.remembered.contains(frameTimestampSeconds)) {
+            return;
         }
         track.remembered.addLast(frameTimestampSeconds);
         if (track.remembered.size() > REMEMBERED_FRAMES) {
@@ -136,15 +132,65 @@ final class VisionDiagnostics {
         return status == null || status.isUnknown() ? null : status.synced();
     }
 
-    private static void prune(ArrayDeque<Double> events, double nowSeconds) {
+    private static void prune(Times events, double nowSeconds) {
         if (!Double.isFinite(nowSeconds)) {
             return;
         }
-        Iterator<Double> iterator = events.iterator();
-        while (iterator.hasNext()) {
-            if (nowSeconds - iterator.next() >= WINDOW_SECONDS) {
-                iterator.remove();
+        events.removeOlderThan(nowSeconds);
+    }
+
+    /** Insertion-ordered timestamps without boxing; a small ring buffer that grows as needed. */
+    private static final class Times {
+        private double[] values = new double[8];
+        private int head;
+        private int size;
+
+        int size() {
+            return size;
+        }
+
+        private double get(int index) {
+            return values[(head + index) % values.length];
+        }
+
+        boolean contains(double value) {
+            for (int index = 0; index < size; index++) {
+                if (get(index) == value) {
+                    return true;
+                }
             }
+            return false;
+        }
+
+        void addLast(double value) {
+            if (size == values.length) {
+                double[] grown = new double[values.length * 2];
+                for (int index = 0; index < size; index++) {
+                    grown[index] = get(index);
+                }
+                values = grown;
+                head = 0;
+            }
+            values[(head + size) % values.length] = value;
+            size++;
+        }
+
+        void removeFirst() {
+            head = (head + 1) % values.length;
+            size--;
+        }
+
+        /** Removes every timestamp at least {@link #WINDOW_SECONDS} older than {@code nowSeconds}, keeping order. */
+        void removeOlderThan(double nowSeconds) {
+            int kept = 0;
+            for (int index = 0; index < size; index++) {
+                double value = get(index);
+                if (!(nowSeconds - value >= WINDOW_SECONDS)) {
+                    values[(head + kept) % values.length] = value;
+                    kept++;
+                }
+            }
+            size = kept;
         }
     }
 

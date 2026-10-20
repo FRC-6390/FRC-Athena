@@ -14,6 +14,7 @@ import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.wire.Wire;
 import ca.frc6390.athena.runtime.wire.WireWriter;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -103,6 +104,7 @@ final class ReplayEncoder {
 
     private final java.util.ArrayList<ReplaySignal> signals = new java.util.ArrayList<>();
     private int capacity = 256;
+    private int[] typeTags = new int[capacity];
     private int[] changed = new int[capacity];
     private int[] touched = new int[capacity];
     private int touchedCount;
@@ -120,10 +122,18 @@ final class ReplayEncoder {
     private final int[] driverStationIds;
     private final Map<Integer, int[]> localizationIds = new HashMap<>();
     private final Map<HardwareIdentity, int[]> motorIds = new HashMap<>();
+    private HardwareIdentity[] motorKeysByPosition = new HardwareIdentity[0];
+    private int[][] motorIdsByPosition = new int[0][];
     private final Map<String, int[]> encoderIds = new HashMap<>();
     private final Map<String, int[]> imuIds = new HashMap<>();
     private final Map<String, int[]> digitalIds = new HashMap<>();
     private final Map<String, Integer> commandSlots = new HashMap<>();
+    /** Command slot per motor declaration; avoids rebuilding {@link MotorDevice#defaultName()} every cycle. */
+    private final Map<MotorDevice, Integer> commandSlotsByMotor = new IdentityHashMap<>();
+    private static final Class<?> IMMUTABLE_LIST_12 = List.of(1).getClass();
+    private static final Class<?> IMMUTABLE_LIST_N = List.of(1, 2, 3).getClass();
+    private Object[] commandMotorLists = new Object[0];
+    private int[][] commandSlotsByOutput = new int[0][];
     private int[][] commandIds = new int[8][];
     private String[] commandModes = new String[8];
     private double[] commandValues = new double[8];
@@ -131,6 +141,9 @@ final class ReplayEncoder {
 
     private boolean forceKeyframe = true;
     private long lastKeyframeMicros = NO_KEYFRAME;
+    /** Encoded DICTIONARY record covering every signal, valid while {@code dictionaryCacheSize} matches. */
+    private final WireWriter dictionaryCache = new WireWriter(1024);
+    private int dictionaryCacheSize = -1;
 
     ReplayEncoder() {
         lifecycleIds = entity("lifecycle", LIFECYCLE, ReplaySignal.ROLE_LIFECYCLE);
@@ -150,8 +163,14 @@ final class ReplayEncoder {
 
     /** Writes a DICTIONARY record containing every entry, and marks all entries as written. */
     void writeDictionary(WireWriter out) {
-        writeDictionaryRange(out, 0, signals.size());
-        dictionaryFrom = signals.size();
+        int size = signals.size();
+        if (dictionaryCacheSize != size) {
+            dictionaryCache.clear();
+            writeDictionaryRange(dictionaryCache, 0, size);
+            dictionaryCacheSize = size;
+        }
+        out.bytes(dictionaryCache.buffer(), 0, dictionaryCache.size());
+        dictionaryFrom = size;
     }
 
     /**
@@ -256,7 +275,7 @@ final class ReplayEncoder {
     }
 
     private void writeEntry(WireWriter out, int id) {
-        int type = signals.get(id - 1).typeTag();
+        int type = typeTags[id];
         out.varint(id).u8(type);
         switch (type) {
             case Wire.TYPE_BOOL -> out.u8(lastBits[id] != 0 ? 1 : 0);
@@ -272,17 +291,21 @@ final class ReplayEncoder {
         int changedCount = 0;
         for (int index = 0; index < touchedCount; index++) {
             int id = touched[index];
-            boolean differs;
-            if (!known[id]) {
-                differs = true;
-            } else if (signals.get(id - 1).typeTag() == Wire.TYPE_STRING) {
-                differs = !Objects.equals(lastObjects[id], pendingObjects[id]);
+            boolean differs = !known[id];
+            // A string signal only uses the object slots and every other type only the bit slots.
+            if (typeTags[id] == Wire.TYPE_STRING) {
+                Object value = pendingObjects[id];
+                Object last = lastObjects[id];
+                if (last != value) {
+                    differs |= !Objects.equals(last, value);
+                    lastObjects[id] = value;
+                }
             } else {
-                differs = lastBits[id] != pendingBits[id];
+                long bits = pendingBits[id];
+                differs |= lastBits[id] != bits;
+                lastBits[id] = bits;
             }
             known[id] = true;
-            lastBits[id] = pendingBits[id];
-            lastObjects[id] = pendingObjects[id];
             if (differs) {
                 changed[changedCount++] = id;
             }
@@ -303,14 +326,31 @@ final class ReplayEncoder {
     }
 
     private void stageHardware(HardwareCycleSnapshot hardware) {
+        int position = 0;
         for (Map.Entry<HardwareIdentity, HardwareCycleSnapshot.MotorInput> entry : hardware.motors().entrySet()) {
             HardwareCycleSnapshot.MotorInput motor = entry.getValue();
-            int[] ids = motorIds.get(entry.getKey());
-            if (ids == null) {
-                ids = entity("hardware/motor/" + motor.name(), MOTOR, ReplaySignal.ROLE_HARDWARE);
-                motorIds.put(entry.getKey(), ids);
-                commandSlot(motor.name());
+            HardwareIdentity identity = entry.getKey();
+            int[] ids;
+            // Snapshots list the same motors in the same order every cycle: check the previous cycle's key at this
+            // position before hashing the identity.
+            if (position < motorKeysByPosition.length && motorKeysByPosition[position] == identity) {
+                ids = motorIdsByPosition[position];
+            } else {
+                ids = motorIds.get(identity);
+                if (ids == null) {
+                    ids = entity("hardware/motor/" + motor.name(), MOTOR, ReplaySignal.ROLE_HARDWARE);
+                    motorIds.put(identity, ids);
+                    commandSlot(motor.name());
+                }
+                if (position >= motorKeysByPosition.length) {
+                    int size = Math.max(8, position * 2);
+                    motorKeysByPosition = java.util.Arrays.copyOf(motorKeysByPosition, size);
+                    motorIdsByPosition = java.util.Arrays.copyOf(motorIdsByPosition, size);
+                }
+                motorKeysByPosition[position] = identity;
+                motorIdsByPosition[position] = ids;
             }
+            position++;
             putF64(ids[0], motor.positionRotations());
             putF64(ids[1], motor.velocityRotationsPerSecond());
             putF64(ids[2], motor.appliedVoltage());
@@ -422,17 +462,62 @@ final class ReplayEncoder {
             commandModes[slot] = "neutral";
             commandValues[slot] = 0.0;
         }
-        for (ResolvedOutput resolved : outputs) {
-            for (MotorDevice motor : resolved.request().motors()) {
-                int slot = commandSlot(motor.defaultName());
-                commandModes[slot] = outputMode(resolved.output());
-                commandValues[slot] = outputValue(resolved.output());
+        for (int index = 0; index < outputs.size(); index++) {
+            ResolvedOutput resolved = outputs.get(index);
+            int[] slots = commandSlots(index, resolved.request().motors());
+            if (slots.length == 0) {
+                continue;
+            }
+            String mode = outputMode(resolved.output());
+            double value = outputValue(resolved.output());
+            for (int slot : slots) {
+                commandModes[slot] = mode;
+                commandValues[slot] = value;
             }
         }
         for (int slot = 0; slot < commandCount; slot++) {
             putString(commandIds[slot][0], commandModes[slot]);
             putF64(commandIds[slot][1], commandValues[slot]);
         }
+    }
+
+    /**
+     * Command slots of one output's motors. Outputs come in the same order every cycle and a control's motor list is
+     * one shared unmodifiable list, so the slots found for that list at this position last cycle are reused.
+     */
+    private int[] commandSlots(int position, List<MotorDevice> motors) {
+        if (position < commandMotorLists.length && commandMotorLists[position] == motors) {
+            return commandSlotsByOutput[position];
+        }
+        int[] slots = new int[motors.size()];
+        for (int index = 0; index < slots.length; index++) {
+            slots[index] = commandSlot(motors.get(index));
+        }
+        if (motors.getClass() != IMMUTABLE_LIST_12 && motors.getClass() != IMMUTABLE_LIST_N) {
+            return slots;
+        }
+        if (position >= commandMotorLists.length) {
+            int size = Math.max(8, position * 2);
+            commandMotorLists = java.util.Arrays.copyOf(commandMotorLists, size);
+            commandSlotsByOutput = java.util.Arrays.copyOf(commandSlotsByOutput, size);
+        }
+        commandMotorLists[position] = motors;
+        commandSlotsByOutput[position] = slots;
+        return slots;
+    }
+
+    private int commandSlot(MotorDevice motor) {
+        Integer cached = commandSlotsByMotor.get(motor);
+        if (cached != null) {
+            return cached;
+        }
+        int slot = commandSlot(motor.defaultName());
+        // Motor declarations are long-lived; the bound only guards against callers that build new ones per cycle.
+        if (commandSlotsByMotor.size() >= 1024) {
+            commandSlotsByMotor.clear();
+        }
+        commandSlotsByMotor.put(motor, slot);
+        return slot;
     }
 
     private int commandSlot(String name) {
@@ -466,6 +551,7 @@ final class ReplayEncoder {
         int id = signals.size() + 1;
         signals.add(new ReplaySignal(id, path, typeTag, unit, role, 0, "", 0L));
         ensureCapacity(id + 1);
+        typeTags[id] = typeTag;
         return id;
     }
 
@@ -480,6 +566,7 @@ final class ReplayEncoder {
         pendingBits = java.util.Arrays.copyOf(pendingBits, size);
         pendingObjects = java.util.Arrays.copyOf(pendingObjects, size);
         known = java.util.Arrays.copyOf(known, size);
+        typeTags = java.util.Arrays.copyOf(typeTags, size);
         touched = java.util.Arrays.copyOf(touched, size);
         changed = java.util.Arrays.copyOf(changed, size);
         capacity = size;

@@ -9,12 +9,14 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -26,10 +28,22 @@ import java.util.function.Supplier;
  * {@link #mark}, {@link #keyframe}, and the waiting and counting accessors. A flush does not compress or touch
  * the disk on the robot thread: it hands the buffered segments to a {@link ReplayWriter} thread, see
  * {@link #flush()}.</p>
+ *
+ * <p>Cycle encoding also runs off the robot thread: {@link #record} queues the cycle's immutable snapshots and an
+ * encoder thread writes them into the buffer in order. Every other operation first encodes the queued cycles on
+ * its own thread, so markers, flushes, keyframe requests and backfill see exactly the frames recorded before them.
+ * While a stream sink is active, or when the queue is full, {@link #record} encodes on the calling thread instead,
+ * so the sink is still called from the robot thread.</p>
  */
 public final class ReplayRecorder {
     /** Segments close at a cycle boundary once they reach this size. */
     static final int SEGMENT_TARGET_BYTES = 64 * 1024;
+    /** Cycles that may wait for the encoder thread; beyond this {@link #record} encodes on the caller. */
+    static final int MAX_PENDING_CYCLES = 64;
+    /** Queued cycles at which {@link #record} wakes the encoder before its next poll. */
+    static final int WAKE_ENCODER_CYCLES = 8;
+    private static final long ENCODER_POLL_MILLIS = 40;
+    private static final int ENCODER_IDLE_POLLS = 50;
 
     private final ReplayPolicy policy;
     private final Path directory;
@@ -42,20 +56,39 @@ public final class ReplayRecorder {
     private Supplier<LocalDateTime> clock = LocalDateTime::now;
 
     private WireWriter segment;
+    /** Closed segment buffer kept for reuse; a closed segment is copied out, so its writer can be cleared. */
+    private WireWriter spareSegment;
     private int segmentFrames;
     private long segmentFirstSequence = -1;
     private long segmentLastSequence = -1;
     private double segmentFirstTimestamp;
     private double segmentLastTimestamp;
-    private ReplayMatch match = ReplayMatch.none();
+    // Volatile so the accessors do not wait for the encoder thread; written under this recorder's monitor.
+    private volatile ReplayMatch match = ReplayMatch.none();
     private boolean enabledSinceFlush;
     private long lastSequence = -1;
     private double lastTimestampSeconds;
-    private ReplayStreamSink sink;
+    private volatile ReplayStreamSink sink;
     private final Set<String> issuedNames = new HashSet<>();
     private final List<MarkerListener> markerListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
     private ReplayWriter writer;
     private final long sessionId = SESSIONS.incrementAndGet();
+
+    // Cycles accepted by record() and not yet encoded, oldest first. Guarded by its own monitor, which is taken
+    // after (never before) this recorder's monitor.
+    private final ArrayDeque<PendingCycle> pending = new ArrayDeque<>();
+    private Thread encoderThread;
+    private boolean encoderStopped;
+    private boolean encodeInline;
+    private long acceptedSequence = -1;
+    private double acceptedTimestampSeconds;
+
+    /** One recorded cycle waiting for the encoder. Every part is immutable. */
+    private record PendingCycle(
+            RuntimeCycleSnapshot snapshot,
+            HardwareCycleSnapshot mechanismInputs,
+            List<ResolvedOutput> outputs) {
+    }
 
     /** Session identities are unique within a JVM and increase over time (seeded from the wall clock). */
     private static final java.util.concurrent.atomic.AtomicLong SESSIONS =
@@ -101,13 +134,17 @@ public final class ReplayRecorder {
     }
 
     /** Returns the sequence number of the latest recorded cycle (the frame index), or -1 before the first cycle. */
-    public synchronized long currentFrameIndex() {
-        return lastSequence;
+    public long currentFrameIndex() {
+        synchronized (pending) {
+            return acceptedSequence;
+        }
     }
 
     /** Returns the timestamp of the latest recorded cycle, in seconds. */
-    public synchronized double currentTimestampSeconds() {
-        return lastTimestampSeconds;
+    public double currentTimestampSeconds() {
+        synchronized (pending) {
+            return acceptedTimestampSeconds;
+        }
     }
 
     /** Returns the policy in effect. */
@@ -152,7 +189,7 @@ public final class ReplayRecorder {
     }
 
     /** Returns the match identity recorded in new files. */
-    public synchronized ReplayMatch match() {
+    public ReplayMatch match() {
         return match;
     }
 
@@ -162,6 +199,11 @@ public final class ReplayRecorder {
      * @param sink sink, or null to remove it
      */
     public synchronized void streamSink(ReplayStreamSink sink) {
+        // Sinks are called on the robot thread: while one streams, cycles are encoded by record() itself.
+        synchronized (pending) {
+            encodeInline = policy.streamEnabled() && sink != null;
+        }
+        drainPending();
         this.sink = sink;
         if (sink != null) {
             sink.attach(this::backfill);
@@ -169,7 +211,7 @@ public final class ReplayRecorder {
     }
 
     /** Returns true when frames are being published to a sink. */
-    public synchronized boolean streaming() {
+    public boolean streaming() {
         return policy.streamEnabled() && sink != null;
     }
 
@@ -180,7 +222,101 @@ public final class ReplayRecorder {
      * @param mechanismInputs hardware inputs the mechanisms used, or null to use the snapshot's
      * @param outputs resolved mechanism outputs, or null for cycles that ran no mechanisms
      */
-    public synchronized void record(
+    public void record(
+            RuntimeCycleSnapshot snapshot,
+            HardwareCycleSnapshot mechanismInputs,
+            List<ResolvedOutput> outputs) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        synchronized (pending) {
+            if (!encodeInline && !encoderStopped && pending.size() < MAX_PENDING_CYCLES) {
+                // The snapshots are immutable records; the outputs list is copied because callers own it.
+                pending.addLast(new PendingCycle(
+                        snapshot, mechanismInputs, outputs == null ? null : List.copyOf(outputs)));
+                accepted(snapshot);
+                startEncoder();
+                // The encoder polls on its own; waking it every cycle would cost the robot thread a syscall.
+                if (pending.size() == WAKE_ENCODER_CYCLES) {
+                    pending.notifyAll();
+                }
+                return;
+            }
+        }
+        synchronized (this) {
+            drainPending();
+            encode(snapshot, mechanismInputs, outputs);
+        }
+        synchronized (pending) {
+            accepted(snapshot);
+        }
+    }
+
+    private void accepted(RuntimeCycleSnapshot snapshot) {
+        acceptedSequence = snapshot.sequence();
+        acceptedTimestampSeconds = snapshot.timestampSeconds();
+    }
+
+    private void startEncoder() {
+        if (encoderThread != null) {
+            return;
+        }
+        encoderThread = new Thread(this::encodeQueued, "athena-replay-encoder");
+        encoderThread.setDaemon(true);
+        encoderThread.start();
+    }
+
+    /**
+     * Encoder thread: every {@link #ENCODER_POLL_MILLIS}, or sooner once {@link #WAKE_ENCODER_CYCLES} cycles are
+     * queued, encodes the queued cycles. Exits when the recorder closes or after {@link #ENCODER_IDLE_POLLS} polls
+     * without a cycle; the next {@link #record} starts a new thread.
+     */
+    private void encodeQueued() {
+        int idlePolls = 0;
+        while (true) {
+            synchronized (pending) {
+                if (pending.size() < WAKE_ENCODER_CYCLES && !encoderStopped) {
+                    try {
+                        pending.wait(ENCODER_POLL_MILLIS);
+                    } catch (InterruptedException interrupted) {
+                        encoderThread = null;
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                if (pending.isEmpty()) {
+                    if (encoderStopped || ++idlePolls >= ENCODER_IDLE_POLLS) {
+                        // Closed or idle. Cycles queued from now on start a new thread.
+                        encoderThread = null;
+                        return;
+                    }
+                    continue;
+                }
+                idlePolls = 0;
+            }
+            synchronized (this) {
+                drainPending();
+            }
+        }
+    }
+
+    /** Encodes every queued cycle, oldest first. Callers hold this recorder's monitor. */
+    private void drainPending() {
+        while (true) {
+            PendingCycle next;
+            synchronized (pending) {
+                next = pending.pollFirst();
+            }
+            if (next == null) {
+                return;
+            }
+            try {
+                encode(next.snapshot(), next.mechanismInputs(), next.outputs());
+            } catch (RuntimeException failure) {
+                reporter.error("Athena replay could not record cycle " + next.snapshot().sequence() + ".", failure);
+            }
+        }
+    }
+
+    private void encode(
             RuntimeCycleSnapshot snapshot,
             HardwareCycleSnapshot mechanismInputs,
             List<ResolvedOutput> outputs) {
@@ -233,6 +369,7 @@ public final class ReplayRecorder {
      * @param signalId signal id, or 0 for none
      */
     public synchronized void mark(int kind, String message, int signalId) {
+        drainPending();
         if (segment == null) {
             openSegment();
         }
@@ -249,6 +386,7 @@ public final class ReplayRecorder {
 
     /** Forces the next recorded cycle to be a keyframe with every known signal. */
     public synchronized void keyframe() {
+        drainPending();
         encoder.requestKeyframe();
     }
 
@@ -314,6 +452,11 @@ public final class ReplayRecorder {
      * that was not flushed is discarded.
      */
     public synchronized void close() {
+        drainPending();
+        synchronized (pending) {
+            encoderStopped = true;
+            pending.notifyAll();
+        }
         sink = null;
         if (writer != null) {
             writer.close();
@@ -325,6 +468,7 @@ public final class ReplayRecorder {
     }
 
     private synchronized Optional<Path> flush(String reason) {
+        drainPending();
         closeSegment();
         List<ReplayBuffer.Segment> segments = buffer.drain();
         if (segments.isEmpty()) {
@@ -375,7 +519,12 @@ public final class ReplayRecorder {
     }
 
     private void openSegment() {
-        segment = new WireWriter(SEGMENT_TARGET_BYTES + 8192);
+        if (spareSegment != null) {
+            segment = spareSegment.clear();
+            spareSegment = null;
+        } else {
+            segment = new WireWriter(SEGMENT_TARGET_BYTES + 8192);
+        }
         segmentFrames = 0;
         segmentFirstSequence = -1;
         segmentLastSequence = -1;
@@ -397,11 +546,13 @@ public final class ReplayRecorder {
                     segmentFirstTimestamp,
                     segmentLastTimestamp));
         }
+        spareSegment = segment;
         segment = null;
     }
 
     /** Returns buffered and open-segment groups covering a sequence range, oldest first. */
     synchronized List<byte[]> backfill(long fromSequence, long toSequence) {
+        drainPending();
         List<byte[]> groups = new ArrayList<>(buffer.backfill(fromSequence, toSequence));
         if (segment != null && segmentFrames > 0 && segmentLastSequence >= fromSequence
                 && segmentFirstSequence <= toSequence) {

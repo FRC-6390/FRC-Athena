@@ -368,12 +368,11 @@ public final class EffortRuntime implements ControlLoopRuntime {
                 return;
             }
             MotorHandle handle = context.motor(device);
-            Optional<MotorConstants> known = EffortUnits.constants(device);
-            if (known.isPresent()) {
-                MotorConstants motor = known.get();
+            EffortUnits.Electrical motor = EffortUnits.electrical(device);
+            if (motor != null) {
                 double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
-                double backEmf = omega / motor.raw().speedConstantRadPerSecPerVolt();
-                double span = limitAmps * motor.resistance().in(Units.Ohms);
+                double backEmf = omega / motor.speedConstantRadPerSecPerVolt();
+                double span = limitAmps * motor.resistanceOhms();
                 lower = Math.max(lower, backEmf - span);
                 upper = Math.min(upper, backEmf + span);
             } else {

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.mechanism.effort;
 
 import ca.frc6390.athena.api.hardware.MotorKind;
+import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.units.MotionKind;
@@ -12,7 +13,10 @@ import edu.wpi.first.units.TorqueUnit;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -28,6 +32,23 @@ import java.util.Optional;
 public final class EffortUnits {
     /** Nominal bus voltage used to express percent outputs as volts when a limit applies. */
     public static final double NOMINAL_VOLTS = 12.0;
+
+    /**
+     * Built-in constants of every known physical motor, looked up per motor on every output cycle. The
+     * motor table is static, so the constants (and their unit conversions) are computed once.
+     */
+    private static final Map<MotorKinds, Optional<MotorConstants>> KNOWN_CONSTANTS = knownConstants();
+    private static final Map<MotorKinds, Electrical> KNOWN_ELECTRICAL = knownElectrical();
+
+    /**
+     * Primitive electrical constants of a motor in the units the names state.
+     *
+     * @param speedConstantRadPerSecPerVolt Kv
+     * @param resistanceOhms winding resistance
+     * @param torqueConstantNmPerAmp Kt
+     */
+    record Electrical(double speedConstantRadPerSecPerVolt, double resistanceOhms, double torqueConstantNmPerAmp) {
+    }
 
     /** Physical kind of an effort measure. */
     public enum Kind {
@@ -163,7 +184,44 @@ public final class EffortUnits {
     /** Returns the built-in constants of a motor, or empty for motor kinds without them. */
     public static Optional<MotorConstants> constants(MotorDevice motor) {
         MotorKind kind = motor.kind();
+        MotorKind physical = kind == null ? null : kind.motorKind();
+        if (physical instanceof MotorKinds known) {
+            return KNOWN_CONSTANTS.get(known);
+        }
         return MotorConstants.forKind(kind);
+    }
+
+    /** Returns the primitive constants of a motor, or null for motor kinds without built-in constants. */
+    static Electrical electrical(MotorDevice motor) {
+        MotorKind kind = motor.kind();
+        MotorKind physical = kind == null ? null : kind.motorKind();
+        if (physical instanceof MotorKinds known) {
+            return KNOWN_ELECTRICAL.get(known);
+        }
+        return constants(motor).map(EffortUnits::electrical).orElse(null);
+    }
+
+    private static Electrical electrical(MotorConstants constants) {
+        return new Electrical(
+                constants.raw().speedConstantRadPerSecPerVolt(),
+                constants.resistance().in(Units.Ohms),
+                constants.raw().torqueConstantNmPerAmp());
+    }
+
+    private static Map<MotorKinds, Optional<MotorConstants>> knownConstants() {
+        Map<MotorKinds, Optional<MotorConstants>> constants = new EnumMap<>(MotorKinds.class);
+        for (MotorKinds kind : MotorKinds.values()) {
+            constants.put(kind, MotorConstants.forKind(kind));
+        }
+        return Collections.unmodifiableMap(constants);
+    }
+
+    private static Map<MotorKinds, Electrical> knownElectrical() {
+        Map<MotorKinds, Electrical> electrical = new EnumMap<>(MotorKinds.class);
+        for (Map.Entry<MotorKinds, Optional<MotorConstants>> entry : KNOWN_CONSTANTS.entrySet()) {
+            entry.getValue().ifPresent(constants -> electrical.put(entry.getKey(), electrical(constants)));
+        }
+        return Collections.unmodifiableMap(electrical);
     }
 
     private static Unit unitOf(Kind kind) {

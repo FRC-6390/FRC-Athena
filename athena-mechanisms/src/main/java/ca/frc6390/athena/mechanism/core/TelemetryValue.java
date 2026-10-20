@@ -247,6 +247,18 @@ public final class TelemetryValue {
         return condition != null && condition.getAsBoolean();
     }
 
+    /**
+     * Returns true when both values read their lock state from the same condition object, so their {@link #locked()}
+     * results agree when read together. The schema builder shares one condition per lock group; publishers use this
+     * to read a group's lock state once per cycle.
+     *
+     * @param other other value
+     * @return true when the lock conditions are the same object (or both values have none)
+     */
+    public boolean sharesLockCondition(TelemetryValue other) {
+        return other != null && meta.lockCondition() == other.meta.lockCondition();
+    }
+
     /** Returns a copy whose lock state comes from the supplied condition. Set by the schema builder. */
     TelemetryValue withLockCondition(java.util.function.BooleanSupplier condition) {
         return withMeta(new Meta(meta.persisted(), meta.published(), meta.lockGroup(), condition));

@@ -31,6 +31,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             new LinkedHashMap<>();
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
+    private final Map<HardwareIdentity, MotorGroup> motorGroups = new LinkedHashMap<>();
+    private volatile MotorGroup[] motorGroupArray = new MotorGroup[0];
+    private final MotorGroup.Wiring groupWiring = new GroupWiring();
     private final Map<MotorDevice, HardwareIdentity> motorIdentities = new IdentityHashMap<>();
     private final Map<EncoderDevice, HardwareIdentity> encoderIdentities = new IdentityHashMap<>();
     private final Map<ImuDevice, HardwareIdentity> imuIdentities = new IdentityHashMap<>();
@@ -41,6 +44,10 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private RefreshTask[] refreshTasks = new RefreshTask[0];
     private int refreshTaskHandleCount = -1;
     private SnapshotSources snapshotSources = SnapshotSources.empty();
+    private SnapshotSources snapshotEntrySources;
+    private SnapshotEntry[] motorSnapshotEntries;
+    private SnapshotEntry[] encoderSnapshotEntries;
+    private SnapshotEntry[] imuSnapshotEntries;
     private int activeRefreshCycles;
     private boolean refreshCycleInFlight;
     private boolean closed;
@@ -51,6 +58,16 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<Object, RuntimeException> operationFailures = new LinkedHashMap<>();
     private final Map<Object, AutoCloseable> runtimeBindings = new IdentityHashMap<>();
     private final Map<Object, Object> runtimeBindingHandles = new IdentityHashMap<>();
+    /**
+     * Motor handles resolved by {@link #motor(MotorDevice)}, keyed by declaration. An entry is valid only while
+     * {@link #motorEpoch} equals its epoch: the epoch moves whenever the motor map or a runtime binding changes
+     * (creation, failover adoption, rebinding, close), so a stale handle is never returned.
+     */
+    private final Map<MotorDevice, MotorLookup> motorLookups = new IdentityHashMap<>();
+    private long motorEpoch;
+
+    private record MotorLookup(MotorHandle handle, long epoch) {
+    }
     private final RuntimeScope runtimeScope = new RuntimeScope("hardware-" + Integer.toHexString(System.identityHashCode(this)));
 
     /**
@@ -84,15 +101,26 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @Override
     public synchronized MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
+        // Steady state: the same declaration resolves to the same handle every cycle. The cached entry is only
+        // used while no binding failure is recorded for the declaration, because a recorded failure makes the
+        // slow path retry the binding.
+        MotorLookup cached = motorLookups.get(device);
+        if (cached != null && cached.epoch() == motorEpoch && !bindingFailures.containsKey(device)) {
+            return cached.handle();
+        }
         HardwareIdentity identity = identity(device);
         MotorHandle existing = motors.get(identity);
-        if (existing != null && !existing.device().equals(device)) {
+        if (existing != null && existing.device() != device && !existing.device().equals(device)) {
             throw new IllegalStateException("Conflicting motor declarations target " + identity.key()
                     + ". First declaration: " + existing.device()
                     + "; conflicting declaration: " + device);
         }
         try {
-            return createMotor(device);
+            MotorHandle handle = createMotor(device);
+            if (!bindingFailures.containsKey(device)) {
+                motorLookups.put(device, new MotorLookup(handle, motorEpoch));
+            }
+            return handle;
         } catch (RuntimeException exception) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
@@ -127,15 +155,25 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                 ? new SoftwareFollowerMotorHandle(device, created)
                 : created;
         handle.activate();
+        ActionContext.SoftwareMotorFollower softwareFollower = null;
         if (leader != null && !softwareFollow) {
             handle.follow(backendHandle(leader), device.isInverted());
         } else if (softwareFollow) {
             HardwareIdentity leaderIdentity = identity(device.follower().leader());
+            softwareFollower = new ActionContext.SoftwareMotorFollower(device, handle);
             softwareFollowers.computeIfAbsent(leaderIdentity, ignored -> new ArrayList<>())
-                    .add(new ActionContext.SoftwareMotorFollower(device, handle));
+                    .add(softwareFollower);
             softwareFollowerViews.remove(leaderIdentity);
         }
+        MotorGroup ledGroup = motorGroups.get(identity);
+        if (ledGroup != null) {
+            handle = ledGroup.adoptLeader(handle);
+        } else if (leader != null) {
+            MotorGroup followedGroup = motorGroups.get(identity(device.follower().leader()));
+            if (followedGroup != null) followedGroup.adoptFollower(device, identity, handle, softwareFollower);
+        }
         motors.put(identity, handle);
+        motorEpoch++;
         bindRuntime(device, handle);
         bindingFailures.remove(device);
         return handle;
@@ -146,6 +184,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         HardwareIdentity leaderIdentity = identity(leader);
         List<ActionContext.SoftwareMotorFollower> followers = softwareFollowers.get(leaderIdentity);
         if (followers == null || followers.isEmpty()) return List.of();
+        List<ActionContext.SoftwareMotorFollower> view = softwareFollowerViews.get(leaderIdentity);
+        if (view != null) return view;
         return softwareFollowerViews.computeIfAbsent(leaderIdentity, ignored -> List.copyOf(followers));
     }
 
@@ -169,18 +209,21 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         EncoderHandle handle;
         if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
             MotorHandle motor = motor(integrated.motor());
-            handle = encoders.computeIfAbsent(identity(device), ignored -> {
+            handle = encoders.get(identity(device));
+            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
                 motor.enableIntegratedEncoder();
                 return adjustable(new IntegratedEncoderHandle(device, motor));
             });
         } else if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
             MotorHandle motor = motor(absolute.motor());
-            handle = encoders.computeIfAbsent(identity(device), ignored -> {
+            handle = encoders.get(identity(device));
+            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
                 motor.enableAbsoluteEncoder();
                 return adjustable(new AbsoluteMotorEncoderHandle(device, motor));
             });
         } else {
-            handle = encoders.computeIfAbsent(identity(device), ignored -> {
+            handle = encoders.get(identity(device));
+            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
                 EncoderHandle created = backends
                         .encoderBackendFor(device)
                         .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
@@ -204,9 +247,80 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private static MotorHandle backendHandle(MotorHandle handle) {
+        if (handle instanceof FailoverMotorHandle failover) handle = failover.original();
         return handle instanceof SoftwareFollowerMotorHandle software
                 ? software.backendHandle()
                 : handle;
+    }
+
+    /**
+     * Declares how a leader-and-followers motor group responds when one of its motors dies, and returns its
+     * runtime health. The group is the policy's leader and every motor declared with {@code .follow(leader)}.
+     * Declare it before the motors are resolved when possible; a group declared later takes over the existing
+     * handles. Declaring the same leader twice returns the first group.
+     *
+     * @param policy group policy
+     * @return group runtime
+     */
+    public synchronized MotorGroup motorGroup(MotorGroupPolicy policy) {
+        Objects.requireNonNull(policy, "policy");
+        HardwareIdentity leaderIdentity = identity(policy.leader());
+        MotorGroup existing = motorGroups.get(leaderIdentity);
+        if (existing != null) return existing;
+        MotorGroup group = new MotorGroup(policy, leaderIdentity, groupWiring);
+        motorGroups.put(leaderIdentity, group);
+        motorGroupArray = motorGroups.values().toArray(MotorGroup[]::new);
+        MotorHandle leaderHandle = motors.get(leaderIdentity);
+        if (leaderHandle != null) adoptExisting(group, leaderHandle);
+        return group;
+    }
+
+    /** Returns whether a motor group handles this failure, so the motor's failure policy must not apply. */
+    public synchronized boolean motorFailureHandled(Object declaration) {
+        if (!(declaration instanceof MotorDevice motor) || motorGroupArray.length == 0) return false;
+        HardwareIdentity identity = identity(motor);
+        for (MotorGroup group : motorGroupArray) {
+            if (group.absorbs(identity)) return true;
+        }
+        return false;
+    }
+
+    private void adoptExisting(MotorGroup group, MotorHandle leaderHandle) {
+        HardwareIdentity leaderIdentity = group.leaderIdentity();
+        FailoverMotorHandle failover = group.adoptLeader(leaderHandle);
+        motors.put(leaderIdentity, failover);
+        motorEpoch++;
+        for (Map.Entry<Object, Object> entry : List.copyOf(runtimeBindingHandles.entrySet())) {
+            if (entry.getValue() == leaderHandle && entry.getKey() instanceof MotorDevice device) {
+                bindRuntime(device, failover);
+            }
+        }
+        for (Map.Entry<HardwareIdentity, EncoderHandle> entry : encoders.entrySet()) {
+            EncoderDevice encoder = entry.getValue().device();
+            if (!(encoder.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated)
+                    || !identity(integrated.motor()).equals(leaderIdentity)) {
+                continue;
+            }
+            EncoderHandle previous = entry.getValue();
+            EncoderHandle rebuilt = adjustable(new IntegratedEncoderHandle(encoder, failover));
+            entry.setValue(rebuilt);
+            for (Map.Entry<Object, Object> binding : List.copyOf(runtimeBindingHandles.entrySet())) {
+                if (binding.getValue() == previous && binding.getKey() instanceof EncoderDevice device) {
+                    bindRuntime(device, rebuilt);
+                }
+            }
+        }
+        List<ActionContext.SoftwareMotorFollower> mirrored = softwareFollowers.getOrDefault(leaderIdentity, List.of());
+        for (Map.Entry<HardwareIdentity, MotorHandle> entry : motors.entrySet()) {
+            MotorDevice device = entry.getValue().device();
+            if (device.follower() == null || !identity(device.follower().leader()).equals(leaderIdentity)) continue;
+            ActionContext.SoftwareMotorFollower software = null;
+            for (ActionContext.SoftwareMotorFollower follower : mirrored) {
+                if (follower.handle() == entry.getValue()) software = follower;
+            }
+            group.adoptFollower(device, entry.getKey(), entry.getValue(), software);
+        }
+        refreshTaskHandleCount = -1;
     }
 
     /**
@@ -231,7 +345,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private ImuHandle createImu(ImuDevice device) {
-        ImuHandle handle = imus.computeIfAbsent(identity(device), ignored -> {
+        ImuHandle handle = imus.get(identity(device));
+        if (handle == null) handle = imus.computeIfAbsent(identity(device), ignored -> {
             ImuHandle created = backends
                     .imuBackendFor(device)
                     .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
@@ -246,19 +361,24 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private void bindRuntime(MotorDevice device, MotorHandle handle) {
+        // Checked before the binding lambda is created so per-cycle lookups of a bound device do not allocate.
+        if (runtimeBindingHandles.get(device) == handle) return;
         replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
     }
 
     private void bindRuntime(EncoderDevice device, EncoderHandle handle) {
+        if (runtimeBindingHandles.get(device) == handle) return;
         replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
     }
 
     private void bindRuntime(ImuDevice device, ImuHandle handle) {
+        if (runtimeBindingHandles.get(device) == handle) return;
         replaceRuntimeBinding(device, handle, () -> device.bindRuntime(runtimeScope, handle));
     }
 
     private void replaceRuntimeBinding(Object device, Object handle, RuntimeBindingFactory factory) {
         if (runtimeBindingHandles.get(device) == handle) return;
+        motorEpoch++;
         AutoCloseable previous = runtimeBindings.remove(device);
         if (previous != null) closeBinding(previous);
         runtimeBindings.put(device, factory.bind());
@@ -305,6 +425,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             for (RefreshTask task : tasks) {
                 if (!refresh(task, nowNanos)) return;
             }
+            if (motorGroupArray.length > 0) evaluateMotorGroups();
             publishSnapshot(captureSnapshot(nowNanos));
         } finally {
             synchronized (this) {
@@ -312,6 +433,13 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                 activeRefreshCycles--;
                 notifyAll();
             }
+        }
+    }
+
+    private synchronized void evaluateMotorGroups() {
+        MotorGroup[] groups = motorGroupArray;
+        for (int index = 0; index < groups.length; index++) {
+            groups[index].evaluate();
         }
     }
 
@@ -330,30 +458,40 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             failures = failureSnapshot(sources);
         }
 
-        Map<HardwareIdentity, HardwareCycleSnapshot.MotorInput> motorInputs = new LinkedHashMap<>();
-        Map<HardwareIdentity, HardwareCycleSnapshot.EncoderInput> encoderInputs = new LinkedHashMap<>();
-        Map<HardwareIdentity, HardwareCycleSnapshot.ImuInput> imuInputs = new LinkedHashMap<>();
+        // Only one refresh cycle is in flight at a time, so its entry buffers can be reused across cycles.
+        if (snapshotEntrySources != sources) {
+            motorSnapshotEntries = SnapshotEntry.buffer(sources.motors().length);
+            encoderSnapshotEntries = SnapshotEntry.buffer(sources.encoders().length);
+            imuSnapshotEntries = SnapshotEntry.buffer(sources.imus().length);
+            snapshotEntrySources = sources;
+        }
+        SnapshotEntry[] motorEntries = motorSnapshotEntries;
+        SnapshotEntry[] encoderEntries = encoderSnapshotEntries;
+        SnapshotEntry[] imuEntries = imuSnapshotEntries;
+        int index = 0;
         for (MotorSnapshotSource source : sources.motors()) {
             MotorHandle handle = source.handle();
             RuntimeException failure = failures.get(source.identity());
-            motorInputs.put(source.identity(), new HardwareCycleSnapshot.MotorInput(
+            motorEntries[index++].set(source.identity(), new HardwareCycleSnapshot.MotorInput(
                     source.name(),
                     motorPosition(handle), motorVelocity(handle), motorVoltage(handle),
                     motorSupplyCurrent(handle), motorStatorCurrent(handle),
                     failure == null, failureMessage(failure)));
         }
+        index = 0;
         for (EncoderSnapshotSource source : sources.encoders()) {
             EncoderHandle handle = source.handle();
             RuntimeException failure = failures.get(source.identity());
-            encoderInputs.put(source.identity(), new HardwareCycleSnapshot.EncoderInput(
+            encoderEntries[index++].set(source.identity(), new HardwareCycleSnapshot.EncoderInput(
                     source.name(),
                     encoderPosition(handle), source.absolutePosition(), encoderVelocity(handle),
                     failure == null, failureMessage(failure)));
         }
+        index = 0;
         for (ImuSnapshotSource source : sources.imus()) {
             ImuHandle handle = source.handle();
             RuntimeException failure = failures.get(source.identity());
-            imuInputs.put(source.identity(), new HardwareCycleSnapshot.ImuInput(
+            imuEntries[index++].set(source.identity(), new HardwareCycleSnapshot.ImuInput(
                     source.name(),
                     imuYaw(handle), imuPitch(handle), imuRoll(handle), imuAngle(handle), imuYawRate(handle),
                     imuPitchRate(handle), imuRollRate(handle),
@@ -361,6 +499,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                     failure == null && imuConnected(handle), imuCalibrating(handle), imuLastUpdate(handle),
                     failureMessage(failure)));
         }
+        // Map.ofEntries builds the same immutable map that HardwareCycleSnapshot's Map.copyOf would, and
+        // Map.copyOf returns an immutable map as is, so no intermediate map is built.
+        Map<HardwareIdentity, HardwareCycleSnapshot.MotorInput> motorInputs = SnapshotEntry.immutableMap(motorEntries);
+        Map<HardwareIdentity, HardwareCycleSnapshot.EncoderInput> encoderInputs =
+                SnapshotEntry.immutableMap(encoderEntries);
+        Map<HardwareIdentity, HardwareCycleSnapshot.ImuInput> imuInputs = SnapshotEntry.immutableMap(imuEntries);
         return new HardwareCycleSnapshot(
                 sequence, nowNanos, motorInputs, encoderInputs, imuInputs);
     }
@@ -371,8 +515,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         ImuSnapshotSource[] imuSources = new ImuSnapshotSource[imus.size()];
         int index = 0;
         for (Map.Entry<HardwareIdentity, MotorHandle> entry : motors.entrySet()) {
+            // A group leader's snapshot reports its own controller, not the motor leading in its place.
+            MotorHandle handle = entry.getValue() instanceof FailoverMotorHandle failover
+                    ? failover.original()
+                    : entry.getValue();
             motorSources[index++] = new MotorSnapshotSource(
-                    entry.getKey(), entry.getValue(), entry.getValue().device().defaultName());
+                    entry.getKey(), handle, entry.getValue().device().defaultName());
         }
         index = 0;
         for (Map.Entry<HardwareIdentity, EncoderHandle> entry : encoders.entrySet()) {
@@ -446,6 +594,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private void retryBindings(long nowNanos) {
+        if (bindingFailures.isEmpty()) return;
         for (Object declaration : new ArrayList<>(bindingFailures.keySet())) {
             RefreshBackoff backoff = bindingRetryBackoffs.get(declaration);
             if (backoff != null && nowNanos < backoff.retryAtNanos()) continue;
@@ -499,10 +648,21 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         operationFailures.put(
                 Objects.requireNonNull(declaration, "declaration"),
                 Objects.requireNonNull(exception, "exception"));
+        if (declaration instanceof MotorDevice motor && motorGroupArray.length > 0) {
+            HardwareIdentity identity = identity(motor);
+            for (MotorGroup group : motorGroupArray) {
+                if (group.contains(identity)) group.operationFailed(identity);
+            }
+        }
     }
+
+    // The same empty list the stream below produces, returned without building a stream when nothing failed.
+    private static final List<BindingFailure> NO_OPERATION_FAILURES =
+            java.util.stream.Stream.<BindingFailure>empty().toList();
 
     /** Returns and clears output/setup failures reported since the previous drain. */
     public synchronized List<BindingFailure> drainOperationFailures() {
+        if (operationFailures.isEmpty()) return NO_OPERATION_FAILURES;
         List<BindingFailure> failures = operationFailures.entrySet().stream()
                 .map(entry -> new BindingFailure(entry.getKey(), entry.getValue()))
                 .toList();
@@ -575,11 +735,15 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         closeAll(runtimeBindings);
         runtimeBindings.clear();
         runtimeBindingHandles.clear();
+        motorLookups.clear();
+        motorEpoch++;
         closeAll(imus);
         closeAll(encoders);
         closeAll(motors);
         softwareFollowers.clear();
         softwareFollowerViews.clear();
+        motorGroups.clear();
+        motorGroupArray = new MotorGroup[0];
         motorIdentities.clear();
         encoderIdentities.clear();
         imuIdentities.clear();
@@ -755,6 +919,38 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
     }
 
+    /**
+     * Reusable map entry handed to {@link Map#ofEntries}, which copies keys and values and keeps no entry.
+     */
+    private static final class SnapshotEntry implements Map.Entry<HardwareIdentity, Object> {
+        private static final SnapshotEntry[] EMPTY = new SnapshotEntry[0];
+        private HardwareIdentity key;
+        private Object value;
+
+        private static SnapshotEntry[] buffer(int size) {
+            if (size == 0) return EMPTY;
+            SnapshotEntry[] entries = new SnapshotEntry[size];
+            for (int i = 0; i < size; i++) entries[i] = new SnapshotEntry();
+            return entries;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static <V> Map<HardwareIdentity, V> immutableMap(SnapshotEntry[] entries) {
+            Map<HardwareIdentity, V> map = (Map<HardwareIdentity, V>) Map.ofEntries(entries);
+            for (SnapshotEntry entry : entries) entry.value = null;
+            return map;
+        }
+
+        private void set(HardwareIdentity key, Object value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        @Override public HardwareIdentity getKey() { return key; }
+        @Override public Object getValue() { return value; }
+        @Override public Object setValue(Object value) { throw new UnsupportedOperationException(); }
+    }
+
     private record SnapshotSources(
             MotorSnapshotSource[] motors,
             EncoderSnapshotSource[] encoders,
@@ -808,6 +1004,49 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @FunctionalInterface
     private interface RuntimeBindingFactory {
         AutoCloseable bind();
+    }
+
+    private final class GroupWiring implements MotorGroup.Wiring {
+        @Override
+        public RuntimeException refreshFailure(HardwareIdentity identity) {
+            return refreshFailures.isEmpty() ? null : refreshFailures.get(identity);
+        }
+
+        @Override
+        public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
+            return backends.motorBackendFor(follower.kind())
+                    .map(backend -> backend.supportsHardwareFollowing(follower, leader))
+                    .orElse(false);
+        }
+
+        @Override
+        public void softwareFollower(ActionContext.SoftwareMotorFollower follower, boolean add) {
+            // The group's motors are mirrored from the declared leader, whichever motor leads it.
+            for (MotorGroup group : motorGroupArray) {
+                if (!group.contains(identity(follower.device()))) continue;
+                HardwareIdentity leaderIdentity = group.leaderIdentity();
+                List<ActionContext.SoftwareMotorFollower> followers =
+                        softwareFollowers.computeIfAbsent(leaderIdentity, ignored -> new ArrayList<>());
+                if (add) {
+                    followers.add(follower);
+                } else {
+                    followers.removeIf(existing -> existing == follower);
+                }
+                softwareFollowerViews.remove(leaderIdentity);
+                return;
+            }
+        }
+
+        @Override
+        public boolean absoluteEncoderOn(HardwareIdentity motor) {
+            for (EncoderHandle encoder : encoders.values()) {
+                if (encoder.device().source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute
+                        && identity(absolute.motor()).equals(motor)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     private record UnavailableMotorHandle(MotorDevice device) implements MotorHandle {

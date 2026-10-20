@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /** Identity-based runtime bindings used by directly readable declarations. */
 public final class RuntimeBindings<K, V> {
@@ -45,6 +46,28 @@ public final class RuntimeBindings<K, V> {
                     description + " is bound to multiple runtimes; read it inside the owning runtime scope.");
         }
         return selected.value;
+    }
+
+    /**
+     * Returns the value bound to a declaration, describing the declaration only when the lookup fails.
+     *
+     * <p>Behaves like {@link #get(Object, String)}, but builds the description lazily so per-cycle reads of a
+     * bound declaration do not allocate. Pass a non-capturing function (for example a static method reference)
+     * to keep the call allocation-free.</p>
+     *
+     * @param declaration bound declaration
+     * @param description builds the declaration's description for error messages
+     * @return bound value
+     * @throws IllegalStateException when the declaration is unbound, or bound to several runtimes and read outside
+     *         the owning runtime scope
+     */
+    public V get(K declaration, Function<? super K, String> description) {
+        Objects.requireNonNull(declaration, "declaration");
+        BindingGroup<V> group = bindings.get(declaration);
+        if (group != null && group.single != null) {
+            return group.single.value;
+        }
+        return get(declaration, description.apply(declaration));
     }
 
     public V find(K declaration) {

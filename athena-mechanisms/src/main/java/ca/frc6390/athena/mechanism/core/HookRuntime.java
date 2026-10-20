@@ -112,13 +112,21 @@ final class HookRuntime {
         }
         EventBinding event = hook.event();
         boolean previousSource = previousSourceActive.getOrDefault(event, false);
-        boolean currentSource = sourceSamples.computeIfAbsent(event, value -> value.sourceActive(safeContext));
+        Boolean sampled = sourceSamples.get(event);
+        if (sampled == null) {
+            // Same as computeIfAbsent, without allocating a capturing lambda per hook per cycle.
+            sampled = event.sourceActive(safeContext);
+            sourceSamples.put(event, sampled);
+        }
+        boolean currentSource = sampled;
         boolean active = event.active(safeContext, previousSource, currentSource);
         boolean wasActive = previousEventActive.getOrDefault(hook, false);
         boolean lifecycleInit = safeContext.phase() == LifecyclePhase.INIT;
         triggeredThisCycle.put(hook, active != wasActive);
 
-        for (HookBinding.HookAction binding : hook.actions()) {
+        List<HookBinding.HookAction> actions = hook.actions();
+        for (int actionIndex = 0; actionIndex < actions.size(); actionIndex++) {
+            HookBinding.HookAction binding = actions.get(actionIndex);
             if (isImmediateDeviceMutation(binding.action())) {
                 if (binding.phase().shouldRun(event, wasActive, active)) {
                     applyImmediateMutation(binding.action(), actionContext);

@@ -315,6 +315,7 @@ each feature guide. In short:
 - **Characterization and models**, [`docs/characterization-and-models.md`](docs/characterization-and-models.md): identified plants, checks, and drift history.
 - **Motion policies**, [`docs/motion-policies.md`](docs/motion-policies.md) and [`docs/action-runtime-contract.md`](docs/action-runtime-contract.md).
 - **Power, thermal, and staging**, [`docs/power-thermal-staging.md`](docs/power-thermal-staging.md).
+- **Motor failover**, [`docs/motor-failover.md`](docs/motor-failover.md): promote a follower when a group's leader dies, drop dead followers, or disable the mechanism.
 - **Replay and simulation exploration**, [`docs/replay.md`](docs/replay.md) and [`docs/sim-exploration.md`](docs/sim-exploration.md).
 - **ARCP and the dashboard**, [`docs/arcp.md`](docs/arcp.md) and [`athena-arcp/README.md`](athena-arcp/README.md).
 - **Alliance transforms**, [`example-projects/localization-setups`](example-projects/localization-setups) and [`example-projects/auto-following`](example-projects/auto-following).

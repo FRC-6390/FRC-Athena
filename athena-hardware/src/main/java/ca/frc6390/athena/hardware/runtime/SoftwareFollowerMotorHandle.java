@@ -12,14 +12,25 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     private final MotorDevice device;
     private final MotorHandle delegate;
     private double direction;
+    /** Percent and voltage derate set by motor failover while its group runs degraded. */
+    private double scale = 1.0;
 
     SoftwareFollowerMotorHandle(MotorDevice device, MotorHandle delegate) {
+        this(device, delegate, device.isInverted() ? -1.0 : 1.0);
+    }
+
+    /** Creates a follower driven with an explicit direction relative to its group's command. */
+    SoftwareFollowerMotorHandle(MotorDevice device, MotorHandle delegate, double direction) {
         this.device = Objects.requireNonNull(device, "device");
         this.delegate = Objects.requireNonNull(delegate, "delegate");
-        direction = device.isInverted() ? -1.0 : 1.0;
+        this.direction = direction;
     }
 
     MotorHandle backendHandle() { return delegate; }
+
+    double direction() { return direction; }
+
+    void scale(double scale) { this.scale = scale; }
 
     @Override public MotorDevice device() { return device; }
 
@@ -34,11 +45,13 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     }
     @Override public void activate() { delegate.activate(); }
     @Override public void refreshInputs() { delegate.refreshInputs(); }
+    @Override public boolean faulted() { return delegate.faulted(); }
+    @Override public void stopFollowing() { delegate.stopFollowing(); }
     @Override public double appliedVoltage() { return delegate.appliedVoltage(); }
     @Override public double supplyCurrentAmps() { return delegate.supplyCurrentAmps(); }
     @Override public double statorCurrentAmps() { return delegate.statorCurrentAmps(); }
-    @Override public void setPercentOutput(double percent) { delegate.setPercentOutput(direction * percent); }
-    @Override public void setVoltage(double volts) { delegate.setVoltage(direction * volts); }
+    @Override public void setPercentOutput(double percent) { delegate.setPercentOutput(direction * scale * percent); }
+    @Override public void setVoltage(double volts) { delegate.setVoltage(direction * scale * volts); }
     @Override public void setPositionTargetRotations(double rotations) {
         delegate.setPositionTargetRotations(direction * rotations);
     }

@@ -44,6 +44,11 @@ final class MechanismRuntime {
     private final List<ResolvedOutput> resolvedScratch = new ArrayList<>();
     private final Map<Object, CandidateOutput> winnerScratch = new IdentityHashMap<>();
     private Set<MotorDevice> drivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    /** Resources claimed so far by {@link #validateNoDuplicateOutputs}, with the claiming output index. */
+    private final List<Object> claimedResources = new ArrayList<>();
+    private int[] claimedOwners = new int[8];
+    private Action baseLocationAction;
+    private String baseLocation;
     private final Map<PathAction, PathRuntime> pathRuntimes;
     private Runnable simulationStep = () -> {
     };
@@ -385,7 +390,7 @@ final class MechanismRuntime {
                                 "lease",
                                 lease.recency(),
                                 result,
-                                lease.reservedResources(),
+                                lease,
                                 lease.diagnosticLocation());
                     }
                 } catch (RuntimeException exception) {
@@ -484,7 +489,8 @@ final class MechanismRuntime {
             applier.endCycle();
         }
         // Controls held after release (HOLD / DECELERATE) keep their motors driven without a lease.
-        drivenNow.addAll(applier.heldMotors());
+        Set<MotorDevice> held = applier.heldMotors();
+        if (!held.isEmpty()) drivenNow.addAll(held);
         simulationStep.run();
         if (traceDue(timedContext.nowSeconds())) {
             traceSnapshot = buildTrace(timedContext, candidates, selected, reservations);
@@ -561,13 +567,14 @@ final class MechanismRuntime {
             String source,
             long recency,
             StateScheduler.Result active,
-            Set<Object> reservedResources,
+            ActiveLease lease,
             String diagnosticLocation) {
         resolvedScratch.clear();
         resolver.resolveInto(mechanism, active.action(), active.context(), resolvedScratch);
         validateNoDuplicateOutputs(resolvedScratch, source, active.action(), diagnosticLocation);
-        for (ResolvedOutput output : resolvedScratch) {
-            validateReservedResources(output.request(), reservedResources);
+        for (int outputIndex = 0; outputIndex < resolvedScratch.size(); outputIndex++) {
+            ResolvedOutput output = resolvedScratch.get(outputIndex);
+            validateReservedResources(output.request(), lease);
             int order = candidates.size();
             CandidateOutput candidate;
             if (order < candidatePool.size()) {
@@ -582,38 +589,55 @@ final class MechanismRuntime {
         }
     }
 
-    private static void validateNoDuplicateOutputs(
+    private void validateNoDuplicateOutputs(
             List<ResolvedOutput> outputs,
             String source,
             Action scheduledOutput,
             String diagnosticLocation) {
-        Map<Object, Integer> claimed = new LinkedHashMap<>();
-        for (int outputIndex = 0; outputIndex < outputs.size(); outputIndex++) {
-            ResolvedOutput output = outputs.get(outputIndex);
-            OutputRequest request = output.request();
-            for (int index = 0; index < motorCount(request); index++) {
-                requireUnclaimedOutputResource(
-                        claimed, motorAt(request, index), outputs, outputIndex,
-                        source, scheduledOutput, diagnosticLocation);
+        // Same result as claiming every resource in an equality-keyed map, without allocating the map
+        // or hashing declarations; a cycle resolves only a handful of outputs.
+        claimedResources.clear();
+        try {
+            for (int outputIndex = 0; outputIndex < outputs.size(); outputIndex++) {
+                ResolvedOutput output = outputs.get(outputIndex);
+                OutputRequest request = output.request();
+                for (int index = 0; index < motorCount(request); index++) {
+                    requireUnclaimedOutputResource(
+                            motorAt(request, index), outputs, outputIndex,
+                            source, scheduledOutput, diagnosticLocation);
+                }
+                if (request.control() != null && request.control().sink() != null) {
+                    requireUnclaimedOutputResource(
+                            request.control().sink(), outputs, outputIndex,
+                            source, scheduledOutput, diagnosticLocation);
+                }
             }
-            if (request.control() != null && request.control().sink() != null) {
-                requireUnclaimedOutputResource(
-                        claimed, request.control().sink(), outputs, outputIndex,
-                        source, scheduledOutput, diagnosticLocation);
-            }
+        } finally {
+            claimedResources.clear();
         }
     }
 
-    private static void requireUnclaimedOutputResource(
-            Map<Object, Integer> claimed,
+    private void requireUnclaimedOutputResource(
             Object resource,
             List<ResolvedOutput> outputs,
             int outputIndex,
             String source,
             Action scheduledOutput,
             String diagnosticLocation) {
-        Integer existingIndex = claimed.putIfAbsent(resource, outputIndex);
-        if (existingIndex != null) {
+        int existingIndex = -1;
+        for (int index = 0; index < claimedResources.size(); index++) {
+            Object claimed = claimedResources.get(index);
+            if (claimed == resource || claimed.equals(resource)) {
+                existingIndex = claimedOwners[index];
+                break;
+            }
+        }
+        if (existingIndex < 0) {
+            int slot = claimedResources.size();
+            if (slot == claimedOwners.length) claimedOwners = java.util.Arrays.copyOf(claimedOwners, slot * 2);
+            claimedOwners[slot] = outputIndex;
+            claimedResources.add(resource);
+        } else {
             throw new IllegalStateException(
                     "Runtime output conflict at " + diagnosticLocation + " while evaluating "
                             + source + " action " + actionType(scheduledOutput)
@@ -625,6 +649,15 @@ final class MechanismRuntime {
     }
 
     private String baseActionLocation(Action baseAction) {
+        // Depends only on the action and the immutable node, and is needed every cycle.
+        if (baseAction != baseLocationAction || baseLocation == null) {
+            baseLocation = describeBaseActionLocation(baseAction);
+            baseLocationAction = baseAction;
+        }
+        return baseLocation;
+    }
+
+    private String describeBaseActionLocation(Action baseAction) {
         List<String> names = new ArrayList<>();
         for (Map.Entry<String, Action> entry : node.Actions().entrySet()) {
             if (entry.getValue() == baseAction) names.add(node.name() + ".actions[\"" + entry.getKey() + "\"]");
@@ -649,20 +682,20 @@ final class MechanismRuntime {
         return "resource '" + resource + "'";
     }
 
-    private static void validateReservedResources(OutputRequest request, Set<Object> reservedResources) {
-        if (reservedResources == null) {
+    private static void validateReservedResources(OutputRequest request, ActiveLease lease) {
+        if (lease == null) {
             return;
         }
         for (int index = 0; index < motorCount(request); index++) {
             MotorDevice motor = motorAt(request, index);
-            if (!reservedResources.contains(motor)) {
+            if (!lease.reserves(motor)) {
                 throw new IllegalStateException(
                         "Action emitted motor '" + motor.defaultName()
                                 + "' outside its compiled resource graph. Add it to the computed action ownership.");
             }
         }
         ControlBinding<?> control = request.control();
-        if (control != null && control.sink() != null && !reservedResources.contains(control.sink())) {
+        if (control != null && control.sink() != null && !lease.reserves(control.sink())) {
             throw new IllegalStateException(
                     "Action emitted a control sink outside its compiled resource graph. "
                             + "Add it to the computed action ownership.");
@@ -701,7 +734,8 @@ final class MechanismRuntime {
             OutputRequest request = candidate.output().request();
             for (int motorIndex = 0; motorIndex < motorCount(request); motorIndex++) {
                 MotorDevice motor = motorAt(request, motorIndex);
-                long reserved = reservations.getOrDefault(motor, Long.MIN_VALUE);
+                Long reservation = reservations.get(motor);
+                long reserved = reservation == null ? Long.MIN_VALUE : reservation.longValue();
                 if (candidate.recency() < reserved && !drivenBy(motor, selected)) {
                     setReason(REASON_STARVED, leaseWithRecency(reserved), motor, 0);
                     return;
@@ -1185,7 +1219,13 @@ final class MechanismRuntime {
         private final String diagnosticLocation;
         private final Object owner;
         private final boolean narrowable;
-        private final Set<Object> liveResources = new LinkedHashSet<>();
+        private final Set<Object> liveResources = new ResourceSet();
+        /**
+         * {@code reservedResources.contains} memoized by resource identity. The set and the resource
+         * declarations are immutable, so an answer never changes, and equality lookups of motor
+         * declarations are expensive (deep record hashCode).
+         */
+        private final Map<Object, Boolean> reservesMemo = new IdentityHashMap<>();
         private boolean liveComputed;
         private double startSeconds = Double.NaN;
         private boolean evaluating;
@@ -1226,7 +1266,19 @@ final class MechanismRuntime {
             liveComputed = true;
             if (scheduler.complete()) return;
             scheduler.collectLive(action, resources, liveResources);
-            liveResources.retainAll(reservedResources);
+            java.util.Iterator<Object> live = liveResources.iterator();
+            while (live.hasNext()) {
+                if (!reserves(live.next())) live.remove();
+            }
+        }
+
+        private boolean reserves(Object resource) {
+            Boolean reserved = reservesMemo.get(resource);
+            if (reserved == null) {
+                reserved = reservedResources.contains(resource);
+                reservesMemo.put(resource, reserved);
+            }
+            return reserved;
         }
 
         private Set<Object> currentReservation() {
@@ -1270,10 +1322,56 @@ final class MechanismRuntime {
         }
     }
 
+    /**
+     * Insertion-ordered set with the membership of a {@link LinkedHashSet}, for the few resources a lease
+     * reserves. It is rebuilt every cycle, so it keeps its backing array instead of allocating hash entries,
+     * and compares by equality without hashing (motor declarations hash deeply).
+     */
+    private static final class ResourceSet extends java.util.AbstractSet<Object> {
+        private final List<Object> items = new ArrayList<>();
+
+        @Override
+        public boolean add(Object resource) {
+            if (contains(resource)) return false;
+            items.add(resource);
+            return true;
+        }
+
+        @Override
+        public boolean contains(Object resource) {
+            for (int index = 0; index < items.size(); index++) {
+                Object item = items.get(index);
+                if (item == resource || resource != null && resource.equals(item)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public java.util.Iterator<Object> iterator() {
+            return items.iterator();
+        }
+
+        @Override
+        public int size() {
+            return items.size();
+        }
+
+        @Override
+        public void clear() {
+            items.clear();
+        }
+    }
+
     private static MechanismContext withTimeInState(MechanismContext context, double timeInStateSeconds) {
+        double clamped = Math.max(0.0, timeInStateSeconds);
+        if (Double.compare(clamped, context.timeInStateSeconds()) == 0) {
+            // Equal to the record that would be built (a node started with its parent); contexts are
+            // immutable values, so the existing one is reused instead of allocating a copy.
+            return context;
+        }
         return new MechanismContext(
                 context.nowSeconds(),
-                Math.max(0.0, timeInStateSeconds),
+                clamped,
                 context.dtSeconds(),
                 context.enabled(),
                 context.autonomous(),
@@ -1321,8 +1419,10 @@ final class MechanismRuntime {
         }
 
         Result evaluate(Action action, MechanismContext context) {
-            if (root == null || root.action() != action) {
+            if (root == null) {
                 root = SchedulerNode.lower(action);
+            } else if (root.action() != action) {
+                root.relower(action, true);
             }
             Evaluation evaluation = evaluate(root, context);
             scheduledActionType = typeName(evaluation.output());
@@ -1501,11 +1601,7 @@ final class MechanismRuntime {
             Objects.requireNonNull(schedule, "schedule");
             Action action = schedule.action();
             Node node = schedule.runtime(context);
-            MechanismContext local = withTimeInState(context, context.nowSeconds() - node.startSeconds);
-
-            if (action instanceof Actions.Sequence sequence) {
-                return evaluateSequence(sequence, schedule, context, local, node);
-            }
+            // Groups, cycles and then-chains never read the node-local context; skip building it.
             if (action instanceof Actions.Cycle cycle) {
                 return evaluateCycle(cycle, schedule, context, node);
             }
@@ -1518,17 +1614,27 @@ final class MechanismRuntime {
             if (action instanceof Actions.Deadline deadline) {
                 return evaluateGroup(deadline.Actions(), schedule, context, node, GroupMode.DEADLINE, 0);
             }
-            if (action instanceof Actions.Computed computed) {
-                if (node.terminal) return schedule.result(null, true, local);
-                SchedulerNode childNode = schedule.named("computed", computed.evaluate(local));
+            if (action instanceof Actions.Then then) {
+                return evaluateThen(then.action(), then.next(), schedule, context, node);
+            }
+            if (action instanceof Actions.HardwareComputed computed) {
+                if (node.terminal) {
+                    return schedule.result(null, true, withTimeInState(context, context.nowSeconds() - node.startSeconds));
+                }
+                SchedulerNode childNode = schedule.named("hardwareComputed", computed.evaluate(actionContext));
                 Evaluation child = evaluate(childNode, context);
                 node.terminal = child.complete();
                 if (child.complete()) childNode.reset();
                 return schedule.result(child.output(), child.complete(), child.context());
             }
-            if (action instanceof Actions.HardwareComputed computed) {
+            MechanismContext local = withTimeInState(context, context.nowSeconds() - node.startSeconds);
+
+            if (action instanceof Actions.Sequence sequence) {
+                return evaluateSequence(sequence, schedule, context, local, node);
+            }
+            if (action instanceof Actions.Computed computed) {
                 if (node.terminal) return schedule.result(null, true, local);
-                SchedulerNode childNode = schedule.named("hardwareComputed", computed.evaluate(actionContext));
+                SchedulerNode childNode = schedule.named("computed", computed.evaluate(local));
                 Evaluation child = evaluate(childNode, context);
                 node.terminal = child.complete();
                 if (child.complete()) childNode.reset();
@@ -1609,9 +1715,6 @@ final class MechanismRuntime {
                         context,
                         local,
                         node);
-            }
-            if (action instanceof Actions.Then then) {
-                return evaluateThen(then.action(), then.next(), schedule, context, node);
             }
             if (action instanceof Actions.RuntimeAction runtimeAction) {
                 if (!node.entered) {
@@ -1780,9 +1883,9 @@ final class MechanismRuntime {
             while (node.index < steps.size()) {
                 Actions.SequenceStep step = steps.get(node.index);
                 SchedulerNode stepNode = schedule.indexed(node.index, step.action());
-                MechanismContext stepContext = stepNode.localContext(context);
+                double stepSeconds = stepNode.timeInState(context);
                 Evaluation child = evaluate(stepNode, context);
-                if (child.complete() || step.complete().test(stepContext)) {
+                if (child.complete() || step.complete().test(withTimeInState(context, stepSeconds))) {
                     stepNode.reset();
                     node.index++;
                     continue;
@@ -1810,9 +1913,9 @@ final class MechanismRuntime {
             for (int attempts = 0; attempts < steps.size(); attempts++) {
                 Actions.CycleStep step = steps.get(node.index);
                 SchedulerNode stepNode = schedule.indexed(node.index, step.action());
-                MechanismContext stepContext = stepNode.localContext(context);
+                double stepSeconds = stepNode.timeInState(context);
                 Evaluation child = evaluate(stepNode, context);
-                if (child.complete() || step.advance().test(stepContext)) {
+                if (child.complete() || step.advance().test(withTimeInState(context, stepSeconds))) {
                     stepNode.reset();
                     node.index = (node.index + 1) % steps.size();
                     continue;
@@ -1909,7 +2012,9 @@ final class MechanismRuntime {
                 Node node,
                 MechanismContext context) {
             if (node.terminal) return true;
-            boolean raw = RuntimeHardwareAccess.call(actionContext, signal::instantaneousActive);
+            boolean raw = RuntimeHardwareAccess.current() == actionContext
+                    ? signal.instantaneousActive()
+                    : RuntimeHardwareAccess.call(actionContext, signal::instantaneousActive);
             if (!raw) {
                 node.stallSinceSeconds = Double.NaN;
                 return false;
@@ -1945,10 +2050,9 @@ final class MechanismRuntime {
                 return false;
             }
             ControlBinding<?> control = target.control();
-            double measurement = RuntimeHardwareAccess.call(actionContext, () -> switch (target.mode()) {
-                case POSITION -> feedbackPosition(control);
-                case VELOCITY -> feedbackVelocity(control);
-            });
+            double measurement = target.mode() == ControlMode.POSITION
+                    ? feedbackPosition(control)
+                    : feedbackVelocity(control);
             if (!Double.isFinite(measurement)) {
                 return false;
             }
@@ -1965,7 +2069,7 @@ final class MechanismRuntime {
                 return false;
             }
             if (Double.isFinite(maxVelocity)) {
-                double velocity = RuntimeHardwareAccess.call(actionContext, () -> feedbackVelocity(control));
+                double velocity = feedbackVelocity(control);
                 return Math.abs(velocity) <= maxVelocity;
             }
             return true;
@@ -2002,16 +2106,24 @@ final class MechanismRuntime {
             return result.accepted() ? result.value() : Double.NaN;
         }
 
+        /** Reads the control's position with this scheduler's hardware context bound. */
         private double feedbackPosition(ControlBinding<?> control) {
+            if (RuntimeHardwareAccess.current() != actionContext) {
+                return RuntimeHardwareAccess.call(actionContext, () -> feedbackPosition(control));
+            }
             if (control.feedback() != null) {
-                return RuntimeHardwareAccess.call(actionContext, control.feedback().position()::position);
+                return control.feedback().position().position();
             }
             return actionContext.motor(control.output()).integratedPositionRotations();
         }
 
+        /** Reads the control's velocity with this scheduler's hardware context bound. */
         private double feedbackVelocity(ControlBinding<?> control) {
+            if (RuntimeHardwareAccess.current() != actionContext) {
+                return RuntimeHardwareAccess.call(actionContext, () -> feedbackVelocity(control));
+            }
             if (control.feedback() != null) {
-                return RuntimeHardwareAccess.call(actionContext, control.feedback().velocity()::velocity);
+                return control.feedback().velocity().velocity();
             }
             return actionContext.motor(control.output()).integratedVelocityRotationsPerSecond();
         }
@@ -2142,39 +2254,111 @@ final class MechanismRuntime {
             private Node(double startSeconds) {
                 this.startSeconds = startSeconds;
             }
+
+            /** Returns this released runtime in the state of {@code new Node(startSeconds)}. */
+            private Node restart(double startSeconds) {
+                this.startSeconds = startSeconds;
+                stallSinceSeconds = Double.NaN;
+                chosen = null;
+                entered = false;
+                index = 0;
+                pathState = null;
+                pathRuntime = null;
+                lastPathContext = null;
+                pathComplete = false;
+                terminal = false;
+                withinSinceSeconds = Double.NaN;
+                if (latchedComplete != null) java.util.Arrays.fill(latchedComplete, false);
+                groupOutputs.clear();
+                markerOutputs.clear();
+                completedMarkers.clear();
+                return this;
+            }
         }
 
+        /**
+         * Lowered schedule of one action. A node replaced by a different action of the same slot (for
+         * example the fresh action a computed action returns every cycle) is reset as before and then
+         * re-lowered in place, reusing its child nodes and runtime state objects instead of allocating a
+         * new subtree. A re-lowered node is indistinguishable from a newly constructed one: its live
+         * children are exactly the known children of the new action and its runtime starts empty.
+         */
         private static final class SchedulerNode {
-            private final Action action;
+            private Action action;
             private final List<SchedulerNode> indexedChildren = new ArrayList<>();
-            private final Map<String, SchedulerNode> namedChildren = new HashMap<>();
+            private Map<String, SchedulerNode> namedChildren = new HashMap<>();
             private final Evaluation evaluation = new Evaluation();
             private Node runtime;
+            /** Runtime state released by {@link #reset()}, reused by the next {@link #runtime}. */
+            private Node spareRuntime;
+            /** Detached (already reset) children kept for reuse when this node is re-lowered. */
+            private List<SchedulerNode> spareIndexed;
+            private Map<String, SchedulerNode> spareNamed;
 
-            private SchedulerNode(Action action) {
+            private SchedulerNode(Action action, boolean validate) {
                 this.action = Objects.requireNonNull(action, "action");
-                Actions.validate(action);
+                if (validate) Actions.validate(action);
                 lowerKnownChildren();
             }
 
+            /** Lowers a root or dynamically produced action; validates its whole static tree once. */
             private static SchedulerNode lower(Action action) {
-                return new SchedulerNode(action);
+                return new SchedulerNode(action, true);
             }
 
             private Action action() {
                 return action;
             }
 
+            /**
+             * Re-lowers this already reset node for {@code next}. The validation of {@code next} runs
+             * before any change, so a rejected action leaves this node as it was.
+             */
+            private void relower(Action next, boolean validate) {
+                Objects.requireNonNull(next, "action");
+                if (validate) Actions.validate(next);
+                if (runtime != null) {
+                    // Only reachable for a replaced root that was not reset; a new node starts without runtime.
+                    spareRuntime = runtime;
+                    runtime = null;
+                }
+                for (int index = 0; index < indexedChildren.size(); index++) {
+                    SchedulerNode child = indexedChildren.get(index);
+                    if (child == null) continue;
+                    if (spareIndexed == null) spareIndexed = new ArrayList<>();
+                    while (spareIndexed.size() <= index) spareIndexed.add(null);
+                    spareIndexed.set(index, child);
+                }
+                indexedChildren.clear();
+                if (!namedChildren.isEmpty()) {
+                    // The live named children become the spares (older spares are dropped); swapping the
+                    // maps avoids re-inserting entries.
+                    Map<String, SchedulerNode> spares = namedChildren;
+                    namedChildren = spareNamed == null ? new HashMap<>() : spareNamed;
+                    namedChildren.clear();
+                    spareNamed = spares;
+                }
+                action = next;
+                lowerKnownChildren();
+            }
+
             private Node runtime(MechanismContext context) {
                 if (runtime == null) {
-                    runtime = new Node(context.nowSeconds());
+                    Node spare = spareRuntime;
+                    if (spare != null) {
+                        spareRuntime = null;
+                        runtime = spare.restart(context.nowSeconds());
+                    } else {
+                        runtime = new Node(context.nowSeconds());
+                    }
                 }
                 return runtime;
             }
 
-            private MechanismContext localContext(MechanismContext context) {
+            /** Seconds since this node's runtime started, starting the runtime now when it has none. */
+            private double timeInState(MechanismContext context) {
                 Node node = runtime(context);
-                return withTimeInState(context, context.nowSeconds() - node.startSeconds);
+                return context.nowSeconds() - node.startSeconds;
             }
 
             private SchedulerNode indexedChild(int index) {
@@ -2182,26 +2366,58 @@ final class MechanismRuntime {
             }
 
             private SchedulerNode indexed(int index, Action childState) {
+                return indexed(index, childState, true);
+            }
+
+            private SchedulerNode indexed(int index, Action childState, boolean validate) {
                 while (indexedChildren.size() <= index) {
                     indexedChildren.add(null);
                 }
                 SchedulerNode child = indexedChildren.get(index);
                 if (child == null || child.action() != childState) {
-                    if (child != null) child.reset();
-                    child = lower(childState);
-                    indexedChildren.set(index, child);
+                    if (child != null) {
+                        child.reset();
+                        child.relower(childState, validate);
+                    } else {
+                        child = spareIndexed(index);
+                        if (child != null) {
+                            child.relower(childState, validate);
+                            spareIndexed.set(index, null);
+                        } else {
+                            child = new SchedulerNode(childState, validate);
+                        }
+                        indexedChildren.set(index, child);
+                    }
                 }
                 return child;
             }
 
             private SchedulerNode named(String name, Action childState) {
+                return named(name, childState, true);
+            }
+
+            private SchedulerNode named(String name, Action childState, boolean validate) {
                 SchedulerNode child = namedChildren.get(name);
                 if (child == null || child.action() != childState) {
-                    if (child != null) child.reset();
-                    child = lower(childState);
-                    namedChildren.put(name, child);
+                    if (child != null) {
+                        child.reset();
+                        child.relower(childState, validate);
+                    } else {
+                        child = spareNamed == null ? null : spareNamed.get(name);
+                        if (child != null) {
+                            child.relower(childState, validate);
+                            spareNamed.remove(name);
+                        } else {
+                            child = new SchedulerNode(childState, validate);
+                        }
+                        namedChildren.put(name, child);
+                    }
                 }
                 return child;
+            }
+
+            private SchedulerNode spareIndexed(int index) {
+                return spareIndexed == null || index >= spareIndexed.size() ? null : spareIndexed.get(index);
             }
 
             private void reset() {
@@ -2222,13 +2438,11 @@ final class MechanismRuntime {
                             runtime.lastPathContext == null ? MechanismContext.empty() : runtime.lastPathContext,
                             true);
                 }
-                runtime = null;
-                for (SchedulerNode child : indexedChildren) {
-                    if (child != null) {
-                        child.reset();
-                    }
+                if (runtime != null) {
+                    spareRuntime = runtime;
+                    runtime = null;
                 }
-                namedChildren.values().forEach(SchedulerNode::reset);
+                resetChildren();
             }
 
             private void interruptLifecycles() {
@@ -2236,10 +2450,11 @@ final class MechanismRuntime {
                     runtime.entered = false;
                     lifecycle.end(true);
                 }
-                for (SchedulerNode child : indexedChildren) {
+                for (int index = 0; index < indexedChildren.size(); index++) {
+                    SchedulerNode child = indexedChildren.get(index);
                     if (child != null) child.interruptLifecycles();
                 }
-                namedChildren.values().forEach(SchedulerNode::interruptLifecycles);
+                if (!namedChildren.isEmpty()) namedChildren.values().forEach(SchedulerNode::interruptLifecycles);
             }
 
             private void shift(double seconds) {
@@ -2247,17 +2462,19 @@ final class MechanismRuntime {
                     runtime.startSeconds += seconds;
                     runtime.stallSinceSeconds = Double.NaN;
                 }
-                for (SchedulerNode child : indexedChildren) {
+                for (int index = 0; index < indexedChildren.size(); index++) {
+                    SchedulerNode child = indexedChildren.get(index);
                     if (child != null) child.shift(seconds);
                 }
-                namedChildren.values().forEach(child -> child.shift(seconds));
+                if (!namedChildren.isEmpty()) namedChildren.values().forEach(child -> child.shift(seconds));
             }
 
             private void resetChildren() {
-                for (SchedulerNode child : indexedChildren) {
+                for (int index = 0; index < indexedChildren.size(); index++) {
+                    SchedulerNode child = indexedChildren.get(index);
                     if (child != null) child.reset();
                 }
-                namedChildren.values().forEach(SchedulerNode::reset);
+                if (!namedChildren.isEmpty()) namedChildren.values().forEach(SchedulerNode::reset);
             }
 
             private void removeNamed(String name) {
@@ -2284,17 +2501,17 @@ final class MechanismRuntime {
 
             private void lowerKnownChildren() {
                 if (action instanceof Actions.Sequence sequence) {
-                    int index = 0;
-                    for (Actions.SequenceStep step : sequence.steps()) {
-                        indexed(index++, step.action());
+                    List<Actions.SequenceStep> steps = sequence.steps();
+                    for (int index = 0; index < steps.size(); index++) {
+                        indexed(index, steps.get(index).action(), false);
                     }
                     if (sequence.next() != null) {
-                        named("next", sequence.next());
+                        named("next", sequence.next(), false);
                     }
                 } else if (action instanceof Actions.Cycle cycle) {
-                    int index = 0;
-                    for (Actions.CycleStep step : cycle.steps()) {
-                        indexed(index++, step.action());
+                    List<Actions.CycleStep> steps = cycle.steps();
+                    for (int index = 0; index < steps.size(); index++) {
+                        indexed(index, steps.get(index).action(), false);
                     }
                 } else if (action instanceof Actions.Parallel parallel) {
                     lowerIndexed(parallel.Actions());
@@ -2303,11 +2520,11 @@ final class MechanismRuntime {
                 } else if (action instanceof Actions.Deadline deadline) {
                     lowerIndexed(deadline.Actions());
                 } else if (action instanceof Actions.Timeout timeout) {
-                    named("timeout", timeout.action());
+                    named("timeout", timeout.action(), false);
                 } else if (action instanceof Actions.WithinTolerance within) {
-                    named("withinTolerance", within.action());
+                    named("withinTolerance", within.action(), false);
                 } else if (action instanceof Actions.VelocityContribution contribution) {
-                    named("velocityDrive", contribution.driveAction());
+                    named("velocityDrive", contribution.driveAction(), false);
                 } else if (action instanceof Actions.Conditional conditional) {
                     lowerConditional(conditional.action(), conditional.next());
                 } else if (action instanceof Actions.Then then) {
@@ -2317,20 +2534,20 @@ final class MechanismRuntime {
 
             private void lowerIndexed(List<Action> actions) {
                 for (int i = 0; i < actions.size(); i++) {
-                    indexed(i, actions.get(i));
+                    indexed(i, actions.get(i), false);
                 }
             }
 
             private void lowerConditional(Action wrapped, Action next) {
-                named("conditional", wrapped);
+                named("conditional", wrapped, false);
                 if (next != null) {
-                    named("next", next);
+                    named("next", next, false);
                 }
             }
 
             private void lowerThen(Action wrapped, Action next) {
-                named("thenState", wrapped);
-                named("thenNext", next);
+                named("thenState", wrapped, false);
+                named("thenNext", next, false);
             }
         }
     }

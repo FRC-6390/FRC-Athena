@@ -286,9 +286,12 @@ public final class Constraints {
             List<? extends Constraint<?>> constraints,
             ConstraintStage stage) {
         Objects.requireNonNull(stage, "stage");
-        return constraints != null && constraints.stream()
-                .filter(Objects::nonNull)
-                .anyMatch(constraint -> constraint.stage() == stage);
+        if (constraints == null) return false;
+        for (int index = 0; index < constraints.size(); index++) {
+            Constraint<?> constraint = constraints.get(index);
+            if (constraint != null && constraint.stage() == stage) return true;
+        }
+        return false;
     }
 
     /**
@@ -341,7 +344,8 @@ public final class Constraints {
         double acceleration = Double.MAX_VALUE;
         boolean declared = false;
         if (constraints != null) {
-            for (Constraint<Double> constraint : constraints) {
+            for (int index = 0; index < constraints.size(); index++) {
+                Constraint<Double> constraint = constraints.get(index);
                 if (constraint instanceof MotionConstraint motion) {
                     declared = true;
                     velocity = Math.min(velocity, motion.profile().maxVelocity());
@@ -383,7 +387,8 @@ public final class Constraints {
         T requested = context.requested();
         boolean corrected = false;
         if (constraints != null) {
-            for (Constraint<T> constraint : constraints) {
+            for (int index = 0; index < constraints.size(); index++) {
+                Constraint<T> constraint = constraints.get(index);
                 if (constraint == null || constraint.stage() != stage) {
                     continue;
                 }

@@ -1,6 +1,8 @@
 package ca.frc6390.athena.mechanism.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -87,6 +89,38 @@ class PowerRuntimeTest {
         power.cycle(motors, hardware, overrides, 0.3);
         assertEquals(Double.POSITIVE_INFINITY, power.capAmps(motor), 0.0, "back at the declared limit: no clamp");
         assertTrue(handle.writes.isEmpty(), "no configuration write on recovery");
+    }
+
+    @Test
+    void snapshotIsBuiltOncePerCycleAndRefreshedByTheNextCycle() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 75).currentLimit(Units.Amps.of(400));
+        Hardware hardware = new Hardware();
+        PowerMotor handle = hardware.motor(motor);
+        handle.appliedVolts = 12.0;
+        handle.supplyAmps = 364.0;
+        RuntimeOverrides overrides = new RuntimeOverrides();
+        PowerRuntime power = runtime(6.0, PowerPolicy.defaults().estimateBatteryResistance(false));
+        List<MotorDevice> motors = List.of(motor);
+
+        power.cycle(motors, hardware, overrides, 0.0);
+        PowerSnapshot first = power.snapshot();
+        assertSame(first, power.snapshot(), "telemetry, ARCP and the power publisher share one snapshot per cycle");
+        assertEquals(motor.defaultName(), first.motors().get(0).name());
+        assertEquals("Power shed", first.motors().get(0).status());
+
+        power.busVoltage(() -> 12.5);
+        handle.supplyAmps = 30.0;
+        handle.appliedVolts = 1.0;
+        power.cycle(motors, hardware, overrides, DT);
+        PowerSnapshot second = power.snapshot();
+        assertNotSame(first, second, "the next cycle builds a new snapshot");
+        assertEquals(12.5, second.busVolts(), 1e-9);
+        assertEquals("Declared", second.motors().get(0).status());
+        assertEquals(6.0, first.busVolts(), 1e-9, "an earlier snapshot is unchanged");
+
+        PowerPolicy changed = PowerPolicy.defaults().estimateBatteryResistance(false).floor(Units.Volts.of(7.5));
+        power.policy(changed);
+        assertEquals(7.5, power.snapshot().floorVolts(), 1e-9, "a policy change is visible before the next cycle");
     }
 
     @Test

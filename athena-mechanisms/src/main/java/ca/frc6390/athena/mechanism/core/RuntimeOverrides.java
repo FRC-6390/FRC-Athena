@@ -33,6 +33,15 @@ final class RuntimeOverrides {
     private final Map<EncoderDevice, Double> requestedEncoderPositions = new IdentityHashMap<>();
     private final Map<ImuDevice, Double> requestedImuYaw = new IdentityHashMap<>();
     private final Map<ControlBinding<?>, ControlSample> controlSamples = new IdentityHashMap<>();
+    /** Whether a binding's constraints declare motion limits; depends only on the immutable binding. */
+    private final Map<ControlBinding<?>, Boolean> declaredMotionLimits = new IdentityHashMap<>();
+    /** Last profile built from each binding's tuning, reused while the tuned limits are unchanged. */
+    private final Map<ControlBinding<?>, MotionProfile> tunedProfiles = new IdentityHashMap<>();
+    /**
+     * Declared runtime configuration of each motor, copied on write so the telemetry and output paths can
+     * read it without locking. A motor declaration is immutable, so its declared configuration never changes.
+     */
+    private volatile Map<MotorDevice, MotorRuntimeConfig> declaredConfigs = new IdentityHashMap<>();
     private ActionContext actionContext = ActionContext.empty();
     private TuningLocks locks = new TuningLocks();
     private TelemetryPersistence persistence = TelemetryPersistence.disabled();
@@ -87,7 +96,20 @@ final class RuntimeOverrides {
     }
 
     MotorRuntimeConfig config(MotorDevice motor) {
-        return motorConfigs.getOrDefault(motor, MotorRuntimeConfig.declared(motor));
+        MotorRuntimeConfig configured = motorConfigs.get(motor);
+        return configured != null ? configured : declaredConfig(motor);
+    }
+
+    private MotorRuntimeConfig declaredConfig(MotorDevice motor) {
+        Map<MotorDevice, MotorRuntimeConfig> cache = declaredConfigs;
+        MotorRuntimeConfig declared = cache.get(motor);
+        if (declared == null) {
+            declared = MotorRuntimeConfig.declared(motor);
+            Map<MotorDevice, MotorRuntimeConfig> updated = new IdentityHashMap<>(cache);
+            updated.put(motor, declared);
+            declaredConfigs = updated;
+        }
+        return declared;
     }
 
     boolean supportsMotorConfig(MotorDevice motor) {
@@ -203,7 +225,10 @@ final class RuntimeOverrides {
                 () -> disabled(declaration), value -> disabled(declaration, value)));
     }
 
-    double testPercent(ControlBinding<?> control) { return controlTestPercent.getOrDefault(control, 0.0); }
+    double testPercent(ControlBinding<?> control) {
+        Double percent = controlTestPercent.get(control);
+        return percent == null ? 0.0 : percent;
+    }
     void testPercent(ControlBinding<?> control, double value) {
         if (!Double.isFinite(value)) throw new IllegalArgumentException("Test percent must be finite.");
         controlTestPercent.put(control, Math.max(-1.0, Math.min(1.0, value)));
@@ -223,14 +248,30 @@ final class RuntimeOverrides {
 
     boolean hasProfile(ControlBinding<?> control) {
         return control.profile() != null
-                || control.mode() == ControlMode.POSITION
-                        && Constraints.motionProfile(control.constraints()) != null
+                || control.mode() == ControlMode.POSITION && declaresMotionLimits(control)
                 || controlProfileOverrides.contains(control);
+    }
+
+    private boolean declaresMotionLimits(ControlBinding<?> control) {
+        Boolean declared = declaredMotionLimits.get(control);
+        if (declared == null) {
+            declared = Constraints.motionProfile(control.constraints()) != null;
+            declaredMotionLimits.put(control, declared);
+        }
+        return declared;
     }
 
     MotionProfile profile(ControlBinding<?> control) {
         ControlTuning tuning = tuning(control);
-        return new MotionProfile(tuning.maxVelocity(), tuning.maxAcceleration());
+        MotionProfile cached = tunedProfiles.get(control);
+        if (cached != null
+                && Double.compare(cached.maxVelocity(), tuning.maxVelocity()) == 0
+                && Double.compare(cached.maxAcceleration(), tuning.maxAcceleration()) == 0) {
+            return cached;
+        }
+        MotionProfile profile = new MotionProfile(tuning.maxVelocity(), tuning.maxAcceleration());
+        tunedProfiles.put(control, profile);
+        return profile;
     }
 
     void minimumPosition(ControlBinding<?> control, double value) {

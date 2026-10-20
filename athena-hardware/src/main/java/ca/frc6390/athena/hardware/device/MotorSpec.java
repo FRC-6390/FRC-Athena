@@ -41,6 +41,11 @@ public record MotorSpec(
         double maxWindingCelsius) {
 
     private static final Map<MotorKinds, MotorSpec> TABLE = new EnumMap<>(MotorKinds.class);
+    // Derived values for the table rows, computed once so per-cycle lookups neither allocate nor recompute.
+    private static final Map<MotorKinds, Optional<MotorSpec>> ROWS = new EnumMap<>(MotorKinds.class);
+    private static final Map<MotorKinds, MotorConstants> CONSTANTS = new EnumMap<>(MotorKinds.class);
+    private static final Map<MotorKinds, Optional<MotorConstants>> CONSTANTS_BY_KIND = new EnumMap<>(MotorKinds.class);
+    private static final Map<MotorKinds, MotorThermalSpec> THERMAL = new EnumMap<>(MotorKinds.class);
 
     static {
         row(MotorKinds.FALCON_500, 4.69, 257.0, 1.5, 6380.0, 260.0, 300.0, 25.0, 150.0);
@@ -52,6 +57,13 @@ public record MotorSpec(
         row(MotorKinds.CIM, 2.42, 133.0, 2.7, 5330.0, 350.0, 320.0, 25.0, 130.0);
         row(MotorKinds.MINI_CIM, 1.41, 89.0, 3.0, 5840.0, 180.0, 280.0, 25.0, 130.0);
         row(MotorKinds.VEX_775_PRO, 0.71, 134.0, 0.7, 18730.0, 300.0, 300.0, 25.0, 130.0);
+        for (MotorSpec spec : TABLE.values()) {
+            MotorConstants constants = spec.computeConstants();
+            ROWS.put(spec.kind, Optional.of(spec));
+            CONSTANTS.put(spec.kind, constants);
+            CONSTANTS_BY_KIND.put(spec.kind, Optional.of(constants));
+            THERMAL.put(spec.kind, spec.computeThermalSpec(constants));
+        }
     }
 
     public MotorSpec {
@@ -77,11 +89,44 @@ public record MotorSpec(
         if (!(physical instanceof MotorKinds known)) {
             return Optional.empty();
         }
-        return Optional.ofNullable(TABLE.get(known));
+        return ROWS.getOrDefault(known, Optional.empty());
     }
 
-    /** Electrical constants derived from this row (R, Kt, Kv). */
+    /** Built-in constants for a motor kind, cached per kind; see {@link MotorConstants#forKind(MotorKind)}. */
+    static Optional<MotorConstants> constantsForKind(MotorKind kind) {
+        MotorKind physical = kind == null ? null : kind.motorKind();
+        if (!(physical instanceof MotorKinds known)) {
+            return Optional.empty();
+        }
+        return CONSTANTS_BY_KIND.getOrDefault(known, Optional.empty());
+    }
+
+    /**
+     * Electrical constants derived from this row (R, Kt, Kv). Built-in table rows return a value computed once.
+     *
+     * @return electrical constants
+     */
     public MotorConstants constants() {
+        MotorConstants cached = isTableRow() ? CONSTANTS.get(kind) : null;
+        return cached != null ? cached : computeConstants();
+    }
+
+    /**
+     * Thermal constants: winding resistance and speed constant come from {@link #constants()}. Built-in table
+     * rows return a value computed once.
+     *
+     * @return thermal constants
+     */
+    public MotorThermalSpec thermalSpec() {
+        MotorThermalSpec cached = isTableRow() ? THERMAL.get(kind) : null;
+        return cached != null ? cached : computeThermalSpec(constants());
+    }
+
+    private boolean isTableRow() {
+        return TABLE.get(kind) == this;
+    }
+
+    private MotorConstants computeConstants() {
         return MotorConstants.of(
                 Units.NewtonMeters.of(stallTorqueNm),
                 Units.Amps.of(stallCurrentAmps),
@@ -89,9 +134,7 @@ public record MotorSpec(
                 Units.RPM.of(freeSpeedRpm));
     }
 
-    /** Thermal constants: winding resistance and speed constant come from {@link #constants()}. */
-    public MotorThermalSpec thermalSpec() {
-        MotorConstants constants = constants();
+    private MotorThermalSpec computeThermalSpec(MotorConstants constants) {
         return new MotorThermalSpec(constants.resistance().in(Units.Ohms), constants.speedConstantRadPerSecPerVolt(),
                 heatCapacityJoulesPerCelsius, coolingSeconds, ambientCelsius, maxWindingCelsius);
     }

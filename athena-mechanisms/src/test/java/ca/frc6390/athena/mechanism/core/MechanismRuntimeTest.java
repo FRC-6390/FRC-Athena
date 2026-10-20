@@ -182,6 +182,38 @@ class MechanismRuntimeTest {
     }
 
     @Test
+    void computedActionStartsEveryNewChildFresh() {
+        // The scheduler reuses the nodes of a replaced computed child. Each new child must still start
+        // from scratch: the old child ends first, timers restart, and a change of shape is honoured.
+        RecordingActionContext actions = new RecordingActionContext(MOTOR);
+        List<String> events = new java.util.ArrayList<>();
+        int[] cycle = {0};
+        Action computed = Actions.compute(context -> {
+            int current = cycle[0];
+            Action timed = Actions.sequence()
+                    .forTime(Seconds.of(0.05), MOTOR.percent(0.25))
+                    .then(MOTOR.percent(0.75));
+            Action lifecycle = Actions.lifecycle("step" + current)
+                    .onStart(() -> events.add("start" + current))
+                    .onEnd(interrupted -> events.add("end" + current + ":" + interrupted))
+                    .build();
+            return current % 2 == 0 ? Actions.parallel(timed, lifecycle) : Actions.parallel(lifecycle, timed);
+        }, MOTOR);
+        TestMechanism mechanism = new TestMechanism(computed);
+        MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
+        runtime.set(computed);
+
+        for (; cycle[0] < 6; cycle[0]++) {
+            runtime.periodic(contextAt(cycle[0] * 0.02), EventContext.empty());
+            assertEquals(0.25, actions.motor(MOTOR).percent, 1.0e-9);
+        }
+
+        assertEquals(List.of(
+                "start0", "end0:true", "start1", "end1:true", "start2", "end2:true",
+                "start3", "end3:true", "start4", "end4:true", "start5"), events);
+    }
+
+    @Test
     void disabledMotorDoesNotApplyOutput() {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         DisabledMotorMechanism mechanism = new DisabledMotorMechanism();

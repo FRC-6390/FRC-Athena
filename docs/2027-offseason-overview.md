@@ -37,6 +37,9 @@ code for each feature is in [`example-projects`](../example-projects/README.md),
 - **Power, thermal, and staging** ([power-thermal-staging.md](power-thermal-staging.md)). `PowerProfile` shares a battery budget
   between motors, `Thermal.derate` scales current limits as the motor heats, and `Staging` moves a mechanism through
   team-defined health stages. Example: `mechanism-examples/StagedArm`, `VelocityShooter`.
+- **Motor failover** ([motor-failover.md](motor-failover.md)). A `MotorFailover` field declares how a leader and its
+  `.follow(leader)` motors respond when one dies: promote a surviving follower to leader, drop a dead follower (with
+  an optional derate), or disable the mechanism. Recovered motors rejoin as followers.
 - **Alliance transforms** (`AllianceTransform`, see [localization-setups](../example-projects/localization-setups/README.md#alliance-geometry)
   and [auto-following](../example-projects/auto-following/README.md)). Field geometry and path mirroring resolve for the
   current alliance at call time.

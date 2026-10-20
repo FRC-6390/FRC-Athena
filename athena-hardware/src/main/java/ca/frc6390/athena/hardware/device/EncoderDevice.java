@@ -49,6 +49,8 @@ public record EncoderDevice(
         boolean baselineConfigApplied,
         Unit measuresUnit) {
     private static final RuntimeBindings<EncoderDevice, EncoderHandle> RUNTIMES = new RuntimeBindings<>();
+    private static final DerivedValueCache<EncoderSource, String> DEFAULT_NAMES =
+            new DerivedValueCache<>(EncoderDevice::computeDefaultName, 1024);
 
     public static EncoderDevice of(EncoderKind kind, int id) {
         return connected(kind, "rio", new HardwareAddress.Can(id));
@@ -163,10 +165,19 @@ public record EncoderDevice(
         return this;
     }
 
+    /**
+     * Flips the sign of this encoder's readings (and of positions converted back to raw rotations).
+     *
+     * <p>This only changes how the sensor is read; it never changes which way a motor turns. For a motor's
+     * integrated encoder ({@code motor.encoder()}), invert the motor instead: {@code motor.inverted()} flips
+     * the output and the integrated sensor together. Use this for a separate sensor that counts against the
+     * motor's direction.
+     */
     public EncoderDevice inverted() {
         return inverted(true);
     }
 
+    /** Sets whether this encoder's readings are sign-flipped; see {@link #inverted()}. */
     public EncoderDevice inverted(boolean inverted) {
         return new EncoderDevice(source, inverted, gearRatio, conversion, offset, failurePolicy,
                 baselineConfigApplied, measuresUnit);
@@ -487,12 +498,46 @@ public record EncoderDevice(
         return isInverted ? -directed : directed;
     }
 
+    /**
+     * Returns the stable default name derived from the encoder source. The name is computed once per source and
+     * cached, so per-cycle callers do not rebuild it.
+     *
+     * @return default name
+     */
     public String defaultName() {
+        return DEFAULT_NAMES.get(source);
+    }
+
+    private static String computeDefaultName(EncoderSource source) {
         if (source instanceof EncoderSource.Standalone standalone) {
-            return sanitize(kind().key()) + "_" + sanitize(standalone.connection().identity()) + "_"
+            return sanitize(standalone.kind().key()) + "_" + sanitize(standalone.connection().identity()) + "_"
                     + standalone.connection().primaryAddress();
         }
-        return sanitize(kind().key()) + "_" + motorSource().id();
+        MotorDevice motor = source instanceof EncoderSource.IntegratedMotor integrated
+                ? integrated.motor()
+                : ((EncoderSource.MotorAbsolute) source).motor();
+        return sanitize(EncoderKinds.INTEGRATED_MOTOR.key()) + "_" + motor.id();
+    }
+
+    /**
+     * Returns a hash code consistent with the record's {@code equals}.
+     *
+     * <p>It hashes every component except {@link #measuresUnit()}, whose WPILib hash code allocates. Equal
+     * declarations have equal components, so the contract holds; encoders are used as map keys on the per-cycle
+     * path.</p>
+     *
+     * @return hash code
+     */
+    @Override
+    public int hashCode() {
+        int result = source.hashCode();
+        result = 31 * result + Boolean.hashCode(isInverted);
+        result = 31 * result + Double.hashCode(gearRatio);
+        result = 31 * result + Double.hashCode(conversion);
+        result = 31 * result + Double.hashCode(offset);
+        result = 31 * result + failurePolicy.hashCode();
+        result = 31 * result + Boolean.hashCode(baselineConfigApplied);
+        return result;
     }
 
     private static String sanitize(String key) {
@@ -613,7 +658,11 @@ public record EncoderDevice(
         if (bound != null) {
             return bound;
         }
-        return RUNTIMES.get(this, "Encoder " + defaultName());
+        return RUNTIMES.get(this, EncoderDevice::runtimeDescription);
+    }
+
+    private static String runtimeDescription(EncoderDevice device) {
+        return "Encoder " + device.defaultName();
     }
 
     private MotorDevice motorSource() {

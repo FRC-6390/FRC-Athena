@@ -65,6 +65,11 @@ final class PowerRuntime {
     private double budgetAmps = Double.POSITIVE_INFINITY;
     private double demandAmps;
     private boolean shedding;
+    /**
+     * Snapshot of the latest cycle, built on first request and reused until the next {@link #cycle} or policy change.
+     * Telemetry, ARCP and the power publisher each read it every robot loop, so it is built at most once per cycle.
+     */
+    private PowerSnapshot snapshot;
 
     PowerPolicy policy() { return policy; }
 
@@ -72,6 +77,7 @@ final class PowerRuntime {
         Objects.requireNonNull(value, "policy");
         if (value == policy) return;
         policy = value;
+        snapshot = null;
         planner = new PowerPlanner(value);
         estimator = newEstimator(value);
         restoreBatteryPrior();
@@ -98,22 +104,30 @@ final class PowerRuntime {
         busVolts = Objects.requireNonNull(supplier, "supplier");
     }
 
-    /** Returns the latest electrical state for telemetry. */
+    /**
+     * Returns the latest electrical state for telemetry. The snapshot is immutable and memoized: repeated calls
+     * between two {@link #cycle} calls return the same instance.
+     */
     PowerSnapshot snapshot() {
-        List<PowerSnapshot.Motor> motors = new ArrayList<>(active.size());
-        for (MotorState state : active) {
-            motors.add(new PowerSnapshot.Motor(
-                    state.device.defaultName(),
+        PowerSnapshot cached = snapshot;
+        if (cached != null) return cached;
+        PowerSnapshot.Motor[] motors = new PowerSnapshot.Motor[active.size()];
+        for (int index = 0; index < motors.length; index++) {
+            MotorState state = active.get(index);
+            motors[index] = new PowerSnapshot.Motor(
+                    state.name,
                     state.demandAmps,
                     state.channel.capAmps(),
                     state.derate,
                     state.temperatureCelsius,
                     state.channel.shareWeight(),
                     state.profileSustainedAmps(),
-                    state.status));
+                    state.status);
         }
-        return new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.raw().floorVolts(),
-                predictedVolts, budgetAmps, demandAmps, shedding, motors);
+        cached = new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.raw().floorVolts(),
+                predictedVolts, budgetAmps, demandAmps, shedding, List.of(motors));
+        snapshot = cached;
+        return cached;
     }
 
     /**
@@ -161,6 +175,7 @@ final class PowerRuntime {
     void cycle(Collection<MotorDevice> motors, ActionContext context, RuntimeOverrides overrides, double nowSeconds) {
         double dt = Double.isNaN(lastNowSeconds) ? 0.0 : Math.max(0.0, Math.min(MAX_DT_SECONDS, nowSeconds - lastNowSeconds));
         lastNowSeconds = nowSeconds;
+        snapshot = null;
         double bus = readBus();
         measuredVolts = bus;
 
@@ -257,9 +272,15 @@ final class PowerRuntime {
 
     private static final class MotorState {
         final MotorDevice device;
+        /** {@link MotorDevice#defaultName()}, computed once: the device is immutable and the name is a string build. */
+        final String name;
         final PowerPlanner.Channel channel = new PowerPlanner.Channel();
         /** Nominal constants, or empty for a motor kind without a MotorSpec row (demand then uses supply current). */
         final Optional<MotorConstants> constants;
+        /** Winding resistance of {@link #constants} in ohms, converted once; NaN without constants. */
+        final double resistanceOhms;
+        /** Speed constant of {@link #constants} in rad/s per volt, converted once; NaN without constants. */
+        final double speedConstantRadPerSecPerVolt;
         final ca.frc6390.athena.hardware.power.Thermal curve;
         MotorHandle handle;
         double demandAmps;
@@ -279,7 +300,14 @@ final class PowerRuntime {
 
         MotorState(MotorDevice device) {
             this.device = device;
+            this.name = device.defaultName();
             this.constants = MotorConstants.forKind(device.kind());
+            this.resistanceOhms = constants.isPresent()
+                    ? constants.get().resistance().in(edu.wpi.first.units.Units.Ohms)
+                    : Double.NaN;
+            this.speedConstantRadPerSecPerVolt = constants.isPresent()
+                    ? constants.get().raw().speedConstantRadPerSecPerVolt()
+                    : Double.NaN;
             this.curve = device.thermalCurve();
         }
 
@@ -290,10 +318,9 @@ final class PowerRuntime {
             double rotationsPerSecond = read(handle::integratedVelocityRotationsPerSecond);
             if (constants.isPresent() && Double.isFinite(volts) && Math.abs(volts) > REGEN_EPSILON_VOLTS
                     && Double.isFinite(rotationsPerSecond)) {
-                MotorConstants known = constants.get();
                 double omega = rotationsPerSecond * 2.0 * Math.PI;
-                double backEmf = omega / known.raw().speedConstantRadPerSecPerVolt();
-                demandAmps = Math.abs(volts - backEmf) / known.resistance().in(edu.wpi.first.units.Units.Ohms);
+                double backEmf = omega / speedConstantRadPerSecPerVolt;
+                demandAmps = Math.abs(volts - backEmf) / resistanceOhms;
             } else if (constants.isPresent() && Double.isFinite(volts)) {
                 demandAmps = 0.0;
             } else {

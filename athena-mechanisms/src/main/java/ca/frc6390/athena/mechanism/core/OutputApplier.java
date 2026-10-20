@@ -41,6 +41,13 @@ final class OutputApplier {
     private final ActionContext context;
     private final RuntimeOverrides overrides;
     private final Map<ControlBinding<?>, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
+    /** The values of {@link #controlRuntimes} in creation order, iterated without allocating entries. */
+    private final List<ControlRuntimeState> controlStates = new ArrayList<>();
+    /** Reused motor and limit lists of {@link #softwareFollowerLimits} and {@link #limitOpenLoop}. */
+    private final List<MotorDevice> followerDevicesScratch = new ArrayList<>();
+    private double[] followerAmpsScratch = new double[4];
+    private final List<MotorDevice> openLoopMotorsScratch = new ArrayList<>();
+    private double[] openLoopLimitsScratch = new double[4];
     /** Power pass of the mechanism; its per-motor caps join the effort clamp. Null before the first cycle. */
     private PowerRuntime electricalPass;
     private final Set<ControlBinding<?>> controlsAppliedThisCycle =
@@ -117,7 +124,10 @@ final class OutputApplier {
         AppliedOutput applied = RuntimeHardwareAccess.current() == context
                 ? resolveControlOutput(output, safeContext)
                 : RuntimeHardwareAccess.call(context, () -> resolveControlOutput(output, safeContext));
-        motorsDrivenThisCycle.addAll(output.request().motors());
+        List<MotorDevice> requestMotors = output.request().motors();
+        for (int index = 0; index < requestMotors.size(); index++) {
+            motorsDrivenThisCycle.add(requestMotors.get(index));
+        }
         if (output.request().control() != null) {
             ControlRuntimeState recorded = controlRuntimes(output.request().control());
             recorded.lastRelease = releaseFor(output.request().control(), output.request().motionPolicy());
@@ -143,7 +153,9 @@ final class OutputApplier {
         appliedHandles.clear();
         ControlBinding<?> control = output.request().control();
         if (control != null) {
-            for (MotorDevice motor : control.motors()) {
+            List<MotorDevice> motors = control.motors();
+            for (int index = 0; index < motors.size(); index++) {
+                MotorDevice motor = motors.get(index);
                 applyMotorAndSoftwareFollowers(motor, context.motor(motor), applied, appliedHandles);
             }
         } else if (output.request().motor() != null) {
@@ -207,16 +219,17 @@ final class OutputApplier {
             }
         });
         appliedMotorCommands.keySet().forEach(motor -> motor.recordCommand(MotorCommandSnapshot.neutral()));
-        controlRuntimes.keySet().forEach(control -> {
+        for (int index = 0; index < controlStates.size(); index++) {
+            ControlBinding<?> control = controlStates.get(index).binding;
             if (control.sink() != null) control.sink().release();
-        });
+        }
         resetControls();
     }
 
     void resetControls() {
-        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding<?> control = entry.getKey();
-            ControlRuntimeState state = entry.getValue();
+        for (int index = 0; index < controlStates.size(); index++) {
+            ControlRuntimeState state = controlStates.get(index);
+            ControlBinding<?> control = state.binding;
             if (!state.active) {
                 continue;
             }
@@ -258,15 +271,15 @@ final class OutputApplier {
      * position is used directly because cached hardware inputs may not reflect the new value yet.
      */
     void encoderPositionSet(EncoderDevice encoder, double position) {
-        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding<?> control = entry.getKey();
+        for (int index = 0; index < controlStates.size(); index++) {
+            ControlRuntimeState state = controlStates.get(index);
+            ControlBinding<?> control = state.binding;
             FeedbackBinding feedback = control.feedback();
             boolean direct = feedback != null && encoder.equals(feedback.position());
             boolean fedBy = direct
                     || feedback != null && feedback.dependencies().contains(encoder)
                     || feedback == null && control.output() != null && encoder.equals(control.output().encoder());
             if (!fedBy) continue;
-            ControlRuntimeState state = entry.getValue();
             state.reseedPending = true;
             state.reseedPosition = direct && Double.isFinite(position) ? position : Double.NaN;
         }
@@ -333,18 +346,28 @@ final class OutputApplier {
             return;
         }
         activeSinks.clear();
-        for (ControlBinding<?> control : controlsAppliedThisCycle) {
+        // Applied controls normally all have a runtime state; walking the states avoids an iterator.
+        int appliedWithState = 0;
+        for (int index = 0; index < controlStates.size(); index++) {
+            ControlBinding<?> control = controlStates.get(index).binding;
+            if (!controlsAppliedThisCycle.contains(control)) continue;
+            appliedWithState++;
             if (control.sink() != null) activeSinks.add(control.sink());
         }
-        for (Map.Entry<ControlBinding<?>, ControlRuntimeState> entry : controlRuntimes.entrySet()) {
-            ControlBinding<?> control = entry.getKey();
-            ControlRuntimeState state = entry.getValue();
+        if (appliedWithState != controlsAppliedThisCycle.size()) {
+            for (ControlBinding<?> control : controlsAppliedThisCycle) {
+                if (control.sink() != null) activeSinks.add(control.sink());
+            }
+        }
+        for (int index = 0; index < controlStates.size(); index++) {
+            ControlRuntimeState state = controlStates.get(index);
+            ControlBinding<?> control = state.binding;
             boolean applied = controlsAppliedThisCycle.contains(control);
             if (!applied && state.active && holdsOnRelease(control, state)) {
                 holdReleased(control, state);
                 applied = true;
             } else if (!applied && state.active && state.lastRetarget == Retarget.SMOOTH
-                    && control.motors().stream().noneMatch(motorsDrivenThisCycle::contains)) {
+                    && !anyDriven(control.motors(), motorsDrivenThisCycle)) {
                 // A SMOOTH binding keeps its reference through an idle gap, so a takeover in a later cycle
                 // inherits it. A cycle in which another output drives the motor is a takeover by that
                 // output, and the reference restarts from measured feedback. Loop state always restarts.
@@ -372,6 +395,13 @@ final class OutputApplier {
         controlsAppliedThisCycle.clear();
     }
 
+    private static boolean anyDriven(List<MotorDevice> motors, Set<MotorDevice> driven) {
+        for (int index = 0; index < motors.size(); index++) {
+            if (driven.contains(motors.get(index))) return true;
+        }
+        return false;
+    }
+
     private void softRelease(ControlBinding<?> control, ControlRuntimeState state) {
         MotionReference reference = state.lastReference != null
                 ? state.lastReference
@@ -388,7 +418,11 @@ final class OutputApplier {
         if (!state.holdable || !state.lastRelease.holds()) return false;
         if (overrides.disabled(control)) return false;
         if (control.output() != null && overrides.disabled(control.output())) return false;
-        return control.motors().stream().noneMatch(overrides::disabled);
+        List<MotorDevice> motors = control.motors();
+        for (int index = 0; index < motors.size(); index++) {
+            if (overrides.disabled(motors.get(index))) return false;
+        }
+        return true;
     }
 
     /**
@@ -676,18 +710,24 @@ final class OutputApplier {
                     && (!Double.isFinite(position) || !Double.isFinite(velocity))) {
                 return null;
             }
-            ConstraintContext<Double> constraintContext = new ConstraintContext<>(
-                    position,
-                    target.position(),
-                    mechanismContext);
-            ConstraintResult<Double> result = control.planner() == null
-                    ? Constraints.evaluate(control.constraints(), constraintContext)
-                    : control.planner().plan(constraintContext, control.constraints());
-            if (!result.accepted()) {
-                blockedBy = result.rejectedBy();
-                return null;
+            double goal;
+            if (control.planner() == null && !hasTargetConstraints(control)) {
+                // No target constraint and no planner: evaluation would allow the request unchanged.
+                goal = target.position();
+            } else {
+                ConstraintContext<Double> constraintContext = new ConstraintContext<>(
+                        position,
+                        target.position(),
+                        mechanismContext);
+                ConstraintResult<Double> result = control.planner() == null
+                        ? Constraints.evaluate(control.constraints(), constraintContext)
+                        : control.planner().plan(constraintContext, control.constraints());
+                if (!result.accepted()) {
+                    blockedBy = result.rejectedBy();
+                    return null;
+                }
+                goal = result.value();
             }
-            double goal = result.value();
             if (overrides.hasTuning(control)) {
                 // Dashboard-tuned limits must also bound what a planner returns (a planner may pick
                 // a wrap candidate outside the tuned window).
@@ -725,17 +765,24 @@ final class OutputApplier {
                     Double.compare(goal, target.position()) != 0);
         }
         if (request instanceof Output.Velocity target) {
-            if (hasTargetConstraints(control) && !Double.isFinite(velocity)) {
+            boolean constrained = hasTargetConstraints(control);
+            if (constrained && !Double.isFinite(velocity)) {
                 return null;
             }
-            ConstraintResult<Double> result = Constraints.evaluate(
-                    control.constraints(),
-                    new ConstraintContext<>(velocity, target.velocity(), mechanismContext));
-            if (!result.accepted()) {
-                blockedBy = result.rejectedBy();
-                return null;
+            double requestedVelocity;
+            if (!constrained) {
+                // No target constraint: evaluation would allow the request unchanged.
+                requestedVelocity = target.velocity();
+            } else {
+                ConstraintResult<Double> result = Constraints.evaluate(
+                        control.constraints(),
+                        new ConstraintContext<>(velocity, target.velocity(), mechanismContext));
+                if (!result.accepted()) {
+                    blockedBy = result.rejectedBy();
+                    return null;
+                }
+                requestedVelocity = result.value();
             }
-            double requestedVelocity = result.value();
             double maximumAcceleration = overrides.tuning(control).maxAcceleration();
             double referenceVelocity = requestedVelocity;
             double referenceAcceleration = 0.0;
@@ -826,7 +873,13 @@ final class OutputApplier {
     }
 
     private ControlRuntimeState controlRuntimes(ControlBinding<?> control) {
-        return controlRuntimes.computeIfAbsent(control, ControlRuntimeState::new);
+        ControlRuntimeState state = controlRuntimes.get(control);
+        if (state == null) {
+            state = new ControlRuntimeState(control);
+            controlRuntimes.put(control, state);
+            controlStates.add(state);
+        }
+        return state;
     }
 
     private static MotionReference referenceFor(Output output, double position, double velocity) {
@@ -944,21 +997,32 @@ final class OutputApplier {
             ControlBinding<?> control,
             Output output,
             MechanismContext context) {
-        Double requested = scalarValue(output);
-        if (requested == null) return output;
-        ConstraintResult<Double> result = Constraints.evaluateOutput(
-                control.constraints(),
-                new ConstraintContext<>(requested, requested, context));
-        if (!result.accepted()) {
-            blockedBy = result.rejectedBy();
-            return Outputs.neutral();
+        if (!isScalar(output)) return output;
+        double value;
+        if (!Constraints.hasStage(control.constraints(), ConstraintStage.OUTPUT)) {
+            // No output constraint: evaluation would allow the value unchanged.
+            value = value(output);
+        } else {
+            Double requested = scalarValue(output);
+            ConstraintResult<Double> result = Constraints.evaluateOutput(
+                    control.constraints(),
+                    new ConstraintContext<>(requested, requested, context));
+            if (!result.accepted()) {
+                blockedBy = result.rejectedBy();
+                return Outputs.neutral();
+            }
+            value = result.value();
         }
-        double value = result.value();
         if (output instanceof Output.Percent) return Outputs.percent(value);
         if (output instanceof Output.Voltage) return Outputs.voltage(value);
         if (output instanceof Output.Position) return Outputs.position(value);
         if (output instanceof Output.Velocity) return Outputs.velocity(value);
         return output;
+    }
+
+    private static boolean isScalar(Output output) {
+        return output instanceof Output.Percent || output instanceof Output.Voltage
+                || output instanceof Output.Position || output instanceof Output.Velocity;
     }
 
     private static Double scalarValue(Output output) {
@@ -970,11 +1034,10 @@ final class OutputApplier {
     }
 
     private static void applySink(ca.frc6390.athena.runtime.control.ControlSink sink, Output output) {
-        Double value = scalarValue(output);
-        if (value == null) {
+        if (!isScalar(output)) {
             sink.release();
         } else {
-            sink.apply(value);
+            sink.apply(value(output));
         }
     }
 
@@ -1042,15 +1105,26 @@ final class OutputApplier {
         if (!Double.isFinite(volts)) {
             return output;
         }
-        Limits followers = softwareFollowerLimits(List.of(motor), actionLimit);
-        List<MotorDevice> motors = new ArrayList<>(followers.motors().size() + 1);
+        List<MotorDevice> motors = openLoopMotorsScratch;
+        motors.clear();
         motors.add(motor);
-        motors.addAll(followers.motors());
-        double[] limits = new double[motors.size()];
+        int followerCount = addSoftwareFollowerLimits(motor, actionLimit, 0);
+        if (openLoopLimitsScratch.length < followerCount + 1) {
+            openLoopLimitsScratch = new double[Math.max(followerCount + 1, openLoopLimitsScratch.length * 2)];
+        }
+        double[] limits = openLoopLimitsScratch;
         limits[0] = Math.min(actionLimit, powerCapAmps(motor));
-        System.arraycopy(followers.amps(), 0, limits, 1, followers.amps().length);
-        double limited = EffortRuntime.clampToLimits(context, volts, motors, limits);
-        return limited == volts ? output : Outputs.voltage(limited);
+        for (int index = 0; index < followerCount; index++) {
+            motors.add(followerDevicesScratch.get(index));
+            limits[index + 1] = followerAmpsScratch[index];
+        }
+        try {
+            double limited = EffortRuntime.clampToLimits(context, volts, motors, limits);
+            return limited == volts ? output : Outputs.voltage(limited);
+        } finally {
+            motors.clear();
+            followerDevicesScratch.clear();
+        }
     }
 
     /**
@@ -1058,31 +1132,39 @@ final class OutputApplier {
      * leader's command, so it is limited by its own power cap and by the Action limit.
      */
     private Limits softwareFollowerLimits(List<MotorDevice> leaders, double actionLimit) {
-        List<MotorDevice> devices = null;
-        List<Double> amps = null;
-        for (MotorDevice leader : leaders) {
-            List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(leader);
-            for (int index = 0; index < followers.size(); index++) {
-                if (devices == null) {
-                    devices = new ArrayList<>();
-                    amps = new ArrayList<>();
-                }
-                MotorDevice follower = followers.get(index).device();
-                devices.add(follower);
-                amps.add(Math.min(actionLimit, powerCapAmps(follower)));
-            }
+        int count = 0;
+        for (int leader = 0; leader < leaders.size(); leader++) {
+            count = addSoftwareFollowerLimits(leaders.get(leader), actionLimit, count);
         }
-        if (devices == null) {
+        if (count == 0) {
             return Limits.NONE;
         }
-        double[] array = new double[amps.size()];
-        for (int i = 0; i < array.length; i++) {
-            array[i] = amps.get(i);
-        }
-        return new Limits(devices, array);
+        return new Limits(followerDevicesScratch, followerAmpsScratch);
     }
 
-    /** Per-motor current limits of a set of motors that share one command. */
+    /**
+     * Appends the software followers of {@code leader} and their limits to the follower scratch lists,
+     * starting at {@code count}, and returns the new count. The scratch is valid until the next call
+     * with a zero count.
+     */
+    private int addSoftwareFollowerLimits(MotorDevice leader, double actionLimit, int count) {
+        if (count == 0) followerDevicesScratch.clear();
+        List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(leader);
+        for (int index = 0; index < followers.size(); index++) {
+            MotorDevice follower = followers.get(index).device();
+            if (followerAmpsScratch.length == count) {
+                followerAmpsScratch = java.util.Arrays.copyOf(followerAmpsScratch, count * 2);
+            }
+            followerDevicesScratch.add(follower);
+            followerAmpsScratch[count++] = Math.min(actionLimit, powerCapAmps(follower));
+        }
+        return count;
+    }
+
+    /**
+     * Per-motor current limits of a set of motors that share one command. {@code amps} may be longer than
+     * {@code motors}; only the first {@code motors.size()} entries apply.
+     */
     private record Limits(List<MotorDevice> motors, double[] amps) {
         static final Limits NONE = new Limits(List.of(), new double[0]);
     }
@@ -1100,8 +1182,9 @@ final class OutputApplier {
 
     private int deviceUnappliedCapAmps(ControlBinding<?> control) {
         double min = Double.POSITIVE_INFINITY;
-        for (MotorDevice motor : control.motors()) {
-            min = Math.min(min, powerCapAmps(motor));
+        List<MotorDevice> motors = control.motors();
+        for (int index = 0; index < motors.size(); index++) {
+            min = Math.min(min, powerCapAmps(motors.get(index)));
         }
         return Double.isFinite(min) ? (int) Math.max(1L, Math.round(min)) : -1;
     }
@@ -1264,8 +1347,9 @@ final class OutputApplier {
         }
         MotorHandle motor = context.motor(control.output());
         boolean allSupportArbitraryFeedforward = true;
-        for (MotorDevice device : control.motors()) {
-            MotorControlCapabilities capabilities = context.motor(device).controlCapabilities();
+        List<MotorDevice> devices = control.motors();
+        for (int index = 0; index < devices.size(); index++) {
+            MotorControlCapabilities capabilities = context.motor(devices.get(index)).controlCapabilities();
             if (request instanceof Output.Position && !capabilities.supportsPosition()
                     || request instanceof Output.Velocity && !capabilities.supportsVelocity()
                     || !capabilities.supportsSlot(config.slot())) {

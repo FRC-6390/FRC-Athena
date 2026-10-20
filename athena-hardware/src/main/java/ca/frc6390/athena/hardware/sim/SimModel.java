@@ -43,6 +43,13 @@ public final class SimModel {
     private final List<SimModel> children;
     private final RuntimeFactory runtimeFactory;
     private final SimPlant plant;
+    // Aggregates over this immutable model and its children, built on first use. The simulation reads them every
+    // step, so rebuilding them would allocate (and rehash every declaration) each cycle.
+    private volatile List<MotorDevice> allMotors;
+    private volatile List<EncoderDevice> allEncoders;
+    private volatile List<SimLimit> allLimits;
+    private volatile List<DigitalInputDevice> allDigitalInputs;
+    private volatile List<SimModel> allPhysicsLeaves;
 
     private SimModel(
             BuiltIn kind,
@@ -257,16 +264,26 @@ public final class SimModel {
 
     /** Returns all motors claimed by this model and its children. */
     public List<MotorDevice> motors() {
-        LinkedHashSet<MotorDevice> values = new LinkedHashSet<>(directMotors);
-        children.forEach(child -> values.addAll(child.motors()));
-        return List.copyOf(values);
+        List<MotorDevice> cached = allMotors;
+        if (cached == null) {
+            LinkedHashSet<MotorDevice> values = new LinkedHashSet<>(directMotors);
+            children.forEach(child -> values.addAll(child.motors()));
+            cached = List.copyOf(values);
+            allMotors = cached;
+        }
+        return cached;
     }
 
     /** Returns all encoders claimed by this model and its children. */
     public List<EncoderDevice> encoders() {
-        LinkedHashSet<EncoderDevice> values = new LinkedHashSet<>(directEncoders);
-        children.forEach(child -> values.addAll(child.encoders()));
-        return List.copyOf(values);
+        List<EncoderDevice> cached = allEncoders;
+        if (cached == null) {
+            LinkedHashSet<EncoderDevice> values = new LinkedHashSet<>(directEncoders);
+            children.forEach(child -> values.addAll(child.encoders()));
+            cached = List.copyOf(values);
+            allEncoders = cached;
+        }
+        return cached;
     }
 
     /** Returns the motion range for a provider-backed leaf, when declared. */
@@ -276,24 +293,39 @@ public final class SimModel {
 
     /** Returns typed simulated limits declared by this model and its children. */
     public List<SimLimit> limits() {
-        List<SimLimit> values = new ArrayList<>(directLimits);
-        children.forEach(child -> values.addAll(child.limits()));
-        return List.copyOf(values);
+        List<SimLimit> cached = allLimits;
+        if (cached == null) {
+            List<SimLimit> values = new ArrayList<>(directLimits);
+            children.forEach(child -> values.addAll(child.limits()));
+            cached = List.copyOf(values);
+            allLimits = cached;
+        }
+        return cached;
     }
 
     /** Returns digital inputs claimed directly or through typed limit declarations. */
     public List<DigitalInputDevice> digitalInputs() {
-        LinkedHashSet<DigitalInputDevice> values = new LinkedHashSet<>(directDigitalInputs);
-        directLimits.forEach(limit -> values.add(limit.sensor()));
-        children.forEach(child -> values.addAll(child.digitalInputs()));
-        return List.copyOf(values);
+        List<DigitalInputDevice> cached = allDigitalInputs;
+        if (cached == null) {
+            LinkedHashSet<DigitalInputDevice> values = new LinkedHashSet<>(directDigitalInputs);
+            directLimits.forEach(limit -> values.add(limit.sensor()));
+            children.forEach(child -> values.addAll(child.digitalInputs()));
+            cached = List.copyOf(values);
+            allDigitalInputs = cached;
+        }
+        return cached;
     }
 
     /** Returns the provider-backed physics leaves contained by this model. */
     public List<SimModel> physicsLeaves() {
-        List<SimModel> leaves = new ArrayList<>();
-        collectPhysicsLeaves(leaves);
-        return List.copyOf(leaves);
+        List<SimModel> cached = allPhysicsLeaves;
+        if (cached == null) {
+            List<SimModel> leaves = new ArrayList<>();
+            collectPhysicsLeaves(leaves);
+            cached = List.copyOf(leaves);
+            allPhysicsLeaves = cached;
+        }
+        return cached;
     }
 
     private void collectPhysicsLeaves(List<SimModel> leaves) {

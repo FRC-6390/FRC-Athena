@@ -3,6 +3,9 @@ package ca.frc6390.athena.hardware.power;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.MotorSpec;
 import edu.wpi.first.units.Units;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Nominal electrical and thermal constants used by Athena's motor model.
@@ -37,6 +40,10 @@ public record MotorThermalSpec(
     public static final MotorThermalSpec GENERIC = new MotorThermalSpec(
             0.05, 500.0 * 2.0 * Math.PI / 60.0, 200.0, 300.0, 25.0, 130.0);
 
+    // Default derate curves, one per distinct spec; bounded so ad hoc specs cannot grow it without limit.
+    private static final int MAX_CACHED_DERATES = 64;
+    private static final Map<MotorThermalSpec, Thermal> DEFAULT_DERATES = new ConcurrentHashMap<>();
+
     public MotorThermalSpec {
         if (!(resistanceOhms > 0.0) || !(kvRadPerSecondPerVolt > 0.0)
                 || !(heatCapacityJoulesPerCelsius > 0.0) || !(coolingSeconds > 0.0)
@@ -47,7 +54,19 @@ public record MotorThermalSpec(
 
     /** Returns the default derate curve: full limit until 30 C below the rated winding temperature, then to 50 percent. */
     public Thermal defaultDerate() {
-        return new Thermal(Units.Celsius.of(maxWindingCelsius - 30.0), Units.Celsius.of(maxWindingCelsius), 0.5);
+        Thermal cached = DEFAULT_DERATES.get(this);
+        if (cached != null) {
+            return cached;
+        }
+        Thermal derate = new Thermal(
+                Units.Celsius.of(maxWindingCelsius - 30.0), Units.Celsius.of(maxWindingCelsius), 0.5);
+        if (DEFAULT_DERATES.size() < MAX_CACHED_DERATES) {
+            Thermal previous = DEFAULT_DERATES.putIfAbsent(this, derate);
+            if (previous != null) {
+                return previous;
+            }
+        }
+        return derate;
     }
 
     /**
@@ -57,6 +76,7 @@ public record MotorThermalSpec(
      * @return constants, {@link #GENERIC} when the kind is not in the table
      */
     public static MotorThermalSpec forKind(MotorKind kind) {
-        return MotorSpec.forKind(kind).map(MotorSpec::thermalSpec).orElse(GENERIC);
+        Optional<MotorSpec> spec = MotorSpec.forKind(kind);
+        return spec.isPresent() ? spec.get().thermalSpec() : GENERIC;
     }
 }

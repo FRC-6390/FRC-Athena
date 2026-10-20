@@ -20,6 +20,8 @@ public record ImuDevice(
         HardwareAddress connection,
         FailurePolicy failurePolicy) implements ImuSource {
     private static final RuntimeBindings<ImuDevice, ImuHandle> RUNTIMES = new RuntimeBindings<>();
+    private static final DerivedValueCache<ImuDevice, String> DEFAULT_NAMES =
+            new DerivedValueCache<>(ImuDevice::computeDefaultName, 1024);
 
     public ImuDevice(ImuKind kind, String bus, HardwareAddress connection) {
         this(kind, bus, connection, FailurePolicy.DISABLE_MECHANISM);
@@ -59,8 +61,19 @@ public record ImuDevice(
         return new ImuDevice(kind, bus, connection, Objects.requireNonNull(policy, "policy"));
     }
 
+    /**
+     * Returns the stable default name derived from the IMU kind and connection. The name is computed once per
+     * declaration and cached, so per-cycle callers do not rebuild it.
+     *
+     * @return default name
+     */
     public String defaultName() {
-        return sanitize(kind.key()) + "_" + sanitize(connection.identity()) + "_" + connection.primaryAddress();
+        return DEFAULT_NAMES.get(this);
+    }
+
+    private static String computeDefaultName(ImuDevice device) {
+        HardwareAddress connection = device.connection;
+        return sanitize(device.kind.key()) + "_" + sanitize(connection.identity()) + "_" + connection.primaryAddress();
     }
 
     /**
@@ -178,6 +191,10 @@ public record ImuDevice(
         if (current != null) {
             return current.imu(this);
         }
-        return RUNTIMES.get(this, "IMU " + defaultName());
+        return RUNTIMES.get(this, ImuDevice::runtimeDescription);
+    }
+
+    private static String runtimeDescription(ImuDevice device) {
+        return "IMU " + device.defaultName();
     }
 }

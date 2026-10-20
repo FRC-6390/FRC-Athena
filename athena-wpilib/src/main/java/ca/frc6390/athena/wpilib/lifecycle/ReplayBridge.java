@@ -118,10 +118,25 @@ final class ReplayBridge {
         }
     }
 
-    private static ReplayMatch driverStationMatch() {
-        return new ReplayMatch(
-                DriverStation.getEventName(),
-                DriverStation.getMatchType().name(),
-                DriverStation.getMatchNumber());
+    // The last match read from the driver station, reused while its fields are unchanged. Class monitor.
+    private static String lastEventName;
+    private static DriverStation.MatchType lastMatchType;
+    private static int lastMatchNumber;
+    private static ReplayMatch lastDriverStationMatch;
+
+    private static synchronized ReplayMatch driverStationMatch() {
+        String eventName = DriverStation.getEventName();
+        DriverStation.MatchType matchType = DriverStation.getMatchType();
+        int matchNumber = DriverStation.getMatchNumber();
+        if (lastDriverStationMatch == null
+                || !Objects.equals(eventName, lastEventName)
+                || matchType != lastMatchType
+                || matchNumber != lastMatchNumber) {
+            lastDriverStationMatch = new ReplayMatch(eventName, matchType.name(), matchNumber);
+            lastEventName = eventName;
+            lastMatchType = matchType;
+            lastMatchNumber = matchNumber;
+        }
+        return lastDriverStationMatch;
     }
 }

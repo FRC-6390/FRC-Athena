@@ -29,16 +29,18 @@ public enum MotorKinds implements MotorKind {
     private final String motorKey;
     private final MotorControllerKind controllerKind;
     private final MotorTechnology technology;
+    private final String key;
 
     MotorKinds(String motorKey, MotorControllerKind controllerKind, MotorTechnology technology) {
         this.motorKey = motorKey;
         this.controllerKind = controllerKind;
         this.technology = technology;
+        this.key = controllerKind.key() + "/" + motorKey;
     }
 
     @Override
     public String key() {
-        return controllerKind.key() + "/" + motorKey;
+        return key;
     }
 
     @Override

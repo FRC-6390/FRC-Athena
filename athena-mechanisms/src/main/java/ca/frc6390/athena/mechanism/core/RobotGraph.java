@@ -86,7 +86,10 @@ final class RobotGraph {
         for (Mechanism mechanism : mechanisms) {
             addMechanismSchema(root, node(mechanism).name(), mechanism, visited, scheduler, overrides);
         }
-        values.replaceAll((path, value) -> governed(path, value, overrides));
+        // One condition per lock group, shared by every value in the group, so publishers can read a group's lock
+        // state once per cycle (TelemetryValue.sharesLockCondition) instead of once per value.
+        Map<Class<?>, java.util.function.BooleanSupplier> lockConditions = new IdentityHashMap<>();
+        values.replaceAll((path, value) -> governed(path, value, overrides, lockConditions));
         overrides.persistence().pruneUnbound();
         values.forEach((path, value) -> root.value(path, value));
         return new TelemetrySchema(root.freeze());
@@ -107,9 +110,13 @@ final class RobotGraph {
             ownedNode.child(group.path(), TelemetryNode.Kind.GROUP);
         }
         MutableTelemetryNode state = ownedNode.child(TelemetrySchema.Group.STATE.path(), TelemetryNode.Kind.GROUP);
-        state.values.put("ActiveAction", TelemetryValue.string(() -> activeActionName(inspected, scheduler)));
-        state.values.put("ActionRunning", TelemetryValue.bool(() -> anyAction(inspected, scheduler, true)));
-        state.values.put("ActionComplete", TelemetryValue.bool(() -> anyAction(inspected, scheduler, false)));
+        // The node's Actions map is an immutable copy, so its names and actions are resolved to arrays once here
+        // instead of streaming the map on every telemetry read.
+        String[] actionNames = inspected.Actions().keySet().toArray(String[]::new);
+        Action[] actions = inspected.Actions().values().toArray(Action[]::new);
+        state.values.put("ActiveAction", TelemetryValue.string(() -> activeActionName(actionNames, actions, scheduler)));
+        state.values.put("ActionRunning", TelemetryValue.bool(() -> anyAction(actions, scheduler, true)));
+        state.values.put("ActionComplete", TelemetryValue.bool(() -> anyAction(actions, scheduler, false)));
         state.values.put("Fault", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.fault(mechanism)));
         state.values.put("Reason", TelemetryValue.string(() -> scheduler == null ? "" : scheduler.reason(mechanism)));
         // The first Staging the mechanism declares; its current stage by enum constant name, or empty.
@@ -201,19 +208,21 @@ final class RobotGraph {
         return scheduler;
     }
 
-    private static String activeActionName(MechanismNode node, MechanismScheduler scheduler) {
+    /** Name of the first running action in declaration order, or empty. */
+    private static String activeActionName(String[] names, Action[] actions, MechanismScheduler scheduler) {
         if (scheduler == null) return "";
-        return node.Actions().entrySet().stream()
-                .filter(entry -> scheduler.isRunning(entry.getValue()))
-                .map(Map.Entry::getKey)
-                .findFirst()
-                .orElse("");
+        for (int index = 0; index < actions.length; index++) {
+            if (scheduler.isRunning(actions[index])) return names[index];
+        }
+        return "";
     }
 
-    private static boolean anyAction(MechanismNode node, MechanismScheduler scheduler, boolean running) {
+    private static boolean anyAction(Action[] actions, MechanismScheduler scheduler, boolean running) {
         if (scheduler == null) return false;
-        return node.Actions().values().stream().anyMatch(action ->
-                running ? scheduler.isRunning(action) : scheduler.isComplete(action));
+        for (Action action : actions) {
+            if (running ? scheduler.isRunning(action) : scheduler.isComplete(action)) return true;
+        }
+        return false;
     }
 
     private Set<Object> directDeclarations(Collection<Mechanism> mechanisms) {
@@ -289,14 +298,16 @@ final class RobotGraph {
             String inputInfo = mechanismPath + "/Devices/" + valuePath + "/Info";
             values.put(inputInfo + "/Type", TelemetryValue.constant("DigitalInput"));
             values.put(inputInfo + "/Channel", TelemetryValue.constant(input.channel()));
-            values.put(inputInfo + "/DeclaredInverted", TelemetryValue.bool(input::isInverted));
+            // Declarations are immutable records: their declared settings are constants, sent once instead of read
+            // every telemetry cycle.
+            values.put(inputInfo + "/DeclaredInverted", TelemetryValue.constant(input.isInverted()));
             values.put(mechanismPath + "/Devices/" + valuePath + "/Setup/ClearEdges",
                     TelemetryValue.command(input::clearLatchedEdges));
         } else if (declaration instanceof ControlBinding<?> control) {
             String controlPath = mechanismPath + "/Controls/" + valuePath;
             values.put(controlPath + "/Config/Disabled", overrides.controlDisabled(control));
-            values.put(controlPath + "/State/Mode", TelemetryValue.string(() -> control.mode().name()));
-            values.put(controlPath + "/Config/Slot", TelemetryValue.number(() -> control.slot()));
+            values.put(controlPath + "/State/Mode", TelemetryValue.constant(control.mode().name()));
+            values.put(controlPath + "/Config/Slot", TelemetryValue.constant(control.slot()));
             values.put(controlPath + "/Config/Constraints/MinimumPosition", TelemetryValue.writableNumber(
                     () -> overrides.tuning(control).minimumPosition(),
                     value -> overrides.minimumPosition(control, value)));
@@ -404,13 +415,15 @@ final class RobotGraph {
      * Applies the robot-defined lock condition to writable values and restores persisted values. Writable
      * values under {@code Config}, {@code Test}, and {@code Setup} default to {@link Locks.InMatch}.
      */
-    private static TelemetryValue governed(String path, TelemetryValue value, RuntimeOverrides overrides) {
+    private static TelemetryValue governed(String path, TelemetryValue value, RuntimeOverrides overrides,
+            Map<Class<?>, java.util.function.BooleanSupplier> lockConditions) {
         TelemetryValue result = value;
         if (result.writable() && result.lockGroup() == null && isTuningPath(path)) {
             result = result.lock(Locks.InMatch.class);
         }
         if (result.writable() && result.lockGroup() != null) {
-            result = result.withLockCondition(overrides.locks().lockCondition(result.lockGroup()));
+            result = result.withLockCondition(
+                    lockConditions.computeIfAbsent(result.lockGroup(), overrides.locks()::lockCondition));
         }
         return overrides.persistence().bind(path, result);
     }
@@ -431,8 +444,8 @@ final class RobotGraph {
         values.put(info + "/Kind", TelemetryValue.constant(motor.kind().key()));
         values.put(info + "/Id", TelemetryValue.constant(motor.id()));
         values.put(info + "/Bus", TelemetryValue.constant(motor.canbus()));
-        values.put(info + "/DeclaredNeutralMode", TelemetryValue.string(() -> motor.neutralMode().name()));
-        values.put(info + "/DeclaredInverted", TelemetryValue.bool(motor::isInverted));
+        values.put(info + "/DeclaredNeutralMode", TelemetryValue.constant(motor.neutralMode().name()));
+        values.put(info + "/DeclaredInverted", TelemetryValue.constant(motor.isInverted()));
         values.put(info + "/Follower", TelemetryValue.constant(motor.follower() == null
                 ? "" : motor.follower().leader().defaultName()));
         values.put(config + "/Disabled", overrides.motorDisabled(motor));
@@ -457,7 +470,10 @@ final class RobotGraph {
         // Thermal and power state. The temperature is the thermal model's estimate, the derate is the curve applied
         // to it, and the cap is the effective limit of the latest power cycle (0 when none). No hardware is read.
         values.put(state + "/TemperatureCelsius", safeNumber(motor.raw()::fusedTemperatureCelsius));
-        values.put(state + "/Derate", safeNumber(() -> motor.thermalCurve().raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius())));
+        // The motor is an immutable record, so its derate curve (a new kind default on every call) is resolved once.
+        var derateCurve = motor.thermalCurve().raw();
+        var motorRaw = motor.raw();
+        values.put(state + "/Derate", safeNumber(() -> derateCurve.derateFractionCelsius(motorRaw.fusedTemperatureCelsius())));
         values.put(state + "/PowerCapAmps", safeNumber(() -> overrides.powerCapAmps(motor)));
     }
 
@@ -470,11 +486,11 @@ final class RobotGraph {
         values.put(path + "/Info/Kind", TelemetryValue.constant(encoder.kind().key()));
         values.put(path + "/Info/Id", TelemetryValue.constant(encoder.id()));
         values.put(path + "/Info/Bus", TelemetryValue.constant(encoder.bus()));
-        values.put(path + "/Info/DeclaredInverted", TelemetryValue.bool(encoder::isInverted));
-        values.put(path + "/Info/GearRatio", TelemetryValue.number(encoder::gearRatio));
-        values.put(path + "/Info/Conversion", TelemetryValue.number(encoder::conversion));
-        values.put(path + "/Info/Offset", TelemetryValue.number(encoder::offset));
-        values.put(path + "/Info/Units", TelemetryValue.string(() -> encoder.measuresUnit().name()));
+        values.put(path + "/Info/DeclaredInverted", TelemetryValue.constant(encoder.isInverted()));
+        values.put(path + "/Info/GearRatio", TelemetryValue.constant(encoder.gearRatio()));
+        values.put(path + "/Info/Conversion", TelemetryValue.constant(encoder.conversion()));
+        values.put(path + "/Info/Offset", TelemetryValue.constant(encoder.offset()));
+        values.put(path + "/Info/Units", TelemetryValue.constant(encoder.measuresUnit().name()));
         values.put(path + "/State/Position", safeNumber(encoder.raw()::position));
         values.put(path + "/State/AbsolutePosition", safeNumber(encoder.raw()::absolutePosition));
         values.put(path + "/State/Velocity", safeNumber(encoder.raw()::velocity));
@@ -519,10 +535,25 @@ final class RobotGraph {
         values.put(path + "/Setup/Status", TelemetryValue.string(() -> overrides.setupStatus(imu)));
     }
 
+    /** Reads skipped after an unsupported reading before it is tried again. */
+    private static final int UNSUPPORTED_RETRY_READS = 50;
+
     private static TelemetryValue safeNumber(DoubleSupplier reader) {
+        // A reading the bound handle does not implement (for example the absolute position of an integrated
+        // encoder) throws UnsupportedOperationException on every call, and building and throwing it every cycle is
+        // expensive on the roboRIO. After one, the value reads NaN without calling the reader for a while. It is
+        // retried periodically because access before the hardware is bound throws the same exception type.
+        int[] skipReads = new int[1];
         return TelemetryValue.number(() -> {
+            if (skipReads[0] > 0) {
+                skipReads[0]--;
+                return Double.NaN;
+            }
             try {
                 return reader.getAsDouble();
+            } catch (UnsupportedOperationException exception) {
+                skipReads[0] = UNSUPPORTED_RETRY_READS;
+                return Double.NaN;
             } catch (RuntimeException exception) {
                 return Double.NaN;
             }

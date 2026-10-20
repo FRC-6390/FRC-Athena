@@ -51,6 +51,8 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
     private double previousHeadingRadians;
     private double lastRefreshTimestamp = Double.NaN;
     private Measurement measurement;
+    private final Runnable readModules = this::readModules;
+    private List<Measurement> measurementList = List.of();
 
     SwerveOdometry(SwerveKinematics kinematics, ImuSource imu) {
         this.kinematics = Objects.requireNonNull(kinematics, "kinematics");
@@ -73,12 +75,8 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         if (Double.compare(lastRefreshTimestamp, timestampSeconds) == 0) {
             return;
         }
-        for (int index = 0; index < driveEncoders.size(); index++) {
-            EncoderDevice driveEncoder = driveEncoders.get(index);
-            EncoderDevice angleEncoder = kinematics.modules().get(index).module().angle.get();
-            distanceReadings[index] = RuntimeHardwareAccess.call(context, driveEncoder.raw()::position);
-            angleReadings[index] = RuntimeHardwareAccess.call(context, angleEncoder.raw()::absolutePosition);
-        }
+        // One hardware-access scope for every module read, instead of one scope (and lambda) per reading.
+        RuntimeHardwareAccess.run(context, readModules);
 
         double rawHeading = Math.toRadians(imu.raw().yawDegrees());
         if (pendingReset != null) {
@@ -122,12 +120,23 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
         measurement = Measurements.poseAndSpeeds(pose, velocity)
                 .timing(Seconds.of(timestampSeconds), Seconds.of(0.0))
                 .source(this);
+        measurementList = List.of(measurement);
         lastRefreshTimestamp = timestampSeconds;
+    }
+
+    /** Reads every module's drive distance and absolute angle; runs inside the refresh's hardware scope. */
+    private void readModules() {
+        for (int index = 0; index < driveEncoders.size(); index++) {
+            EncoderDevice driveEncoder = driveEncoders.get(index);
+            EncoderDevice angleEncoder = kinematics.modules().get(index).module().angle.get();
+            distanceReadings[index] = driveEncoder.raw().position();
+            angleReadings[index] = angleEncoder.raw().absolutePosition();
+        }
     }
 
     @Override
     public synchronized List<Measurement> measurements() {
-        return measurement == null ? List.of() : List.of(measurement);
+        return measurementList;
     }
 
     @Override
@@ -183,6 +192,24 @@ public final class SwerveOdometry implements PoseSignal, HardwareMeasurementSign
             snapshottedModulePositionVersion = modulePositionVersion;
         }
         return modulePositionSnapshot;
+    }
+
+    /**
+     * Internal, not for robot code: the values of {@link #modulePositions()} as primitives, for per-cycle
+     * localization. Writes each module's travel in meters and azimuth in rotations of the steer mechanism, in
+     * kinematic order, into arrays of at least the module count.
+     *
+     * @param distancesMeters receives each module's travel
+     * @param anglesRotations receives each module's azimuth
+     * @return number of modules written; 0 before the first refresh, like an empty {@link #modulePositions()}
+     */
+    public synchronized int modulePositions(double[] distancesMeters, double[] anglesRotations) {
+        if (!hasPreviousReadings) {
+            return 0;
+        }
+        System.arraycopy(previousDistances, 0, distancesMeters, 0, previousDistances.length);
+        System.arraycopy(previousAngles, 0, anglesRotations, 0, previousAngles.length);
+        return previousDistances.length;
     }
 
     private void commitModuleReadings() {

@@ -2,6 +2,7 @@ package ca.frc6390.athena.mechanism.motion;
 
 import ca.frc6390.athena.mechanism.constraint.ConstraintContext;
 import ca.frc6390.athena.mechanism.constraint.ConstraintResult;
+import ca.frc6390.athena.mechanism.constraint.ConstraintStage;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.measure.Angle;
@@ -43,6 +44,25 @@ public final class MotionPlanners {
             double current = context.current();
             double requested = context.requested();
             long center = Math.round((current - requested) / period);
+            if (!Constraints.hasStage(constraints, ConstraintStage.TARGET)) {
+                // Without target constraints every candidate is allowed, so the nearest one wins. Compared as
+                // primitives, boxing only the winner; ties keep the earliest offset as the general loop does.
+                boolean found = false;
+                double nearest = requested;
+                double nearestDistance = Double.POSITIVE_INFINITY;
+                for (long offset = -2; offset <= 2; offset++) {
+                    double candidate = requested + (center + offset) * period;
+                    double distance = Math.abs(candidate - current);
+                    if (distance < nearestDistance) {
+                        found = true;
+                        nearest = candidate;
+                        nearestDistance = distance;
+                    }
+                }
+                return found
+                        ? new ConstraintResult.Allowed<>(nearest)
+                        : new ConstraintResult.Allowed<>(requested);
+            }
             Double best = null;
             double bestDistance = Double.POSITIVE_INFINITY;
             for (long offset = -2; offset <= 2; offset++) {

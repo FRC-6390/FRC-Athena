@@ -21,11 +21,9 @@ public final class RuntimeHardwareAccess {
         try {
             return action.get();
         } finally {
-            if (previous == null) {
-                CURRENT.remove();
-            } else {
-                CURRENT.set(previous);
-            }
+            // set(null) rather than remove(): remove() drops the thread-local entry, so every cycle's next call
+            // would allocate it again. current() reads null either way.
+            CURRENT.set(previous);
         }
     }
 

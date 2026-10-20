@@ -367,7 +367,31 @@ class CtreBackendTest {
         assertEquals(1, controller.rollCalls);
     }
 
+    @Test
+    void faultedReportsTheFatalFaultCapturedByTheLastRefresh() {
+        RecordingTalonController controller = new RecordingTalonController();
+        CtreMotorHandle handle = new CtreMotorHandle(
+                MotorDevice.of(MotorKinds.KRAKEN_X60, 5), new CtreMotorOptions(), controller);
+
+        handle.refreshInputs();
+        assertFalse(handle.faulted());
+
+        controller.fatalFault = true;
+        assertFalse(handle.faulted(), "faulted() reads the cached refresh, not the controller");
+        assertEquals(1, controller.fatalFaultReads);
+
+        handle.refreshInputs();
+        assertTrue(handle.faulted());
+
+        controller.fatalFault = false;
+        handle.refreshInputs();
+        assertFalse(handle.faulted());
+        assertEquals(3, controller.fatalFaultReads);
+    }
+
     private static final class RecordingTalonController implements CtreMotorHandle.TalonController {
+        private boolean fatalFault;
+        private int fatalFaultReads;
         private int outputConfigurationCalls;
         private boolean brake;
         private int configureSlotCalls;
@@ -386,6 +410,12 @@ class CtreBackendTest {
         private int supplyCurrentLimitAmps;
         private int statorCurrentLimitAmps;
         private int torqueCurrentLimitAmps;
+
+        @Override
+        public boolean fatalFault() {
+            fatalFaultReads++;
+            return fatalFault;
+        }
 
         @Override
         public void setPercent(double percent) {}

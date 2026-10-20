@@ -50,6 +50,8 @@ public final class ArcpBridge implements AutoCloseable {
     private final Path statusDirectory;
     private double lastExportSeconds = Double.NaN;
     private String lastFailure = "";
+    /** Contents of the last status.txt written, so an unchanged status costs no file write. */
+    private String lastStatusText = "";
     private boolean closed;
 
     private ArcpBridge(NativeArcpServer server, ArcpSignals signals, ArcpTuning tuning, ReplayRecorder recorder,
@@ -294,6 +296,15 @@ public final class ArcpBridge implements AutoCloseable {
         }
     }
 
+    /**
+     * Regenerates the tuning and status exports. Runs on the robot thread at the export cadence (about once a second),
+     * and writes a file only when its contents changed.
+     *
+     * <p>The value reads ({@link ArcpSignals#persistedValues()} and the code defaults) must stay on the robot thread:
+     * they call mechanism suppliers and runtime maps that are not thread-safe. The string building and file writes that
+     * follow only touch the captured maps, {@link ArcpTuning} and the export files, so they could move to a background
+     * thread; they stay here because the file service is expected to serve the files as soon as a cycle returns.</p>
+     */
     private void refreshExports() {
         try {
             tuning.refresh(signals.persistedValues(), codeDefaults.get());
@@ -323,7 +334,11 @@ public final class ArcpBridge implements AutoCloseable {
                     text.append("disk.usableBytes=unknown\n");
                 }
             }
-            ArcpTuning.writeFile(statusDirectory, "status.txt", text.toString());
+            String statusText = text.toString();
+            if (!statusText.equals(lastStatusText)) {
+                ArcpTuning.writeFile(statusDirectory, "status.txt", statusText);
+                lastStatusText = statusText;
+            }
         } catch (RuntimeException failure) {
             report(failure);
         }

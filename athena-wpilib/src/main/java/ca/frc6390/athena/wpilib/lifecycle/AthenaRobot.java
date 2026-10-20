@@ -24,6 +24,7 @@ import java.util.function.BooleanSupplier;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
+import ca.frc6390.athena.wpilib.telemetry.LoopTimingPublisher;
 import ca.frc6390.athena.wpilib.telemetry.PowerTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.SystemTelemetryPublisher;
 import ca.frc6390.athena.wpilib.system.MemoryPressure;
@@ -58,6 +59,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private SystemRuntime systemRuntime;
     private SystemTelemetryPublisher systemTelemetryPublisher;
     private PowerTelemetryPublisher powerTelemetryPublisher;
+    private LoopTimingPublisher loopTimingPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
     private MechanismTracePublisher.Profile traceProfile = MechanismTracePublisher.Profile.OFF;
@@ -65,6 +67,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private VisionSimulationField simulationVisionField = VisionSimulationField.EMPTY;
     private int reportedSystemFailures;
     private MemoryPressure reportedPressure = MemoryPressure.NORMAL;
+    /** Pressure the telemetry read-only period was last set for; null until first set. */
+    private MemoryPressure telemetryPeriodPressure;
     private boolean reportedJvmConfiguration;
     private ReplayBridge replay;
     /** Start of the current enabled period (autonomous, teleop or test), or NaN while disabled. */
@@ -190,6 +194,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemRuntime = SystemRuntime.create(systemTuning, RobotBase.isReal());
         systemTelemetryPublisher = new SystemTelemetryPublisher();
         powerTelemetryPublisher = new PowerTelemetryPublisher();
+        loopTimingPublisher = new LoopTimingPublisher();
         systemRuntime.start();
         publishSystemTelemetry();
         publishMechanismTelemetry();
@@ -203,6 +208,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         CommandScheduler.getInstance().run();
         replay.periodic();
         arcp.periodic(timestampSeconds());
+        if (loopTimingPublisher != null) loopTimingPublisher.cycleFinished();
     }
 
     @Override
@@ -299,6 +305,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     private void run(LifecycleMode mode, LifecyclePhase phase, boolean enabled, boolean simulation) {
+        // TimedRobot runs the mode periodic callback first and robotPeriodic last in every cycle.
+        if (phase == LifecyclePhase.PERIODIC && loopTimingPublisher != null) loopTimingPublisher.cycleStarted();
         double timestamp = timestampSeconds();
         double dtSeconds = elapsed(timestamp);
         if (tracePublisher != null) {
@@ -345,11 +353,15 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemRuntime.update();
         SystemStatus status = systemRuntime.status();
         systemTelemetryPublisher.publish(status);
-        mechanismTelemetryPublisher.readOnlyPeriod(switch (status.pressure()) {
-            case NORMAL -> Seconds.of(0.10);
-            case WARNING -> Seconds.of(0.50);
-            case CRITICAL -> Seconds.of(1.00);
-        });
+        if (status.pressure() != telemetryPeriodPressure) {
+            // Only on a pressure change: the period is a unit-converted measure, rebuilt on every call.
+            mechanismTelemetryPublisher.readOnlyPeriod(switch (status.pressure()) {
+                case NORMAL -> Seconds.of(0.10);
+                case WARNING -> Seconds.of(0.50);
+                case CRITICAL -> Seconds.of(1.00);
+            });
+            telemetryPeriodPressure = status.pressure();
+        }
         while (reportedSystemFailures < status.failures().size()) {
             DriverStation.reportWarning(
                     "Athena system tuning: " + status.failures().get(reportedSystemFailures++), false);
@@ -466,6 +478,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         failure = closeResource(failure, autoPreviewPublisher, "auto preview publisher");
         failure = closeResource(failure, systemTelemetryPublisher, "system telemetry publisher");
         failure = closeResource(failure, powerTelemetryPublisher, "power telemetry publisher");
+        failure = closeResource(failure, loopTimingPublisher, "loop timing publisher");
         failure = closeResource(failure, systemRuntime, "system runtime");
         for (DigitalInput input : digitalInputs.values()) {
             failure = closeResource(failure, input, "digital input");

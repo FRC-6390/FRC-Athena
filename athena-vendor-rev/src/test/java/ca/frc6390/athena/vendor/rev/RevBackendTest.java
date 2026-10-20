@@ -25,6 +25,7 @@ import ca.frc6390.athena.hardware.device.HardwareBus;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import com.revrobotics.config.BaseConfig;
+import com.revrobotics.spark.SparkBase;
 import com.revrobotics.spark.config.SparkBaseConfig;
 import com.revrobotics.spark.config.SparkParameters;
 import java.lang.reflect.Field;
@@ -32,6 +33,29 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class RevBackendTest {
+    @Test
+    void repeatedOpenLoopCommandsSkipTheVendorCall() {
+        RecordingSparkController controller = new RecordingSparkController();
+        RevMotorHandle handle = new RevMotorHandle(MotorDevice.of(MotorKinds.NEO, 19), new RevMotorOptions(), controller);
+
+        handle.setVoltage(2.0);
+        handle.setVoltage(2.0);
+        handle.setVoltage(2.0);
+        assertEquals(1, controller.setVoltageCalls);
+        handle.setVoltage(2.5);
+        assertEquals(2, controller.setVoltageCalls);
+        assertEquals(2.5, controller.lastVolts);
+
+        handle.stop();
+        handle.setVoltage(2.5);
+        assertEquals(3, controller.setVoltageCalls, "stop() must not leave a stale voltage cached");
+        handle.setPercentOutput(0.5);
+        handle.setPercentOutput(0.5);
+        assertEquals(1, controller.setPercentCalls);
+        handle.setVoltage(2.5);
+        assertEquals(4, controller.setVoltageCalls, "switching modes resends");
+    }
+
     @Test
     void runtimeMotorConfigurationIsAppliedWithoutReplacingTheDeclaration() {
         RecordingSparkController controller = new RecordingSparkController();
@@ -452,6 +476,41 @@ class RevBackendTest {
         assertEquals(MotorControlCapabilities.OPEN_LOOP_ONLY, handle.controlCapabilities());
     }
 
+    @Test
+    void faultedReportsTheFatalFaultCapturedByTheLastRefresh() {
+        RecordingSparkController controller = new RecordingSparkController();
+        RevMotorHandle handle = new RevMotorHandle(
+                MotorDevice.of(MotorKinds.NEO, 2), new RevMotorOptions(), controller);
+
+        handle.refreshInputs();
+        assertFalse(handle.faulted());
+
+        controller.fatalFault = true;
+        assertFalse(handle.faulted(), "faulted() reads the cached refresh, not the controller");
+        assertEquals(1, controller.fatalFaultReads);
+
+        handle.refreshInputs();
+        assertTrue(handle.faulted());
+
+        controller.fatalFault = false;
+        handle.refreshInputs();
+        assertFalse(handle.faulted());
+        assertEquals(3, controller.fatalFaultReads);
+    }
+
+    @Test
+    void fatalFaultMaskCoversOnlyFaultsThatStopTheMotor() {
+        SparkBase.Faults fatal = new SparkBase.Faults(RevMotorHandle.FATAL_FAULT_BITS);
+        assertTrue(fatal.gateDriver);
+        assertTrue(fatal.motorType);
+        assertTrue(fatal.escEeprom);
+        assertTrue(fatal.firmware);
+        assertFalse(fatal.other);
+        assertFalse(fatal.sensor);
+        assertFalse(fatal.can);
+        assertFalse(fatal.temperature);
+    }
+
     private static final class RecordingSparkController implements RevMotorHandle.SparkController {
         private int configureCalls;
         private boolean configureResult = true;
@@ -472,6 +531,14 @@ class RevBackendTest {
         private int enableAbsoluteEncoderCalls;
         private boolean closed;
         private MotorRuntimeConfig runtimeConfiguration;
+        private boolean fatalFault;
+        private int fatalFaultReads;
+
+        @Override
+        public boolean fatalFault() {
+            fatalFaultReads++;
+            return fatalFault;
+        }
 
         @Override
         public boolean configure(MotorDevice device, RevMotorOptions options) {
@@ -490,11 +557,20 @@ class RevBackendTest {
             return true;
         }
 
-        @Override
-        public void setPercent(double percent) {}
+        private int setPercentCalls;
+        private int setVoltageCalls;
+        private double lastVolts = Double.NaN;
 
         @Override
-        public void setVoltage(double volts) {}
+        public void setPercent(double percent) {
+            setPercentCalls++;
+        }
+
+        @Override
+        public void setVoltage(double volts) {
+            setVoltageCalls++;
+            lastVolts = volts;
+        }
 
         @Override
         public void setPositionTarget(double rotations) {}

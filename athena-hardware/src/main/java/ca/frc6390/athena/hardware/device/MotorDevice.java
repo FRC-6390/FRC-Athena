@@ -63,6 +63,10 @@ public record MotorDevice(
         Thermal thermal) {
     private static final RuntimeBindings<MotorDevice, RuntimeMotor> RUNTIMES = new RuntimeBindings<>();
     private static final Current NO_LIMIT = Units.Amps.of(0.0);
+    private static final DerivedValueCache<MotorDevice, String> DEFAULT_NAMES =
+            new DerivedValueCache<>(MotorDevice::computeDefaultName, 1024);
+    private static final DerivedValueCache<MotorDevice, MotorCurrentLimits> CURRENT_LIMITS =
+            new DerivedValueCache<>(MotorDevice::computeCurrentLimits, 1024);
     /**
      * Creates a motor ref on the default roboRIO CAN bus.
      *
@@ -345,8 +349,21 @@ public record MotorDevice(
                 supplyCurrentLimit, current, vendorOptions, follower, isDisabled, failurePolicy, power, thermal);
     }
 
-    /** Returns the effective supply and stator limits used by Athena. */
+    /**
+     * Returns the effective supply and stator limits used by Athena. The limits are derived once per declaration
+     * and cached, so per-cycle callers do not recompute them.
+     *
+     * @return effective current limits
+     */
     public MotorCurrentLimits currentLimits() {
+        return CURRENT_LIMITS.get(this);
+    }
+
+    private static MotorCurrentLimits computeCurrentLimits(MotorDevice device) {
+        return device.deriveCurrentLimits();
+    }
+
+    private MotorCurrentLimits deriveCurrentLimits() {
         Current supply = supplyCurrentLimit.in(Units.Amps) > 0 ? supplyCurrentLimit : currentLimit;
         double supplyAmps = supply.in(Units.Amps);
         double statorAmps = statorCurrentLimit.in(Units.Amps);
@@ -430,7 +447,11 @@ public record MotorDevice(
     }
 
     private RuntimeMotor runtime() {
-        return RUNTIMES.get(this, "Motor " + defaultName());
+        return RUNTIMES.get(this, MotorDevice::runtimeDescription);
+    }
+
+    private static String runtimeDescription(MotorDevice device) {
+        return "Motor " + device.defaultName();
     }
 
     private static final class RuntimeMotor {
@@ -502,8 +523,40 @@ public record MotorDevice(
                 failurePolicy, power, thermal);
     }
 
+    /**
+     * Returns the stable default name derived from the motor kind and id. The name is computed once per
+     * declaration and cached, so per-cycle callers do not rebuild it.
+     *
+     * @return default name: the sanitized kind key followed by {@code _} and the id
+     */
     public String defaultName() {
-        return sanitize(kind.key()) + "_" + id;
+        return DEFAULT_NAMES.get(this);
+    }
+
+    private static String computeDefaultName(MotorDevice device) {
+        return sanitize(device.kind.key()) + "_" + device.id;
+    }
+
+    /**
+     * Returns a hash code consistent with the record's {@code equals}.
+     *
+     * <p>It hashes only the identity components (kind, id, bus, inversion, neutral mode, disabled flag and
+     * failure policy). Equal declarations have equal components, so the contract holds. Leaving out the current
+     * limits, follower, power profile and thermal curve keeps this allocation-free: WPILib measure and unit hash
+     * codes allocate, and declarations are used as map keys on the per-cycle path.</p>
+     *
+     * @return hash code
+     */
+    @Override
+    public int hashCode() {
+        int result = kind.hashCode();
+        result = 31 * result + id;
+        result = 31 * result + canbus.hashCode();
+        result = 31 * result + Boolean.hashCode(isInverted);
+        result = 31 * result + neutralMode.hashCode();
+        result = 31 * result + Boolean.hashCode(isDisabled);
+        result = 31 * result + failurePolicy.hashCode();
+        return result;
     }
 
     /**

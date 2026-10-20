@@ -20,6 +20,8 @@ final class AnnotatedTelemetry {
 
     private static TelemetryValue fieldValue(Field field, Object instance, Telemetry annotation) {
         makeAccessible(field, instance);
+        // Resolved once: the primitive readers run every telemetry cycle.
+        Object target = Modifier.isStatic(field.getModifiers()) ? null : instance;
         Class<?> type = field.getType();
         if (TelemetryValue.class.isAssignableFrom(type)) {
             if (annotation.writable() || hasBounds(annotation)) {
@@ -32,10 +34,10 @@ final class AnnotatedTelemetry {
 
         if (!annotation.writable()) {
             if (type.isPrimitive() && isNumber(type)) {
-                return TelemetryValue.number(() -> readPrimitiveNumber(field, instance));
+                return TelemetryValue.number(() -> readPrimitiveNumber(field, target));
             }
             if (type == boolean.class) {
-                return TelemetryValue.bool(() -> readPrimitiveBoolean(field, instance));
+                return TelemetryValue.bool(() -> readPrimitiveBoolean(field, target));
             }
             return readOnly(type, () -> read(field, instance), field);
         }
@@ -49,7 +51,7 @@ final class AnnotatedTelemetry {
             requireBounds(annotation, field);
             return TelemetryValue.writableNumber(
                     type.isPrimitive()
-                            ? () -> readPrimitiveNumber(field, instance)
+                            ? () -> readPrimitiveNumber(field, target)
                             : () -> ((Number) read(field, instance)).doubleValue(),
                     value -> writeNumber(field, instance, clamp(value, annotation.min(), annotation.max())));
         }
@@ -57,7 +59,7 @@ final class AnnotatedTelemetry {
             if (hasBounds(annotation)) throw invalid(field, "boolean telemetry cannot have numeric bounds");
             return TelemetryValue.writableBoolean(
                     type == boolean.class
-                            ? () -> readPrimitiveBoolean(field, instance)
+                            ? () -> readPrimitiveBoolean(field, target)
                             : () -> (Boolean) read(field, instance),
                     value -> write(field, instance, value));
         }
@@ -211,17 +213,19 @@ final class AnnotatedTelemetry {
         }
     }
 
-    private static double readPrimitiveNumber(Field field, Object instance) {
+    /** Reads a primitive numeric field; {@code target} is null for a static field. */
+    private static double readPrimitiveNumber(Field field, Object target) {
         try {
-            return field.getDouble(Modifier.isStatic(field.getModifiers()) ? null : instance);
+            return field.getDouble(target);
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Unable to read telemetry field " + field.getName(), exception);
         }
     }
 
-    private static boolean readPrimitiveBoolean(Field field, Object instance) {
+    /** Reads a primitive boolean field; {@code target} is null for a static field. */
+    private static boolean readPrimitiveBoolean(Field field, Object target) {
         try {
-            return field.getBoolean(Modifier.isStatic(field.getModifiers()) ? null : instance);
+            return field.getBoolean(target);
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Unable to read telemetry field " + field.getName(), exception);
         }

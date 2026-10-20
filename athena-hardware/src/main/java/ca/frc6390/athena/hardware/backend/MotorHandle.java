@@ -80,6 +80,27 @@ public interface MotorHandle {
     }
 
     /**
+     * Leaves hardware follower mode so the controller accepts direct commands again. Motor failover calls this
+     * once when it promotes a follower or re-points it to a new leader. Afterwards the controller must run
+     * uninverted: Athena applies the follower's direction in software. Controllers whose next direct request
+     * replaces the follow request (CTRE) need not override it.
+     */
+    default void stopFollowing() {
+        // default no-op
+    }
+
+    /**
+     * Returns whether the controller reports a fault that stops it from driving the motor. Read from the cached
+     * inputs of the latest {@link #refreshInputs()}; it must not touch the bus. A lost or stale CAN connection is
+     * reported by {@link #refreshInputs()} throwing instead.
+     *
+     * @return true while the controller is faulted
+     */
+    default boolean faulted() {
+        return false;
+    }
+
+    /**
      * Sets open-loop output.
      *
      * @param percent output from -1 to 1

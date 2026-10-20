@@ -76,27 +76,28 @@ public final class VisionGraph {
 
     /** Refreshes cached measurements using the supplied monotonic runtime timestamp. */
     public void refresh(double nowSeconds) {
-        List<Measurement> poses = new ArrayList<>();
-        List<Measurement> targets = new ArrayList<>();
-        List<RefreshFailure> failures = new ArrayList<>();
+        List<RefreshFailure> failures = null;
         for (CameraRuntime camera : cameraList) {
             if (!camera.shouldAttempt(nowSeconds)) {
-                failures.add(new RefreshFailure(camera.camera(), camera.lastFailure));
+                failures = withFailure(failures, new RefreshFailure(camera.camera(), camera.lastFailure));
                 continue;
             }
             try {
                 camera.refresh(nowSeconds);
             } catch (RuntimeException exception) {
                 camera.failed(exception, nowSeconds);
-                failures.add(new RefreshFailure(camera.camera(), exception));
+                failures = withFailure(failures, new RefreshFailure(camera.camera(), exception));
             }
-            poses.addAll(camera.poseMeasurements());
-            targets.addAll(camera.targetMeasurements());
         }
-        poseMeasurements = poses.isEmpty() ? List.of() : List.copyOf(poses);
-        targetMeasurements = targets.isEmpty() ? List.of() : List.copyOf(targets);
-        aggregateDirty = false;
-        refreshFailures = failures.isEmpty() ? List.of() : List.copyOf(failures);
+        // The combined lists are built when first read; until then the per-camera caches hold the same values.
+        aggregateDirty = true;
+        refreshFailures = failures == null ? List.of() : List.copyOf(failures);
+    }
+
+    private static List<RefreshFailure> withFailure(List<RefreshFailure> failures, RefreshFailure failure) {
+        List<RefreshFailure> target = failures == null ? new ArrayList<>() : failures;
+        target.add(failure);
+        return target;
     }
 
     /** Returns camera failures captured during the latest refresh. */
@@ -157,15 +158,24 @@ public final class VisionGraph {
         if (!aggregateDirty) {
             return;
         }
-        List<Measurement> poses = new ArrayList<>();
-        List<Measurement> targets = new ArrayList<>();
+        List<Measurement> poses = null;
+        List<Measurement> targets = null;
         for (CameraRuntime camera : cameraList) {
-            poses.addAll(camera.poseMeasurements());
-            targets.addAll(camera.targetMeasurements());
+            poses = appended(poses, camera.poseMeasurements());
+            targets = appended(targets, camera.targetMeasurements());
         }
-        poseMeasurements = poses.isEmpty() ? List.of() : List.copyOf(poses);
-        targetMeasurements = targets.isEmpty() ? List.of() : List.copyOf(targets);
+        poseMeasurements = poses == null ? List.of() : List.copyOf(poses);
+        targetMeasurements = targets == null ? List.of() : List.copyOf(targets);
         aggregateDirty = false;
+    }
+
+    private static List<Measurement> appended(List<Measurement> combined, List<Measurement> values) {
+        if (values.isEmpty()) {
+            return combined;
+        }
+        List<Measurement> target = combined == null ? new ArrayList<>(values.size()) : combined;
+        target.addAll(values);
+        return target;
     }
 
     private static String key(CameraDevice camera) {

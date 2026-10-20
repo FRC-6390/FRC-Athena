@@ -181,6 +181,33 @@ class ArcpSystemSignalsTest {
         assertEquals(Map.of(entries.get("athena/power/arm/capAmps").signalId(), 35.0), sampled(signals));
     }
 
+    @Test
+    void motorChannelsFollowTheirNamesWhenTheReportedOrderChanges() {
+        FakeSource source = new FakeSource();
+        String left = "drive/left";
+        String right = "drive/right";
+        source.motors = List.of(motor(left, 10.0, Double.POSITIVE_INFINITY));
+        ArcpSystemSignals signals = new ArcpSystemSignals(1, source);
+        signals.discoverMotors();
+        long leftCurrent = byPath(signals).get("athena/power/drive/left/current").signalId();
+        assertEquals(10.0, (Double) sampled(signals).get(leftCurrent), 1e-12);
+
+        // A motor reported before discovery adds its channels is skipped, then sampled once it has them.
+        source.motors = List.of(motor(right, 5.0, Double.POSITIVE_INFINITY), motor(left, 11.0, Double.POSITIVE_INFINITY));
+        assertEquals(11.0, (Double) sampled(signals).get(leftCurrent), 1e-12);
+        signals.discoverMotors();
+        long rightCurrent = byPath(signals).get("athena/power/drive/right/current").signalId();
+        Map<Long, Object> grown = sampled(signals);
+        assertEquals(5.0, (Double) grown.get(rightCurrent), 1e-12);
+        assertFalse(grown.containsKey(leftCurrent), "unchanged values are not resent");
+
+        // Same names, swapped positions: each value still goes to its own motor's channel.
+        source.motors = List.of(motor(left, 12.0, Double.POSITIVE_INFINITY), motor(right, 6.0, Double.POSITIVE_INFINITY));
+        Map<Long, Object> swapped = sampled(signals);
+        assertEquals(12.0, (Double) swapped.get(leftCurrent), 1e-12);
+        assertEquals(6.0, (Double) swapped.get(rightCurrent), 1e-12);
+    }
+
     private static PowerSnapshot.Motor motor(String name, double demandAmps, double capAmps) {
         return new PowerSnapshot.Motor(name, demandAmps, capAmps, 1.0, 25.0, 1.0, 0.0, "Declared");
     }

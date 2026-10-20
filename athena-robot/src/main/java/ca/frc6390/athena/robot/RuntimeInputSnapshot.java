@@ -17,6 +17,8 @@ public record RuntimeInputSnapshot(List<Joystick> joysticks, DriverStationState 
     public static final int AXES = 6;
     /** POV values recorded per joystick. */
     public static final int POVS = 4;
+    private static final RuntimeInputSnapshot EMPTY =
+            new RuntimeInputSnapshot(List.of(), DriverStationState.DISCONNECTED);
 
     public RuntimeInputSnapshot {
         joysticks = joysticks == null ? List.of() : List.copyOf(joysticks);
@@ -25,7 +27,7 @@ public record RuntimeInputSnapshot(List<Joystick> joysticks, DriverStationState 
 
     /** Returns an empty snapshot: no joysticks, default driver station state. */
     public static RuntimeInputSnapshot empty() {
-        return new RuntimeInputSnapshot(List.of(), DriverStationState.DISCONNECTED);
+        return EMPTY;
     }
 
     /**
@@ -68,8 +70,22 @@ public record RuntimeInputSnapshot(List<Joystick> joysticks, DriverStationState 
             povs = povs == null ? new int[0] : povs.clone();
         }
 
+        private static final Joystick[] DISCONNECTED = disconnectedPorts();
+
+        /** Returns the disconnected placeholder for a port; instances for the standard ports are shared. */
         static Joystick disconnected(int port) {
+            if (port >= 0 && port < DISCONNECTED.length) {
+                return DISCONNECTED[port];
+            }
             return new Joystick(port, false, "", 0, new double[0], 0L, new int[0]);
+        }
+
+        private static Joystick[] disconnectedPorts() {
+            Joystick[] ports = new Joystick[JOYSTICK_PORTS];
+            for (int port = 0; port < ports.length; port++) {
+                ports[port] = new Joystick(port, false, "", 0, new double[0], 0L, new int[0]);
+            }
+            return ports;
         }
 
         /** Returns an axis value, or 0 when the device does not report that axis. */

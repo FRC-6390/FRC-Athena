@@ -320,6 +320,17 @@ public final class Localization implements PoseSignal {
         }
     }
 
+    /** Returns the newest pose sample of this node's output, from the cycle result instead of a rescan. */
+    @Override
+    public Optional<PoseMeasurementSample> measurement() {
+        synchronized (state) {
+            if (!state.runtimeOwned && strategy != Strategy.KALMAN) {
+                evaluate(Double.NaN);
+            }
+            return Optional.ofNullable(state.output.latestPose());
+        }
+    }
+
     public List<Measurement> acceptedMeasurements() {
         synchronized (state) {
             return state.accepted;
@@ -469,7 +480,10 @@ public final class Localization implements PoseSignal {
         if (cameras.isEmpty()) {
             return;
         }
-        double heading = poseSnapshot().headingRadians();
+        // poseSnapshot() of this Kalman node, read from the cycle result: the newest pose, or the origin.
+        PoseMeasurementSample latest = state.output.latestPose();
+        PoseSnapshot pose = latest == null ? null : latest.pose();
+        double heading = pose == null ? 0.0 : pose.headingRadians();
         if (!Double.isFinite(heading)) {
             return;
         }
@@ -517,10 +531,12 @@ public final class Localization implements PoseSignal {
 
     private void evaluate(double timestampSeconds) {
         state.evaluatingTimestamp = timestampSeconds;
-        List<Measurement> accepted = new ArrayList<>();
-        List<Rejection> rejections = new ArrayList<>();
+        // Allocated on first use: a cycle without measurements keeps the shared empty lists.
+        List<Measurement> accepted = null;
+        List<Rejection> rejections = null;
         SwerveOdometry odometry = null;
-        for (PoseSignal input : inputs) {
+        for (int inputIndex = 0; inputIndex < inputs.size(); inputIndex++) {
+            PoseSignal input = inputs.get(inputIndex);
             if (strategy == Strategy.KALMAN && input instanceof SwerveOdometry swerveOdometry) {
                 if (odometry != null && odometry != swerveOdometry) {
                     throw new IllegalStateException("Kalman localization accepts exactly one odometry input.");
@@ -528,35 +544,57 @@ public final class Localization implements PoseSignal {
                 odometry = swerveOdometry;
                 continue;
             }
-            for (Measurement measurement : input.measurements()) {
+            // Indexed loops: measurement lists are small and random access, and this runs every cycle.
+            List<Measurement> measurements = input.measurements();
+            for (int index = 0; index < measurements.size(); index++) {
+                Measurement measurement = measurements.get(index);
                 PoseSnapshot pose = pose(measurement);
                 if (pose == null) {
-                    rejections.add(new Rejection(measurement, "not a pose measurement"));
+                    rejections = added(rejections, new Rejection(measurement, "not a pose measurement"));
                     continue;
                 }
                 String reason = rejection(measurement, pose);
                 if (reason == null) {
-                    accepted.add(measurement);
+                    accepted = added(accepted, measurement);
                 } else {
-                    rejections.add(new Rejection(measurement, reason));
+                    rejections = added(rejections, new Rejection(measurement, reason));
                 }
             }
         }
-        state.accepted = List.copyOf(accepted);
-        if (strategy == Strategy.KALMAN && !accepted.isEmpty()) {
+        state.accepted = accepted == null ? List.of() : List.copyOf(accepted);
+        if (strategy == Strategy.KALMAN && accepted != null) {
             // Kalman inputs are vision only (odometry is skipped above), so an accepted frame seeds the pose.
             state.seeded = true;
         }
-        state.rejections = List.copyOf(rejections);
-        state.rejected = rejections.stream().map(Rejection::measurement).toList();
+        state.rejections = rejections == null ? List.of() : List.copyOf(rejections);
+        state.rejected = rejections == null ? List.of() : rejectedMeasurements(rejections);
         List<Measurement> output = switch (strategy) {
             case FILTER -> state.accepted;
-            case LATEST_VALID -> latest(accepted);
-            case WEIGHTED_AVERAGE -> weightedAverage(accepted);
-            case COVARIANCE_INTERSECTION -> covarianceIntersection(accepted);
-            case KALMAN -> kalman(odometry, accepted, timestampSeconds);
+            case LATEST_VALID -> latest(state.accepted);
+            case WEIGHTED_AVERAGE -> weightedAverage(state.accepted);
+            case COVARIANCE_INTERSECTION -> covarianceIntersection(state.accepted);
+            case KALMAN -> kalman(odometry, state.accepted, timestampSeconds);
         };
         state.output = CycleResult.of(output);
+    }
+
+    private static List<Measurement> rejectedMeasurements(List<Rejection> rejections) {
+        Measurement[] measurements = new Measurement[rejections.size()];
+        for (int index = 0; index < measurements.length; index++) {
+            Measurement measurement = rejections.get(index).measurement();
+            if (measurement == null) {
+                // Unmodifiable like List.of, but keeps a null measurement.
+                return rejections.stream().map(Rejection::measurement).toList();
+            }
+            measurements[index] = measurement;
+        }
+        return List.of(measurements);
+    }
+
+    private static <T> List<T> added(List<T> list, T value) {
+        List<T> target = list == null ? new ArrayList<>() : list;
+        target.add(value);
+        return target;
     }
 
     private void publishPose() {
@@ -641,9 +679,15 @@ public final class Localization implements PoseSignal {
 
     /** Filter stages feeding this node, found through its refreshable inputs, nearest first. */
     private List<Localization> upstreamStages() {
+        // The graph is fixed once the refreshable inputs are cached, so the stage list is computed once.
+        List<Localization> cached = state.stages;
+        if (cached != null) {
+            return cached;
+        }
         List<Localization> stages = new ArrayList<>();
         collectStages(this, stages, java.util.Collections.newSetFromMap(new IdentityHashMap<>()));
-        return stages;
+        state.stages = List.copyOf(stages);
+        return state.stages;
     }
 
     private static void collectStages(Localization node, List<Localization> stages, Set<Localization> visited) {
@@ -1011,6 +1055,7 @@ public final class Localization implements PoseSignal {
         private StructPublisher<Pose2d> posePublisher;
         private List<MeasurementSignal> refreshables;
         private List<RobotHeadingAware> headingCameras;
+        private List<Localization> stages;
         private double evaluatingTimestamp = Double.NaN;
     }
 
@@ -1139,7 +1184,12 @@ public final class Localization implements PoseSignal {
         private final Map<Object, Double> lastSeenVisionTimestamps = new IdentityHashMap<>();
         private final Map<Object, VisionRecovery> visionRecovery = new IdentityHashMap<>();
         private SwerveDrivePoseEstimator estimator;
+        /** Last vision std-dev vector handed to the estimator; reused while the three values are unchanged. */
+        private edu.wpi.first.math.Matrix<edu.wpi.first.math.numbers.N3, edu.wpi.first.math.numbers.N1> visionVector;
+        private final long[] visionBits = new long[3];
         private double lastSeedTimestamp = Double.NEGATIVE_INFINITY;
+        private final double[] moduleDistances;
+        private final double[] moduleAngles;
 
         private KalmanEngine(
                 SwerveOdometry odometry,
@@ -1147,6 +1197,8 @@ public final class Localization implements PoseSignal {
                 MeasurementStdDevs defaultVisionStdDevs) {
             this.stateStdDevs = stateStdDevs;
             this.defaultVisionStdDevs = defaultVisionStdDevs;
+            moduleDistances = new double[odometry.kinematics().modules().size()];
+            moduleAngles = new double[moduleDistances.length];
             kinematics = new SwerveDriveKinematics(odometry.kinematics().modules().stream()
                     .map(module -> new Translation2d(module.x().in(edu.wpi.first.units.Units.Meters), module.y().in(edu.wpi.first.units.Units.Meters)))
                     .toArray(Translation2d[]::new));
@@ -1162,7 +1214,8 @@ public final class Localization implements PoseSignal {
                 KalmanTuning tuning,
                 boolean seeding,
                 VisionDiagnostics diagnostics) {
-            Rotation2d heading = new Rotation2d(odometry.heading().in(edu.wpi.first.units.Units.Radians));
+            // Same value as odometry.heading() in radians, without the measure.
+            Rotation2d heading = new Rotation2d(odometry.poseSnapshot().headingRadians());
             SwerveModulePosition[] positions = positions(odometry);
             RobotVelocity odometrySpeeds = odometry.velocity();
             if (estimator == null) {
@@ -1180,12 +1233,7 @@ public final class Localization implements PoseSignal {
                 visionRecovery.clear();
             }
             estimator.updateWithTime(timestampSeconds, heading, positions);
-            List<PoseMeasurementSample> samples = vision.stream()
-                    .filter(PoseMeasurementSample.class::isInstance)
-                    .map(PoseMeasurementSample.class::cast)
-                    .sorted(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                    .toList();
-            for (PoseMeasurementSample sample : samples) {
+            for (PoseMeasurementSample sample : oldestFirst(vision)) {
                 Verdict verdict = addVision(sample, timestampSeconds, innovationGate, maxHeadingResidualRadians,
                         odometrySpeeds, heading, positions, tuning, seeding);
                 diagnostics.observe(sample.source(), sample.timestampSeconds(),
@@ -1241,9 +1289,11 @@ public final class Localization implements PoseSignal {
             // Heading-residual and innovation gates share one recovery path: a source whose samples
             // are rejected but stay self-consistent for several frames (e.g. after a gyro slip or a
             // reset to the wrong heading) is re-admitted instead of being locked out forever.
-            double headingResidual = headingResidual(sample);
+            // The filter state does not change between the two checks, so one prediction serves both.
+            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
+            double headingResidual = headingResidual(sample, predicted);
             boolean headingRejected = trustsHeading(sample) && headingResidual > maxHeadingResidualRadians;
-            double innovationValue = Double.isFinite(innovationGate) ? innovation(sample, stdDevs) : 0.0;
+            double innovationValue = Double.isFinite(innovationGate) ? innovation(sample, stdDevs, predicted) : 0.0;
             boolean innovationRejected = innovationValue > innovationGate;
             if (headingRejected || innovationRejected) {
                 String reason = headingRejected
@@ -1258,9 +1308,36 @@ public final class Localization implements PoseSignal {
             } else {
                 visionRecovery.remove(source);
             }
-            estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), vector(stdDevs));
+            estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), visionVector(stdDevs));
             return Verdict.accept();
         }
+
+        /** Pose samples in timestamp order; equal timestamps keep their input order. */
+        private static List<PoseMeasurementSample> oldestFirst(List<Measurement> vision) {
+            int count = 0;
+            for (Measurement measurement : vision) {
+                if (measurement instanceof PoseMeasurementSample) {
+                    count++;
+                }
+            }
+            if (count == 0) {
+                return List.of();
+            }
+            PoseMeasurementSample[] samples = new PoseMeasurementSample[count];
+            int index = 0;
+            for (Measurement measurement : vision) {
+                if (measurement instanceof PoseMeasurementSample sample) {
+                    samples[index++] = sample;
+                }
+            }
+            if (count > 1) {
+                java.util.Arrays.sort(samples, BY_TIMESTAMP);
+            }
+            return java.util.Arrays.asList(samples);
+        }
+
+        private static final Comparator<PoseMeasurementSample> BY_TIMESTAMP =
+                Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds);
 
         /** The frame's own speeds when it reports a non-zero set, otherwise the odometry speeds. */
         private static RobotVelocity measuredSpeeds(PoseMeasurementSample sample, RobotVelocity odometrySpeeds) {
@@ -1302,8 +1379,7 @@ public final class Localization implements PoseSignal {
             }
         }
 
-        private double innovation(PoseMeasurementSample sample, MeasurementStdDevs stdDevs) {
-            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
+        private double innovation(PoseMeasurementSample sample, MeasurementStdDevs stdDevs, Pose2d predicted) {
             double dx = sample.pose().xMeters() - predicted.getX();
             double dy = sample.pose().yMeters() - predicted.getY();
             double dh = wrapRadians(sample.pose().headingRadians() - predicted.getRotation().getRadians());
@@ -1312,19 +1388,39 @@ public final class Localization implements PoseSignal {
                     + square(dh / stdDevs.raw().headingRadians());
         }
 
-        private double headingResidual(PoseMeasurementSample sample) {
-            Pose2d predicted = estimator.sampleAt(sample.timestampSeconds()).orElse(estimator.getEstimatedPosition());
+        private double headingResidual(PoseMeasurementSample sample, Pose2d predicted) {
             return Math.abs(wrapRadians(
                     sample.pose().headingRadians() - predicted.getRotation().getRadians()));
         }
 
 
-        private static SwerveModulePosition[] positions(SwerveOdometry odometry) {
-            return odometry.modulePositions().stream()
-                    .map(position -> new SwerveModulePosition(
-                            position.distance().in(edu.wpi.first.units.Units.Meters),
-                            Rotation2d.fromRotations(position.angle().in(edu.wpi.first.units.Units.Rotations))))
-                    .toArray(SwerveModulePosition[]::new);
+        private SwerveModulePosition[] positions(SwerveOdometry odometry) {
+            int count = odometry.modulePositions(moduleDistances, moduleAngles);
+            SwerveModulePosition[] positions = new SwerveModulePosition[count];
+            for (int index = 0; index < count; index++) {
+                // The same values modulePositions() reports through its measures: meters are the base unit, and
+                // an angle in rotations is read back through the base unit, as Angle.in(Rotations) does.
+                positions[index] = new SwerveModulePosition(
+                        moduleDistances[index],
+                        Rotation2d.fromRotations(edu.wpi.first.units.Units.Rotations.of(moduleAngles[index])
+                                .in(edu.wpi.first.units.Units.Rotations)));
+            }
+            return positions;
+        }
+
+        private edu.wpi.first.math.Matrix<edu.wpi.first.math.numbers.N3, edu.wpi.first.math.numbers.N1> visionVector(
+                MeasurementStdDevs stdDevs) {
+            // Compared bit for bit so that -0.0 and NaN never reuse a vector built from different values.
+            long x = Double.doubleToRawLongBits(stdDevs.raw().xMeters());
+            long y = Double.doubleToRawLongBits(stdDevs.raw().yMeters());
+            long heading = Double.doubleToRawLongBits(stdDevs.raw().headingRadians());
+            if (visionVector == null || x != visionBits[0] || y != visionBits[1] || heading != visionBits[2]) {
+                visionVector = vector(stdDevs);
+                visionBits[0] = x;
+                visionBits[1] = y;
+                visionBits[2] = heading;
+            }
+            return visionVector;
         }
 
         private static boolean usable(MeasurementStdDevs stdDevs) {

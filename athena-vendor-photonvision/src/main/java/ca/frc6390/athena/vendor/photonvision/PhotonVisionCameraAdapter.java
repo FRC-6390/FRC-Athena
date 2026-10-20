@@ -2,11 +2,14 @@ package ca.frc6390.athena.vendor.photonvision;
 
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Radians;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import ca.frc6390.athena.api.hardware.CameraKind;
@@ -34,6 +37,7 @@ import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Transform3d;
 import edu.wpi.first.math.geometry.Translation3d;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.Timer;
 import org.photonvision.PhotonCamera;
 import org.photonvision.PhotonPoseEstimator;
@@ -74,7 +78,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     public PhotonVisionCameraAdapter(PhotonVisionDevice device) {
         this(
                 device,
-                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                realCameraClient(device),
                 defaultPoseClient(device, defaultFieldLayout()),
                 Timer::getFPGATimestamp);
     }
@@ -94,7 +98,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             PhotonVisionDevice device, AprilTagFieldLayout fieldLayout) {
         return new PhotonVisionCameraAdapter(
                 device,
-                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                realCameraClient(device),
                 defaultPoseClient(device, fieldLayout == null ? defaultFieldLayout() : fieldLayout),
                 Timer::getFPGATimestamp);
     }
@@ -193,11 +197,20 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             Supplier<Pose2d> referencePose) {
         this(
                 device,
-                new PhotonCameraClient(new PhotonCamera(Objects.requireNonNull(device, "device").name())),
+                realCameraClient(device),
                 new PhotonPoseEstimatorClient(
                         poseEstimator, poseStrategy, device::mountPose, referencePose, device::singleTagHeadingEnabled,
                         () -> device.reportedRobotHeading().in(Radians)),
                 Timer::getFPGATimestamp);
+    }
+
+    /**
+     * Opens the PhotonLib camera for a device. On the real robot the camera is read by a background
+     * thread; in simulation every read happens on the caller's thread, as before.
+     */
+    private static PhotonCameraClient realCameraClient(PhotonVisionDevice device) {
+        PhotonCamera camera = new PhotonCamera(Objects.requireNonNull(device, "device").name());
+        return new PhotonCameraClient(camera, !RobotBase.isSimulation());
     }
 
     PhotonVisionCameraAdapter(PhotonVisionDevice device, PhotonClient client) {
@@ -480,6 +493,16 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 source);
     }
 
+    /**
+     * Returns how many decoded frames the background reader dropped because the robot thread had not
+     * drained the queue in time. Always 0 when frames are read synchronously (simulation).
+     *
+     * @return dropped frame count
+     */
+    public long droppedFrames() {
+        return client instanceof PhotonCameraClient camera ? camera.droppedFrames() : 0L;
+    }
+
     @Override
     public void close() {
         if (client != null) {
@@ -508,28 +531,168 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
-    private static final class PhotonCameraClient implements PhotonClient {
-        private final PhotonCamera camera;
+    /**
+     * Reads one PhotonLib camera. Synchronous mode reads on the caller's thread. Background mode runs a daemon
+     * thread that decodes unread results and converts the newest frame's robot-independent part (timing and
+     * targets) into a bounded queue. The caller drains that queue in arrival order and runs the pose solve on
+     * its own thread, because the solve reads robot heading and pose.
+     */
+    static final class PhotonCameraClient implements PhotonClient {
+        /** Decoded frames held for the robot thread; the oldest is dropped when a new one would exceed this. */
+        static final int QUEUE_CAPACITY = 8;
+        // Polls stay well under the 20 ms robot cycle without spinning the second core on empty reads.
+        private static final long POLL_MILLIS = 10L;
 
-        private PhotonCameraClient(PhotonCamera camera) {
-            this.camera = Objects.requireNonNull(camera, "camera");
+        /** The PhotonLib calls this client makes. A seam so tests can feed frames without NetworkTables. */
+        interface FrameSource {
+            List<PhotonPipelineResult> unreadResults();
+
+            boolean isConnected();
+
+            void close();
+        }
+
+        private final FrameSource source;
+        private final Deque<QueuedFrame> queue = new ArrayDeque<>();
+        private final AtomicLong droppedFrames = new AtomicLong();
+        private final Thread reader;
+        private volatile boolean closed;
+
+        PhotonCameraClient(PhotonCamera camera, boolean background) {
+            this(fromCamera(Objects.requireNonNull(camera, "camera")), background);
+        }
+
+        PhotonCameraClient(FrameSource source, boolean background) {
+            this.source = Objects.requireNonNull(source, "source");
+            if (background) {
+                reader = new Thread(this::readLoop, "athena-photonvision-reader");
+                reader.setDaemon(true);
+                reader.start();
+            } else {
+                reader = null;
+            }
+        }
+
+        private static FrameSource fromCamera(PhotonCamera camera) {
+            return new FrameSource() {
+                @Override
+                public List<PhotonPipelineResult> unreadResults() {
+                    return camera.getAllUnreadResults();
+                }
+
+                @Override
+                public boolean isConnected() {
+                    return camera.isConnected();
+                }
+
+                @Override
+                public void close() {
+                    camera.close();
+                }
+            };
         }
 
         @Override
         public List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient) {
-            List<PhotonPipelineResult> results = camera.getAllUnreadResults();
-            if (results.isEmpty()) return List.of();
-            return List.of(PhotonVisionResult.fromPhoton(results.get(results.size() - 1), poseClient));
+            if (reader == null) {
+                List<PhotonPipelineResult> results = source.unreadResults();
+                if (results.isEmpty()) return List.of();
+                return List.of(PhotonVisionResult.fromPhoton(results.get(results.size() - 1), poseClient));
+            }
+            QueuedFrame frame = drain();
+            if (frame == null) return List.of();
+            // The pose solve needs the robot heading and pose, so it runs here on the robot thread.
+            Optional<PhotonVisionPoseEstimate> pose = poseClient == null
+                    ? Optional.empty()
+                    : poseClient.estimate(frame.raw());
+            return List.of(frame.converted().withPose(pose));
+        }
+
+        /** Takes every queued frame in arrival order and returns the newest; rethrows a reader failure first. */
+        private QueuedFrame drain() {
+            QueuedFrame newest = null;
+            synchronized (queue) {
+                while (!queue.isEmpty()) {
+                    QueuedFrame next = queue.poll();
+                    if (next.failure() != null) {
+                        throw next.failure();
+                    }
+                    newest = next;
+                }
+            }
+            return newest;
+        }
+
+        private void readLoop() {
+            while (!closed) {
+                try {
+                    List<PhotonPipelineResult> results = source.unreadResults();
+                    if (results.isEmpty()) {
+                        Thread.sleep(POLL_MILLIS);
+                        continue;
+                    }
+                    // Like the synchronous path, only the newest frame of a batch is used.
+                    offer(QueuedFrame.of(results.get(results.size() - 1)));
+                } catch (InterruptedException exception) {
+                    return;
+                } catch (RuntimeException exception) {
+                    if (closed) {
+                        return;
+                    }
+                    offer(QueuedFrame.failed(exception));
+                    try {
+                        Thread.sleep(POLL_MILLIS);
+                    } catch (InterruptedException interrupted) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        private void offer(QueuedFrame frame) {
+            synchronized (queue) {
+                if (queue.size() >= QUEUE_CAPACITY) {
+                    queue.poll();
+                    droppedFrames.incrementAndGet();
+                }
+                queue.offer(frame);
+            }
+        }
+
+        long droppedFrames() {
+            return droppedFrames.get();
         }
 
         @Override
         public boolean isConnected() {
-            return camera.isConnected();
+            return source.isConnected();
         }
 
         @Override
         public void close() {
-            camera.close();
+            closed = true;
+            if (reader != null) {
+                reader.interrupt();
+            }
+            source.close();
+        }
+
+        /**
+         * One frame from the reader thread: the PhotonLib result and its robot-independent conversion, or the
+         * failure that the robot thread must rethrow in its own refresh.
+         */
+        private record QueuedFrame(PhotonPipelineResult raw, PhotonVisionResult converted, RuntimeException failure) {
+            static QueuedFrame of(PhotonPipelineResult raw) {
+                try {
+                    return new QueuedFrame(raw, PhotonVisionResult.fromTargets(raw), null);
+                } catch (RuntimeException exception) {
+                    return failed(exception);
+                }
+            }
+
+            static QueuedFrame failed(RuntimeException exception) {
+                return new QueuedFrame(null, null, exception);
+            }
         }
     }
 
@@ -883,6 +1046,17 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 return new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
             }
             Optional<PhotonVisionPoseEstimate> pose = poseClient == null ? Optional.empty() : poseClient.estimate(result);
+            return fromTargets(result).withPose(pose);
+        }
+
+        /**
+         * The part of a frame that needs no robot state: timing and targets, with no pose. Safe to compute on
+         * the reader thread.
+         */
+        static PhotonVisionResult fromTargets(PhotonPipelineResult result) {
+            if (result == null) {
+                return new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
+            }
             List<PhotonVisionTarget> targets = result.hasTargets()
                     ? result.getTargets().stream().map(PhotonVisionCameraAdapter::targetFromPhoton).toList()
                     : List.of();
@@ -890,8 +1064,12 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                     result.getTimestampSeconds(),
                     PhotonVisionCameraAdapter.latencySeconds(result),
                     targets,
-                    pose,
+                    Optional.empty(),
                     PhotonVisionCameraAdapter.secondsSinceLastPong(result));
+        }
+
+        PhotonVisionResult withPose(Optional<PhotonVisionPoseEstimate> pose) {
+            return new PhotonVisionResult(timestampSeconds, latencySeconds, targets, pose, secondsSinceLastPong);
         }
     }
 

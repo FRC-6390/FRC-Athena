@@ -94,6 +94,14 @@ public final class RobotRuntime implements AutoCloseable {
     private final Set<String> reportedFailures = new LinkedHashSet<>();
     private final Set<Object> activeRecoverableFailures = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, Integer> recoverySamples = new IdentityHashMap<>();
+    private final Set<Object> failedDeclarations = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    // Cycle-snapshot parts reused while unchanged, so a steady cycle does not rebuild them.
+    private DigitalInputDevice[] snapshotDigitalDevices = new DigitalInputDevice[0];
+    private List<RuntimeCycleSnapshot.DigitalInput> snapshotDigitalInputs = List.of();
+    private DigitalInputDevice[] digitalScratch = new DigitalInputDevice[0];
+    private boolean[] digitalRawScratch = new boolean[0];
+    private boolean[] digitalActiveScratch = new boolean[0];
+    private List<RuntimeCycleSnapshot.LocalizationInput> snapshotLocalizationInputs = List.of();
     private long cycleSequence;
     private volatile RuntimeCycleSnapshot cycleSnapshot;
     private ReplayRecorder replayRecorder;
@@ -270,6 +278,7 @@ public final class RobotRuntime implements AutoCloseable {
         localization(services.localizations().toArray(Localization[]::new));
         services.pathProviders().forEach(this::registerPathProvider);
         services.autoChoosers().forEach(this::registerAutoChooser);
+        mechanisms.bindMotorFailovers(hardwareGraph);
         mechanisms.motorDevices().stream().filter(motor -> !motor.isDisabled()).forEach(hardwareGraph::motor);
         mechanisms.encoderDevices().forEach(hardwareGraph::encoder);
         mechanisms.imuDevices().forEach(hardwareGraph::imu);
@@ -494,11 +503,14 @@ public final class RobotRuntime implements AutoCloseable {
 
     /** Running auto name for telemetry, or an empty string outside autonomous. */
     public String runningAutoName() {
-        return autoChoosers.stream()
-                .map(AutoChooser::runningName)
-                .flatMap(java.util.Optional::stream)
-                .findFirst()
-                .orElse("");
+        // Read every cycle by telemetry: a plain loop instead of a stream pipeline.
+        for (int index = 0; index < autoChoosers.size(); index++) {
+            Optional<String> name = autoChoosers.get(index).runningName();
+            if (name.isPresent()) {
+                return name.get();
+            }
+        }
+        return "";
     }
 
     private void registerPathProvider(PathProvider provider) {
@@ -577,8 +589,12 @@ public final class RobotRuntime implements AutoCloseable {
     /** Builds dashboard-safe previews of the currently selected autonomous Actions. */
     public List<AutoPreview> selectedAutoPreviews() {
         long revision = 1L;
-        for (AutoChooser chooser : autoChoosers) revision = 31L * revision + chooser.revision();
-        for (PathProvider provider : pathProviders) revision = 31L * revision + provider.previewRevision();
+        for (int index = 0; index < autoChoosers.size(); index++) {
+            revision = 31L * revision + autoChoosers.get(index).revision();
+        }
+        for (int index = 0; index < pathProviders.size(); index++) {
+            revision = 31L * revision + pathProviders.get(index).previewRevision();
+        }
         if (revision == cachedAutoPreviewRevision) return cachedAutoPreviews;
 
         List<AutoPreview> previews = new ArrayList<>();
@@ -936,18 +952,8 @@ public final class RobotRuntime implements AutoCloseable {
             List<ResolvedOutput> outputs,
             HardwareCycleSnapshot mechanismInputs,
             RuntimeInputSnapshot driverInputs) {
-        List<RuntimeCycleSnapshot.DigitalInput> digitalInputs = mechanisms.digitalInputDevices().stream()
-                .map(input -> new RuntimeCycleSnapshot.DigitalInput(
-                        input.defaultName(), input.channel(), safeDigitalRead(input, true), safeDigitalRead(input, false)))
-                .toList();
-        List<RuntimeCycleSnapshot.LocalizationInput> localizationInputs = new ArrayList<>(localizations.size());
-        for (int index = 0; index < localizations.size(); index++) {
-            Localization localization = localizations.get(index);
-            localizationInputs.add(new RuntimeCycleSnapshot.LocalizationInput(
-                    index,
-                    localization.getClass().getSimpleName(),
-                    localizationSnapshots.get(index).measurements()));
-        }
+        List<RuntimeCycleSnapshot.DigitalInput> digitalInputs = snapshotDigitalInputs();
+        List<RuntimeCycleSnapshot.LocalizationInput> localizationInputs = snapshotLocalizationInputs();
         cycleSnapshot = new RuntimeCycleSnapshot(
                 ++cycleSequence,
                 context.nowSeconds(),
@@ -965,6 +971,88 @@ public final class RobotRuntime implements AutoCloseable {
         if (replayRecorder != null) {
             replayRecorder.record(cycleSnapshot, mechanismInputs, outputs);
         }
+    }
+
+    /**
+     * Reads every digital input for the cycle snapshot. The previous list (immutable) is returned while the devices
+     * and their readings are unchanged.
+     */
+    private List<RuntimeCycleSnapshot.DigitalInput> snapshotDigitalInputs() {
+        Set<DigitalInputDevice> devices = mechanisms.digitalInputDevices();
+        int count = devices.size();
+        if (digitalScratch.length < count) {
+            digitalScratch = new DigitalInputDevice[count];
+            digitalRawScratch = new boolean[count];
+            digitalActiveScratch = new boolean[count];
+        }
+        DigitalInputDevice[] previousDevices = snapshotDigitalDevices;
+        List<RuntimeCycleSnapshot.DigitalInput> previous = snapshotDigitalInputs;
+        boolean unchanged = count == previousDevices.length;
+        int index = 0;
+        for (DigitalInputDevice input : devices) {
+            boolean raw = safeDigitalRead(input, true);
+            boolean active = safeDigitalRead(input, false);
+            digitalScratch[index] = input;
+            digitalRawScratch[index] = raw;
+            digitalActiveScratch[index] = active;
+            if (unchanged) {
+                RuntimeCycleSnapshot.DigitalInput last = previous.get(index);
+                unchanged = previousDevices[index] == input && last.raw() == raw && last.active() == active;
+            }
+            index++;
+        }
+        if (unchanged) {
+            java.util.Arrays.fill(digitalScratch, 0, count, null);
+            return previous;
+        }
+        RuntimeCycleSnapshot.DigitalInput[] inputs = new RuntimeCycleSnapshot.DigitalInput[count];
+        for (int i = 0; i < count; i++) {
+            DigitalInputDevice input = digitalScratch[i];
+            // Devices are immutable records, so a device seen last cycle keeps its name.
+            String name = i < previousDevices.length && previousDevices[i] == input
+                    ? previous.get(i).name()
+                    : input.defaultName();
+            inputs[i] = new RuntimeCycleSnapshot.DigitalInput(
+                    name, input.channel(), digitalRawScratch[i], digitalActiveScratch[i]);
+        }
+        snapshotDigitalDevices = java.util.Arrays.copyOf(digitalScratch, count);
+        java.util.Arrays.fill(digitalScratch, 0, count, null);
+        snapshotDigitalInputs = List.of(inputs);
+        return snapshotDigitalInputs;
+    }
+
+    /** Builds the localization part of the cycle snapshot, reusing entries whose measurements did not change. */
+    private List<RuntimeCycleSnapshot.LocalizationInput> snapshotLocalizationInputs() {
+        List<RuntimeCycleSnapshot.LocalizationInput> previous = snapshotLocalizationInputs;
+        int count = localizations.size();
+        RuntimeCycleSnapshot.LocalizationInput[] inputs = null;
+        for (int index = 0; index < count; index++) {
+            List<Measurement> measurements = localizationSnapshots.get(index).measurements();
+            RuntimeCycleSnapshot.LocalizationInput last = index < previous.size() ? previous.get(index) : null;
+            RuntimeCycleSnapshot.LocalizationInput input;
+            if (last != null && last.measurements() == measurements) {
+                input = last;
+            } else {
+                input = new RuntimeCycleSnapshot.LocalizationInput(
+                        index,
+                        last != null ? last.type() : localizations.get(index).getClass().getSimpleName(),
+                        measurements);
+            }
+            if (inputs == null && input != last) {
+                inputs = new RuntimeCycleSnapshot.LocalizationInput[count];
+                for (int copied = 0; copied < index; copied++) {
+                    inputs[copied] = previous.get(copied);
+                }
+            }
+            if (inputs != null) {
+                inputs[index] = input;
+            }
+        }
+        if (inputs == null && count == previous.size()) {
+            return previous;
+        }
+        snapshotLocalizationInputs = inputs == null ? List.copyOf(previous.subList(0, count)) : List.of(inputs);
+        return snapshotLocalizationInputs;
     }
 
     private RuntimeInputSnapshot captureInputs() {
@@ -987,7 +1075,7 @@ public final class RobotRuntime implements AutoCloseable {
     }
 
     private void refreshFailures(double nowSeconds) {
-        Set<Object> failedThisCycle = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<Object> failedThisCycle = clearedFailureSet();
         for (HardwareGraph.BindingFailure failure : hardwareGraph.drainOperationFailures()) {
             failedThisCycle.add(failure.declaration());
             handleHardwareFailure("operation", failure.declaration(), failure.exception());
@@ -1004,12 +1092,17 @@ public final class RobotRuntime implements AutoCloseable {
             }
         }
         recoverHealthyDeclarations(failedThisCycle);
+        mechanisms.dispatchMotorFailovers();
     }
 
     private void handleHardwareFailure(String phase, Object declaration, RuntimeException exception) {
         FailurePolicy policy;
         String type;
-        if (declaration instanceof MotorDevice motor) {
+        if (declaration instanceof MotorDevice motor && hardwareGraph.motorFailureHandled(motor)) {
+            // Its motor group promoted a new leader or dropped it: report it without disabling the mechanism.
+            policy = FailurePolicy.WARN;
+            type = "motor (failover)";
+        } else if (declaration instanceof MotorDevice motor) {
             policy = motor.failurePolicy();
             type = "motor";
         } else if (declaration instanceof EncoderDevice encoder) {
@@ -1057,7 +1150,18 @@ public final class RobotRuntime implements AutoCloseable {
         }
     }
 
+    /** Returns the reused per-cycle set of declarations that failed, emptied. Robot thread only. */
+    private Set<Object> clearedFailureSet() {
+        if (!failedDeclarations.isEmpty()) {
+            failedDeclarations.clear();
+        }
+        return failedDeclarations;
+    }
+
     private void recoverHealthyDeclarations(Set<Object> failedThisCycle) {
+        if (activeRecoverableFailures.isEmpty()) {
+            return;
+        }
         for (Object declaration : List.copyOf(activeRecoverableFailures)) {
             if (failedThisCycle.contains(declaration)) {
                 recoverySamples.remove(declaration);

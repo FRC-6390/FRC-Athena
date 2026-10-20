@@ -16,7 +16,9 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.networktables.NetworkTableEvent;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.NetworkTableListenerPoller;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
@@ -24,18 +26,39 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** Publishes Athena's mechanism-scoped telemetry schema to NT4 dashboards. */
+/**
+ * Publishes Athena's mechanism-scoped telemetry schema to NT4 dashboards.
+ *
+ * <p>Values are written only when they differ from the last value written, so an unchanged value costs no
+ * NetworkTables call. Dashboard writes to writable values and action controls are detected through one listener
+ * poller drained once per publish, instead of asking every entry for its last-change time every cycle (a JNI call
+ * that takes the NetworkTables storage lock).</p>
+ */
 public final class MechanismTelemetryPublisher implements AutoCloseable {
     public static final String ROOT = "/Athena/Mechanisms";
     private static final double DEFAULT_CUSTOM_PERIOD_SECONDS = 0.10;
+    private static final EnumSet<NetworkTableEvent.Kind> VALUE_EVENTS = EnumSet.of(NetworkTableEvent.Kind.kValueAll);
 
     private final NetworkTableInstance instance;
+    /** Listener handle to the channel whose entry it watches. */
+    private final Map<Integer, ChangeWatcher> watchers = new HashMap<>();
+    private NetworkTableListenerPoller poller;
     private final List<ValueChannel> values = new ArrayList<>();
+    /**
+     * The channels of {@link #values} updated on every publish (writable values and points), in the same order. A
+     * publish between two read-only periods walks only these instead of skipping the rest one by one.
+     */
+    private final List<ValueChannel> everyCycle = new ArrayList<>();
+    /** One lock state per shared lock condition, read at most once per publish. */
+    private final List<LockState> lockStates = new ArrayList<>();
     private final List<ValueChannel> allValues = new ArrayList<>();
     private final List<ActionChannel> actions = new ArrayList<>();
     private final Set<String> reportedFailures = new HashSet<>();
@@ -75,21 +98,52 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         if (publishReadOnly) {
             lastCustomPublish = timestampSeconds;
         }
-        for (int index = 0, size = values.size(); index < size; index++) {
-            ValueChannel channel = values.get(index);
-            if (channel.value.writable()
-                    || channel.value.type() == TelemetryValue.Type.POINTS
-                    || publishReadOnly) {
-                try {
-                    channel.update(publishReadOnly);
-                } catch (RuntimeException exception) {
-                    reportOnce(channel.path, exception);
-                }
+        drainChangeEvents();
+        for (int index = 0, size = lockStates.size(); index < size; index++) {
+            lockStates.get(index).stale = true;
+        }
+        List<ValueChannel> due = publishReadOnly ? values : everyCycle;
+        for (int index = 0, size = due.size(); index < size; index++) {
+            ValueChannel channel = due.get(index);
+            try {
+                channel.update(publishReadOnly);
+            } catch (RuntimeException exception) {
+                reportOnce(channel.path, exception);
             }
         }
         for (int index = 0, size = actions.size(); index < size; index++) {
             actions.get(index).update();
         }
+    }
+
+    private LockState lockState(TelemetryValue value) {
+        for (LockState state : lockStates) {
+            if (state.source.sharesLockCondition(value)) return state;
+        }
+        LockState state = new LockState(value);
+        lockStates.add(state);
+        return state;
+    }
+
+    /**
+     * Marks the channels whose entries changed since the last publish. NetworkTables queues a value event in the same
+     * storage update that moves an entry's last-change time, so a channel without an event has no change to apply.
+     */
+    private void drainChangeEvents() {
+        if (poller == null || watchers.isEmpty()) return;
+        NetworkTableEvent[] events = poller.readQueue();
+        for (NetworkTableEvent event : events) {
+            ChangeWatcher watcher = watchers.get(event.listener);
+            if (watcher != null) watcher.changePending = true;
+        }
+    }
+
+    /** Watches an entry for value changes; {@link #changePending} is set by {@link #drainChangeEvents()}. */
+    private ChangeWatcher watch(NetworkTableEntry entry) {
+        if (poller == null) poller = new NetworkTableListenerPoller(instance);
+        ChangeWatcher watcher = new ChangeWatcher(poller, poller.addListener(entry, VALUE_EVENTS));
+        watchers.put(watcher.listener, watcher);
+        return watcher;
     }
 
     private void bind(TelemetrySchema schema) {
@@ -108,6 +162,9 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             String path = join(nodePath, name);
             ValueChannel channel = new ValueChannel(instance, path, value);
             allValues.add(channel);
+            if (value.writable() && channel.entry != null) {
+                channel.watcher = watch(channel.entry);
+            }
             if (value.constant()) {
                 try {
                     channel.update(true);
@@ -116,10 +173,19 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 }
             } else {
                 values.add(channel);
+                if (value.writable() || value.type() == TelemetryValue.Type.POINTS) {
+                    everyCycle.add(channel);
+                }
+                if (channel.lockStatus != null) {
+                    channel.lockState = lockState(value);
+                }
             }
         });
-        node.actions().forEach((name, action) ->
-                actions.add(new ActionChannel(instance, join(nodePath, name), action)));
+        node.actions().forEach((name, action) -> {
+            ActionChannel channel = new ActionChannel(instance, join(nodePath, name), action);
+            channel.watcher = watch(channel.commandRunning);
+            actions.add(channel);
+        });
         node.children().forEach((name, child) -> bindNode(child, nodePath));
     }
 
@@ -204,14 +270,70 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     public void close() {
         closeChannels();
         boundSchema = null;
+        if (poller != null) {
+            poller.close();
+            poller = null;
+        }
     }
 
     private void closeChannels() {
+        for (ChangeWatcher watcher : watchers.values()) watcher.close();
+        watchers.clear();
         for (ValueChannel channel : allValues) channel.close();
         for (ActionChannel channel : actions) channel.close();
         values.clear();
+        everyCycle.clear();
+        lockStates.clear();
         allValues.clear();
         actions.clear();
+    }
+
+    /**
+     * The lock state of every value that reads the same lock condition. The condition is read once per publish, by
+     * the first channel that needs it, instead of once per value.
+     */
+    private static final class LockState {
+        private final TelemetryValue source;
+        private boolean stale = true;
+        private boolean locked;
+
+        private LockState(TelemetryValue source) {
+            this.source = source;
+        }
+
+        private boolean locked() {
+            if (stale) {
+                locked = source.locked();
+                stale = false;
+            }
+            return locked;
+        }
+    }
+
+    /** A value listener on one entry and whether it reported a change not yet handled. */
+    private static final class ChangeWatcher {
+        private final NetworkTableListenerPoller poller;
+        private final int listener;
+        private boolean changePending;
+
+        private ChangeWatcher(NetworkTableListenerPoller poller, int listener) {
+            this.poller = poller;
+            this.listener = listener;
+        }
+
+        /** True when the entry may have changed: unwatched, or a value event is not handled yet. */
+        private static boolean pending(ChangeWatcher watcher) {
+            return watcher == null || watcher.changePending;
+        }
+
+        /** Marks the pending change handled. Left set when handling throws, so the next publish retries it. */
+        private static void handled(ChangeWatcher watcher) {
+            if (watcher != null) watcher.changePending = false;
+        }
+
+        private void close() {
+            poller.removeListener(listener);
+        }
     }
 
     private static final class ValueChannel implements AutoCloseable {
@@ -222,6 +344,10 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         private final StructArrayPublisher<Translation2d> pointsPublisher;
         private final NetworkTableEntry writeStatus;
         private final NetworkTableEntry lockStatus;
+        /** Change listener on {@link #entry} for writable values; null otherwise. */
+        private ChangeWatcher watcher;
+        /** Shared lock state when the value has a lock group and is updated by publish; null otherwise. */
+        private LockState lockState;
         private String lastWriteStatus = "ok";
         private boolean lastLocked;
         private boolean lockPublished;
@@ -304,19 +430,23 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                         translated[index] = new Translation2d(points[index].getX(), points[index].getY());
                     }
                     pointsPublisher.set(translated);
-                    lastObject = points.clone();
+                    // TelemetryValue.points returns a fresh copy on every read, so this array is not shared.
+                    lastObject = points;
                     published = true;
                 }
                 return;
             }
             if (value.writable()) {
-                long changed = entry.getLastChange();
+                // Only an entry with a value event can have a new last-change time; skip the JNI call otherwise.
+                long changed = ChangeWatcher.pending(watcher) ? entry.getLastChange() : lastEntryChange;
                 if (changed != lastEntryChange) {
                     applyDashboardValue();
                     lastEntryChange = entry.getLastChange();
                     rememberCurrentValue();
-                } else if (publishLocal) {
-                    publishWritableIfChanged();
+                    ChangeWatcher.handled(watcher);
+                } else {
+                    ChangeWatcher.handled(watcher);
+                    if (publishLocal) publishWritableIfChanged();
                 }
                 publishLockStatus();
                 return;
@@ -415,7 +545,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
 
         private void publishLockStatus() {
             if (lockStatus == null) return;
-            boolean locked = value.locked();
+            boolean locked = lockState != null ? lockState.locked() : value.locked();
             if (!lockPublished || locked != lastLocked) {
                 lockStatus.setString(value.lockGroup().getSimpleName() + (locked ? " (locked)" : " (unlocked)"));
                 lastLocked = locked;
@@ -482,6 +612,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         private final CommandScheduler scheduler = CommandScheduler.getInstance();
         private final NetworkTableEntry[] constants;
         private final NetworkTableEntry commandRunning;
+        /** Change listener on {@link #commandRunning}. */
+        private ChangeWatcher watcher;
         private final NetworkTableEntry running;
         private final NetworkTableEntry complete;
         private long lastCommandChange;
@@ -510,13 +642,14 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         }
 
         private void update() {
-            long changed = commandRunning.getLastChange();
+            long changed = ChangeWatcher.pending(watcher) ? commandRunning.getLastChange() : lastCommandChange;
             if (changed != lastCommandChange) {
                 boolean requested = commandRunning.getBoolean(scheduler.isScheduled(command));
                 if (requested && !scheduler.isScheduled(command)) scheduler.schedule(command);
                 else if (!requested && scheduler.isScheduled(command)) scheduler.cancel(command);
                 lastCommandChange = commandRunning.getLastChange();
             }
+            ChangeWatcher.handled(watcher);
             boolean scheduled = scheduler.isScheduled(command);
             if (!publishedStatus || lastScheduled != scheduled) {
                 commandRunning.setBoolean(scheduled);

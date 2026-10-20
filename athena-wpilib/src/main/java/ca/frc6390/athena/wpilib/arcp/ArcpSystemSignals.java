@@ -115,9 +115,9 @@ final class ArcpSystemSignals {
 
                 @Override
                 public String alliance() {
-                    return DriverStation.getAlliance()
-                            .map(alliance -> alliance == DriverStation.Alliance.Red ? "Red" : "Blue")
-                            .orElse("");
+                    java.util.Optional<DriverStation.Alliance> alliance = DriverStation.getAlliance();
+                    if (alliance.isEmpty()) return "";
+                    return alliance.get() == DriverStation.Alliance.Red ? "Red" : "Blue";
                 }
 
                 @Override
@@ -195,6 +195,15 @@ final class ArcpSystemSignals {
     private final Source source;
     private final List<ArcpDictEntry> dictionary;
     private final Map<String, MotorChannel> motors = new HashMap<>();
+    /**
+     * Channel resolved for each position of the power pass's motor list, with the name it was resolved for. The list
+     * keeps its order from cycle to cycle and its names are the same string instances, so a position whose name is
+     * the same instance as last time reuses its channel without a map lookup.
+     */
+    private MotorChannel[] motorSlots = new MotorChannel[0];
+    private String[] motorSlotNames = new String[0];
+    private VisionChannel[] visionSlots = new VisionChannel[0];
+    private String[] visionSlotNames = new String[0];
     private final long modeId;
     private final long matchTimeId;
     private final long allianceId;
@@ -342,8 +351,24 @@ final class ArcpSystemSignals {
             sampleVision(cycle);
         }
         if (!motors.isEmpty()) {
-            for (PowerSnapshot.Motor motor : source.motors()) {
-                MotorChannel channel = motors.get(motor.name());
+            List<PowerSnapshot.Motor> reported = source.motors();
+            int count = reported.size();
+            if (motorSlots.length != count) {
+                motorSlots = new MotorChannel[count];
+                motorSlotNames = new String[count];
+            }
+            for (int index = 0; index < count; index++) {
+                PowerSnapshot.Motor motor = reported.get(index);
+                String name = motor.name();
+                MotorChannel channel;
+                if (motorSlotNames[index] == name && motorSlots[index] != null) {
+                    channel = motorSlots[index];
+                } else {
+                    channel = motors.get(name);
+                    // A motor without a channel yet is looked up again next cycle, until discovery adds it.
+                    motorSlots[index] = channel;
+                    motorSlotNames[index] = name;
+                }
                 if (channel == null) {
                     continue;
                 }
@@ -363,8 +388,23 @@ final class ArcpSystemSignals {
     }
 
     private void sampleVision(ArcpCycle cycle) {
-        for (VisionSourceStatus status : source.visionSources()) {
-            VisionChannel channel = vision.get(status.name());
+        List<VisionSourceStatus> statuses = source.visionSources();
+        int count = statuses.size();
+        if (visionSlots.length != count) {
+            visionSlots = new VisionChannel[count];
+            visionSlotNames = new String[count];
+        }
+        for (int index = 0; index < count; index++) {
+            VisionSourceStatus status = statuses.get(index);
+            String name = status.name();
+            VisionChannel channel;
+            if (visionSlotNames[index] == name && visionSlots[index] != null) {
+                channel = visionSlots[index];
+            } else {
+                channel = vision.get(name);
+                visionSlots[index] = channel;
+                visionSlotNames[index] = name;
+            }
             if (channel == null) {
                 continue;
             }

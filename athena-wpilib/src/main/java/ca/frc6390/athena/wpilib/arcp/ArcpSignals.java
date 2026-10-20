@@ -94,6 +94,15 @@ final class ArcpSignals {
 
     private final List<ArcpDictEntry> dictionary = new ArrayList<>();
     private final List<ValueChannel> values = new ArrayList<>();
+    /**
+     * The values sampled every cycle, in dictionary order: {@link #values} without the constants once those have been
+     * sent. A constant never changes after the schema is built, so after its first sample it would only be re-read and
+     * compared every cycle for nothing.
+     */
+    private ValueChannel[] sampled;
+    private boolean constantsSent;
+    /** Persisted writable values, the only ones {@link #persistedValues()} reports. */
+    private final List<ValueChannel> persisted = new ArrayList<>();
     private final List<ActionChannel> actions = new ArrayList<>();
     private final List<LockChannel> locks = new ArrayList<>();
     private final Map<Long, ValueChannel> valuesById = new HashMap<>();
@@ -113,6 +122,7 @@ final class ArcpSignals {
         this.locked = locked;
         Map<Class<?>, Boolean> groups = new LinkedHashMap<>();
         walk(schema.root(), "", groups);
+        sampled = values.toArray(ValueChannel[]::new);
         for (Class<?> group : groups.keySet()) {
             long id = nextId++;
             locks.add(new LockChannel(id, group));
@@ -156,8 +166,13 @@ final class ArcpSignals {
      */
     void sample(ArcpCycle cycle) {
         cycle.clear();
-        for (int i = 0, n = values.size(); i < n; i++) {
-            sampleValue(values.get(i), cycle);
+        ValueChannel[] channels = sampled;
+        for (ValueChannel channel : channels) {
+            sampleValue(channel, cycle);
+        }
+        if (!constantsSent) {
+            constantsSent = true;
+            sampled = values.stream().filter(channel -> !channel.value.constant()).toArray(ValueChannel[]::new);
         }
         for (int i = 0, n = actions.size(); i < n; i++) {
             ActionChannel channel = actions.get(i);
@@ -276,11 +291,9 @@ final class ArcpSignals {
     /** Current values of persisted writable numbers, booleans and strings, keyed by telemetry path. */
     Map<String, Object> persistedValues() {
         Map<String, Object> out = new TreeMap<>();
-        for (ValueChannel channel : values) {
-            if (channel.value.isPersisted() && channel.value.writable()
-                    && channel.value.type() != TelemetryValue.Type.NUMBER_ARRAY) {
-                out.put(channel.path, channel.value.value());
-            }
+        for (int i = 0, n = persisted.size(); i < n; i++) {
+            ValueChannel channel = persisted.get(i);
+            out.put(channel.path, channel.value.value());
         }
         return out;
     }
@@ -325,6 +338,9 @@ final class ArcpSignals {
             ValueChannel channel = new ValueChannel(id, path, value);
             values.add(channel);
             valuesById.put(id, channel);
+            if (value.isPersisted() && value.writable() && value.type() != TelemetryValue.Type.NUMBER_ARRAY) {
+                persisted.add(channel);
+            }
             int typeTag = typeTag(value.type());
             int role = value.writable() ? ArcpDictEntry.ROLE_CONTROL : roleOf(path);
             int flags = (value.writable() ? ArcpDictEntry.FLAG_WRITABLE : 0)

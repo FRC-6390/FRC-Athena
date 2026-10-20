@@ -273,33 +273,104 @@ project(':athena-auto') {
 }
 
 project(':athena-benchmarks') {
+    def nativeOs = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+    def nativeArch = System.getProperty('os.arch').toLowerCase(Locale.ROOT)
+    def nativeClassifier
+    def nativeDirectory
+    if (nativeOs.contains('win')) {
+        nativeClassifier = 'windowsx86-64'
+        nativeDirectory = 'windows/x86-64/shared'
+    } else if (nativeOs.contains('mac')) {
+        nativeClassifier = 'osxuniversal'
+        nativeDirectory = 'osx/universal/shared'
+    } else if (nativeArch.contains('aarch64') || nativeArch.contains('arm64')) {
+        nativeClassifier = 'linuxarm64'
+        nativeDirectory = 'linux/arm64/shared'
+    } else {
+        nativeClassifier = 'linuxx86-64'
+        nativeDirectory = 'linux/x86-64/shared'
+    }
+
+    configurations {
+        wpilibBenchmarkNatives
+    }
+
     dependencies {
         implementation project(':athena-mechanisms')
         implementation project(':athena-hardware')
         implementation project(':athena-simulation')
         implementation project(':athena-robot')
+        // The full-robot loop benchmark runs a Rebuilt-shaped AthenaRobot through WPILib's TimedRobot loop.
+        implementation project(':athena-wpilib')
+        runtimeOnly project(':athena-vendor-photonvision')
+        runtimeOnly "org.photonvision:photonlib-java:${rootProject.findProperty('photonLibVersion')}"
+        runtimeOnly "org.photonvision:photontargeting-java:${rootProject.findProperty('photonLibVersion')}"
+        runtimeOnly "us.hebi.quickbuf:quickbuf-runtime:1.4"
         implementation "org.openjdk.jmh:jmh-core:1.37"
         annotationProcessor "org.openjdk.jmh:jmh-generator-annprocess:1.37"
-        runtimeOnly "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
-        runtimeOnly "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
-        runtimeOnly "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "org.wpilib:annotations-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.wpiunits:wpiunits-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.wpiutil:wpiutil-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.wpimath:wpimath-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.hal:hal-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.wpilibj:wpilibj-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.wpilibNewCommands:wpilibNewCommands-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.ntcore:ntcore-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.cscore:cscore-java:${rootProject.findProperty('wpilibVersion')}"
+        implementation "edu.wpi.first.cameraserver:cameraserver-java:${rootProject.findProperty('wpilibVersion')}"
+        wpilibBenchmarkNatives "edu.wpi.first.wpiutil:wpiutil-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibBenchmarkNatives "edu.wpi.first.wpimath:wpimath-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibBenchmarkNatives "edu.wpi.first.hal:hal-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibBenchmarkNatives "edu.wpi.first.wpinet:wpinet-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
+        wpilibBenchmarkNatives "edu.wpi.first.ntcore:ntcore-cpp:${rootProject.findProperty('wpilibVersion')}:${nativeClassifier}@zip"
     }
+
+    tasks.withType(JavaCompile).configureEach {
+        // JMH's annotation processor does not claim Athena's @Telemetry annotations on the copied robot.
+        options.compilerArgs.add('-Xlint:-processing')
+    }
+
+    tasks.register('extractWpilibBenchmarkNatives', Sync) {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        from { configurations.wpilibBenchmarkNatives.collect { zipTree(it) } }
+        into layout.buildDirectory.dir('wpilib-natives')
+    }
+
+    def nativeLibraryPath = layout.buildDirectory.dir("wpilib-natives/${nativeDirectory}").get().asFile.absolutePath
 
     tasks.register('jmh', JavaExec) {
         group = 'Verification'
         description = 'Runs Athena JMH benchmarks.'
-        dependsOn tasks.named('classes')
+        dependsOn tasks.named('classes'), tasks.named('extractWpilibBenchmarkNatives')
         classpath = sourceSets.main.runtimeClasspath
         mainClass = 'org.openjdk.jmh.Main'
+        jvmArgs "-Djava.library.path=${nativeLibraryPath}"
+        systemProperty 'java.library.path', nativeLibraryPath
     }
 
     tasks.register('jmhGc', JavaExec) {
         group = 'Verification'
         description = 'Runs Athena JMH benchmarks with GC allocation profiling.'
-        dependsOn tasks.named('classes')
+        dependsOn tasks.named('classes'), tasks.named('extractWpilibBenchmarkNatives')
         classpath = sourceSets.main.runtimeClasspath
         mainClass = 'org.openjdk.jmh.Main'
+        systemProperty 'java.library.path', nativeLibraryPath
         args '-prof', 'gc'
+    }
+
+    // Runs the Rebuilt-shaped robot through the real TimedRobot loop and prints CPU time and allocation per
+    // cycle. -Pcycles=<n> sets the measured cycle count; -Pjfr=<file> records a Java Flight Recording.
+    tasks.register('robotLoopProfile', JavaExec) {
+        group = 'Verification'
+        description = 'Measures CPU time and allocation per AthenaRobot loop cycle for a Rebuilt-shaped robot.'
+        dependsOn tasks.named('classes'), tasks.named('extractWpilibBenchmarkNatives')
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'ca.frc6390.athena.benchmarks.rebuilt.RobotLoopProfile'
+        systemProperty 'java.library.path', nativeLibraryPath
+        args(findProperty('cycles') ?: '20000')
+        if (findProperty('jfr')) {
+            jvmArgs "-XX:StartFlightRecording=filename=${findProperty('jfr')},settings=profile"
+        }
     }
 
     tasks.withType(PublishToMavenRepository).configureEach {

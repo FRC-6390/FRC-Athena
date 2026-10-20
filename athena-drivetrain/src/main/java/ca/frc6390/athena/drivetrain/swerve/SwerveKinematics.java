@@ -1,13 +1,13 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
 import edu.wpi.first.math.geometry.Rotation2d;
-import static edu.wpi.first.units.Units.RadiansPerSecond;
 
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.Rotations;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.GearRatio;
+import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.signal.ImuSource;
 import ca.frc6390.athena.hardware.sim.SimModel;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -44,6 +44,9 @@ public final class SwerveKinematics implements SimModel.Source {
     private final double maxSpeedMetersPerSecond;
     private final AtomicReference<RobotVelocity> requestedSimulationVelocity = new AtomicReference<>();
     private SimModel simulationModel;
+    // Simulation step only: per-module drive distance encoders and the drive motors they were built from.
+    private final EncoderDevice[] simulationDistanceEncoders;
+    private final MotorDevice[] simulationDriveMotors;
 
     public SwerveKinematics(LinearVelocity maxSpeed, Module... modules) {
         this(maxSpeed, modules == null ? List.of() : Arrays.asList(modules));
@@ -60,6 +63,8 @@ public final class SwerveKinematics implements SimModel.Source {
         }
         this.modules.forEach(Objects::requireNonNull);
         this.maxSpeedMetersPerSecond = maxSpeedMetersPerSecond;
+        simulationDistanceEncoders = new EncoderDevice[this.modules.size()];
+        simulationDriveMotors = new MotorDevice[this.modules.size()];
     }
 
     /** Creates the common four-module rectangular layout. */
@@ -125,23 +130,25 @@ public final class SwerveKinematics implements SimModel.Source {
         if (safe.frame() != VelocityFrame.ROBOT) {
             throw new IllegalArgumentException("Swerve module targets require a robot-relative velocity.");
         }
-        List<SwerveModuleTarget> targets = new ArrayList<>(modules.size());
+        SwerveModuleTarget[] targets = new SwerveModuleTarget[modules.size()];
         double greatestSpeed = 0.0;
-        for (Module module : modules) {
+        for (int index = 0; index < targets.length; index++) {
+            Module module = modules.get(index);
             double wheelX = safe.raw().xMetersPerSecond() - safe.raw().angularRadiansPerSecond() * module.yMeters();
             double wheelY = safe.raw().yMetersPerSecond() + safe.raw().angularRadiansPerSecond() * module.xMeters();
             double speed = Math.hypot(wheelX, wheelY);
             greatestSpeed = Math.max(greatestSpeed, speed);
             double angleRotations = speed <= 1.0e-12 ? 0.0 : Math.atan2(wheelY, wheelX) / TWO_PI;
-            targets.add(new SwerveModuleTarget(speed, angleRotations));
+            targets[index] = new SwerveModuleTarget(speed, angleRotations);
         }
-        if (greatestSpeed <= maxSpeedMetersPerSecond) {
-            return List.copyOf(targets);
+        if (greatestSpeed > maxSpeedMetersPerSecond) {
+            double scale = maxSpeedMetersPerSecond / greatestSpeed;
+            for (int index = 0; index < targets.length; index++) {
+                SwerveModuleTarget target = targets[index];
+                targets[index] = new SwerveModuleTarget(target.speedMetersPerSecond() * scale, target.angleRotations());
+            }
         }
-        double scale = maxSpeedMetersPerSecond / greatestSpeed;
-        return targets.stream()
-                .map(target -> new SwerveModuleTarget(target.speedMetersPerSecond() * scale, target.angleRotations()))
-                .toList();
+        return List.of(targets);
     }
 
     /** Converts a finite-cycle request into module targets without translational skew. */
@@ -156,19 +163,21 @@ public final class SwerveKinematics implements SimModel.Source {
             throw new IllegalArgumentException("Expected " + modules.size() + " module states, got " + states.size());
         }
 
-        double[][] normal = new double[3][3];
-        double[] rhs = new double[3];
+        // Normal equations as one 3x4 row-major augmented matrix [A^T A | A^T b].
+        double[] system = new double[12];
         for (int index = 0; index < modules.size(); index++) {
             Module module = modules.get(index);
             SwerveModuleTarget state = Objects.requireNonNull(states.get(index), "state");
             double angle = state.angleRotations() * TWO_PI;
             double wheelX = state.speedMetersPerSecond() * Math.cos(angle);
             double wheelY = state.speedMetersPerSecond() * Math.sin(angle);
-            accumulate(normal, rhs, 1.0, 0.0, -module.yMeters(), wheelX);
-            accumulate(normal, rhs, 0.0, 1.0, module.xMeters(), wheelY);
+            accumulate(system, 1.0, 0.0, -module.yMeters(), wheelX);
+            accumulate(system, 0.0, 1.0, module.xMeters(), wheelY);
         }
-        double[] solution = solve3x3(normal, rhs);
-        return RobotVelocity.Raw.of(solution[0], solution[1], solution[2], VelocityFrame.ROBOT);
+        if (!solve3x3(system)) {
+            return RobotVelocity.Raw.of(0.0, 0.0, 0.0, VelocityFrame.ROBOT);
+        }
+        return RobotVelocity.Raw.of(system[3], system[7], system[11], VelocityFrame.ROBOT);
     }
 
     public List<Module> modules() {
@@ -267,7 +276,7 @@ public final class SwerveKinematics implements SimModel.Source {
         for (int index = 0; index < modules.size(); index++) {
             SwerveModule module = modules.get(index).module();
             SwerveModuleTarget state = states.get(index);
-            EncoderDevice driveDistance = distanceEncoder(module);
+            EncoderDevice driveDistance = simulationDistanceEncoder(index, module);
             double rawDriveVelocity = driveDistance.rotationsFromPosition(Meters.of(state.speedMetersPerSecond()))
                     - driveDistance.rotationsFromPosition(Meters.of(0.0));
             drivePositions[index] += rawDriveVelocity * seconds;
@@ -290,6 +299,19 @@ public final class SwerveKinematics implements SimModel.Source {
                     Units.Rotations.of(steerPosition),
                     Units.RotationsPerSecond.of((rawAngle - previousAngle) * module.model().steerReduction() / seconds));
         }
+    }
+
+    /**
+     * The drive distance encoder of one module for the simulation step, rebuilt only when the module's drive motor
+     * changes. The encoder is an immutable declaration derived from that motor and the module's fixed model.
+     */
+    private EncoderDevice simulationDistanceEncoder(int index, SwerveModule module) {
+        MotorDevice drive = module.drive.get();
+        if (simulationDriveMotors[index] != drive) {
+            simulationDistanceEncoders[index] = distanceEncoder(module);
+            simulationDriveMotors[index] = drive;
+        }
+        return simulationDistanceEncoders[index];
     }
 
     private static EncoderDevice distanceEncoder(SwerveModule module) {
@@ -326,10 +348,11 @@ public final class SwerveKinematics implements SimModel.Source {
                 velocity.raw().yMetersPerSecond(),
                 velocity.raw().angularRadiansPerSecond(),
                 dt);
-        return RobotVelocity.robot(
-                MetersPerSecond.of(corrected.vxMetersPerSecond),
-                MetersPerSecond.of(corrected.vyMetersPerSecond),
-                RadiansPerSecond.of(corrected.omegaRadiansPerSecond));
+        return RobotVelocity.Raw.of(
+                corrected.vxMetersPerSecond,
+                corrected.vyMetersPerSecond,
+                corrected.omegaRadiansPerSecond,
+                VelocityFrame.ROBOT);
     }
 
     private double moduleSpeed(SwerveModule module, SimModel.Context context) {
@@ -352,56 +375,58 @@ public final class SwerveKinematics implements SimModel.Source {
         return context.encoderAbsolutePosition(module.angle.get()).in(Units.Rotations);
     }
 
-    private static void accumulate(
-            double[][] normal,
-            double[] rhs,
-            double a,
-            double b,
-            double c,
-            double observed) {
-        double[] row = {a, b, c};
-        for (int i = 0; i < 3; i++) {
-            rhs[i] += row[i] * observed;
-            for (int j = 0; j < 3; j++) {
-                normal[i][j] += row[i] * row[j];
-            }
-        }
+    /** Adds one observation row {@code (a, b, c)} to the 3x4 row-major augmented normal equations. */
+    private static void accumulate(double[] system, double a, double b, double c, double observed) {
+        accumulateRow(system, 0, a, a, b, c, observed);
+        accumulateRow(system, 4, b, a, b, c, observed);
+        accumulateRow(system, 8, c, a, b, c, observed);
     }
 
-    private static double[] solve3x3(double[][] matrix, double[] values) {
-        double[][] augmented = new double[3][4];
-        for (int row = 0; row < 3; row++) {
-            System.arraycopy(matrix[row], 0, augmented[row], 0, 3);
-            augmented[row][3] = values[row];
-        }
+    private static void accumulateRow(
+            double[] system, int offset, double weight, double a, double b, double c, double observed) {
+        system[offset + 3] += weight * observed;
+        system[offset] += weight * a;
+        system[offset + 1] += weight * b;
+        system[offset + 2] += weight * c;
+    }
+
+    /**
+     * Solves a 3x4 row-major augmented system in place by Gauss-Jordan elimination with partial pivoting, leaving
+     * the solution in the last column. Returns false when the system is singular.
+     */
+    private static boolean solve3x3(double[] augmented) {
         for (int column = 0; column < 3; column++) {
             int pivot = column;
             for (int row = column + 1; row < 3; row++) {
-                if (Math.abs(augmented[row][column]) > Math.abs(augmented[pivot][column])) {
+                if (Math.abs(augmented[row * 4 + column]) > Math.abs(augmented[pivot * 4 + column])) {
                     pivot = row;
                 }
             }
-            if (Math.abs(augmented[pivot][column]) < 1.0e-12) {
-                return new double[3];
+            if (Math.abs(augmented[pivot * 4 + column]) < 1.0e-12) {
+                return false;
             }
-            double[] swap = augmented[column];
-            augmented[column] = augmented[pivot];
-            augmented[pivot] = swap;
-            double divisor = augmented[column][column];
+            if (pivot != column) {
+                for (int item = 0; item < 4; item++) {
+                    double swap = augmented[column * 4 + item];
+                    augmented[column * 4 + item] = augmented[pivot * 4 + item];
+                    augmented[pivot * 4 + item] = swap;
+                }
+            }
+            double divisor = augmented[column * 4 + column];
             for (int item = column; item < 4; item++) {
-                augmented[column][item] /= divisor;
+                augmented[column * 4 + item] /= divisor;
             }
             for (int row = 0; row < 3; row++) {
                 if (row == column) {
                     continue;
                 }
-                double factor = augmented[row][column];
+                double factor = augmented[row * 4 + column];
                 for (int item = column; item < 4; item++) {
-                    augmented[row][item] -= factor * augmented[column][item];
+                    augmented[row * 4 + item] -= factor * augmented[column * 4 + item];
                 }
             }
         }
-        return new double[] {augmented[0][3], augmented[1][3], augmented[2][3]};
+        return true;
     }
 
     private static void requirePositive(double value, String name) {

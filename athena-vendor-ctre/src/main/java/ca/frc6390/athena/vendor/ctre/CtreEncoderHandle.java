@@ -159,10 +159,11 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
     @Override
     public void refreshInputs() {
+        // The connection check reads the frame timestamps of this batch, so refresh first.
+        controller.refreshSignals();
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE encoder is disconnected: " + device.defaultName());
         }
-        controller.refreshSignals();
         positionRotations = controller.positionRotations();
         absolutePositionRotations = controller.absolutePositionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
@@ -213,6 +214,7 @@ public final class CtreEncoderHandle implements EncoderHandle {
         private final StatusSignal<Angle> absolutePosition;
         private final StatusSignal<AngularVelocity> velocity;
         private final BaseStatusSignal[] signals;
+        private final SignalFreshness freshness;
         private final PendingPositionSet pendingPosition = new PendingPositionSet();
 
         private PhoenixCANCoderController(EncoderDevice device) {
@@ -221,9 +223,10 @@ public final class CtreEncoderHandle implements EncoderHandle {
             absolutePosition = encoder.getAbsolutePosition();
             velocity = encoder.getVelocity();
             signals = new BaseStatusSignal[] {position, absolutePosition, velocity};
+            freshness = new SignalFreshness(position);
         }
 
-        @Override public boolean isConnected() { return encoder.isConnected(); }
+        @Override public boolean isConnected() { return freshness.connected(); }
 
         @Override
         public String configureBaseline() {

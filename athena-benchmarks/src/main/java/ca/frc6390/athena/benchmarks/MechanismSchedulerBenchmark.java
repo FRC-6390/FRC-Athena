@@ -47,6 +47,13 @@ public class MechanismSchedulerBenchmark {
         public MechanismTraceLevel traceLevel;
 
         /**
+         * STATIC requests a fixed parallel action. COMPUTED requests a computed action that returns a new
+         * parallel action every cycle, the shape swerve modules use for their targets.
+         */
+        @Param({"STATIC", "COMPUTED"})
+        public String actionShape;
+
+        /**
          * Creates the runtime and warms handle caches.
          */
         @Setup
@@ -56,7 +63,7 @@ public class MechanismSchedulerBenchmark {
             for (int i = 0; i < 32; i++) {
                 MotorMechanism mechanism = new MotorMechanism(i * 8);
                 runtime.register(mechanism);
-                runtime.request(mechanism.drive);
+                runtime.request("COMPUTED".equals(actionShape) ? mechanism.computedDrive : mechanism.drive);
             }
             runtime.robotPeriodic(0.0, 0.02);
         }
@@ -81,6 +88,7 @@ public class MechanismSchedulerBenchmark {
         private final MotorDevice c;
         private final MotorDevice d;
         public final Action drive;
+        public final Action computedDrive;
 
         private MotorMechanism(int baseId) {
             a = MotorDevice.of(MotorKinds.KRAKEN_X60, baseId + 1);
@@ -92,6 +100,14 @@ public class MechanismSchedulerBenchmark {
                     b.percent(0.35),
                     c.percent(-0.35),
                     d.percent(-0.35));
+            computedDrive = Actions.compute(context -> {
+                double percent = 0.35 * Math.cos(context.nowSeconds());
+                return Actions.parallel(
+                        a.percent(percent),
+                        b.percent(percent),
+                        c.percent(-percent),
+                        d.percent(-percent));
+            }, a, b, c, d);
         }
     }
 }

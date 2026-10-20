@@ -8,6 +8,7 @@ import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
+import ca.frc6390.athena.hardware.backend.OpenLoopCommandFilter;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
@@ -51,11 +52,13 @@ public final class CtreMotorHandle implements MotorHandle {
     private final TalonController controller;
     private boolean activated;
     private boolean inputsFresh;
+    private final OpenLoopCommandFilter openLoop = new OpenLoopCommandFilter();
     private double positionRotations;
     private double velocityRotationsPerSecond;
     private double appliedVoltage;
     private double supplyCurrentAmps;
     private double statorCurrentAmps;
+    private boolean fatalFault;
     private MotorClosedLoopConfig appliedClosedLoopConfig;
     private boolean focDisabledAfterLicenseFault;
 
@@ -91,6 +94,7 @@ public final class CtreMotorHandle implements MotorHandle {
     @Override
     public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         Objects.requireNonNull(configuration, "configuration");
+        openLoop.invalidate();
         if (!controller.configureOutput(
                 configuration.neutralMode() == MotorNeutralMode.BRAKE,
                 device.follower() == null && configuration.inverted())) {
@@ -120,6 +124,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void activate() {
+        openLoop.invalidate();
         if (!activated) {
             if (!controller.configureOutput(
                     device.neutralMode() == MotorNeutralMode.BRAKE,
@@ -146,20 +151,33 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void refreshInputs() {
+        // The connection check reads the frame timestamps of this batch, so refresh first.
+        controller.refreshSignals();
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE motor is disconnected: " + device.defaultName());
         }
-        controller.refreshSignals();
         positionRotations = controller.positionRotations();
         velocityRotationsPerSecond = controller.velocityRotationsPerSecond();
         appliedVoltage = controller.appliedVoltage();
         supplyCurrentAmps = controller.supplyCurrentAmps();
         statorCurrentAmps = controller.statorCurrentAmps();
+        fatalFault = controller.fatalFault();
         inputsFresh = true;
+    }
+
+    /**
+     * Reports a Talon fault that stops it from driving the motor, as captured by the latest
+     * {@link #refreshInputs()}: a hardware fault, plus on a TalonFXS a bridge short, a drive disabled by its
+     * Hall sensor, or no motor arrangement selected. Limits, temperature, brownout and supply faults do not count.
+     */
+    @Override
+    public boolean faulted() {
+        return fatalFault;
     }
 
     @Override
     public void follow(MotorHandle leader, boolean inverted) {
+        openLoop.invalidate();
         if (!(leader instanceof CtreMotorHandle ctreLeader)) {
             throw new IllegalArgumentException("CTRE motor " + device.defaultName()
                     + " can only follow another CTRE motor.");
@@ -184,21 +202,37 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void setPercentOutput(double percent) {
-        controller.setPercent(clamp(percent));
+        double safe = clamp(percent);
+        if (!openLoop.percent(safe)) return;
+        try {
+            controller.setPercent(safe);
+        } catch (RuntimeException exception) {
+            openLoop.invalidate();
+            throw exception;
+        }
     }
 
     @Override
     public void setVoltage(double volts) {
-        controller.setVoltage(finiteOrZero(volts));
+        double safe = finiteOrZero(volts);
+        if (!openLoop.voltage(safe)) return;
+        try {
+            controller.setVoltage(safe);
+        } catch (RuntimeException exception) {
+            openLoop.invalidate();
+            throw exception;
+        }
     }
 
     @Override
     public void setPositionTargetRotations(double rotations) {
+        openLoop.invalidate();
         controller.setPositionTarget(finiteOrZero(rotations));
     }
 
     @Override
     public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        openLoop.invalidate();
         MotorClosedLoopRequest safeRequest = safeRequest(request);
         applyClosedLoopConfig(safeRequest.config());
         FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
@@ -225,6 +259,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+        openLoop.invalidate();
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
     }
 
@@ -232,6 +267,7 @@ public final class CtreMotorHandle implements MotorHandle {
     public void setVelocityTargetRotationsPerSecond(
             double rotationsPerSecond,
             MotorClosedLoopRequest request) {
+        openLoop.invalidate();
         MotorClosedLoopRequest safeRequest = safeRequest(request);
         applyClosedLoopConfig(safeRequest.config());
         FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
@@ -263,6 +299,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void stop() {
+        openLoop.invalidate();
         controller.stop();
     }
 
@@ -401,6 +438,9 @@ public final class CtreMotorHandle implements MotorHandle {
 
         /** Device temperature in Celsius from the last batched refresh, or empty when the controller has none. */
         default java.util.OptionalDouble temperatureCelsius() { return java.util.OptionalDouble.empty(); }
+
+        /** Whether a fault that stops the controller from driving was active at the last batched refresh. */
+        default boolean fatalFault() { return false; }
     }
 
     private static final class PhoenixTalonController implements TalonController {
@@ -424,10 +464,11 @@ public final class CtreMotorHandle implements MotorHandle {
                     talon.getMotorVoltage(),
                     talon.getSupplyCurrent(),
                     talon.getStatorCurrent(),
-                    talon.getDeviceTemp());
+                    talon.getDeviceTemp(),
+                    talon.getFault_Hardware());
         }
 
-        @Override public boolean isConnected() { return talon.isConnected(); }
+        @Override public boolean isConnected() { return signals.freshness.connected(); }
 
         @Override
         public void setPercent(double percent) {
@@ -539,6 +580,7 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
         @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
         @Override public java.util.OptionalDouble temperatureCelsius() { return signals.temperatureCelsius(); }
+        @Override public boolean fatalFault() { return signals.fatalFault(); }
     }
 
     private static final class PhoenixTalonFxsController implements TalonController {
@@ -564,10 +606,14 @@ public final class CtreMotorHandle implements MotorHandle {
                     talon.getMotorVoltage(),
                     talon.getSupplyCurrent(),
                     talon.getStatorCurrent(),
-                    talon.getDeviceTemp());
+                    talon.getDeviceTemp(),
+                    talon.getFault_Hardware(),
+                    talon.getFault_BridgeShort(),
+                    talon.getFault_DriveDisabledHallSensor(),
+                    talon.getFault_MotorArrangementNotSelected());
         }
 
-        @Override public boolean isConnected() { return talon.isConnected(); }
+        @Override public boolean isConnected() { return signals.freshness.connected(); }
 
         private static MotorArrangementValue arrangement(MotorDevice device) {
             if (!(device.kind().motorKind() instanceof MotorKinds motor)) {
@@ -697,6 +743,7 @@ public final class CtreMotorHandle implements MotorHandle {
         @Override public double supplyCurrentAmps() { return signals.supplyCurrent.getValueAsDouble(); }
         @Override public double statorCurrentAmps() { return signals.statorCurrent.getValueAsDouble(); }
         @Override public java.util.OptionalDouble temperatureCelsius() { return signals.temperatureCelsius(); }
+        @Override public boolean fatalFault() { return signals.fatalFault(); }
     }
 
     private static boolean configureCurrentLimits(
@@ -736,7 +783,10 @@ public final class CtreMotorHandle implements MotorHandle {
         private final StatusSignal<Current> supplyCurrent;
         private final StatusSignal<Current> statorCurrent;
         private final StatusSignal<Temperature> deviceTemp;
+        /** Faults that stop the controller from driving; refreshed in the same batch as the inputs. */
+        private final BaseStatusSignal[] fatalFaults;
         private final BaseStatusSignal[] all;
+        private final SignalFreshness freshness;
 
         private TalonSignals(
                 StatusSignal<Angle> position,
@@ -744,14 +794,29 @@ public final class CtreMotorHandle implements MotorHandle {
                 StatusSignal<Voltage> voltage,
                 StatusSignal<Current> supplyCurrent,
                 StatusSignal<Current> statorCurrent,
-                StatusSignal<Temperature> deviceTemp) {
+                StatusSignal<Temperature> deviceTemp,
+                BaseStatusSignal... fatalFaults) {
             this.position = position;
             this.velocity = velocity;
             this.voltage = voltage;
             this.supplyCurrent = supplyCurrent;
             this.statorCurrent = statorCurrent;
             this.deviceTemp = deviceTemp;
-            all = new BaseStatusSignal[] {position, velocity, voltage, supplyCurrent, statorCurrent, deviceTemp};
+            this.fatalFaults = fatalFaults;
+            BaseStatusSignal[] inputs = {position, velocity, voltage, supplyCurrent, statorCurrent, deviceTemp};
+            all = java.util.Arrays.copyOf(inputs, inputs.length + fatalFaults.length);
+            System.arraycopy(fatalFaults, 0, all, inputs.length, fatalFaults.length);
+            freshness = new SignalFreshness(position);
+        }
+
+        private boolean fatalFault() {
+            // getValueAsDouble() avoids boxing the Boolean signal value.
+            for (BaseStatusSignal fault : fatalFaults) {
+                if (fault.getValueAsDouble() != 0.0) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private java.util.OptionalDouble temperatureCelsius() {

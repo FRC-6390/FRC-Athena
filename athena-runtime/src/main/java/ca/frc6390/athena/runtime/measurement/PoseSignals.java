@@ -77,13 +77,35 @@ public final class PoseSignals {
         });
     }
 
+    /** Classes of the JDK's unmodifiable lists ({@code List.of}, {@code List.copyOf}, {@code Stream.toList}). */
+    private static final Class<?> IMMUTABLE_LIST_12 = List.of(1).getClass();
+    private static final Class<?> IMMUTABLE_LIST_N = List.of(1, 2, 3).getClass();
+
+    /** Last transform of a derived signal: the source list it was computed from and the result. */
+    private record Transformed(List<Measurement> source, List<Measurement> result) {
+    }
+
     private static PoseSignal derived(
             MeasurementSignal source,
             Function<List<Measurement>, List<Measurement>> transform) {
         return new PoseSignal() {
+            private volatile Transformed last;
+
             @Override
             public List<Measurement> measurements() {
-                return transform.apply(source.measurements());
+                List<Measurement> values = source.measurements();
+                // Sources hand out the same unmodifiable list until they have new measurements, and measurements
+                // are immutable, so the previous result still describes that exact list.
+                Transformed previous = last;
+                if (previous != null && previous.source() == values) {
+                    return previous.result();
+                }
+                List<Measurement> result = transform.apply(values);
+                if (values != null
+                        && (values.getClass() == IMMUTABLE_LIST_N || values.getClass() == IMMUTABLE_LIST_12)) {
+                    last = new Transformed(values, result);
+                }
+                return result;
             }
 
             @Override

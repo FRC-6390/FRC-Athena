@@ -54,6 +54,7 @@ public final class MechanismScheduler {
     private final Set<Object> ambiguousDeclarationTargets = new LinkedHashSet<>();
     private final Set<DigitalInputDevice> digitalInputs = new LinkedHashSet<>();
     private final RobotGraph graph = new RobotGraph();
+    private MotorFailover[] motorFailovers = new MotorFailover[0];
     private final Map<PathAction, PathRuntime> pathRuntimes = new LinkedHashMap<>();
     private final Map<Object, List<LeaseRegistration>> leaseTargets = new IdentityHashMap<>();
     private final Map<Object, LeaseReservation> leaseReservations = new IdentityHashMap<>();
@@ -63,6 +64,16 @@ public final class MechanismScheduler {
     private final Map<Object, Long> reservationScratch = new IdentityHashMap<>();
     private final Map<MechanismRuntime, Set<MotorDevice>> drivenByRuntimeScratch = new IdentityHashMap<>();
     private final Set<MotorDevice> globallyDrivenScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<MechanismRuntime> faultedScratch = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Map<ControlBinding<?>, StageCaps> stageCapsScratch = new IdentityHashMap<>();
+    private final Map<ControlBinding<?>, Enum<?>> stageNamesScratch = new IdentityHashMap<>();
+    /** {@link #runtimes} values in the map's iteration order, refreshed whenever the map changes. */
+    private MechanismRuntime[] runtimeOrder = new MechanismRuntime[0];
+    /** {@link #digitalInputs} in iteration order, refreshed whenever the set changes. */
+    private DigitalInputDevice[] digitalInputOrder = new DigitalInputDevice[0];
+    private MechanismContext periodicMechanismContext;
+    private EventContext periodicEventContext;
+    private final java.util.function.Supplier<List<ResolvedOutput>> periodicBody = this::periodicWithPendingArguments;
     private final Map<Object, Set<MotorDevice>> faultSuppressions = new IdentityHashMap<>();
     private final Map<MotorDevice, Integer> faultSuppressionCounts = new IdentityHashMap<>();
     private final Map<Action, Set<Object>> liveResourceCache = new IdentityHashMap<>();
@@ -182,6 +193,7 @@ public final class MechanismScheduler {
         }
         graph.node(mechanism);
         runtimes.computeIfAbsent(mechanism, this::runtime);
+        runtimeOrder = runtimes.values().toArray(new MechanismRuntime[0]);
         runtimes.get(mechanism).traceLevel(traceLevel);
         runtimes.get(mechanism).tracePeriodSeconds(tracePeriodSeconds);
         indexActionTargets(
@@ -281,7 +293,10 @@ public final class MechanismScheduler {
      * @return this runtime
      */
     public MechanismScheduler sampleSignals() {
-        digitalInputs.forEach(DigitalInputDevice::sample);
+        DigitalInputDevice[] inputs = digitalInputOrder;
+        for (int index = 0; index < inputs.length; index++) {
+            inputs[index].sample();
+        }
         return this;
     }
 
@@ -503,6 +518,32 @@ public final class MechanismScheduler {
             }
         }
         return java.util.Collections.unmodifiableSet(controls);
+    }
+
+    /**
+     * Binds the {@link MotorFailover} declarations of registered mechanisms to the graph that owns their motors.
+     * Call it before the motors are resolved, so each group leader is created behind its failover handle.
+     *
+     * @param hardware hardware graph that resolves the mechanisms' motors
+     */
+    public void bindMotorFailovers(ca.frc6390.athena.hardware.runtime.HardwareGraph hardware) {
+        Objects.requireNonNull(hardware, "hardware");
+        List<MotorFailover> bound = new ArrayList<>(List.of(motorFailovers));
+        for (Object declaration : graph.declarations(runtimes.keySet())) {
+            if (declaration instanceof MotorFailover failover && !containsIdentity(bound, failover)) {
+                failover.bind(hardware);
+                bound.add(failover);
+            }
+        }
+        motorFailovers = bound.toArray(MotorFailover[]::new);
+    }
+
+    /** Runs motor failover callbacks for group events recorded by the latest hardware refresh. */
+    public void dispatchMotorFailovers() {
+        MotorFailover[] failovers = motorFailovers;
+        for (int index = 0; index < failovers.length; index++) {
+            failovers[index].dispatch();
+        }
     }
 
     /**
@@ -1285,9 +1326,22 @@ public final class MechanismScheduler {
     }
 
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
-        return ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess.call(
-                actionContext,
-                () -> periodicBound(mechanismContext, eventContext));
+        // The bound body is a prebuilt supplier reading the arguments from fields, so the cycle does not
+        // allocate a capturing lambda. The previous arguments are restored for a nested call.
+        MechanismContext previousMechanismContext = periodicMechanismContext;
+        EventContext previousEventContext = periodicEventContext;
+        periodicMechanismContext = mechanismContext;
+        periodicEventContext = eventContext;
+        try {
+            return ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess.call(actionContext, periodicBody);
+        } finally {
+            periodicMechanismContext = previousMechanismContext;
+            periodicEventContext = previousEventContext;
+        }
+    }
+
+    private List<ResolvedOutput> periodicWithPendingArguments() {
+        return periodicBound(periodicMechanismContext, periodicEventContext);
     }
 
     private List<ResolvedOutput> periodicBound(MechanismContext mechanismContext, EventContext eventContext) {
@@ -1300,9 +1354,11 @@ public final class MechanismScheduler {
         drivenByRuntime.clear();
         globallyDriven.clear();
         cycleSeconds = safeMechanismContext.nowSeconds();
-        Set<MechanismRuntime> faulted = Collections.newSetFromMap(new IdentityHashMap<>());
+        Set<MechanismRuntime> faulted = faultedScratch;
+        faulted.clear();
+        MechanismRuntime[] ordered = runtimeOrder;
         try {
-            for (MechanismRuntime runtime : runtimes.values()) {
+            for (MechanismRuntime runtime : ordered) {
                 try {
                     runtime.runHooks(eventContext, false);
                 } catch (RuntimeException exception) {
@@ -1312,7 +1368,7 @@ public final class MechanismScheduler {
             evaluateStagings(safeMechanismContext.nowSeconds());
             // Evaluate every lease first so reservations reflect where each lease is in its tree
             // this cycle, then arbitrate and apply against those reservations.
-            for (MechanismRuntime runtime : runtimes.values()) {
+            for (MechanismRuntime runtime : ordered) {
                 try {
                     runtime.evaluateCandidates(safeMechanismContext);
                 } catch (RuntimeException exception) {
@@ -1326,11 +1382,11 @@ public final class MechanismScheduler {
             power.cycle(powerMotors, actionContext, resolver.overrides(), safeMechanismContext.nowSeconds());
             Map<ControlBinding<?>, StageCaps> caps = stageCapsByControl();
             Map<ControlBinding<?>, Enum<?>> stageNames = stageNamesByControl(caps);
-            for (MechanismRuntime runtime : runtimes.values()) {
+            for (MechanismRuntime runtime : ordered) {
                 runtime.stageCaps(caps, stageNames);
                 runtime.electrical(power);
             }
-            for (MechanismRuntime runtime : runtimes.values()) {
+            for (MechanismRuntime runtime : ordered) {
                 Set<MotorDevice> driven;
                 if (faulted.contains(runtime)) {
                     driven = runtime.neutralizeAfterFault();
@@ -1343,11 +1399,14 @@ public final class MechanismScheduler {
                     }
                 }
                 drivenByRuntime.put(runtime, driven);
-                globallyDriven.addAll(driven);
+                if (!driven.isEmpty()) globallyDriven.addAll(driven);
             }
         } finally {
-            digitalInputs.forEach(DigitalInputDevice::clearLatchedEdges);
-            for (MechanismRuntime runtime : runtimes.values()) {
+            DigitalInputDevice[] inputs = digitalInputOrder;
+            for (int index = 0; index < inputs.length; index++) {
+                inputs[index].clearLatchedEdges();
+            }
+            for (MechanismRuntime runtime : ordered) {
                 runtime.finishOutputCycle(globallyDriven, drivenByRuntime.getOrDefault(runtime, Set.of()));
             }
             retireCompletedRequests();
@@ -1427,7 +1486,8 @@ public final class MechanismScheduler {
     }
 
     private void evaluateStagings(double nowSeconds) {
-        for (Staging<?> staging : stagings) {
+        for (int index = 0; index < stagings.size(); index++) {
+            Staging<?> staging = stagings.get(index);
             try {
                 staging.evaluate(nowSeconds, stageHost);
             } catch (RuntimeException exception) {
@@ -1440,8 +1500,11 @@ public final class MechanismScheduler {
     /** Maps each capped binding to the stage constant that set its caps, for the State/Reason explanation. */
     private Map<ControlBinding<?>, Enum<?>> stageNamesByControl(Map<ControlBinding<?>, StageCaps> caps) {
         if (caps.isEmpty()) return Map.of();
-        Map<ControlBinding<?>, Enum<?>> names = new IdentityHashMap<>();
-        for (Staging<?> staging : stagings) {
+        // Reused every cycle: the runtimes only read the installed maps during that cycle's apply.
+        Map<ControlBinding<?>, Enum<?>> names = stageNamesScratch;
+        names.clear();
+        for (int index = 0; index < stagings.size(); index++) {
+            Staging<?> staging = stagings.get(index);
             for (StageModifier modifier : staging.activeModifiers()) {
                 names.put(modifier.binding(), staging.currentStage());
             }
@@ -1451,8 +1514,10 @@ public final class MechanismScheduler {
 
     private Map<ControlBinding<?>, StageCaps> stageCapsByControl() {
         if (stagings.isEmpty()) return Map.of();
-        Map<ControlBinding<?>, StageCaps> caps = new IdentityHashMap<>();
-        for (Staging<?> staging : stagings) {
+        Map<ControlBinding<?>, StageCaps> caps = stageCapsScratch;
+        caps.clear();
+        for (int index = 0; index < stagings.size(); index++) {
+            Staging<?> staging = stagings.get(index);
             for (StageModifier modifier : staging.activeModifiers()) {
                 caps.put(modifier.binding(),
                         caps.getOrDefault(modifier.binding(), StageCaps.NONE).with(modifier.kind(), modifier.fraction()));
@@ -1539,6 +1604,7 @@ public final class MechanismScheduler {
                 digitalInputs.add(digitalInput);
             }
         }
+        digitalInputOrder = digitalInputs.toArray(new DigitalInputDevice[0]);
     }
 
     public List<ResolvedOutput> robotPeriodic(double nowSeconds, double dtSeconds) {

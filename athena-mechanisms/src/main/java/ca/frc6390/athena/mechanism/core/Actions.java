@@ -1636,8 +1636,28 @@ public final class Actions {
         }
     }
 
+    /** Reused visited set of {@link #validate(Action)}; actions are lowered every cycle by computed actions. */
+    private static final ThreadLocal<ValidationScratch> VALIDATION_SCRATCH =
+            ThreadLocal.withInitial(ValidationScratch::new);
+
+    private static final class ValidationScratch {
+        private final Set<Action> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        private boolean busy;
+    }
+
     static void validate(Action action) {
-        validate(action, Collections.newSetFromMap(new IdentityHashMap<>()));
+        ValidationScratch scratch = VALIDATION_SCRATCH.get();
+        if (scratch.busy) {
+            validate(action, Collections.newSetFromMap(new IdentityHashMap<>()));
+            return;
+        }
+        scratch.busy = true;
+        try {
+            validate(action, scratch.visited);
+        } finally {
+            scratch.visited.clear();
+            scratch.busy = false;
+        }
     }
 
     static boolean hasElapsed(double elapsedSeconds, double durationSeconds) {
@@ -1653,8 +1673,54 @@ public final class Actions {
         } else if (action instanceof Then then) {
             validateThenSource(then.action());
         }
-        for (Action.Child child : action.children()) {
-            validate(child.action(), visited);
+        validateChildren(action, visited);
+    }
+
+    /**
+     * Validates the children of {@code action} in {@link Action#children()} order. The built-in
+     * composites are walked directly so validation does not build their child lists.
+     */
+    private static void validateChildren(Action action, Set<Action> visited) {
+        if (action instanceof Parallel parallel) {
+            validateAll(parallel.Actions(), visited);
+        } else if (action instanceof Race race) {
+            validateAll(race.Actions(), visited);
+        } else if (action instanceof Deadline deadline) {
+            validateAll(deadline.Actions(), visited);
+        } else if (action instanceof Sequence sequence) {
+            List<SequenceStep> steps = sequence.steps();
+            for (int index = 0; index < steps.size(); index++) {
+                validate(steps.get(index).action(), visited);
+            }
+            validate(sequence.next(), visited);
+        } else if (action instanceof Cycle cycle) {
+            List<CycleStep> steps = cycle.steps();
+            for (int index = 0; index < steps.size(); index++) {
+                validate(steps.get(index).action(), visited);
+            }
+        } else if (action instanceof Conditional conditional) {
+            validate(conditional.action(), visited);
+            validate(conditional.next(), visited);
+        } else if (action instanceof Then then) {
+            validate(then.action(), visited);
+            validate(then.next(), visited);
+        } else if (action instanceof Timeout timeout) {
+            validate(timeout.action(), visited);
+        } else if (action instanceof WithinTolerance within) {
+            validate(within.action(), visited);
+        } else if (action instanceof VelocityContribution contribution) {
+            validate(contribution.driveAction(), visited);
+        } else {
+            List<Action.Child> children = action.children();
+            for (int index = 0; index < children.size(); index++) {
+                validate(children.get(index).action(), visited);
+            }
+        }
+    }
+
+    private static void validateAll(List<Action> actions, Set<Action> visited) {
+        for (int index = 0; index < actions.size(); index++) {
+            validate(actions.get(index), visited);
         }
     }
 
