@@ -54,7 +54,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private NetworkTableListenerPoller poller;
     private final List<ValueChannel> values = new ArrayList<>();
     /**
-     * The channels of {@link #values} updated on every publish (writable values and points), in the same order. A
+     * The channels of {@link #values} updated on every publish (writable values and live points), in the same order. A
      * publish between two read-only periods walks only these instead of skipping the rest one by one.
      */
     private final List<ValueChannel> everyCycle = new ArrayList<>();
@@ -220,7 +220,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             }
         } else {
             values.add(channel);
-            if (value.writable() || value.type() == TelemetryValue.Type.POINTS) {
+            if (value.writable() || value.type() == TelemetryValue.Type.POINTS && !value.isPeriodic()) {
                 everyCycle.add(channel);
             }
             if (channel.lockStatus != null) {

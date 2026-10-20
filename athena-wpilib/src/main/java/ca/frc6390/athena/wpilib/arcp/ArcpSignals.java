@@ -155,6 +155,25 @@ final class ArcpSignals {
         return motors || vision;
     }
 
+    /**
+     * Forgets what was sent, so the next {@link #sample} sends every signal again. Called when a client connects after a
+     * stretch with no client, because nothing was sampled meanwhile.
+     */
+    void forgetSent() {
+        for (ValueChannel channel : values) {
+            channel.published = false;
+            channel.lastText = null;
+            channel.lastArray = null;
+        }
+        for (ActionChannel channel : actions) {
+            channel.published = false;
+        }
+        for (LockChannel channel : locks) {
+            channel.published = false;
+        }
+        system.forgetSent();
+    }
+
     /** Number of published values (not counting actions and lock signals). */
     int valueCount() {
         return values.size();

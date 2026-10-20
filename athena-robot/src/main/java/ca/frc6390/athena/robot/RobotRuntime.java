@@ -978,8 +978,8 @@ public final class RobotRuntime implements AutoCloseable {
      * and their readings are unchanged.
      */
     private List<RuntimeCycleSnapshot.DigitalInput> snapshotDigitalInputs() {
-        Set<DigitalInputDevice> devices = mechanisms.digitalInputDevices();
-        int count = devices.size();
+        DigitalInputDevice[] devices = mechanisms.digitalInputArray();
+        int count = devices.length;
         if (digitalScratch.length < count) {
             digitalScratch = new DigitalInputDevice[count];
             digitalRawScratch = new boolean[count];

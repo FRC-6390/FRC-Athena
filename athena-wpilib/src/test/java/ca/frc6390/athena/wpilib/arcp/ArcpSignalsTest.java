@@ -61,6 +61,21 @@ class ArcpSignalsTest {
     }
 
     @Test
+    void forgetSentResendsCurrentValuesAfterAnIdleStretch() {
+        Probe probe = new Probe();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(probe);
+        ArcpSignals signals = new ArcpSignals(runtime.mechanismTelemetrySchema(), group -> false, new QuietSource());
+        long value = id(signals, "/Values/value");
+
+        sample(signals);
+        assertFalse(sample(signals).containsKey(value), "an unchanged value is not resent");
+
+        signals.forgetSent();
+        assertEquals(1.0, (Double) sample(signals).get(value), 1e-12, "after forgetSent the value is sent again");
+        assertFalse(sample(signals).containsKey(value));
+    }
+
+    @Test
     void constantsAreSentOnceAndChangedValuesInTheCycleTheyChange() {
         Probe probe = new Probe();
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(probe);

@@ -285,8 +285,8 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         values.put("State/Sampled", TelemetryValue.bool(() -> sampled));
         values.put("Data/Inputs", TelemetryValue.numberArray(this::sampledInputs));
         values.put("Data/Values", TelemetryValue.numberArray(this::sampledValues));
-        values.put("Visualization/Points", TelemetryValue.points(this::configuredPoints));
-        values.put("Visualization/Curve", TelemetryValue.points(this::curvePoints));
+        values.put("Visualization/Points", TelemetryValue.points(this::configuredPoints).periodic());
+        values.put("Visualization/Curve", TelemetryValue.points(this::curvePoints).periodic());
         values.put("Visualization/Current", TelemetryValue.points(this::currentPoint));
         values.put("Recorded/Count", TelemetryValue.number(this::recordedCount));
         values.put("Recorded/Log", TelemetryValue.string(this::recordedLog));

@@ -309,6 +309,14 @@ public final class MechanismScheduler {
         return Set.copyOf(digitalInputs);
     }
 
+    /**
+     * The digital input devices in registration order, without copying. The array is replaced, never written, when the
+     * set changes, so the caller may keep it but must not modify it.
+     */
+    public DigitalInputDevice[] digitalInputArray() {
+        return digitalInputOrder;
+    }
+
     public List<Mechanism> mechanisms() {
         return List.copyOf(runtimes.keySet());
     }
