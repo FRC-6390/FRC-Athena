@@ -1010,8 +1010,8 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 44);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 44);
         @SuppressWarnings("unused")
-        private final ControlBinding<?> velocity = Controls.velocity(motor).feedback(encoder);
-        private final Action initial = velocity.velocity(5.0);
+        private final ControlBinding<?> velocity = Controls.velocity(motor, Units.Rotations).feedback(encoder);
+        private final Action initial = velocity.velocity(Units.RotationsPerSecond.of(5.0));
     }
 
     private static final class DigitalHookMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

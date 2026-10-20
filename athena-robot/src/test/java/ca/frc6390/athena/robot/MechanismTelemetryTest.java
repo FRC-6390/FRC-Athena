@@ -225,9 +225,9 @@ class MechanismTelemetryTest {
 
     private static final class StagedMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 12);
-        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
-        final Action spin = control.velocity(5.0);
-        final Action volts = control.voltage(3.0);
+        final ControlBinding<?> control = Controls.velocity(motor, Units.Rotations).pid(1.0, 0.0, 0.0);
+        final Action spin = control.velocity(Units.RotationsPerSecond.of(5.0));
+        final Action volts = control.voltage(Units.Volts.of(3.0));
         final Staging<Stage> health = Staging.of(Stage.NORMAL)
                 .stage(Stage.HOT, () -> false, control.limitEffort(0.5));
 
@@ -240,28 +240,27 @@ class MechanismTelemetryTest {
         final ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 2);
         final PidGains pid = PidGains.of(1.0, 0.0, 0.0);
         final FeedforwardGains feedforward = FeedforwardGains.of(0.0, 1.0, 0.0, 0.0);
-        final ControlBinding<?> control = Controls.position(motor)
+        final ControlBinding<?> control = Controls.position(motor, Units.Rotations)
                 .feedback(encoder).pid(pid).feedforward(feedforward);
         final TelemetryValue position = TelemetryValue.number(encoder::position);
         final Action run = control.percent(0.5);
     }
 
     private static final class ControlOnlyMechanism implements Mechanism {
-        final ControlBinding<?> control = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 9));
+        final ControlBinding<?> control = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 9), Units.Rotations);
     }
 
     private static final class EmbeddedLoopMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 10);
-        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
+        final ControlBinding<?> control = Controls.velocity(motor, Units.Rotations).pid(1.0, 0.0, 0.0);
     }
 
     private static final class InterpolationTelemetryMechanism implements Mechanism {
-        private final ControlBinding<?> velocity = Controls.velocity(
-                MotorDevice.of(MotorKinds.KRAKEN_X60, 11));
+        private final ControlBinding<?> velocity = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 11), Units.Rotations);
         public final Action shot = velocity
-                .interpolate(ca.frc6390.athena.mechanism.interpolation.InterpolationKinds.LINEAR, () -> 2.0)
-                .at(1.0, 20.0)
-                .at(3.0, 40.0);
+                .interpolate(ca.frc6390.athena.mechanism.interpolation.InterpolationKinds.LINEAR, () -> 2.0, Units.Value)
+                .at(Units.Value.of(1.0), Units.RotationsPerSecond.of(20.0))
+                .at(Units.Value.of(3.0), Units.RotationsPerSecond.of(40.0));
     }
 
     private static final class DashboardMechanism implements Mechanism {

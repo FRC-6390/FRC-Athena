@@ -52,7 +52,7 @@ class TurretMotionSimulationTest {
         TurretMechanism turret = new TurretMechanism();
         SimulationSession simulation = SimulationSession.create();
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(turret);
-        runtime.request(turret.fieldHeading.position(90.0));
+        runtime.request(turret.fieldHeading.position(Units.Degrees.of(90.0)));
 
         int signChanges = 0;
         double lastSign = 0.0;
@@ -95,13 +95,13 @@ class TurretMotionSimulationTest {
                 .momentOfInertia(Units.KilogramSquareMeters.of(0.5))
                 .range(Range.of(Units.Rotations.of(-0.75), Units.Rotations.of(0.75)));
         private final ImuDevice chassisImu = ImuDevice.of(ImuKinds.PIGEON_2, 17);
-        private final ControlBinding<?> fieldHeading = Controls.position(motor)
+        private final ControlBinding<?> fieldHeading = Controls.position(motor, Units.Degrees)
                 .feedback(angle)
                 .dependency(chassisImu)
                 .loop(ControlLoops.targetTransform(binding -> context ->
                         ControlOutput.position(context.target() - chassisImu.angleDegrees())))
                 .pid(0.144, 0.0, 0.006)
-                .constraints(Constraints.range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))), Constraints.motion(180.0, 540.0))
+                .constraints(Constraints.range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))), Constraints.motion(Units.DegreesPerSecond.of(180.0), Units.DegreesPerSecondPerSecond.of(540.0)))
                 .planner(MotionPlanners.boundedAngular(360.0));
         private final Action neutral = fieldHeading.neutral();
     }

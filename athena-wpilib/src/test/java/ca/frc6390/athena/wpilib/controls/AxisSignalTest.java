@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.controls;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -187,11 +189,10 @@ class AxisSignalTest {
     void oneCurveCanShapeAnAxisAndInterpolationWithSharedLiveTuning() {
         AxisCurves.ExpoCurve curve = AxisCurves.expo(0.0);
         AxisSignal axis = new AxisSignal(() -> 0.5).curve(curve);
-        InterpolatedControlAction interpolation = Controls.position(
-                        MotorDevice.of(MotorKinds.KRAKEN_X60, 41))
-                .interpolate(curve, () -> 5.0)
-                .at(0.0, 0.0)
-                .at(10.0, 100.0);
+        InterpolatedControlAction interpolation = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 41), Units.Rotations)
+                .interpolate(curve, () -> 5.0, Units.Value)
+                .at(Units.Value.of(0.0), Units.Rotations.of(0.0))
+                .at(Units.Value.of(10.0), Units.Rotations.of(100.0));
 
         assertEquals(0.5, axis.value(), 1.0e-9);
         assertEquals(50.0, interpolation.target(), 1.0e-9);

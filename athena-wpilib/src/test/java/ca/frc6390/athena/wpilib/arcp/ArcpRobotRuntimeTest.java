@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.arcp;
 
+import edu.wpi.first.units.Units;
+
 import static edu.wpi.first.units.Units.Seconds;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -468,8 +470,8 @@ class ArcpRobotRuntimeTest {
     /** Test robot mechanism with a velocity loop on one motor and a two-stage staging. */
     static final class ArcpPoweredMechanism implements Mechanism {
         final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 21);
-        final ControlBinding<?> control = Controls.velocity(motor).pid(1.0, 0.0, 0.0);
-        public final Action spin = control.velocity(5.0);
+        final ControlBinding<?> control = Controls.velocity(motor, Units.Rotations).pid(1.0, 0.0, 0.0);
+        public final Action spin = control.velocity(Units.RotationsPerSecond.of(5.0));
         public final Staging<Stage> health = Staging.of(Stage.NORMAL)
                 .stage(Stage.HOT, () -> false, control.limitEffort(0.5));
 

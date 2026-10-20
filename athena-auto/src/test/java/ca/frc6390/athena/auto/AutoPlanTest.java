@@ -47,12 +47,12 @@ class AutoPlanTest {
     @Test
     void listsSettledVelocityLimitedEffortDeadlineRaceAndMarkers() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 1);
-        ControlBinding<?> arm = Controls.position(motor);
-        Action armMove = arm.position(1.0)
+        ControlBinding<?> arm = Controls.position(motor, Units.Rotations);
+        Action armMove = arm.position(Units.Rotations.of(1.0))
                 .effort(Units.Amps.of(10))
-                .untilWithin(0.1)
+                .untilWithin(Units.Rotations.of(0.1))
                 .settled(Seconds.of(0.2))
-                .maxVelocity(0.5);
+                .maxVelocity(Units.RotationsPerSecond.of(0.5));
         Action action = Actions.sequence()
                 .run(Actions.deadline(Paths.choreo("approach").marker("intake", Actions.waitSeconds(Seconds.of(0.2))), armMove))
                 .then(Actions.race(

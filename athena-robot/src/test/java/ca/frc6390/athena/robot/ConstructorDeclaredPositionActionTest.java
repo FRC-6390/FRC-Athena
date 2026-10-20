@@ -94,7 +94,7 @@ class ConstructorDeclaredPositionActionTest {
         private final Action trackTarget;
 
         private ConstructorActionMechanism(AtomicReference<Double> target, boolean planned) {
-            ControlBinding<?> configured = Controls.position(motor)
+            ControlBinding<?> configured = Controls.position(motor, Units.Rotations)
                     .feedback(motor.encoder())
                     .pid(1.0, 0.0, 0.0);
             position = planned
@@ -102,7 +102,7 @@ class ConstructorDeclaredPositionActionTest {
                             .planner(MotionPlanners.boundedAngular(360.0))
                             .profile(MotionProfiles.trapezoid(180.0, 360.0))
                     : configured;
-            trackTarget = position.position(() -> target.get());
+            trackTarget = position.position(() -> target.get(), Units.Rotations);
         }
     }
 
@@ -112,7 +112,7 @@ class ConstructorDeclaredPositionActionTest {
                 .inverted()
                 .reduction(7.0)
                 .measures(Units.Degrees);
-        private final ControlBinding<?> position = Controls.position(motor)
+        private final ControlBinding<?> position = Controls.position(motor, Units.Degrees)
                 .feedback(encoder)
                 .pid(0.015, 0.0, 0.0)
                 .constraint(Constraints.range(Range.of(Units.Degrees.of(-136.0), Units.Degrees.of(204.0))))
@@ -122,7 +122,7 @@ class ConstructorDeclaredPositionActionTest {
         private final Action trackTarget;
 
         private ExternalEncoderMechanism(AtomicReference<Double> target) {
-            trackTarget = position.position(() -> target.get());
+            trackTarget = position.position(() -> target.get(), Units.Degrees);
         }
     }
 }
