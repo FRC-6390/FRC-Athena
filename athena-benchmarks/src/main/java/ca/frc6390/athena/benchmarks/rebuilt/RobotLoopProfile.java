@@ -78,7 +78,7 @@ public final class RobotLoopProfile {
     }
 
     /** One robot cycle: a driver station packet with sticks and triggers, then the TimedRobot loop body. */
-    private static void step(RebuiltRobot robot, int cycle, boolean enabled) {
+    static void step(RebuiltRobot robot, int cycle, boolean enabled) {
         double phase = (cycle % 500) / 500.0;
         // Driver: drive in a slow circle, hold the shoot trigger for half of every 10 s.
         DriverStationSim.setJoystickAxisCount(0, 6);

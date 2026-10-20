@@ -373,6 +373,22 @@ project(':athena-benchmarks') {
         }
     }
 
+    // Measures boot cost: construction, robotInit, simulationInit, and the first 5 s of loop cycles (disabled, as
+    // at power-up) against steady state. -Pjfr=<file> records a Java Flight Recording covering the whole run.
+    tasks.register('robotStartupProfile', JavaExec) {
+        group = 'Verification'
+        description = 'Measures robot construction, init and first-5-second loop cost for a Rebuilt-shaped robot.'
+        dependsOn tasks.named('classes'), tasks.named('extractWpilibBenchmarkNatives')
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'ca.frc6390.athena.benchmarks.rebuilt.RobotStartupProfile'
+        systemProperty 'java.library.path', nativeLibraryPath
+        args(findProperty('cycles') ?: '2000')
+        if (findProperty('jfr')) {
+            // -PjfrSettings=<file.jfc> overrides the stock profile (for example a 1 ms execution sample period).
+            jvmArgs "-XX:StartFlightRecording=filename=${findProperty('jfr')},settings=${findProperty('jfrSettings') ?: 'profile'}"
+        }
+    }
+
     tasks.withType(PublishToMavenRepository).configureEach {
         enabled = false
     }
