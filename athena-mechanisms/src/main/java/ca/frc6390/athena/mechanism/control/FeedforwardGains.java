@@ -11,6 +11,8 @@ import ca.frc6390.athena.mechanism.core.Output;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import edu.wpi.first.units.AngleUnit;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Angle;
 import java.util.Map;
 import java.util.Objects;
 
@@ -69,22 +71,22 @@ public final class FeedforwardGains implements ControlLoop, TelemetrySource {
      * @return arm feedforward gains with no offset
      */
     public static FeedforwardGains arm(double s, double v, double g) {
-        return arm(s, v, g, 0.0);
+        return new FeedforwardGains(s, v, 0.0, g, true, 0.0, null);
     }
 
     /**
      * Arm feedforward with a phase offset: {@code kG * cos(angle + offset)}. The offset is added to the
-     * angle in radians, so the sum is the angle from horizontal when the encoder reads {@code -offset}
-     * there. The convention matches {@code MechanismModel.gravityVolts} for rotary models.
+     * angle, so the sum is the angle from horizontal when the encoder reads {@code -offset} there. The convention matches {@code MechanismModel.gravityVolts} for rotary models.
      *
      * @param s static gain in volts
      * @param v velocity gain in volts per unit per second
      * @param g gravity amplitude in volts
-     * @param gravityOffsetRadians phase added to the angle, in radians; must be finite
+     * @param gravityOffset phase added to the angle; must be finite (any angle unit, stored in radians)
      * @return arm feedforward gains
      */
-    public static FeedforwardGains arm(double s, double v, double g, double gravityOffsetRadians) {
-        return new FeedforwardGains(s, v, 0.0, g, true, gravityOffsetRadians, null);
+    public static FeedforwardGains arm(double s, double v, double g, Angle gravityOffset) {
+        return new FeedforwardGains(s, v, 0.0, g, true, Objects.requireNonNull(gravityOffset, "gravityOffset")
+                .in(Units.Radians), null);
     }
 
     public double staticGain() { return staticGain; }
@@ -94,8 +96,8 @@ public final class FeedforwardGains implements ControlLoop, TelemetrySource {
     public boolean isDisabled() { return disabled; }
     /** True for the arm form; false means gravity is a constant voltage. */
     public boolean isArm() { return arm; }
-    /** Phase added to the angle before the gravity cosine, in radians (arm form only). */
-    public double gravityOffsetRadians() { return gravityOffsetRadians; }
+    /** Phase added to the angle before the gravity cosine (arm form only; zero for the plain form). */
+    public Angle gravityOffset() { return Units.Radians.of(gravityOffsetRadians); }
     /** Angle unit the arm position is measured in, or null while the gains are not yet bound to a binding. */
     public AngleUnit gravityAngle() { return gravityAngle; }
 

@@ -353,10 +353,6 @@ public final class Actions {
         return until(ctx -> condition.getAsBoolean(), action);
     }
 
-    public static Action untilWithin(Action action, double tolerance) {
-        return new WithinTolerance(action, tolerance);
-    }
-
     /** Typed tolerance; converted with the action's control binding unit at declaration. */
     public static Action untilWithin(Action action, Measure<?> tolerance) {
         Objects.requireNonNull(tolerance, "tolerance");
@@ -372,12 +368,6 @@ public final class Actions {
         WithinTolerance within = requireWithin(action, "settled");
         double seconds = requireDuration(duration.in(Seconds), "Settle duration");
         return new WithinTolerance(within.action(), within.tolerance(), seconds, within.maxVelocity());
-    }
-
-    /** Limits the measured velocity (control units per second) while inside the tolerance window. */
-    public static Action maxVelocity(Action action, double maxVelocity) {
-        WithinTolerance within = requireWithin(action, "maxVelocity");
-        return new WithinTolerance(within.action(), within.tolerance(), within.settleSeconds(), maxVelocity);
     }
 
     /** Typed velocity limit: a rate of the control binding's unit per second. */

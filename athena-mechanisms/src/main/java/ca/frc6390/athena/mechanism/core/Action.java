@@ -110,19 +110,9 @@ public interface Action extends DeviceAction {
     }
 
     /**
-     * Completes this position or velocity control action when its configured
-     * feedback is within the supplied tolerance of the requested target.
-     *
-     * @param tolerance maximum absolute target error in the control's configured units
-     * @return feedback-completing action
-     */
-    default Action untilWithin(double tolerance) {
-        return Actions.untilWithin(this, tolerance);
-    }
-
-    /**
-     * Typed form of {@link #untilWithin(double)}: the tolerance is a WPILib measure of the control's
-     * unit (a rate of that unit for velocity controls). Requires a unit-typed control binding.
+     * Completes this position or velocity control action when its feedback is within the tolerance of the
+     * requested target. The tolerance is a WPILib measure of the control's unit (a rate of that unit for
+     * velocity controls). Requires a unit-typed control binding.
      *
      * @param tolerance maximum absolute target error as a measure
      * @return feedback-completing action
@@ -152,33 +142,16 @@ public interface Action extends DeviceAction {
     }
 
     /**
-     * Requires the measured velocity of an {@link #untilWithin(double) untilWithin} position action to be
-     * at most {@code maxVelocity} in magnitude (control units per second) for it to complete. Velocity
-     * controls are rejected: their target is already a velocity.
+     * Requires the measured velocity of an {@link #untilWithin(Measure) untilWithin} position action to be
+     * at most {@code maxVelocity} in magnitude for it to complete. The limit is a rate of the control
+     * binding's unit per second. Velocity controls are rejected: their target is already a velocity.
      *
      * @param maxVelocity maximum absolute measured velocity, non-negative
      * @return velocity-limited tolerance action
      * @throws IllegalArgumentException when this action is not a position {@code untilWithin} action
      */
-    default Action maxVelocity(double maxVelocity) {
-        return Actions.maxVelocity(this, maxVelocity);
-    }
-
-    /** Typed form of {@link #maxVelocity(Measure)}: a rate of the control binding's unit per second. */
     default Action maxVelocity(Measure<?> maxVelocity) {
         return Actions.maxVelocity(this, maxVelocity);
-    }
-
-    /**
-     * Convenience for {@code untilWithin(tolerance).settled(duration)}: completes once the position or
-     * velocity error stays within {@code tolerance} continuously for {@code duration}.
-     *
-     * @param tolerance maximum absolute target error in the control's configured units
-     * @param duration required continuous time inside the window
-     * @return settled tolerance action
-     */
-    default Action untilSettled(double tolerance, Time duration) {
-        return untilWithin(tolerance).settled(duration);
     }
 
     /**

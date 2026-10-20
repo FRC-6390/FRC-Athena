@@ -5,6 +5,8 @@ import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.motion.MotionProfile;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
+import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.Voltage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -45,11 +47,6 @@ public final class Constraints {
         return new TypedRangeConstraint(minimum.unit(), low, high);
     }
 
-    /** Declares maximum reference velocity and acceleration for a control. */
-    public static Constraint<Double> motion(double maximumVelocity, double maximumAcceleration) {
-        return new MotionConstraint(new MotionProfile(maximumVelocity, maximumAcceleration));
-    }
-
     /**
      * Typed motion limits. {@code maximumVelocity} measures a rate of the control's unit (for example
      * degrees per second); {@code maximumAcceleration} measures a rate of that rate. Converted when
@@ -84,6 +81,23 @@ public final class Constraints {
     private record TypedMotionConstraint(Unit velocityUnit, Unit accelerationUnit, double velocityBase,
             double accelerationBase) implements UnitConstraint {
         @Override
+        public Constraint<Double> expressedIn(Unit unit, boolean velocityControl) {
+            if (!velocityControl) {
+                return expressedIn(unit);
+            }
+            Unit acceleration = UnitConversions.perSecond(UnitConversions.perSecond(unit));
+            Unit jerk = UnitConversions.perSecond(acceleration);
+            if (!UnitConversions.sameDimension(velocityUnit, acceleration)
+                    || !UnitConversions.sameDimension(accelerationUnit, jerk)) {
+                throw new IllegalArgumentException("Velocity motion limits measure " + velocityUnit.name() + " and "
+                        + accelerationUnit.name() + ": a velocity control takes an acceleration and its rate "
+                        + "(for example RotationsPerSecondPerSecond and RotationsPerSecondPerSecond.per(Seconds)).");
+            }
+            double scale = UnitConversions.baseScale(unit);
+            return new VelocityMotionConstraint(velocityBase / scale, accelerationBase / scale);
+        }
+
+        @Override
         public Constraint<Double> expressedIn(Unit unit) {
             Unit perSecond = UnitConversions.perSecond(unit);
             if (!UnitConversions.sameDimension(velocityUnit, perSecond)
@@ -92,7 +106,19 @@ public final class Constraints {
                         + accelerationUnit.name() + " and cannot be applied to " + unit.name() + ".");
             }
             double scale = UnitConversions.baseScale(unit);
-            return motion(velocityBase / scale, accelerationBase / scale);
+            return new MotionConstraint(new MotionProfile(velocityBase / scale, accelerationBase / scale));
+        }
+    }
+
+    /**
+     * Motion limits of a velocity control: the largest acceleration and its rate (jerk) of the velocity target,
+     * in control units per second squared and per second cubed. The limits are recorded on the binding; the
+     * velocity loop does not enforce them yet.
+     */
+    public record VelocityMotionConstraint(double acceleration, double jerk) implements Constraint<Double> {
+        @Override
+        public ConstraintResult<Double> evaluate(ConstraintContext<Double> context) {
+            return new ConstraintResult.Allowed<>(context.requested());
         }
     }
 
@@ -114,12 +140,22 @@ public final class Constraints {
         }
     }
 
-    /** Clamps the final calculated control output to an inclusive range. */
-    public static Constraint<Double> clamp(double minimum, double maximum) {
-        if (!Double.isFinite(minimum) || !Double.isFinite(maximum) || maximum < minimum) {
+    /**
+     * Clamps the final calculated voltage output to an inclusive range. The setpoint and the feedback are not
+     * limited; use {@link #range(Measure, Measure)} for those. Applies only during output evaluation.
+     *
+     * @param minimum lower voltage bound
+     * @param maximum upper voltage bound
+     * @return output-stage voltage clamp
+     * @throws IllegalArgumentException when a bound is not finite or the bounds are reversed
+     */
+    public static Constraint<Double> clamp(Voltage minimum, Voltage maximum) {
+        double low = Objects.requireNonNull(minimum, "minimum").in(Units.Volts);
+        double high = Objects.requireNonNull(maximum, "maximum").in(Units.Volts);
+        if (!Double.isFinite(low) || !Double.isFinite(high) || high < low) {
             throw new IllegalArgumentException("Control clamp bounds must be finite and ordered.");
         }
-        return new ClampConstraint(minimum, maximum);
+        return new ClampConstraint(low, high);
     }
 
     private record ClampConstraint(double minimum, double maximum) implements Constraint<Double> {
@@ -138,12 +174,21 @@ public final class Constraints {
         }
     }
 
-    /** Clamps the final calculated control output symmetrically around zero. */
-    public static Constraint<Double> clamp(double maximumAbsolute) {
-        if (!Double.isFinite(maximumAbsolute) || maximumAbsolute < 0.0) {
+    /**
+     * Limits the calculated voltage output to {@code +/- maximumAbsolute} at the output stage. This limits the
+     * drive voltage (for example 12 V on a battery-powered motor), not the setpoint, so position and velocity
+     * targets still reach the loop unchanged.
+     *
+     * @param maximumAbsolute largest output magnitude, non-negative and finite
+     * @return output-stage voltage clamp
+     * @throws IllegalArgumentException when the magnitude is negative or not finite
+     */
+    public static Constraint<Double> maxVoltage(Voltage maximumAbsolute) {
+        double magnitude = Objects.requireNonNull(maximumAbsolute, "maximumAbsolute").in(Units.Volts);
+        if (!Double.isFinite(magnitude) || magnitude < 0.0) {
             throw new IllegalArgumentException("Control clamp magnitude must be finite and non-negative.");
         }
-        return clamp(-maximumAbsolute, maximumAbsolute);
+        return new ClampConstraint(-magnitude, magnitude);
     }
 
     public static Constraint<Double> lower(BooleanSupplier blocked) {

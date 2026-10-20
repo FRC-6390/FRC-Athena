@@ -30,10 +30,6 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     private boolean persistPoints;
     private volatile long pointVersion;
 
-    InterpolatedControlAction(ControlBinding<?> control, InterpolationModel model, DoubleSupplier input) {
-        this(control, model, input, null, List.of());
-    }
-
     InterpolatedControlAction(
             ControlBinding<?> control,
             InterpolationModel model,
@@ -62,40 +58,55 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
      * measure the binding's unit (or its per-second rate for velocity bindings).
      */
     public InterpolatedControlAction at(Measure<?> point, Measure<?> value) {
-        if (inputUnit == null) {
-            throw new IllegalStateException("Typed interpolation points require interpolate(model, input, inputUnit).");
-        }
-        return at(ControlBinding.valueIn(point, inputUnit), control.modeValue(value));
+        return addFixed(ControlBinding.valueIn(point, inputUnit), control.modeValue(value));
     }
 
-    /** Adds a fixed interpolation point and target value. */
-    public InterpolatedControlAction at(double point, double value) {
-        requireFinite(value, "Interpolation value");
-        return at(point, () -> value);
-    }
-
-    /** Adds an interpolation point whose target value can change at runtime. */
-    public InterpolatedControlAction at(double point, DoubleSupplier value) {
-        requireFinite(point, "Interpolation point");
+    /**
+     * Adds an interpolation point whose target can change at runtime. The point is a measure of the input
+     * unit; the target supplier reads {@code valueUnit}, which must measure the binding's unit (per second
+     * for velocity bindings).
+     */
+    public InterpolatedControlAction at(Measure<?> point, DoubleSupplier value, Unit valueUnit) {
         Objects.requireNonNull(value, "value");
+        double factor = valueFactor(valueUnit);
+        return addFixedPoint(ControlBinding.valueIn(point, inputUnit), () -> value.getAsDouble() * factor);
+    }
+
+    /**
+     * Adds a runtime-sampled interpolation point and target. The point supplier reads {@code pointUnit}; the
+     * target supplier reads {@code valueUnit}, which must measure the binding's unit (per second for velocity
+     * bindings).
+     */
+    public InterpolatedControlAction at(DoubleSupplier point, Unit pointUnit, DoubleSupplier value, Unit valueUnit) {
+        Objects.requireNonNull(point, "point");
+        Objects.requireNonNull(value, "value");
+        double pointFactor = UnitConversions.factor(Objects.requireNonNull(pointUnit, "pointUnit"), inputUnit);
+        double valueFactor = valueFactor(valueUnit);
+        return append(new Entry(() -> point.getAsDouble() * pointFactor,
+                () -> value.getAsDouble() * valueFactor, null, null));
+    }
+
+    private double valueFactor(Unit valueUnit) {
+        Objects.requireNonNull(valueUnit, "valueUnit");
+        Unit target = control.unit();
+        if (target == null) {
+            throw new IllegalStateException("Typed interpolation values require a unit-typed control binding.");
+        }
+        return UnitConversions.factor(valueUnit, target);
+    }
+
+    private InterpolatedControlAction addFixed(double point, double value) {
+        requireFinite(value, "Interpolation value");
+        return addFixedPoint(point, () -> value);
+    }
+
+    private InterpolatedControlAction addFixedPoint(double point, DoubleSupplier value) {
+        requireFinite(point, "Interpolation point");
         if (entries.stream().anyMatch(entry -> entry.fixedPoint() != null
                 && Double.compare(entry.fixedPoint(), point) == 0)) {
             throw new IllegalArgumentException("Interpolation points must be unique: " + point);
         }
         return append(new Entry(() -> point, value, point, null));
-    }
-
-    /** Adds a runtime-sampled interpolation point and fixed target value. */
-    public InterpolatedControlAction at(DoubleSupplier point, double value) {
-        requireFinite(value, "Interpolation value");
-        return at(point, () -> value);
-    }
-
-    /** Adds a runtime-sampled interpolation point and target value. */
-    public InterpolatedControlAction at(DoubleSupplier point, DoubleSupplier value) {
-        Objects.requireNonNull(point, "point");
-        Objects.requireNonNull(value, "value");
-        return append(new Entry(point, value, null, null));
     }
 
     private InterpolatedControlAction append(Entry entry) {

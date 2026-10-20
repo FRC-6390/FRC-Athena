@@ -8,6 +8,9 @@ import edu.wpi.first.units.AngleUnit;
 import edu.wpi.first.units.Measure;
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.VoltageUnit;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Voltage;
 import ca.frc6390.athena.hardware.signal.PositionSignal;
 import ca.frc6390.athena.hardware.signal.VelocitySignal;
 import ca.frc6390.athena.mechanism.constraint.Constraint;
@@ -52,7 +55,7 @@ import java.util.function.Supplier;
  * <p>The type parameter {@code U} is the WPILib unit the binding's plain {@code double} values are
  * expressed in: {@link edu.wpi.first.units.AngleUnit} for rotary bindings and
  * {@link edu.wpi.first.units.DistanceUnit} for linear ones. Bindings created without a unit
- * ({@code Controls.position(motor)}) keep working with raw doubles and have a null {@link #unit()};
+ * ({@code Controls.position(motor, Units.Rotations)}) keep working with raw doubles and have a null {@link #unit()};
  * typed methods on them throw. Typed values are converted to base-unit doubles when declared, so the
  * per-cycle path never allocates measures.</p>
  */
@@ -87,7 +90,7 @@ public record ControlBinding<U extends Unit>(
         dependencies = dependencies == null ? List.of() : List.copyOf(dependencies);
         loops = loops == null ? List.of() : List.copyOf(loops);
         validateFeedbackUnit(unit, feedback);
-        constraints = convertConstraints(constraints, unit);
+        constraints = convertConstraints(constraints, unit, mode == ControlMode.VELOCITY);
         // Reject non-overlapping position ranges when the binding is declared, not in the robot loop.
         ca.frc6390.athena.mechanism.constraint.Constraints.positionRange(constraints);
         validateMotorTargets(output, followers);
@@ -213,7 +216,7 @@ public record ControlBinding<U extends Unit>(
     }
 
     /** Configures wrapped error calculation for a continuous position input. */
-    public ControlBinding<U> continuous(double minimum, double maximum) {
+    private ControlBinding<U> continuousValues(double minimum, double maximum) {
         requirePositionControl("Continuous input");
         if (!Double.isFinite(minimum) || !Double.isFinite(maximum) || maximum <= minimum) {
             throw new IllegalArgumentException("Continuous input bounds must be finite and ordered.");
@@ -225,7 +228,8 @@ public record ControlBinding<U extends Unit>(
     /** Typed form of {@link #continuous(double, double)}; both bounds must measure this binding's unit. */
     public ControlBinding<U> continuous(Measure<?> minimum, Measure<?> maximum) {
         requireUnit("Typed continuous input");
-        return continuous(valueIn(minimum, unit), valueIn(maximum, unit));
+        requirePositionControl("Continuous input");
+        return continuousValues(valueIn(minimum, unit), valueIn(maximum, unit));
     }
 
     /** Returns the motion kind of this binding: rotary for angle units, linear for distance units. */
@@ -356,7 +360,7 @@ public record ControlBinding<U extends Unit>(
         Objects.requireNonNull(gains, "gains");
         if (mode != ControlMode.VELOCITY) {
             throw new IllegalStateException("Torque velocity control needs a velocity control binding "
-                    + "(Controls.velocity(...)), not a position control.");
+                    + "(Controls.velocity(..., Units.Rotations)), not a position control.");
         }
         requireOutput();
         for (MotorDevice motor : motors) {
@@ -405,7 +409,7 @@ public record ControlBinding<U extends Unit>(
     /**
      * Adds arm feedforward: static and velocity terms plus {@code kG * cos(angle)}, where the angle is the
      * mechanism position in radians. The angle unit is taken from this binding: a typed binding such as
-     * {@code Controls.position(motor, Degrees)}, or an encoder declared with {@code measures(...)} in an angle
+     * {@code Controls.position(motor, Units.Rotations).followers(Degrees)}, or an encoder declared with {@code measures(...)} in an angle
      * unit (for example {@code measures(Units.Degrees)}).
      * Declare {@link #feedback(EncoderDevice)} before this call.
      *
@@ -416,25 +420,26 @@ public record ControlBinding<U extends Unit>(
      * @throws IllegalArgumentException when this is a velocity control or the angle unit cannot be known
      */
     public ControlBinding<U> armFf(double staticGain, double velocityGain, double gravityGain) {
-        return armFf(staticGain, velocityGain, gravityGain, 0.0);
+        return feedforward(FeedforwardGains.arm(staticGain, velocityGain, gravityGain));
     }
 
     /**
-     * Arm feedforward with a phase offset: {@code kG * cos(angle + gravityOffsetRadians)}. The offset is in
-     * radians and follows the convention of {@code MechanismModel.gravityVolts}. Use it when the encoder's zero
-     * is not horizontal: if the encoder reads {@code h} radians when the arm is horizontal, pass {@code -h}.
-     * The same rules as {@link #armFf(double, double, double)} apply to the angle unit.
+     * Arm feedforward with a phase offset: {@code kG * cos(angle + gravityOffset)}. The offset is an angle
+     * measure and follows the convention of {@code MechanismModel.gravityVolts}. Use it when the encoder's zero
+     * is not horizontal: if the encoder reads {@code h} when the arm is horizontal, pass {@code -h}. Any angle
+     * unit works (for example {@code Degrees.of(-30)}); it is converted to radians once. The same rules as
+     * {@link #armFf(double, double, double)} apply to the control's angle unit.
      *
      * @param staticGain static gain in volts
      * @param velocityGain velocity gain in volts per unit per second
      * @param gravityGain gravity amplitude in volts
-     * @param gravityOffsetRadians phase added to the angle, in radians; must be finite
+     * @param gravityOffset phase added to the angle; must be finite
      * @return binding with arm feedforward
      * @throws IllegalArgumentException when this is a velocity control or the angle unit cannot be known
      */
     public ControlBinding<U> armFf(double staticGain, double velocityGain, double gravityGain,
-            double gravityOffsetRadians) {
-        return feedforward(FeedforwardGains.arm(staticGain, velocityGain, gravityGain, gravityOffsetRadians));
+            Angle gravityOffset) {
+        return feedforward(FeedforwardGains.arm(staticGain, velocityGain, gravityGain, gravityOffset));
     }
 
     /** Adds static, velocity, acceleration, and gravity feedforward contributions measured in volts. */
@@ -492,7 +497,7 @@ public record ControlBinding<U extends Unit>(
                     + encoder.defaultName() + " measures " + measured.name() + ".");
         }
         throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of this feedback. Use an "
-                + "encoder declared with measures(...) or a typed control such as Controls.position(motor, Degrees).");
+                + "encoder declared with measures(...) or a typed control such as Controls.position(motor, Units.Rotations).followers(Degrees).");
     }
 
     public ControlBinding<U> constraint(Constraint<Double> constraint) {
@@ -635,29 +640,52 @@ public record ControlBinding<U extends Unit>(
         return mode == ControlMode.VELOCITY ? velocity() : position();
     }
 
-    /** Returns signed target error in this control's configured feedback units. */
-    public double error(double target) {
-        requireFinite(target, "Control target");
-        return target - measurement();
+    /**
+     * Returns the signed error {@code target - measurement} as a measure of this binding's unit. For a
+     * velocity binding the error is a rate (unit per second). The target must measure this binding's unit.
+     */
+    public Measure<?> error(Measure<?> target) {
+        requireUnit("Typed error");
+        double error = modeValue(target) - measurement();
+        return errorMeasure(error);
     }
 
-    /** Returns whether this control is currently within tolerance of a target. */
-    public boolean isAt(double target, double tolerance) {
+    private Measure<?> errorMeasure(double valueInUnit) {
+        double base = valueInUnit * UnitConversions.baseScale(unit);
+        return mode == ControlMode.VELOCITY
+                ? UnitConversions.perSecond(unit).ofBaseUnits(base)
+                : unit.ofBaseUnits(base);
+    }
+
+    /** Returns whether this control is currently within tolerance of a typed target. */
+    public boolean isAt(Measure<?> target, Measure<?> tolerance) {
+        return isAtValues(modeValue(target), modeValue(tolerance));
+    }
+
+    private boolean isAtValues(double target, double tolerance) {
         validateToleranceTarget(target, tolerance);
         return Math.abs(target - measurement()) <= tolerance;
     }
 
-    /** Returns a reusable condition that tracks whether this control is at a target. */
-    public BooleanSupplier at(double target, double tolerance) {
-        validateToleranceTarget(target, tolerance);
-        return () -> isAt(target, tolerance);
+    /** Returns a reusable condition that tracks whether this control is at a typed target. */
+    public BooleanSupplier at(Measure<?> target, Measure<?> tolerance) {
+        double targetValue = modeValue(target);
+        double toleranceValue = modeValue(tolerance);
+        validateToleranceTarget(targetValue, toleranceValue);
+        return () -> isAtValues(targetValue, toleranceValue);
     }
 
-    /** Returns a reusable condition for a dynamically supplied target. */
-    public BooleanSupplier at(DoubleSupplier target, double tolerance) {
+    /**
+     * Returns a reusable condition for a dynamically supplied target. The supplier is read in
+     * {@code targetUnit}, so the value is converted to this binding's unit with a precomputed factor.
+     */
+    public BooleanSupplier at(DoubleSupplier target, Unit targetUnit, Measure<?> tolerance) {
+        requireUnit("Typed targets");
         Objects.requireNonNull(target, "target");
-        validateTolerance(tolerance);
-        return () -> isAt(target.getAsDouble(), tolerance);
+        double factor = UnitConversions.factor(targetUnit, unit);
+        double toleranceValue = modeValue(tolerance);
+        validateTolerance(toleranceValue);
+        return () -> isAtValues(target.getAsDouble() * factor, toleranceValue);
     }
 
     /**
@@ -784,11 +812,10 @@ public record ControlBinding<U extends Unit>(
      */
     public SlipCheck slipCheck(EncoderDevice second, GearRatio ratio, Measure<?> tolerance) {
         requireUnit("Typed slip tolerance");
-        return slipCheck(second, ratio, valueIn(tolerance, unit));
+        return slipCheckValue(second, ratio, valueIn(tolerance, unit));
     }
 
-    /** Raw form of {@link #slipCheck(EncoderDevice, GearRatio, Measure)}; the tolerance is in binding units. */
-    public SlipCheck slipCheck(EncoderDevice second, GearRatio ratio, double tolerance) {
+    private SlipCheck slipCheckValue(EncoderDevice second, GearRatio ratio, double tolerance) {
         Objects.requireNonNull(second, "second");
         Objects.requireNonNull(ratio, "ratio");
         FeedbackBinding feedback = requireFeedback();
@@ -849,7 +876,8 @@ public record ControlBinding<U extends Unit>(
     }
 
     /** Converts typed constraints to this binding's unit; plain constraints pass through unchanged. */
-    private static List<Constraint<Double>> convertConstraints(List<Constraint<Double>> constraints, Unit unit) {
+    private static List<Constraint<Double>> convertConstraints(List<Constraint<Double>> constraints, Unit unit,
+            boolean velocityControl) {
         if (constraints == null) {
             return List.of();
         }
@@ -859,9 +887,9 @@ public record ControlBinding<U extends Unit>(
             if (constraint instanceof UnitConstraint typed) {
                 if (unit == null) {
                     throw new IllegalStateException("Typed constraints require a unit-typed control binding "
-                            + "(Controls.position(motor, unit)).");
+                            + "(Controls.position(motor, Units.Rotations).followers(unit)).");
                 }
-                converted.add(typed.expressedIn(unit));
+                converted.add(typed.expressedIn(unit, velocityControl));
             } else {
                 converted.add(constraint);
             }
@@ -892,7 +920,7 @@ public record ControlBinding<U extends Unit>(
     private void requireUnit(String feature) {
         if (unit == null) {
             throw new IllegalStateException(feature + " require a unit-typed control binding "
-                    + "(Controls.position(motor, unit) or Controls.velocity(motor, unit)).");
+                    + "(Controls.position(motor, Units.Rotations).followers(unit) or Controls.velocity(motor, Units.Rotations).followers(unit)).");
         }
     }
 
@@ -979,67 +1007,60 @@ public record ControlBinding<U extends Unit>(
                 release);
     }
 
-    public Action set(double target) {
-        return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
-    }
-
-    public Action set(DoubleSupplier target) {
-        return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
-    }
-
-    /** Creates an interpolated position or velocity action for this binding. */
-    public InterpolatedControlAction interpolate(InterpolationModel model, DoubleSupplier input) {
-        requireOutput();
-        return new InterpolatedControlAction(
-                this,
-                Objects.requireNonNull(model, "model"),
-                Objects.requireNonNull(input, "input"));
-    }
-
     /** Creates interpolation whose segments use the same mapping contract as controller axes. */
-    public InterpolatedControlAction interpolate(CurveMapping mapping, DoubleSupplier input) {
+    public InterpolatedControlAction interpolate(CurveMapping mapping, DoubleSupplier input, Unit inputUnit) {
         return interpolate(InterpolationKinds.curved(
-                Objects.requireNonNull(mapping, "mapping")), input);
+                Objects.requireNonNull(mapping, "mapping")), input, inputUnit);
     }
 
     /**
      * Typed position target. The measure must measure this binding's unit (for example
-     * {@code Degrees.of(90)} for a binding created with {@code Controls.position(motor, Degrees)}).
+     * {@code Degrees.of(90)} for a binding created with {@code Controls.position(motor, Units.Rotations).followers(Degrees)}).
      * Conversion happens here, at declaration.
      */
     public Action position(Measure<?> position) {
         requireUnit("Typed position targets");
-        return position(valueIn(position, unit));
+        requireMode(ControlMode.POSITION, "Position targets");
+        return positionTarget(valueIn(position, unit));
     }
 
     /** Typed velocity target, expressed as a rate of this binding's unit per second. */
     public Action velocity(Measure<?> velocity) {
         requireUnit("Typed velocity targets");
-        return velocity(rateIn(velocity, unit));
+        requireMode(ControlMode.VELOCITY, "Velocity targets");
+        return velocityTarget(rateIn(velocity, unit));
+    }
+
+    /** Typed target for whichever mode this binding controls: a position, or a velocity for velocity bindings. */
+    public Action set(Measure<?> target) {
+        return mode == ControlMode.VELOCITY ? velocity(target) : position(target);
+    }
+
+    /** Dynamic typed target for whichever mode this binding controls; {@code targetUnit} states the supplied unit. */
+    public Action set(DoubleSupplier target, Unit targetUnit) {
+        return mode == ControlMode.VELOCITY ? velocity(target, targetUnit) : position(target, targetUnit);
     }
 
     /**
      * Dynamic position target supplied in {@code positionUnit}. The value is converted to this
-     * binding's unit with a precomputed factor, so the robot loop does not allocate.
+     * binding's unit with a precomputed factor, so the robot loop does not allocate. The unit must
+     * measure the same dimension as this binding (an angle for an angle binding, and so on).
      */
-    public Action position(DoubleSupplier position, U positionUnit) {
+    public Action position(DoubleSupplier position, Unit positionUnit) {
         requireUnit("Typed position targets");
+        requireMode(ControlMode.POSITION, "Position targets");
         double factor = UnitConversions.factor(positionUnit, unit);
         Objects.requireNonNull(position, "position");
-        return position(() -> position.getAsDouble() * factor);
+        return positionTarget(() -> position.getAsDouble() * factor);
     }
 
     /** Dynamic velocity target supplied as unit-per-second values in {@code velocityUnit}. */
-    public Action velocity(DoubleSupplier velocity, U velocityUnit) {
+    public Action velocity(DoubleSupplier velocity, Unit velocityUnit) {
         requireUnit("Typed velocity targets");
+        requireMode(ControlMode.VELOCITY, "Velocity targets");
         double factor = UnitConversions.factor(velocityUnit, unit);
         Objects.requireNonNull(velocity, "velocity");
-        return velocity(() -> velocity.getAsDouble() * factor);
-    }
-
-    /** Returns a reusable condition that tracks whether this control is at a typed target. */
-    public BooleanSupplier at(Measure<?> target, Measure<?> tolerance) {
-        return at(modeValue(target), modeValue(tolerance));
+        return velocityTarget(() -> velocity.getAsDouble() * factor);
     }
 
     /** Typed form of {@link #interpolate(InterpolationModel, DoubleSupplier)} with a unit on the input. */
@@ -1063,15 +1084,18 @@ public record ControlBinding<U extends Unit>(
         return Actions.percent(this, finiteSupplier(percent, "Control percent", false));
     }
 
-    public Action voltage(double volts) {
+    /** Typed voltage output: the motor voltage the loop drives while this action runs. */
+    public Action voltage(Voltage volts) {
         requireOutput();
-        requireFinite(volts, "Control voltage");
-        return Actions.voltage(this, volts);
+        return Actions.voltage(this, valueIn(volts, Units.Volts));
     }
 
-    public Action voltage(DoubleSupplier volts) {
+    /** Dynamic typed voltage output; {@code voltsUnit} states the unit the supplier reads in. */
+    public Action voltage(DoubleSupplier volts, VoltageUnit voltsUnit) {
         requireOutput();
-        return Actions.voltage(this, finiteSupplier(volts, "Control voltage", false));
+        Objects.requireNonNull(volts, "volts");
+        double factor = UnitConversions.factor(voltsUnit, Units.Volts);
+        return Actions.voltage(this, finiteSupplier(() -> volts.getAsDouble() * factor, "Control voltage", false));
     }
 
     /** Stops driving this control and applies the motor's configured neutral mode. */
@@ -1080,27 +1104,27 @@ public record ControlBinding<U extends Unit>(
         return Actions.neutral(this);
     }
 
-    public Action position(double position) {
+    private Action positionTarget(double position) {
         requireOutput();
         requireMode(ControlMode.POSITION, "Position targets");
         requireFinite(position, "Control position");
         return Actions.position(this, position);
     }
 
-    public Action position(DoubleSupplier position) {
+    private Action positionTarget(DoubleSupplier position) {
         requireOutput();
         requireMode(ControlMode.POSITION, "Position targets");
         return Actions.position(this, finiteSupplier(position, "Control position", true));
     }
 
-    public Action velocity(double velocity) {
+    private Action velocityTarget(double velocity) {
         requireOutput();
         requireMode(ControlMode.VELOCITY, "Velocity targets");
         requireFinite(velocity, "Control velocity");
         return Actions.velocity(this, velocity);
     }
 
-    public Action velocity(DoubleSupplier velocity) {
+    private Action velocityTarget(DoubleSupplier velocity) {
         requireOutput();
         requireMode(ControlMode.VELOCITY, "Velocity targets");
         return Actions.velocity(this, finiteSupplier(velocity, "Control velocity", true));

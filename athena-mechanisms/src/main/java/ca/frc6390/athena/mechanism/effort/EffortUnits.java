@@ -76,7 +76,7 @@ public final class EffortUnits {
             default:
                 accepted = kind == Kind.CURRENT;
                 message = "Untyped control accepts Current (A) effort only, not " + unit.name()
-                        + ". Declare a unit (Controls.position(motor, unit)) for torque or force.";
+                        + ". Declare a unit (Controls.position(motor, Units.Rotations).followers(unit)) for torque or force.";
                 break;
         }
         if (!accepted) {

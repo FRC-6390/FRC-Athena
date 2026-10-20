@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.constraint;
 
+import edu.wpi.first.units.Units;
+
 import edu.wpi.first.units.Unit;
 
 /**
@@ -18,9 +20,25 @@ public interface UnitConstraint extends Constraint<Double> {
      */
     Constraint<Double> expressedIn(Unit unit);
 
+    /**
+     * Returns the constraint for a binding of the given mode. A position binding uses {@link #expressedIn(Unit)}.
+     * A velocity binding's targets are rates, so the default expresses the limits in {@code unit} per second
+     * (a range bounds the velocity target). Motion limits override this: in velocity mode they are an
+     * acceleration and its rate (jerk), not a velocity and an acceleration.
+     *
+     * @param unit unit of the control binding (the position unit for a velocity binding)
+     * @param velocityControl true when the binding is a velocity control
+     * @return converted constraint
+     */
+    default Constraint<Double> expressedIn(Unit unit, boolean velocityControl) {
+        return velocityControl
+                ? expressedIn(ca.frc6390.athena.hardware.units.UnitConversions.perSecond(unit))
+                : expressedIn(unit);
+    }
+
     @Override
     default ConstraintResult<Double> evaluate(ConstraintContext<Double> context) {
         throw new IllegalStateException("Typed constraints must be attached to a unit-typed control binding "
-                + "(Controls.position(motor, unit)) before evaluation.");
+                + "(Controls.position(motor, Units.Rotations).followers(unit)) before evaluation.");
     }
 }

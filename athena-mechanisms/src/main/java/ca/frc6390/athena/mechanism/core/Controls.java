@@ -1,19 +1,20 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.runtime.control.ControlSink;
 import edu.wpi.first.units.AngleUnit;
+import edu.wpi.first.units.DimensionlessUnit;
 import edu.wpi.first.units.DistanceUnit;
+import edu.wpi.first.units.Unit;
 
 /**
- * Factories for control bindings.
+ * Factories for control bindings. Every binding declares the WPILib unit its targets, feedback and
+ * constraints are expressed in. Use {@code Units.Value} for a dimensionless binding.
  */
 public final class Controls {
     private Controls() {
-    }
-
-    public static ControlBinding<?> position(MotorDevice output) {
-        return of(ControlMode.POSITION).output(output);
     }
 
     /**
@@ -32,18 +33,24 @@ public final class Controls {
         return typed(ControlMode.POSITION, unit).output(output);
     }
 
-    /** Creates a position control whose calculated result is applied to a scalar destination. */
-    public static ControlBinding<?> position(ControlSink output) {
-        return of(ControlMode.POSITION).output(output);
+    /** Creates a dimensionless position control, for example one whose targets are a plain ratio. */
+    public static ControlBinding<DimensionlessUnit> position(MotorDevice output, DimensionlessUnit unit) {
+        return typed(ControlMode.POSITION, unit).output(output);
     }
 
-    /** Creates one position control that commands every supplied motor. */
-    public static ControlBinding<?> position(MotorDevice output, MotorDevice... additionalOutputs) {
-        return outputs(ControlMode.POSITION, output, additionalOutputs);
+    /** Creates a rotary position control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<AngleUnit> position(ControlSink output, AngleUnit unit) {
+        return typed(ControlMode.POSITION, unit).output(output);
     }
 
-    public static ControlBinding<?> velocity(MotorDevice output) {
-        return of(ControlMode.VELOCITY).output(output);
+    /** Creates a linear position control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<DistanceUnit> position(ControlSink output, DistanceUnit unit) {
+        return typed(ControlMode.POSITION, unit).output(output);
+    }
+
+    /** Creates a dimensionless position control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<DimensionlessUnit> position(ControlSink output, DimensionlessUnit unit) {
+        return typed(ControlMode.POSITION, unit).output(output);
     }
 
     /**
@@ -62,30 +69,29 @@ public final class Controls {
         return typed(ControlMode.VELOCITY, unit).output(output);
     }
 
-    /** Creates a velocity control whose calculated result is applied to a scalar destination. */
-    public static ControlBinding<?> velocity(ControlSink output) {
-        return of(ControlMode.VELOCITY).output(output);
+    /** Creates a dimensionless velocity control: targets are per-second rates of a plain ratio. */
+    public static ControlBinding<DimensionlessUnit> velocity(MotorDevice output, DimensionlessUnit unit) {
+        return typed(ControlMode.VELOCITY, unit).output(output);
     }
 
-    /** Creates one velocity control that commands every supplied motor. */
-    public static ControlBinding<?> velocity(MotorDevice output, MotorDevice... additionalOutputs) {
-        return outputs(ControlMode.VELOCITY, output, additionalOutputs);
+    /** Creates a rotary velocity control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<AngleUnit> velocity(ControlSink output, AngleUnit unit) {
+        return typed(ControlMode.VELOCITY, unit).output(output);
     }
 
-    static ControlBinding<?> of(ControlMode mode) {
-        return new ControlBinding<>(mode, null, 0, null, null, null, null);
+    /** Creates a linear velocity control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<DistanceUnit> velocity(ControlSink output, DistanceUnit unit) {
+        return typed(ControlMode.VELOCITY, unit).output(output);
     }
 
-    private static <U extends edu.wpi.first.units.Unit> ControlBinding<U> typed(ControlMode mode, U unit) {
+    /** Creates a dimensionless velocity control whose calculated result is applied to a scalar destination. */
+    public static ControlBinding<DimensionlessUnit> velocity(ControlSink output, DimensionlessUnit unit) {
+        return typed(ControlMode.VELOCITY, unit).output(output);
+    }
+
+    private static <U extends Unit> ControlBinding<U> typed(ControlMode mode, U unit) {
         java.util.Objects.requireNonNull(unit, "unit");
         return new ControlBinding<>(mode, null, 0, null, null, null, null, null, null, null, null,
                 false, null, null, unit, null, null, null);
-    }
-
-    private static ControlBinding<?> outputs(
-            ControlMode mode,
-            MotorDevice output,
-            MotorDevice... additionalOutputs) {
-        return of(mode).output(output).followers(additionalOutputs);
     }
 }
