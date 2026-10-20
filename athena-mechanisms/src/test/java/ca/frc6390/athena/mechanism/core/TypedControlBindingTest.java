@@ -250,6 +250,19 @@ class TypedControlBindingTest {
                 .constraint(Constraints.range(Units.RotationsPerSecond.of(-200.0), Units.RotationsPerSecond.of(200.0))));
     }
 
+    /** A runtime value on an interpolation point is stated in the binding's own unit (per second for velocity). */
+    @Test
+    void interpolationRuntimeValuesUseTheBindingUnit() {
+        double[] rps = {4.0};
+        var wheel = Controls.velocity(motor(), Units.Rotations);
+        var table = wheel.interpolate(InterpolationKinds.LINEAR, () -> 1.0, Units.Meters)
+                .at(Units.Meters.of(1.0), () -> rps[0], Units.Rotations)
+                .at(Units.Meters.of(3.0), Units.RotationsPerSecond.of(10.0));
+        assertEquals(4.0, table.target(), 1.0e-9);
+        assertThrows(IllegalArgumentException.class, () -> wheel.interpolate(InterpolationKinds.LINEAR, () -> 1.0, Units.Meters)
+                .at(Units.Meters.of(1.0), () -> rps[0], Units.RotationsPerSecond));
+    }
+
     /** Equivalence: the same physical key gives the same target whether the input is read in inches or meters. */
     @Test
     void interpolationKeyInInchesAndMetersGivesTheSameTarget() {

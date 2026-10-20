@@ -134,10 +134,11 @@ The key can be sampled at runtime, with each value stated in its own unit:
 
 ```java
 wheel.interpolate(InterpolationKinds.LINEAR, () -> distanceInches, Units.Inches)
-        .at(Units.Inches.of(40.0), () -> rpsCommand, Units.RotationsPerSecond)
+        .at(Units.Inches.of(40.0), () -> rpsCommand, Units.Rotations)
 ```
 
-`at(Measure, DoubleSupplier, Unit)` takes a fixed point with a runtime value;
+`at(Measure, DoubleSupplier, Unit)` takes a fixed point with a runtime value. The value unit is the binding's unit
+(`Units.Rotations` for a velocity binding, which then reads rotations per second);
 `at(DoubleSupplier, Unit, DoubleSupplier, Unit)` takes both at runtime.
 
 ## Mismatch errors
