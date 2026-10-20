@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.effort;
 
+import edu.wpi.first.units.measure.Current;
+import edu.wpi.first.units.measure.Voltage;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
 import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -370,7 +372,7 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (known.isPresent()) {
                 MotorConstants motor = known.get();
                 double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
-                double backEmf = omega / motor.speedConstantRadPerSecPerVolt();
+                double backEmf = omega / motor.raw().speedConstantRadPerSecPerVolt();
                 double span = limitAmps * motor.resistance().in(Units.Ohms);
                 lower = Math.max(lower, backEmf - span);
                 upper = Math.min(upper, backEmf + span);
@@ -435,7 +437,7 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (motor == null) {
                 return Double.NaN;
             }
-            torque += loadVolts * motor.torqueConstantNmPerAmp() / motor.resistance().in(Units.Ohms);
+            torque += loadVolts * motor.raw().torqueConstantNmPerAmp() / motor.resistance().in(Units.Ohms);
         }
         return torque * declaration.effort().gearing();
     }
@@ -451,7 +453,7 @@ public final class EffortRuntime implements ControlLoopRuntime {
             if (motor == null || !Double.isFinite(activeAmps[i])) {
                 return Double.NaN;
             }
-            torque += activeAmps[i] * motor.torqueConstantNmPerAmp() * declaration.effort().gearing();
+            torque += activeAmps[i] * motor.raw().torqueConstantNmPerAmp() * declaration.effort().gearing();
         }
         if (declaration.kind() == EffortUnits.Kind.FORCE) {
             return torque / Units.Meters.fromBaseUnits(declaration.effort().radius().baseUnitMagnitude());

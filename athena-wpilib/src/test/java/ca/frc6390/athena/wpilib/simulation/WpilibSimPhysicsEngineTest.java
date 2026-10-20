@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.simulation;
 
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 
@@ -50,7 +52,7 @@ class WpilibSimPhysicsEngineTest {
         session.hardwareGraph().motor(motor).setVoltage(12.0);
         session.step(Units.Seconds.of(1.0));
 
-        double wheelMetersPerSecond = driveDistance.velocityFromRotationsPerSecond(
+        double wheelMetersPerSecond = driveDistance.raw().velocityFromRotationsPerSecond(
                 session.encoder(driveDistance).velocityRotationsPerSecond());
         assertTrue(wheelMetersPerSecond > 4.0,
                 "MK5N R3 wheel speed was incorrectly reduced twice: " + wheelMetersPerSecond);
@@ -228,7 +230,7 @@ class WpilibSimPhysicsEngineTest {
         SimulationSession session = SimulationSession.create()
                 .physicsEngine(new WpilibSimPhysicsEngine());
         Localization localization = Localizations.latestValid()
-                .input(Measurements.poses(session::pose));
+                .input(Measurements.poses(() -> new Pose2d(session.pose().xMeters(), session.pose().yMeters(), new Rotation2d(session.pose().headingRadians()))));
         RobotRuntime runtime = RobotRuntime.simulated(session)
                 .register(drive)
                 .localization(localization);
@@ -238,9 +240,9 @@ class WpilibSimPhysicsEngineTest {
         runtime.simulationPeriodic(0.02, 1.0);
 
         assertTrue(session.pose().xMeters() > 0.0);
-        assertEquals(session.pose().xMeters(), localization.pose().xMeters(), 1.0e-9);
-        assertEquals(session.pose().yMeters(), localization.pose().yMeters(), 1.0e-9);
-        assertEquals(session.pose().headingRadians(), localization.pose().headingRadians(), 1.0e-9);
+        assertEquals(session.pose().xMeters(), localization.pose().getX(), 1.0e-9);
+        assertEquals(session.pose().yMeters(), localization.pose().getY(), 1.0e-9);
+        assertEquals(session.pose().headingRadians(), localization.pose().getRotation().getRadians(), 1.0e-9);
     }
 
     private static SimulationSession sessionWith(String name, SimModel model) {

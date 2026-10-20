@@ -134,7 +134,7 @@ public final class EffortUnits {
                 throw new IllegalArgumentException(name + " effort needs torque constants for motor "
                         + motor.defaultName() + " — use Amps for this motor kind.");
             }
-            amps[i] = torque / (count * gearing * constants.get().torqueConstantNmPerAmp());
+            amps[i] = torque / (count * gearing * constants.get().raw().torqueConstantNmPerAmp());
         }
         return amps;
     }
@@ -155,7 +155,7 @@ public final class EffortUnits {
             if (constants.isEmpty() || !Double.isFinite(amps[i])) {
                 return Double.NaN;
             }
-            torque += amps[i] * constants.get().torqueConstantNmPerAmp() * gearing;
+            torque += amps[i] * constants.get().raw().torqueConstantNmPerAmp() * gearing;
         }
         return torque;
     }

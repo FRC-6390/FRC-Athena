@@ -80,7 +80,7 @@ public final class SingleJointArm implements Mechanism {
     private final SimModel simulation = SimModel.arm(motor).encoder(encoder).model(model);
 
     /** Checks exist because the binding has a model. Thresholds and debounce are overridable. */
-    public final BindingCheck blocked = control.blocked().threshold(1.5).forSeconds(0.25);
+    public final BindingCheck blocked = control.blocked().threshold(1.5).forTime(edu.wpi.first.units.Units.Seconds.of(0.25));
     public final DoubleSupplier load = control.load();
 
     /** Stow completes before a newer request can take the arm (bounded by atMost). */

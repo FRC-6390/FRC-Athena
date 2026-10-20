@@ -114,7 +114,7 @@ class PhotonVisionSimulationProviderTest {
     void simulatedCameraCapturedBeforeBindingFeedsLocalizationThroughRuntimeCache() {
         CameraDevice camera = Cameras.photonVision("localization-front")
                 .mount(Meters.of(0.0), Meters.of(0.0), Meters.of(0.5), Degrees.of(0.0), Degrees.of(0.0), Degrees.of(0.0));
-        var declaredPose = camera.pose().singleTagStdDevs(0.2, 0.2, 0.1);
+        var declaredPose = camera.pose().singleTagStdDevs(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
         Localization localization = Localizations.latestValid().input(declaredPose);
         VisionSimulation simulation = new PhotonVisionSimulationProvider().create(
                 List.of(camera),
@@ -127,8 +127,8 @@ class PhotonVisionSimulationProviderTest {
         graph.refresh();
         localization.refresh(ActionContext.empty(), 1.0, 0.02);
 
-        assertEquals(2.0, localization.pose().xMeters(), 1.0e-9);
-        assertEquals(2.0, localization.pose().yMeters(), 1.0e-9);
+        assertEquals(2.0, localization.pose().getX(), 1.0e-9);
+        assertEquals(2.0, localization.pose().getY(), 1.0e-9);
         assertEquals(1, localization.acceptedMeasurements().size());
     }
 }

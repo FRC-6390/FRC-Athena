@@ -1,5 +1,7 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.Hertz;
 import static edu.wpi.first.units.Units.Meters;
@@ -267,19 +269,19 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
             double latencySeconds = Math.max(0.0, latencyMeanMs + jitterMs * latencyNoise) / 1000.0;
 
             PoseMeasurementSample pose = Measurements.pose(measured)
-                    .timing(captureSeconds, latencySeconds)
+                    .timing(Seconds.of(captureSeconds), Seconds.of(latencySeconds))
                     .visionMetadata(ambiguity, targetCount, averageDistance)
                     .source(camera);
             if (modelled) {
-                pose = pose.stdDevs(MeasurementStdDevs.of(sigmaXy, sigmaXy, sigmaHeading));
+                pose = pose.stdDevs(MeasurementStdDevs.of(Meters.of(sigmaXy), Meters.of(sigmaXy), Radians.of(sigmaHeading)));
             }
             List<Measurement> targets = visible.stream()
                     .map(VisibleTarget::measurement)
                     .map(target -> (Measurement) Measurements.target(
                             target.fiducialId(),
-                            target.yawDegrees(),
-                            target.pitchDegrees(),
-                            target.distanceMeters(),
+                            Degrees.of(target.yawDegrees()),
+                            Degrees.of(target.pitchDegrees()),
+                            Meters.of(target.distanceMeters()),
                             target.confidence()))
                     .toList();
             channel.pending.add(new PendingFrame(captureSeconds + latencySeconds, channel.sequence++, pose, targets));
@@ -358,9 +360,9 @@ public final class PhotonVisionSimulationProvider implements VisionSimulationPro
                     .map(VisibleTarget::measurement)
                     .map(target -> (Measurement) Measurements.target(
                             target.fiducialId(),
-                            target.yawDegrees(),
-                            target.pitchDegrees(),
-                            target.distanceMeters(),
+                            Degrees.of(target.yawDegrees()),
+                            Degrees.of(target.pitchDegrees()),
+                            Meters.of(target.distanceMeters()),
                             target.confidence()))
                     .toList();
         }

@@ -1007,7 +1007,7 @@ final class OutputApplier {
     private Output limitEffort(ControlRuntimeState state, Output requested, Output candidate, double dtSeconds,
             double position, double velocity) {
         double actionLimit = requested instanceof EffortCarrier carrier
-                ? carrier.effort().currentLimitAmps()
+                ? carrier.effort().limitValue()
                 : Double.POSITIVE_INFINITY;
         List<MotorDevice> leaders = state.binding.motors();
         for (int i = 0; i < state.powerCaps.length; i++) {
@@ -1035,7 +1035,7 @@ final class OutputApplier {
             return output;
         }
         double actionLimit = output instanceof EffortCarrier carrier
-                ? carrier.effort().currentLimitAmps()
+                ? carrier.effort().limitValue()
                 : Double.POSITIVE_INFINITY;
         double volts = output instanceof Output.Voltage voltage ? voltage.volts()
                 : ((Output.Percent) output).percent() * EffortUnits.NOMINAL_VOLTS;
@@ -1349,12 +1349,12 @@ final class OutputApplier {
         if (feedback == null) {
             return true;
         }
-        if (!(feedback.position() instanceof EncoderDevice position)
-                || !(feedback.velocity() instanceof EncoderDevice velocity)
-                || !position.equals(velocity)) {
+        if (!(feedback.position() instanceof EncoderDevice.PositionFeedback position)
+                || !(feedback.velocity() instanceof EncoderDevice.VelocityFeedback velocity)
+                || !position.encoder().equals(velocity.encoder())) {
             return false;
         }
-        return isNativeFeedback(control.output(), position);
+        return isNativeFeedback(control.output(), position.encoder());
     }
 
     private static boolean isNativeFeedback(MotorDevice output, EncoderDevice feedback) {

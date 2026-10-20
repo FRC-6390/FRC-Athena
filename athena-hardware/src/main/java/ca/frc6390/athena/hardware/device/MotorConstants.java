@@ -112,12 +112,12 @@ public record MotorConstants(
 
     /**
      * Per-cycle primitive for {@link #expectedUnloadedSpeed(Voltage)}, in radians per second and volts.
-     * Athena's hot paths call this to avoid allocating measures; teams should use the typed method.
+     * Athena's hot paths call this to avoid allocating measures; robot code should use the typed method.
      *
      * @param appliedVolts applied voltage in volts
      * @return expected unloaded speed in radians per second
      */
-    public double expectedUnloadedSpeedRadPerSec(double appliedVolts) {
+    double expectedUnloadedSpeedRadPerSec(double appliedVolts) {
         return (appliedVolts - freeCurrent.in(Units.Amps) * resistance.in(Units.Ohms))
                 * speedConstantRadPerSecPerVolt();
     }
@@ -128,7 +128,7 @@ public record MotorConstants(
      *
      * @return torque constant in newton-metres per amp
      */
-    public double torqueConstantNmPerAmp() {
+    double torqueConstantNmPerAmp() {
         return stallTorque.in(Units.NewtonMeters) / stallCurrent.in(Units.Amps);
     }
 
@@ -138,7 +138,7 @@ public record MotorConstants(
      *
      * @return speed constant in radians per second per volt
      */
-    public double speedConstantRadPerSecPerVolt() {
+    double speedConstantRadPerSecPerVolt() {
         double backEmfAtFree = nominalVoltage.in(Units.Volts)
                 - resistance.in(Units.Ohms) * freeCurrent.in(Units.Amps);
         return freeSpeed.in(Units.RadiansPerSecond) / backEmfAtFree;
@@ -153,6 +153,38 @@ public record MotorConstants(
     private static void requireNonNegative(double value, String name) {
         if (!Double.isFinite(value) || value < 0.0) {
             throw new IllegalArgumentException("Motor " + name + " must be non-negative and finite.");
+        }
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive constants for Athena's hot paths in the units the names state.
+     * Robot code uses the typed accessors (expectedUnloadedSpeed(Voltage), ...).
+     */
+    public static final class Raw {
+        private final MotorConstants owner;
+
+        private Raw(MotorConstants owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see MotorConstants#expectedUnloadedSpeedRadPerSec. */
+        public double expectedUnloadedSpeedRadPerSec(double appliedVolts) {
+            return owner.expectedUnloadedSpeedRadPerSec(appliedVolts);
+        }
+
+        /** Internal: see MotorConstants#torqueConstantNmPerAmp. */
+        public double torqueConstantNmPerAmp() {
+            return owner.torqueConstantNmPerAmp();
+        }
+
+        /** Internal: see MotorConstants#speedConstantRadPerSecPerVolt. */
+        public double speedConstantRadPerSecPerVolt() {
+            return owner.speedConstantRadPerSecPerVolt();
         }
     }
 }

@@ -1,5 +1,13 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.Seconds;
+
+import static edu.wpi.first.units.Units.Meters;
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.Radians;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -21,8 +29,8 @@ class MeasurementSignalPolicyTest {
         Measurement stale = timedPose(8.0, 0.04);
         Measurement slow = timedPose(9.8, 0.20);
         MeasurementSignal signal = Measurements.measurements(() -> List.of(fresh, stale, slow))
-                .latencyLimit(0.05)
-                .maxAge(10.0, 1.0)
+                .latencyLimit(Seconds.of(0.05))
+                .maxAge(Seconds.of(10.0), Seconds.of(1.0))
                 .enabled(() -> true);
 
         assertEquals(List.of(fresh), signal.measurements());
@@ -33,7 +41,7 @@ class MeasurementSignalPolicyTest {
 
     @Test
     void stdDevsApplyToPoseMeasurements() {
-        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.3, 0.4);
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.3), Radians.of(0.4));
         MeasurementSignal signal = Measurements.measurement(() -> timedPose(1.0, 0.0)).stdDevs(stdDevs);
 
         Measurement measurement = signal.latestMeasurement().orElseThrow();
@@ -43,12 +51,12 @@ class MeasurementSignalPolicyTest {
 
     @Test
     void stdDevValuesCanBeConfiguredWithoutASettingsObject() {
-        MeasurementSignal signal = Measurements.measurement(() -> timedPose(1.0, 0.0)).stdDevs(0.2, 0.4);
+        MeasurementSignal signal = Measurements.measurement(() -> timedPose(1.0, 0.0)).stdDevs(Meters.of(0.2), Radians.of(0.4));
 
         PoseMeasurementSample pose = assertInstanceOf(
                 PoseMeasurementSample.class,
                 signal.latestMeasurement().orElseThrow());
-        assertEquals(MeasurementStdDevs.of(0.2, 0.2, 0.4), pose.stdDevs());
+        assertEquals(MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.4)), pose.stdDevs());
     }
 
     @Test
@@ -106,20 +114,20 @@ class MeasurementSignalPolicyTest {
 
     @Test
     void robotVelocityConvertsFieldRelativeAndClampsMagnitude() {
-        RobotVelocity robot = RobotVelocity.field(2.0, 0.0, 3.0).fieldToRobot(Math.PI / 2.0);
+        RobotVelocity robot = RobotVelocity.field(MetersPerSecond.of(2.0), MetersPerSecond.of(0.0), RadiansPerSecond.of(3.0)).fieldToRobot(Rotation2d.fromRadians(Math.PI / 2.0));
 
-        assertEquals(0.0, robot.xMetersPerSecond(), 1.0e-9);
-        assertEquals(-2.0, robot.yMetersPerSecond(), 1.0e-9);
-        assertEquals(3.0, robot.angularRadiansPerSecond(), 1.0e-9);
+        assertEquals(0.0, robot.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(-2.0, robot.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(3.0, robot.raw().angularRadiansPerSecond(), 1.0e-9);
 
-        RobotVelocity clamped = new RobotVelocity(3.0, 4.0, -5.0).clamp(2.5, 1.25);
-        assertEquals(1.5, clamped.xMetersPerSecond(), 1.0e-9);
-        assertEquals(2.0, clamped.yMetersPerSecond(), 1.0e-9);
-        assertEquals(-1.25, clamped.angularRadiansPerSecond(), 1.0e-9);
+        RobotVelocity clamped = RobotVelocity.robot(MetersPerSecond.of(3.0), MetersPerSecond.of(4.0), RadiansPerSecond.of(-5.0)).clamp(MetersPerSecond.of(2.5), RadiansPerSecond.of(1.25));
+        assertEquals(1.5, clamped.raw().xMetersPerSecond(), 1.0e-9);
+        assertEquals(2.0, clamped.raw().yMetersPerSecond(), 1.0e-9);
+        assertEquals(-1.25, clamped.raw().angularRadiansPerSecond(), 1.0e-9);
     }
 
     private static Measurement timedPose(double timestampSeconds, double latencySeconds) {
         return ((PoseMeasurement) Measurements.pose(new PoseSnapshot(timestampSeconds, 0.0, 0.0)))
-                .timing(timestampSeconds, latencySeconds);
+                .timing(Seconds.of(timestampSeconds), Seconds.of(latencySeconds));
     }
 }

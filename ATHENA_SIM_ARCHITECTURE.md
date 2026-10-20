@@ -230,7 +230,7 @@ The default Athena runtime path is deterministic and single-threaded. Optional w
 Workers are for snapshot-producing tasks such as fast signal sampling, vision/localization input refresh, or other read/compute work. They must not own motor writes, Action routing, hook execution, or autonomous lifecycle. Those stay in the single `RobotRuntime` periodic path.
 
 ```java
-runtime.fastSignalSampling(0.005, scheduler);
+runtime.fastSignalSampling(Milliseconds.of(5), scheduler);
 ```
 
 The scheduler is caller-owned. Athena cancels the worker tasks it starts, but it does not shut down a scheduler it did not create.

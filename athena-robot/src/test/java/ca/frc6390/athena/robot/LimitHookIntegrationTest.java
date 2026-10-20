@@ -175,7 +175,7 @@ class LimitHookIntegrationTest {
         }
 
         private double encoderPosition() {
-            return arm.encoder.positionFromRotations(
+            return arm.encoder.raw().positionFromRotations(
                     runtime.hardwareGraph().encoder(arm.encoder).positionRotations());
         }
 

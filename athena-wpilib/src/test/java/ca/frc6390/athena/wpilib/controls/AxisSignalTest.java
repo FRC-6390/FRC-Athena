@@ -13,7 +13,7 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.mechanism.core.Controls;
 import ca.frc6390.athena.mechanism.core.InterpolatedControlAction;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import org.junit.jupiter.api.Test;
 
 class AxisSignalTest {
@@ -200,11 +200,11 @@ class AxisSignalTest {
         interpolation.telemetry().get("Config/Curve/Expo").set(1.0);
         assertEquals(0.125, axis.value(), 1.0e-9);
         assertEquals(12.5, interpolation.target(), 1.0e-9);
-        Point2d[] axisGraph = (Point2d[]) axis.telemetry().get("Visualization/Curve").value();
-        Point2d[] interpolationGraph =
-                (Point2d[]) interpolation.telemetry().get("Visualization/Curve").value();
-        assertEquals(0.125, axisGraph[30].y(), 1.0e-9);
-        assertEquals(12.5, interpolationGraph[8].y(), 1.0e-9);
+        Translation2d[] axisGraph = (Translation2d[]) axis.telemetry().get("Visualization/Curve").value();
+        Translation2d[] interpolationGraph =
+                (Translation2d[]) interpolation.telemetry().get("Visualization/Curve").value();
+        assertEquals(0.125, axisGraph[30].getY(), 1.0e-9);
+        assertEquals(12.5, interpolationGraph[8].getY(), 1.0e-9);
     }
 
     @Test
@@ -250,19 +250,19 @@ class AxisSignalTest {
         axis.value();
         Map<String, ca.frc6390.athena.mechanism.core.TelemetryValue> telemetry = axis.telemetry();
 
-        Point2d[] curve = (Point2d[]) telemetry.get("Visualization/Curve").value();
-        Point2d rawMarker = ((Point2d[]) telemetry.get("Visualization/Raw").value())[0];
-        Point2d mappedMarker = ((Point2d[]) telemetry.get("Visualization/Mapped").value())[0];
-        Point2d outputMarker = ((Point2d[]) telemetry.get("Visualization/Output").value())[0];
+        Translation2d[] curve = (Translation2d[]) telemetry.get("Visualization/Curve").value();
+        Translation2d rawMarker = ((Translation2d[]) telemetry.get("Visualization/Raw").value())[0];
+        Translation2d mappedMarker = ((Translation2d[]) telemetry.get("Visualization/Mapped").value())[0];
+        Translation2d outputMarker = ((Translation2d[]) telemetry.get("Visualization/Output").value())[0];
 
         assertEquals(41, curve.length);
-        assertEquals(0.5, rawMarker.x(), 1.0e-9);
-        assertEquals(0.0, rawMarker.y(), 1.0e-9);
-        assertEquals(0.25, mappedMarker.y(), 1.0e-9);
-        assertEquals(0.02, outputMarker.y(), 1.0e-9);
+        assertEquals(0.5, rawMarker.getX(), 1.0e-9);
+        assertEquals(0.0, rawMarker.getY(), 1.0e-9);
+        assertEquals(0.25, mappedMarker.getY(), 1.0e-9);
+        assertEquals(0.02, outputMarker.getY(), 1.0e-9);
 
         telemetry.get("Curve/Config/Exponent").set(3.0);
-        Point2d[] updated = (Point2d[]) telemetry.get("Visualization/Curve").value();
-        assertEquals(0.125, updated[30].y(), 1.0e-9);
+        Translation2d[] updated = (Translation2d[]) telemetry.get("Visualization/Curve").value();
+        assertEquals(0.125, updated[30].getY(), 1.0e-9);
     }
 }

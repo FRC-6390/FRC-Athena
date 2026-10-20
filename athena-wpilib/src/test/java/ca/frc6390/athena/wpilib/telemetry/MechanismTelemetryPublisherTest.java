@@ -1,5 +1,8 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Meters;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,7 +14,7 @@ import ca.frc6390.athena.mechanism.core.Telemetry;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.robot.RobotRuntime;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -23,8 +26,8 @@ class MechanismTelemetryPublisherTest {
     @Test
     void publishesNativePointArraysForAdvantageScope() {
         DashboardMechanism mechanism = new DashboardMechanism();
-        Point2d[][] source = {{
-                new Point2d(-1.0, -1.0), new Point2d(0.0, 1.0), new Point2d(1.0, -1.0)}};
+        Translation2d[][] source = {{
+                new Translation2d(-1.0, -1.0), new Translation2d(0.0, 1.0), new Translation2d(1.0, -1.0)}};
         mechanism.points = TelemetryValue.points(() -> source[0]);
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
         NetworkTableInstance instance = NetworkTableInstance.create();
@@ -38,7 +41,7 @@ class MechanismTelemetryPublisherTest {
             assertEquals(-1.0, published[0].getX(), 1.0e-9);
             assertEquals(1.0, published[2].getX(), 1.0e-9);
 
-            source[0] = new Point2d[] {new Point2d(0.6, -0.25)};
+            source[0] = new Translation2d[] {new Translation2d(0.6, -0.25)};
             publisher.publish(runtime.mechanismTelemetrySchema(), 0.02);
             published = points.get();
             assertEquals(1, published.length);
@@ -157,7 +160,7 @@ class MechanismTelemetryPublisherTest {
         String temperaturePath = "/Athena/Mechanisms/dashboardMechanism/Values/temperature";
         String gainPath = "/Athena/Mechanisms/dashboardMechanism/Values/gain";
         try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(instance)
-                .readOnlyPeriodSeconds(0.5)) {
+                .readOnlyPeriod(Seconds.of(0.5))) {
             publisher.publish(schema, 0.0);
             mechanism.temperature = 42.0;
             instance.getEntry(gainPath).setDouble(3.0);
@@ -204,7 +207,7 @@ class MechanismTelemetryPublisherTest {
         private double outputPercent = 0.2;
 
         @Telemetry("field/zone")
-        private final Rectangle2d zone = Rectangle2d.of(1.0, 2.0, 3.0, 4.0);
+        private final Rectangle2d zone = Rectangle2d.of(Meters.of(1.0), Meters.of(2.0), Meters.of(3.0), Meters.of(4.0));
 
         private double temperature = 20.0;
         private double gain = 1.0;
@@ -212,7 +215,7 @@ class MechanismTelemetryPublisherTest {
         @Telemetry
         private TelemetryValue curveSamples = TelemetryValue.constant(new double[0]);
         @Telemetry
-        private TelemetryValue points = TelemetryValue.points(() -> new Point2d[0]);
+        private TelemetryValue points = TelemetryValue.points(() -> new Translation2d[0]);
         @Telemetry("gain")
         private final TelemetryValue gainValue = TelemetryValue.writableNumber(
                 () -> gain,

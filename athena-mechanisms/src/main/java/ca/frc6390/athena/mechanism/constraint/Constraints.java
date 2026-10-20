@@ -80,21 +80,14 @@ public final class Constraints {
 
     private record TypedMotionConstraint(Unit velocityUnit, Unit accelerationUnit, double velocityBase,
             double accelerationBase) implements UnitConstraint {
+        /**
+         * Motion limits keep the same meaning for every mode: the first measure is the largest velocity (a rate of
+         * the unit) and the second the largest acceleration. A velocity control clamps its target to the first and
+         * slews the reference by the second, which is what the velocity loop enforces.
+         */
         @Override
         public Constraint<Double> expressedIn(Unit unit, boolean velocityControl) {
-            if (!velocityControl) {
-                return expressedIn(unit);
-            }
-            Unit acceleration = UnitConversions.perSecond(UnitConversions.perSecond(unit));
-            Unit jerk = UnitConversions.perSecond(acceleration);
-            if (!UnitConversions.sameDimension(velocityUnit, acceleration)
-                    || !UnitConversions.sameDimension(accelerationUnit, jerk)) {
-                throw new IllegalArgumentException("Velocity motion limits measure " + velocityUnit.name() + " and "
-                        + accelerationUnit.name() + ": a velocity control takes an acceleration and its rate "
-                        + "(for example RotationsPerSecondPerSecond and RotationsPerSecondPerSecond.per(Seconds)).");
-            }
-            double scale = UnitConversions.baseScale(unit);
-            return new VelocityMotionConstraint(velocityBase / scale, accelerationBase / scale);
+            return expressedIn(unit);
         }
 
         @Override
@@ -107,18 +100,6 @@ public final class Constraints {
             }
             double scale = UnitConversions.baseScale(unit);
             return new MotionConstraint(new MotionProfile(velocityBase / scale, accelerationBase / scale));
-        }
-    }
-
-    /**
-     * Motion limits of a velocity control: the largest acceleration and its rate (jerk) of the velocity target,
-     * in control units per second squared and per second cubed. The limits are recorded on the binding; the
-     * velocity loop does not enforce them yet.
-     */
-    public record VelocityMotionConstraint(double acceleration, double jerk) implements Constraint<Double> {
-        @Override
-        public ConstraintResult<Double> evaluate(ConstraintContext<Double> context) {
-            return new ConstraintResult.Allowed<>(context.requested());
         }
     }
 

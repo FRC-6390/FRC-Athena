@@ -1,5 +1,6 @@
 package ca.frc6390.athena.wpilib.lifecycle;
 
+import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.auto.AutoChooser;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
@@ -208,7 +209,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     public final void disabledInit() {
         run(LifecycleMode.DISABLED, LifecyclePhase.INIT, false, simulationActive());
         if (!Double.isNaN(enabledSinceSeconds)) {
-            runtime.recordDisable(timestampSeconds() - enabledSinceSeconds);
+            runtime.recordDisable(Seconds.of(timestampSeconds() - enabledSinceSeconds));
             enabledSinceSeconds = Double.NaN;
         }
         replay.initialized(LifecycleMode.DISABLED);
@@ -303,7 +304,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         if (tracePublisher != null) {
             tracePublisher.profile(effectiveTraceProfile());
             athena().mechanismTraceLevel(tracePublisher.traceLevel());
-            athena().mechanismTracePeriodSeconds(tracePublisher.runtimePeriodSeconds());
+            athena().mechanismTracePeriod(Seconds.of(tracePublisher.runtimePeriodSeconds()));
         }
         EventContext eventContext = new EventContext(timestamp, dtSeconds, mode, phase, enabled, simulation);
         athena().periodic(
@@ -344,10 +345,10 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemRuntime.update();
         SystemStatus status = systemRuntime.status();
         systemTelemetryPublisher.publish(status);
-        mechanismTelemetryPublisher.readOnlyPeriodSeconds(switch (status.pressure()) {
-            case NORMAL -> 0.10;
-            case WARNING -> 0.50;
-            case CRITICAL -> 1.00;
+        mechanismTelemetryPublisher.readOnlyPeriod(switch (status.pressure()) {
+            case NORMAL -> Seconds.of(0.10);
+            case WARNING -> Seconds.of(0.50);
+            case CRITICAL -> Seconds.of(1.00);
         });
         while (reportedSystemFailures < status.failures().size()) {
             DriverStation.reportWarning(

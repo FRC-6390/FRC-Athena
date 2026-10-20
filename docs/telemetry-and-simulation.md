@@ -186,7 +186,7 @@ Mechanisms can publish fields and zero-argument methods with `@Telemetry` withou
 
 ```java
 @Telemetry
-private double armPosition() { return encoder.position(); }
+private double armPosition() { return encoder.positionAngle().in(Units.Degrees); } // encoder measures(Degrees)
 
 @Telemetry
 private boolean homed() { return homeSwitch.active(); }

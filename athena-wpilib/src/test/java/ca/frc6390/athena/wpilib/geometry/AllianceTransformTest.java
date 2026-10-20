@@ -1,5 +1,7 @@
 package ca.frc6390.athena.wpilib.geometry;
 
+import static edu.wpi.first.units.Units.Meters;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
@@ -16,7 +18,7 @@ class AllianceTransformTest {
 
     @Test
     void rotate180RotatesPoseAndHeadingOnRed() {
-        AllianceTransform rotated = AllianceTransform.rotate180(LENGTH, WIDTH).withAlliance(() -> true);
+        AllianceTransform rotated = AllianceTransform.rotate180(Meters.of(LENGTH), Meters.of(WIDTH)).withAlliance(() -> true);
 
         Pose2d red = rotated.pose(new Pose2d(1.0, 2.0, new Rotation2d(0.0)));
 
@@ -27,7 +29,7 @@ class AllianceTransformTest {
 
     @Test
     void rotate180ChangesHeadingByHalfACircle() {
-        AllianceTransform rotated = AllianceTransform.rotate180(LENGTH, WIDTH).withAlliance(() -> true);
+        AllianceTransform rotated = AllianceTransform.rotate180(Meters.of(LENGTH), Meters.of(WIDTH)).withAlliance(() -> true);
         Rotation2d blue = new Rotation2d(0.6);
 
         Rotation2d red = rotated.rotation(blue);
@@ -37,7 +39,7 @@ class AllianceTransformTest {
 
     @Test
     void mirrorXFlipsXAndReflectsHeading() {
-        AllianceTransform mirrored = AllianceTransform.mirrorX(LENGTH).withAlliance(() -> true);
+        AllianceTransform mirrored = AllianceTransform.mirrorX(Meters.of(LENGTH)).withAlliance(() -> true);
 
         Pose2d facingUp = mirrored.pose(new Pose2d(2.0, 3.0, new Rotation2d(Math.PI / 2.0)));
         assertEquals(14.0, facingUp.getX(), EPSILON);
@@ -50,7 +52,7 @@ class AllianceTransformTest {
 
     @Test
     void mirrorYFlipsYAndNegatesHeading() {
-        AllianceTransform mirrored = AllianceTransform.mirrorY(WIDTH).withAlliance(() -> true);
+        AllianceTransform mirrored = AllianceTransform.mirrorY(Meters.of(WIDTH)).withAlliance(() -> true);
 
         Pose2d pose = mirrored.pose(new Pose2d(2.0, 3.0, new Rotation2d(Math.PI / 4.0)));
 
@@ -61,7 +63,7 @@ class AllianceTransformTest {
     @Test
     void blueAndUnknownAllianceReturnTheInputUnchanged() {
         Pose2d blue = new Pose2d(2.0, 3.0, new Rotation2d(0.4));
-        AllianceTransform rotated = AllianceTransform.rotate180(LENGTH, WIDTH);
+        AllianceTransform rotated = AllianceTransform.rotate180(Meters.of(LENGTH), Meters.of(WIDTH));
 
         assertEquals(blue, rotated.withAlliance(() -> false).pose(blue));
         assertEquals(blue, rotated.withAlliance(() -> false).pose(blue));
@@ -69,21 +71,21 @@ class AllianceTransformTest {
 
     @Test
     void translationRotationAndRegionFollowTheResolvedAlliance() {
-        AllianceTransform rotated = AllianceTransform.rotate180(LENGTH, WIDTH).withAlliance(() -> true);
+        AllianceTransform rotated = AllianceTransform.rotate180(Meters.of(LENGTH), Meters.of(WIDTH)).withAlliance(() -> true);
 
         Translation2d translation = rotated.translation(new Translation2d(2.0, 3.0));
         assertEquals(14.0, translation.getX(), EPSILON);
         assertEquals(5.0, translation.getY(), EPSILON);
 
-        assertEquals(Rectangle2d.of(13.0, 4.0, 15.0, 6.0),
-                rotated.region(Rectangle2d.of(1.0, 2.0, 3.0, 4.0)));
+        assertEquals(Rectangle2d.of(Meters.of(13.0), Meters.of(4.0), Meters.of(15.0), Meters.of(6.0)),
+                rotated.region(Rectangle2d.of(Meters.of(1.0), Meters.of(2.0), Meters.of(3.0), Meters.of(4.0))));
     }
 
     @Test
     void poseSupplierResolvesTheAllianceOnEveryCall() {
         AtomicBoolean red = new AtomicBoolean(false);
         Pose2d blue = new Pose2d(1.0, 2.0, new Rotation2d(0.0));
-        var supplier = AllianceTransform.rotate180(LENGTH, WIDTH).withAlliance(red::get).poseSupplier(blue);
+        var supplier = AllianceTransform.rotate180(Meters.of(LENGTH), Meters.of(WIDTH)).withAlliance(red::get).poseSupplier(blue);
 
         assertEquals(blue, supplier.get());
         red.set(true);

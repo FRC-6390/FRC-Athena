@@ -38,7 +38,7 @@ class ModelPersistenceTest {
         MechanismModel model = new MechanismModel(MotionKind.ROTARY, 0.5, 0.4, 2.0, 0.2, 0.3, 0.7,
                 new FrictionTable(List.of(0.0, 0.5), List.of(0.1, 0.2)), Double.NaN, 0.04, 0.05,
                 0.0125, 0.02, 2, List.of("kraken_x60", "kraken_x44"), 10.0, Map.of(), 0.98, 240);
-        MechanismModel running = model.withPayloadDelta(0.0);
+        MechanismModel running = model.withPayloadDelta(edu.wpi.first.units.Units.Volts.of(0.0));
 
         PersistentStore store = PersistentStore.open(directory);
         PersistentModelStorage storage = new PersistentModelStorage(store);

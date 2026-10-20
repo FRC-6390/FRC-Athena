@@ -1,38 +1,45 @@
 package ca.frc6390.athena.runtime.control;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearVelocity;
 import java.util.Objects;
 
 /**
  * Immutable planar chassis velocity with an explicit coordinate frame.
  *
- * @param xMetersPerSecond forward or down-field velocity
- * @param yMetersPerSecond left or across-field velocity
- * @param angularRadiansPerSecond counter-clockwise angular velocity
- * @param frame coordinate frame of the linear components
+ * <p>Team-facing factories and accessors use WPILib units. Components are stored as primitives so
+ * that per-cycle math does not allocate measures; the {@code raw()} view exists for runtime
+ * hot paths (kinematics, localization, path followers) and are not meant for robot code.
  */
-public record RobotVelocity(
-        double xMetersPerSecond,
-        double yMetersPerSecond,
-        double angularRadiansPerSecond,
-        VelocityFrame frame) {
-    public RobotVelocity {
-        xMetersPerSecond = finiteOrZero(xMetersPerSecond);
-        yMetersPerSecond = finiteOrZero(yMetersPerSecond);
-        angularRadiansPerSecond = finiteOrZero(angularRadiansPerSecond);
-        frame = Objects.requireNonNull(frame, "frame");
+public final class RobotVelocity {
+    private final double xMetersPerSecond;
+    private final double yMetersPerSecond;
+    private final double angularRadiansPerSecond;
+    private final VelocityFrame frame;
+
+    private RobotVelocity(
+            double xMetersPerSecond,
+            double yMetersPerSecond,
+            double angularRadiansPerSecond,
+            VelocityFrame frame) {
+        this.xMetersPerSecond = finiteOrZero(xMetersPerSecond);
+        this.yMetersPerSecond = finiteOrZero(yMetersPerSecond);
+        this.angularRadiansPerSecond = finiteOrZero(angularRadiansPerSecond);
+        this.frame = Objects.requireNonNull(frame, "frame");
     }
 
-    /** Creates a robot-relative velocity for source compatibility. */
-    public RobotVelocity(double xMetersPerSecond, double yMetersPerSecond, double angularRadiansPerSecond) {
-        this(xMetersPerSecond, yMetersPerSecond, angularRadiansPerSecond, VelocityFrame.ROBOT);
+    /** Creates a robot-relative velocity from WPILib-typed components. */
+    public static RobotVelocity robot(LinearVelocity x, LinearVelocity y, AngularVelocity angular) {
+        return new RobotVelocity(mps(x), mps(y), rps(angular), VelocityFrame.ROBOT);
     }
 
-    public static RobotVelocity robot(double x, double y, double angular) {
-        return new RobotVelocity(x, y, angular, VelocityFrame.ROBOT);
-    }
-
-    public static RobotVelocity field(double x, double y, double angular) {
-        return new RobotVelocity(x, y, angular, VelocityFrame.FIELD);
+    /** Creates a field-relative velocity from WPILib-typed components. */
+    public static RobotVelocity field(LinearVelocity x, LinearVelocity y, AngularVelocity angular) {
+        return new RobotVelocity(mps(x), mps(y), rps(angular), VelocityFrame.FIELD);
     }
 
     public static RobotVelocity zero() {
@@ -43,20 +50,40 @@ public record RobotVelocity(
         return new RobotVelocity(0.0, 0.0, 0.0, frame);
     }
 
-    public static RobotVelocity linear(double x, double y) {
-        return robot(x, y, 0.0);
+    public static RobotVelocity linear(LinearVelocity x, LinearVelocity y) {
+        return robot(x, y, RadiansPerSecond.zero());
     }
 
-    public static RobotVelocity linear(double x, double y, VelocityFrame frame) {
-        return new RobotVelocity(x, y, 0.0, frame);
+    public static RobotVelocity linear(LinearVelocity x, LinearVelocity y, VelocityFrame frame) {
+        return new RobotVelocity(mps(x), mps(y), 0.0, frame);
     }
 
-    public static RobotVelocity angular(double angular) {
-        return robot(0.0, 0.0, angular);
+    public static RobotVelocity angular(AngularVelocity angular) {
+        return robot(MetersPerSecond.zero(), MetersPerSecond.zero(), angular);
     }
 
-    public static RobotVelocity angular(double angular, VelocityFrame frame) {
-        return new RobotVelocity(0.0, 0.0, angular, frame);
+    public static RobotVelocity angular(AngularVelocity angular, VelocityFrame frame) {
+        return new RobotVelocity(0.0, 0.0, rps(angular), frame);
+    }
+
+    /** Returns the frame of the linear components. */
+    public VelocityFrame frame() {
+        return frame;
+    }
+
+    /** Returns forward (robot) or down-field (field) velocity. */
+    public LinearVelocity x() {
+        return MetersPerSecond.of(xMetersPerSecond);
+    }
+
+    /** Returns left (robot) or across-field (field) velocity. */
+    public LinearVelocity y() {
+        return MetersPerSecond.of(yMetersPerSecond);
+    }
+
+    /** Returns counter-clockwise angular velocity. */
+    public AngularVelocity angular() {
+        return RadiansPerSecond.of(angularRadiansPerSecond);
     }
 
     public RobotVelocity plus(RobotVelocity other) {
@@ -72,6 +99,7 @@ public record RobotVelocity(
         return plus(Objects.requireNonNull(other, "other").unaryMinus());
     }
 
+    /** Scales every component by a unitless factor. */
     public RobotVelocity times(double scalar) {
         double safe = finiteOrZero(scalar);
         return new RobotVelocity(
@@ -81,6 +109,7 @@ public record RobotVelocity(
                 frame);
     }
 
+    /** Divides every component by a unitless divisor. */
     public RobotVelocity div(double scalar) {
         if (!Double.isFinite(scalar) || scalar == 0.0) {
             throw new IllegalArgumentException("Velocity divisor must be finite and non-zero.");
@@ -112,26 +141,28 @@ public record RobotVelocity(
                 frame);
     }
 
-    public RobotVelocity withLinear(double x, double y) {
-        return new RobotVelocity(x, y, angularRadiansPerSecond, frame);
+    public RobotVelocity withLinear(LinearVelocity x, LinearVelocity y) {
+        return new RobotVelocity(mps(x), mps(y), angularRadiansPerSecond, frame);
     }
 
-    public RobotVelocity withAngular(double angular) {
-        return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, angular, frame);
+    public RobotVelocity withAngular(AngularVelocity angular) {
+        return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, rps(angular), frame);
     }
 
     public RobotVelocity linearOnly() {
-        return withAngular(0.0);
+        return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, 0.0, frame);
     }
 
     public RobotVelocity angularOnly() {
         return new RobotVelocity(0.0, 0.0, angularRadiansPerSecond, frame);
     }
 
-    public double linearMagnitude() {
-        return Math.hypot(xMetersPerSecond, yMetersPerSecond);
+    /** Returns the magnitude of the linear components. */
+    public LinearVelocity linearMagnitude() {
+        return MetersPerSecond.of(Math.hypot(xMetersPerSecond, yMetersPerSecond));
     }
 
+    /** Interpolates toward {@code end}; {@code amount} is a unitless fraction clamped to [0, 1]. */
     public RobotVelocity interpolate(RobotVelocity end, double amount) {
         RobotVelocity safe = requireSameFrame(end);
         double t = Math.max(0.0, Math.min(1.0, finiteOrZero(amount)));
@@ -139,55 +170,90 @@ public record RobotVelocity(
     }
 
     /** Converts this field-relative value into robot-relative coordinates. */
-    public RobotVelocity fieldToRobot(double headingRadians) {
+    public RobotVelocity fieldToRobot(Rotation2d heading) {
         requireFrame(VelocityFrame.FIELD, "fieldToRobot");
-        double heading = finiteOrZero(headingRadians);
-        double cos = Math.cos(heading);
-        double sin = Math.sin(heading);
-        return robot(
+        double cos = Math.cos(radians(heading));
+        double sin = Math.sin(radians(heading));
+        return new RobotVelocity(
                 xMetersPerSecond * cos + yMetersPerSecond * sin,
                 -xMetersPerSecond * sin + yMetersPerSecond * cos,
-                angularRadiansPerSecond);
+                angularRadiansPerSecond,
+                VelocityFrame.ROBOT);
     }
 
     /** Converts this robot-relative value into field-relative coordinates. */
-    public RobotVelocity robotToField(double headingRadians) {
+    public RobotVelocity robotToField(Rotation2d heading) {
         requireFrame(VelocityFrame.ROBOT, "robotToField");
-        double heading = finiteOrZero(headingRadians);
-        double cos = Math.cos(heading);
-        double sin = Math.sin(heading);
-        return field(
+        double cos = Math.cos(radians(heading));
+        double sin = Math.sin(radians(heading));
+        return new RobotVelocity(
                 xMetersPerSecond * cos - yMetersPerSecond * sin,
                 xMetersPerSecond * sin + yMetersPerSecond * cos,
-                angularRadiansPerSecond);
+                angularRadiansPerSecond,
+                VelocityFrame.FIELD);
     }
 
-    public RobotVelocity inFrame(VelocityFrame target, double headingRadians) {
+    /** Returns this velocity expressed in {@code target}, rotating with {@code heading} if needed. */
+    public RobotVelocity inFrame(VelocityFrame target, Rotation2d heading) {
         VelocityFrame safeTarget = Objects.requireNonNull(target, "target");
         if (frame == safeTarget) {
             return this;
         }
         return safeTarget == VelocityFrame.ROBOT
-                ? fieldToRobot(headingRadians)
-                : robotToField(headingRadians);
+                ? fieldToRobot(heading)
+                : robotToField(heading);
     }
 
-    public RobotVelocity clamp(double maxLinearMetersPerSecond, double maxAngularRadiansPerSecond) {
+    /**
+     * Limits the linear speed and angular speed. A non-positive limit leaves that component
+     * unclamped, as before.
+     */
+    public RobotVelocity clamp(LinearVelocity maxLinear, AngularVelocity maxAngular) {
         double x = xMetersPerSecond;
         double y = yMetersPerSecond;
-        double maxLinear = finiteOrZero(maxLinearMetersPerSecond);
+        double maxLinearMetersPerSecond = finiteOrZero(mps(maxLinear));
         double magnitude = Math.hypot(x, y);
-        if (maxLinear > 0.0 && magnitude > maxLinear) {
-            double scale = maxLinear / magnitude;
+        if (maxLinearMetersPerSecond > 0.0 && magnitude > maxLinearMetersPerSecond) {
+            double scale = maxLinearMetersPerSecond / magnitude;
             x *= scale;
             y *= scale;
         }
-        double maxAngular = finiteOrZero(maxAngularRadiansPerSecond);
+        double maxAngularRadiansPerSecond = finiteOrZero(rps(maxAngular));
         double angular = angularRadiansPerSecond;
-        if (maxAngular > 0.0) {
-            angular = Math.max(-maxAngular, Math.min(maxAngular, angular));
+        if (maxAngularRadiansPerSecond > 0.0) {
+            angular = Math.max(-maxAngularRadiansPerSecond, Math.min(maxAngularRadiansPerSecond, angular));
         }
         return new RobotVelocity(x, y, angular, frame);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof RobotVelocity other)) {
+            return false;
+        }
+        return Double.compare(xMetersPerSecond, other.xMetersPerSecond) == 0
+                && Double.compare(yMetersPerSecond, other.yMetersPerSecond) == 0
+                && Double.compare(angularRadiansPerSecond, other.angularRadiansPerSecond) == 0
+                && frame == other.frame;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(xMetersPerSecond, yMetersPerSecond, angularRadiansPerSecond, frame);
+    }
+
+    @Override
+    public String toString() {
+        return "RobotVelocity[x=" + xMetersPerSecond + " m/s, y=" + yMetersPerSecond
+                + " m/s, angular=" + angularRadiansPerSecond + " rad/s, frame=" + frame + ']';
+    }
+
+    /** Returns an internal, primitive view of this velocity. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
     }
 
     private RobotVelocity requireSameFrame(RobotVelocity other) {
@@ -205,7 +271,55 @@ public record RobotVelocity(
         }
     }
 
+    private static double mps(LinearVelocity value) {
+        return value.in(MetersPerSecond);
+    }
+
+    private static double rps(AngularVelocity value) {
+        return value.in(RadiansPerSecond);
+    }
+
+    private static double radians(Rotation2d heading) {
+        return finiteOrZero(Objects.requireNonNull(heading, "heading").getRadians());
+    }
+
     private static double finiteOrZero(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    /**
+     * Internal, not for robot code: primitive access for runtime hot paths (localization, odometry,
+     * kinematics, path followers). Units are meters per second and radians per second.
+     */
+    public static final class Raw {
+        private final RobotVelocity velocity;
+
+        private Raw(RobotVelocity velocity) {
+            this.velocity = velocity;
+        }
+
+        /** Internal: builds a velocity from primitives without allocating measures. Not for robot code. */
+        public static RobotVelocity of(
+                double xMetersPerSecond,
+                double yMetersPerSecond,
+                double angularRadiansPerSecond,
+                VelocityFrame frame) {
+            return new RobotVelocity(xMetersPerSecond, yMetersPerSecond, angularRadiansPerSecond, frame);
+        }
+
+        /** Internal: forward component in meters per second. */
+        public double xMetersPerSecond() {
+            return velocity.xMetersPerSecond;
+        }
+
+        /** Internal: lateral component in meters per second. */
+        public double yMetersPerSecond() {
+            return velocity.yMetersPerSecond;
+        }
+
+        /** Internal: angular component in radians per second. */
+        public double angularRadiansPerSecond() {
+            return velocity.angularRadiansPerSecond;
+        }
     }
 }

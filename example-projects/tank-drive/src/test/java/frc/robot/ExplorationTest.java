@@ -1,5 +1,6 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.robot.RobotRuntime;
@@ -23,7 +24,7 @@ class ExplorationTest {
     void seededRandomPlayHasNoFindings() {
         ExplorationReport report = SimExplorer.of(session -> RobotRuntime.simulated(session).register(new Robot()))
                 .seed(7)
-                .duration(120)
+                .duration(Seconds.of(120))
                 .controllers(0)
                 .modes(ModeSchedule.random())
                 .inputs(InputModel.standard())

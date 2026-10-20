@@ -2,6 +2,9 @@ package ca.frc6390.athena.robot;
 
 import static edu.wpi.first.units.Units.Seconds;
 
+import edu.wpi.first.units.measure.Current;
+import static edu.wpi.first.units.Units.Meters;
+
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -126,12 +129,12 @@ class MechanismTelemetryTest {
                 .get("tunedMechanism/Devices/encoder/Setup/RequestedPosition").set(3.0);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/encoder/Setup/SetPosition").set(true);
-        assertEquals(3.0, mechanism.encoder.position(), 1e-9);
+        assertEquals(3.0, mechanism.encoder.raw().position(), 1e-9);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/imu/Setup/RequestedYawDegrees").set(42.0);
         runtime.mechanismTelemetrySchema().values()
                 .get("tunedMechanism/Devices/imu/Setup/SetYaw").set(true);
-        assertEquals(42.0, mechanism.imu.yawDegrees(), 1e-9);
+        assertEquals(42.0, mechanism.imu.raw().yawDegrees(), 1e-9);
 
         runtime.mechanismTelemetrySchema().values().get("tunedMechanism/Controls/control/Config/Disabled").set(true);
         runtime.robotPeriodic(0.02, 0.02);
@@ -149,7 +152,7 @@ class MechanismTelemetryTest {
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
                 .register(mechanism)
                 .mechanismTraceLevel(ca.frc6390.athena.mechanism.core.MechanismTraceLevel.CAPTURE)
-                .mechanismTracePeriodSeconds(0.0);
+                .mechanismTracePeriod(Seconds.of(0.0));
 
         runtime.robotPeriodic(0.0, 0.02);
 
@@ -242,7 +245,7 @@ class MechanismTelemetryTest {
         final FeedforwardGains feedforward = FeedforwardGains.of(0.0, 1.0, 0.0, 0.0);
         final ControlBinding<?> control = Controls.position(motor, Units.Rotations)
                 .feedback(encoder).pid(pid).feedforward(feedforward);
-        final TelemetryValue position = TelemetryValue.number(encoder::position);
+        final TelemetryValue position = TelemetryValue.number(encoder.raw()::position);
         final Action run = control.percent(0.5);
     }
 
@@ -273,7 +276,7 @@ class MechanismTelemetryTest {
     private static final class AnnotatedMechanism implements Mechanism {
         @Telemetry("field/zone")
         private static final ca.frc6390.athena.runtime.geometry.Rectangle2d ZONE =
-                ca.frc6390.athena.runtime.geometry.Rectangle2d.of(1.0, 2.0, 3.0, 4.0);
+                ca.frc6390.athena.runtime.geometry.Rectangle2d.of(Meters.of(1.0), Meters.of(2.0), Meters.of(3.0), Meters.of(4.0));
         @Telemetry(writable = true, min = 0.0, max = 1.0)
         private double outputPercent = 0.5;
         @Telemetry(writable = true)

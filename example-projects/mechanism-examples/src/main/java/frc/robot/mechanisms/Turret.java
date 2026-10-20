@@ -47,10 +47,10 @@ public final class Turret implements Mechanism {
             .feedback(angle)
             .dependency(chassisImu)
             .loop(ControlLoops.targetTransform(binding -> context ->
-                    ControlOutput.position(context.target() - chassisImu.angleDegrees())))
+                    ControlOutput.position(context.target() - chassisImu.angle().in(edu.wpi.first.units.Units.Degrees))))
             .pid(0.144, 0.0, 0.006)
             .constraints(Constraints.range(travel), Constraints.motion(Units.DegreesPerSecond.of(180.0), Units.DegreesPerSecondPerSecond.of(540.0)))
-            .planner(MotionPlanners.boundedAngular(360.0));
+            .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
 
     public final Action forward = fieldHeading.position(Units.Degrees.of(0.0)).untilWithin(Units.Degrees.of(1.5));
     public final Action left = fieldHeading.position(Units.Degrees.of(90.0)).untilWithin(Units.Degrees.of(1.5));

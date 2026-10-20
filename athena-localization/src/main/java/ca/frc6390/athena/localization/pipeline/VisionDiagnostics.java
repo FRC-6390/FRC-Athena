@@ -1,5 +1,6 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import edu.wpi.first.units.measure.Current;
 import static edu.wpi.first.units.Units.Hertz;
 import static edu.wpi.first.units.Units.Seconds;
 

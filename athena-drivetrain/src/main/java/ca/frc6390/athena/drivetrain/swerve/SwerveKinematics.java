@@ -1,5 +1,8 @@
 package ca.frc6390.athena.drivetrain.swerve;
 
+import edu.wpi.first.math.geometry.Rotation2d;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.Rotations;
@@ -19,7 +22,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
-import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 import java.util.concurrent.atomic.AtomicReference;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -111,10 +113,10 @@ public final class SwerveKinematics implements SimModel.Source {
     }
 
     /** Drives one pooled request after normalizing every channel into robot coordinates. */
-    public Action drive(RobotVelocityPool velocities, DoubleSupplier headingRadians) {
+    public Action drive(RobotVelocityPool velocities, Supplier<Rotation2d> heading) {
         RobotVelocityPool safeVelocities = Objects.requireNonNull(velocities, "velocities");
-        DoubleSupplier safeHeading = Objects.requireNonNull(headingRadians, "headingRadians");
-        return drive(() -> safeVelocities.robotRelative(safeHeading.getAsDouble()));
+        Supplier<Rotation2d> safeHeading = Objects.requireNonNull(heading, "heading");
+        return drive(() -> safeVelocities.robotRelative(safeHeading.get()));
     }
 
     /** Converts robot-relative velocity into ordered module targets. */
@@ -126,8 +128,8 @@ public final class SwerveKinematics implements SimModel.Source {
         List<SwerveModuleTarget> targets = new ArrayList<>(modules.size());
         double greatestSpeed = 0.0;
         for (Module module : modules) {
-            double wheelX = safe.xMetersPerSecond() - safe.angularRadiansPerSecond() * module.yMeters();
-            double wheelY = safe.yMetersPerSecond() + safe.angularRadiansPerSecond() * module.xMeters();
+            double wheelX = safe.raw().xMetersPerSecond() - safe.raw().angularRadiansPerSecond() * module.yMeters();
+            double wheelY = safe.raw().yMetersPerSecond() + safe.raw().angularRadiansPerSecond() * module.xMeters();
             double speed = Math.hypot(wheelX, wheelY);
             greatestSpeed = Math.max(greatestSpeed, speed);
             double angleRotations = speed <= 1.0e-12 ? 0.0 : Math.atan2(wheelY, wheelX) / TWO_PI;
@@ -166,7 +168,7 @@ public final class SwerveKinematics implements SimModel.Source {
             accumulate(normal, rhs, 0.0, 1.0, module.xMeters(), wheelY);
         }
         double[] solution = solve3x3(normal, rhs);
-        return new RobotVelocity(solution[0], solution[1], solution[2]);
+        return RobotVelocity.Raw.of(solution[0], solution[1], solution[2], VelocityFrame.ROBOT);
     }
 
     public List<Module> modules() {
@@ -247,13 +249,13 @@ public final class SwerveKinematics implements SimModel.Source {
         Pose2d current = new Pose2d(pose.xMeters(), pose.yMeters(),
                 edu.wpi.first.math.geometry.Rotation2d.fromRadians(pose.headingRadians()));
         Pose2d next = current.exp(new Twist2d(
-                robot.xMetersPerSecond() * seconds,
-                robot.yMetersPerSecond() * seconds,
-                robot.angularRadiansPerSecond() * seconds));
+                robot.raw().xMetersPerSecond() * seconds,
+                robot.raw().yMetersPerSecond() * seconds,
+                robot.raw().angularRadiansPerSecond() * seconds));
         context.advancePose(
                 Units.MetersPerSecond.of((next.getX() - current.getX()) / seconds),
                 Units.MetersPerSecond.of((next.getY() - current.getY()) / seconds),
-                Units.RadiansPerSecond.of(robot.angularRadiansPerSecond()),
+                Units.RadiansPerSecond.of(robot.raw().angularRadiansPerSecond()),
                 Units.Seconds.of(seconds));
     }
 
@@ -320,14 +322,14 @@ public final class SwerveKinematics implements SimModel.Source {
         }
         double dt = Double.isFinite(dtSeconds) && dtSeconds > 0.0 ? dtSeconds : 0.02;
         ChassisSpeeds corrected = ChassisSpeeds.discretize(
-                velocity.xMetersPerSecond(),
-                velocity.yMetersPerSecond(),
-                velocity.angularRadiansPerSecond(),
+                velocity.raw().xMetersPerSecond(),
+                velocity.raw().yMetersPerSecond(),
+                velocity.raw().angularRadiansPerSecond(),
                 dt);
         return RobotVelocity.robot(
-                corrected.vxMetersPerSecond,
-                corrected.vyMetersPerSecond,
-                corrected.omegaRadiansPerSecond);
+                MetersPerSecond.of(corrected.vxMetersPerSecond),
+                MetersPerSecond.of(corrected.vyMetersPerSecond),
+                RadiansPerSecond.of(corrected.omegaRadiansPerSecond));
     }
 
     private double moduleSpeed(SwerveModule module, SimModel.Context context) {

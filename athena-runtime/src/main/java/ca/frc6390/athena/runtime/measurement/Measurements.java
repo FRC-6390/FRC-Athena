@@ -7,6 +7,12 @@ import java.util.function.Supplier;
 
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
+
+import static edu.wpi.first.units.Units.Degrees;
+import static edu.wpi.first.units.Units.Meters;
 
 /**
  * Factories for measurement signals and samples.
@@ -26,6 +32,16 @@ public final class Measurements {
     }
 
     /**
+     * Creates a pose measurement sample from a WPILib pose.
+     *
+     * @param pose pose
+     * @return measurement
+     */
+    public static PoseMeasurementSample pose(Pose2d pose) {
+        return pose(PoseSignals.toSnapshot(pose));
+    }
+
+    /**
      * Creates a pose and speed measurement sample.
      *
      * @param pose pose
@@ -37,26 +53,37 @@ public final class Measurements {
     }
 
     /**
+     * Creates a pose and speed measurement sample from a WPILib pose.
+     *
+     * @param pose pose
+     * @param speeds speeds
+     * @return measurement
+     */
+    public static PoseMeasurementSample poseAndSpeeds(Pose2d pose, RobotVelocity speeds) {
+        return poseAndSpeeds(PoseSignals.toSnapshot(pose), speeds);
+    }
+
+    /**
      * Creates a camera-relative target measurement sample.
      *
      * @param targetId target id, or {@code -1} when unavailable
-     * @param yawDegrees target yaw
-     * @param pitchDegrees target pitch
-     * @param distanceMeters estimated distance
+     * @param yaw target yaw
+     * @param pitch target pitch
+     * @param distance estimated distance
      * @param confidence target confidence where higher is better
      * @return measurement
      */
     public static TargetMeasurementSample target(
             int targetId,
-            double yawDegrees,
-            double pitchDegrees,
-            double distanceMeters,
+            Angle yaw,
+            Angle pitch,
+            Distance distance,
             double confidence) {
         return new TargetMeasurement(
                 targetId,
-                yawDegrees,
-                pitchDegrees,
-                distanceMeters,
+                yaw.in(Degrees),
+                pitch.in(Degrees),
+                distance.in(Meters),
                 0.0,
                 0.0,
                 confidence,
@@ -71,7 +98,7 @@ public final class Measurements {
      * @param pose pose supplier
      * @return measurement signal
      */
-    public static PoseSignal poses(Supplier<PoseSnapshot> pose) {
+    public static PoseSignal poses(Supplier<Pose2d> pose) {
         Objects.requireNonNull(pose, "pose");
         return () -> List.of(pose(pose.get()));
     }
@@ -83,7 +110,7 @@ public final class Measurements {
      * @param speeds speeds supplier
      * @return measurement signal
      */
-    public static PoseSignal poseAndSpeeds(Supplier<PoseSnapshot> pose, Supplier<RobotVelocity> speeds) {
+    public static PoseSignal poseAndSpeeds(Supplier<Pose2d> pose, Supplier<RobotVelocity> speeds) {
         Objects.requireNonNull(pose, "pose");
         Objects.requireNonNull(speeds, "speeds");
         return () -> List.of(poseAndSpeeds(pose.get(), speeds.get()));

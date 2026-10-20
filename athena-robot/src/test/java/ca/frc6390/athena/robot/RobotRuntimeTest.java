@@ -83,8 +83,8 @@ class RobotRuntimeTest {
         simulation.imu(imu).yawDegrees(72.5);
         runtime.robotPeriodic(0.0, 0.02);
 
-        assertEquals(72.5, imu.yawDegrees(), 1.0e-9);
-        assertEquals(72.5, imu.angleDegrees(), 1.0e-9);
+        assertEquals(72.5, imu.raw().yawDegrees(), 1.0e-9);
+        assertEquals(72.5, imu.raw().angleDegrees(), 1.0e-9);
     }
 
     @Test
@@ -125,7 +125,7 @@ class RobotRuntimeTest {
     void inlineRuntimeWorkersRunWhenDueFromMainPeriodic() {
         AtomicInteger runs = new AtomicInteger();
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
-                .workers(RuntimeWorkers.inline(RuntimeWorker.every("counter", 0.05, runs::incrementAndGet)));
+                .workers(RuntimeWorkers.inline(RuntimeWorker.every("counter", Seconds.of(0.05), runs::incrementAndGet)));
 
         runtime.robotPeriodic(0.0, 0.02);
         runtime.robotPeriodic(0.02, 0.02);
@@ -137,7 +137,7 @@ class RobotRuntimeTest {
     @Test
     void inlineRuntimeWorkerFailuresAreRecordedAndDoNotStopPeriodic() {
         AtomicInteger runs = new AtomicInteger();
-        RuntimeWorkers workers = RuntimeWorkers.inline(RuntimeWorker.every("unstable", 0.01, () -> {
+        RuntimeWorkers workers = RuntimeWorkers.inline(RuntimeWorker.every("unstable", Seconds.of(0.01), () -> {
             runs.incrementAndGet();
             throw new IllegalStateException("boom");
         }));
@@ -155,7 +155,7 @@ class RobotRuntimeTest {
     void runtimeWorkerFailureHandlerRunsOutsideWorkerLock() {
         AtomicInteger failuresSeenByHandler = new AtomicInteger();
         RuntimeWorkers[] holder = new RuntimeWorkers[1];
-        RuntimeWorkers workers = RuntimeWorkers.inline(RuntimeWorker.every("unstable", 0.01, () -> {
+        RuntimeWorkers workers = RuntimeWorkers.inline(RuntimeWorker.every("unstable", Seconds.of(0.01), () -> {
             throw new IllegalStateException("boom");
         })).onFailure(failure -> {
             assertEquals(false, Thread.holdsLock(holder[0]));
@@ -176,7 +176,7 @@ class RobotRuntimeTest {
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
                 .workers(RuntimeWorkers.async(
                         executor,
-                        RuntimeWorker.every("async", 0.001, latch::countDown)));
+                        RuntimeWorker.every("async", Seconds.of(0.001), latch::countDown)));
         try {
             assertEquals(1, latch.getCount());
 
@@ -196,7 +196,7 @@ class RobotRuntimeTest {
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
         RuntimeWorkers workers = RuntimeWorkers.async(
                 executor,
-                RuntimeWorker.every("async-unstable", 0.001, () -> {
+                RuntimeWorker.every("async-unstable", Seconds.of(0.001), () -> {
                     try {
                         if (runs.incrementAndGet() == 1) {
                             throw new IllegalStateException("first");
@@ -229,7 +229,7 @@ class RobotRuntimeTest {
                 .register(new MotorMechanism())
                 .workers(RuntimeWorkers.async(
                         executor,
-                        RuntimeWorker.every("lifecycle", 0.01, () -> {
+                        RuntimeWorker.every("lifecycle", Seconds.of(0.01), () -> {
                             workerRuns.incrementAndGet();
                             workerStarted.countDown();
                         })))
@@ -401,7 +401,7 @@ class RobotRuntimeTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation)
                 .register(mechanism)
                 .mechanismTraceLevel(ca.frc6390.athena.mechanism.core.MechanismTraceLevel.CAPTURE)
-                .mechanismTracePeriodSeconds(0.0);
+                .mechanismTracePeriod(Seconds.of(0.0));
         runtime.request(mechanism.initial);
 
         runtime.robotPeriodic(1.0, 0.02);
@@ -634,7 +634,7 @@ class RobotRuntimeTest {
         runtime.robotPeriodic(0.0, 0.02);
 
         assertEquals(1, reads.get());
-        assertEquals(2.0, localization.pose().xMeters(), 1.0e-9);
+        assertEquals(2.0, localization.pose().getX(), 1.0e-9);
         assertEquals(1, reads.get());
     }
 
@@ -646,8 +646,8 @@ class RobotRuntimeTest {
             return List.of(Measurements.pose(new PoseSnapshot(6.0, 2.0, 0.25)));
         });
         ca.frc6390.athena.runtime.measurement.PoseSignal configuredCameraPose = camera.pose()
-                .multiTagStdDevs(0.2, 0.2, 0.1)
-                .distanceStdDevScaling(2.0, 2.0);
+                .multiTagStdDevs(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1))
+                .distanceStdDevScaling(Meters.of(2.0), 2.0);
         Localization filtered = Localizations.filter().input(configuredCameraPose);
         Localization output = Localizations.latestValid().input(filtered);
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
@@ -656,7 +656,7 @@ class RobotRuntimeTest {
         runtime.robotPeriodic(1.0, 0.02);
 
         assertEquals(1, reads.get());
-        assertEquals(6.0, output.pose().xMeters(), 1.0e-9);
+        assertEquals(6.0, output.pose().getX(), 1.0e-9);
         assertEquals(1, runtime.localizationMeasurements().size());
     }
 
@@ -674,9 +674,9 @@ class RobotRuntimeTest {
         runtime.disabledPeriodic(1.0, 0.02);
 
         assertEquals(1, reads.get());
-        assertEquals(7.0, output.pose().xMeters(), 1.0e-9);
-        assertEquals(3.0, output.pose().yMeters(), 1.0e-9);
-        assertEquals(0.5, output.pose().headingRadians(), 1.0e-9);
+        assertEquals(7.0, output.pose().getX(), 1.0e-9);
+        assertEquals(3.0, output.pose().getY(), 1.0e-9);
+        assertEquals(0.5, output.pose().getRotation().getRadians(), 1.0e-9);
     }
 
     @Test
@@ -689,9 +689,9 @@ class RobotRuntimeTest {
         mechanism.driveMotors().forEach(motor -> simulation.motor(motor).state(2.0, 2.0));
         runtime.robotPeriodic(1.0, 1.0);
 
-        assertTrue(mechanism.odometry.pose().xMeters() > 0.0);
-        assertTrue(mechanism.estimatedPose.pose().xMeters() > 0.0);
-        assertEquals(mechanism.odometry.pose().xMeters(), mechanism.estimatedPose.pose().xMeters(), 1.0e-9);
+        assertTrue(mechanism.odometry.pose().getX() > 0.0);
+        assertTrue(mechanism.estimatedPose.pose().getX() > 0.0);
+        assertEquals(mechanism.odometry.pose().getX(), mechanism.estimatedPose.pose().getX(), 1.0e-9);
     }
 
     @Test
@@ -704,7 +704,7 @@ class RobotRuntimeTest {
                 });
         RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create())
                 .localization(localization)
-                .localizationMaxAge(1.0);
+                .localizationMaxAge(Seconds.of(1.0));
 
         runtime.robotPeriodic(5.0, 0.02);
         runtime.disabledPeriodic(5.02, 0.02);

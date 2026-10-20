@@ -1,5 +1,7 @@
 package frc.robot.examples;
 
+import static edu.wpi.first.units.Units.Seconds;
+
 import ca.frc6390.athena.robot.RuntimeWorker;
 import ca.frc6390.athena.robot.RuntimeWorkers;
 
@@ -10,8 +12,8 @@ public final class RuntimeWorkerExamples {
 
     public static RuntimeWorkers inline(Runnable sampleSensors, Runnable updateDiagnostics) {
         return RuntimeWorkers.inline(
-                RuntimeWorker.every("fast-signals", 0.005, sampleSensors),
-                RuntimeWorker.every("diagnostics", 0.100, updateDiagnostics))
+                RuntimeWorker.every("fast-signals", Seconds.of(0.005), sampleSensors),
+                RuntimeWorker.every("diagnostics", Seconds.of(0.100), updateDiagnostics))
                 .onFailure(failure -> System.err.println(
                         failure.worker().name() + ": " + failure.exception().getMessage()));
     }

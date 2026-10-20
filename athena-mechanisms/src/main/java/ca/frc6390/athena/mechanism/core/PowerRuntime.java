@@ -112,7 +112,7 @@ final class PowerRuntime {
                     state.profileSustainedAmps(),
                     state.status));
         }
-        return new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.floorVolts(),
+        return new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.raw().floorVolts(),
                 predictedVolts, budgetAmps, demandAmps, shedding, motors);
     }
 
@@ -181,8 +181,8 @@ final class PowerRuntime {
             state.readInputs(handle);
             if (Double.isFinite(state.supplyAmps)) totalSupply += state.supplyAmps;
             MotorRuntimeConfig config = overrides.config(motor);
-            state.derate = state.curve.derateFractionCelsius(motor.fusedTemperatureCelsius());
-            state.temperatureCelsius = motor.fusedTemperatureCelsius();
+            state.derate = state.curve.raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius());
+            state.temperatureCelsius = motor.raw().fusedTemperatureCelsius();
             // The declared limits (applied once at configuration) bound the cap too, scaled by the derate.
             // The tighter of supply and stator wins, because the cap is applied to the motor's voltage.
             double declaredLimit = Math.min(
@@ -205,7 +205,7 @@ final class PowerRuntime {
                 batteryStore.put(BATTERY_OHMS_KEY, estimator.ohms());
             }
         }
-        batteryOhms = policy.estimateBatteryResistance() ? estimator.ohms() : policy.defaultBatteryOhms();
+        batteryOhms = policy.estimateBatteryResistance() ? estimator.ohms() : policy.raw().defaultBatteryOhms();
         openCircuitVolts = policy.estimateBatteryResistance()
                 ? estimator.openCircuitVolts()
                 : Double.isFinite(bus) ? bus + batteryOhms * totalSupply : Double.NaN;
@@ -214,7 +214,7 @@ final class PowerRuntime {
         shedding = planner.shedding();
         predictedVolts = planBus.predictedVolts(totalDemand());
         budgetAmps = Double.isFinite(openCircuitVolts)
-                ? PowerBudget.budgetAmps(openCircuitVolts, batteryOhms, policy.floorVolts())
+                ? PowerBudget.budgetAmps(openCircuitVolts, batteryOhms, policy.raw().floorVolts())
                 : Double.POSITIVE_INFINITY;
         demandAmps = totalDemand();
 
@@ -252,7 +252,7 @@ final class PowerRuntime {
     }
 
     private static BatteryResistanceEstimator newEstimator(PowerPolicy policy) {
-        return new BatteryResistanceEstimator(20.0, 0.02, policy.defaultBatteryOhms());
+        return new BatteryResistanceEstimator(20.0, 0.02, policy.raw().defaultBatteryOhms());
     }
 
     private static final class MotorState {
@@ -274,7 +274,7 @@ final class PowerRuntime {
 
         double profileSustainedAmps() {
             var profile = device.power();
-            return profile == null ? 0.0 : profile.sustainedAmps();
+            return profile == null ? 0.0 : profile.raw().sustainedAmps();
         }
 
         MotorState(MotorDevice device) {
@@ -292,7 +292,7 @@ final class PowerRuntime {
                     && Double.isFinite(rotationsPerSecond)) {
                 MotorConstants known = constants.get();
                 double omega = rotationsPerSecond * 2.0 * Math.PI;
-                double backEmf = omega / known.speedConstantRadPerSecPerVolt();
+                double backEmf = omega / known.raw().speedConstantRadPerSecPerVolt();
                 demandAmps = Math.abs(volts - backEmf) / known.resistance().in(edu.wpi.first.units.Units.Ohms);
             } else if (constants.isPresent() && Double.isFinite(volts)) {
                 demandAmps = 0.0;

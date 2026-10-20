@@ -76,13 +76,13 @@ class EffortRuntimeTest {
     /** Predicted current for a voltage at a speed: the quantity the clamp bounds. */
     static double currentAt(double volts, double rotationsPerSecond, MotorConstants k) {
         double omega = rotationsPerSecond * 2.0 * Math.PI;
-        return (volts - omega / k.speedConstantRadPerSecPerVolt()) / k.resistance().in(Units.Ohms);
+        return (volts - omega / k.raw().speedConstantRadPerSecPerVolt()) / k.resistance().in(Units.Ohms);
     }
 
     static MechanismModel model(MotorConstants k) {
         // Feedforward matches back-EMF exactly (kV = 2 pi / Kv); no friction, gravity or inertia terms.
-        return new MechanismModel(MotionKind.ROTARY, 0.0, 0.0, 2.0 * Math.PI / k.speedConstantRadPerSecPerVolt(), 0.0, 0.0,
-                0.0, FrictionTable.EMPTY, Double.NaN, Double.NaN, 0.0, k.torqueConstantNmPerAmp(), k.resistance().in(Units.Ohms), 1,
+        return new MechanismModel(MotionKind.ROTARY, 0.0, 0.0, 2.0 * Math.PI / k.raw().speedConstantRadPerSecPerVolt(), 0.0, 0.0,
+                0.0, FrictionTable.EMPTY, Double.NaN, Double.NaN, 0.0, k.raw().torqueConstantNmPerAmp(), k.resistance().in(Units.Ohms), 1,
                 List.of(), 1.0, Map.of(), 0.0, 0);
     }
 
@@ -177,7 +177,7 @@ class EffortRuntimeTest {
         FakeContext context = new FakeContext();
         context.motor(KRAKEN, 0.0);
         runtime.advance(Double.POSITIVE_INFINITY, DT, 12.0, 0.0, 0.0);
-        double expectedAmps = 0.1 / KRAKEN_K.torqueConstantNmPerAmp();
+        double expectedAmps = 0.1 / KRAKEN_K.raw().torqueConstantNmPerAmp();
         assertEquals(expectedAmps * KRAKEN_K.resistance().in(Units.Ohms), runtime.clampVolts(context, 12.0), 1e-9);
     }
 
@@ -213,12 +213,12 @@ class EffortRuntimeTest {
         assertFalse(runtime.yielded());
         runtime.advance(Double.POSITIVE_INFINITY, DT, 0.1, 0.0, 0.0);
         double early = Math.abs(currentAt(runtime.clampVolts(context, 12.0), 0.0, KRAKEN_K));
-        assertTrue(early < 0.2 / KRAKEN_K.torqueConstantNmPerAmp(), "ramp starts below the ceiling: " + early);
+        assertTrue(early < 0.2 / KRAKEN_K.raw().torqueConstantNmPerAmp(), "ramp starts below the ceiling: " + early);
         for (int i = 0; i < 6; i++) {
             runtime.advance(Double.POSITIVE_INFINITY, DT, 0.1, 0.0, 0.0);
         }
         double full = Math.abs(currentAt(runtime.clampVolts(context, 12.0), 0.0, KRAKEN_K));
-        assertEquals(0.2 / KRAKEN_K.torqueConstantNmPerAmp(), full, 1e-6);
+        assertEquals(0.2 / KRAKEN_K.raw().torqueConstantNmPerAmp(), full, 1e-6);
     }
 
     @Test
@@ -243,8 +243,8 @@ class EffortRuntimeTest {
         EffortRuntime runtime = runtime(arm);
         FakeContext context = new FakeContext();
         context.motor(KRAKEN, 0.0);
-        double burstVolts = 0.4 / KRAKEN_K.torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms);
-        double ceilingVolts = 0.2 / KRAKEN_K.torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms);
+        double burstVolts = 0.4 / KRAKEN_K.raw().torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms);
+        double ceilingVolts = 0.2 / KRAKEN_K.raw().torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms);
         for (int i = 1; i <= 5; i++) {
             runtime.advance(Double.POSITIVE_INFINITY, DT, 12.0, 0.0, 0.0);
             assertEquals(burstVolts, runtime.clampVolts(context, 12.0), 1e-9, "burst cycle " + i);
@@ -279,7 +279,7 @@ class EffortRuntimeTest {
         context.motor(KRAKEN, 0.0);
         runtime.advance(Double.POSITIVE_INFINITY, DT, 1.0, 0.0, 0.0);
         assertFalse(runtime.yielded());
-        assertEquals(0.2 / KRAKEN_K.torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms),
+        assertEquals(0.2 / KRAKEN_K.raw().torqueConstantNmPerAmp() * KRAKEN_K.resistance().in(Units.Ohms),
                 runtime.clampVolts(context, 12.0), 1e-9);
     }
 

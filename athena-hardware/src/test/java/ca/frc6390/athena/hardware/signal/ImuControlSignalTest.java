@@ -12,18 +12,18 @@ class ImuControlSignalTest {
     void axesExposeRadiansAndRetainSourceDependencies() {
         Object dependency = new Object();
         ImuSource source = new ImuSource() {
-            @Override public double yawDegrees() { return 90.0; }
-            @Override public double pitchDegrees() { return -45.0; }
-            @Override public double rollDegrees() { return 30.0; }
-            @Override public double angleDegrees() { return 90.0; }
-            @Override public double yawRateDegreesPerSecond() { return 180.0; }
-            @Override public double pitchRateDegreesPerSecond() { return -90.0; }
-            @Override public double rollRateDegreesPerSecond() { return 45.0; }
-            @Override public double linearAccelerationXG() { return 0.1; }
-            @Override public double linearAccelerationYG() { return -0.2; }
-            @Override public double linearAccelerationZG() { return 0.3; }
+            @Override public double readYawDegrees() { return 90.0; }
+            @Override public double readPitchDegrees() { return -45.0; }
+            @Override public double readRollDegrees() { return 30.0; }
+            @Override public double readAngleDegrees() { return 90.0; }
+            @Override public double readYawRateDegreesPerSecond() { return 180.0; }
+            @Override public double readPitchRateDegreesPerSecond() { return -90.0; }
+            @Override public double readRollRateDegreesPerSecond() { return 45.0; }
+            @Override public double readLinearAccelerationXG() { return 0.1; }
+            @Override public double readLinearAccelerationYG() { return -0.2; }
+            @Override public double readLinearAccelerationZG() { return 0.3; }
             @Override public List<?> dependencies() { return List.of(dependency); }
-            @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { }
+            @Override public void writeYawDegrees(ActionContext context, double yawDegrees) { }
         };
 
         assertEquals(Math.PI / 2.0, source.headingSignal().position(), 1.0e-9);
@@ -70,14 +70,14 @@ class ImuControlSignalTest {
 
     private record TestSource(double yawValue, double angleValue, double pitchValue, double rollValue)
             implements ImuSource {
-        @Override public double yawDegrees() { return yawValue; }
-        @Override public double angleDegrees() { return angleValue; }
-        @Override public double pitchDegrees() { return pitchValue; }
-        @Override public double rollDegrees() { return rollValue; }
-        @Override public double yawRateDegreesPerSecond() { return 0.0; }
-        @Override public double linearAccelerationXG() { return 0.0; }
-        @Override public double linearAccelerationYG() { return 0.0; }
-        @Override public double linearAccelerationZG() { return 0.0; }
-        @Override public void applyYawDegrees(ActionContext context, double yawDegrees) { }
+        @Override public double readYawDegrees() { return yawValue; }
+        @Override public double readAngleDegrees() { return angleValue; }
+        @Override public double readPitchDegrees() { return pitchValue; }
+        @Override public double readRollDegrees() { return rollValue; }
+        @Override public double readYawRateDegreesPerSecond() { return 0.0; }
+        @Override public double readLinearAccelerationXG() { return 0.0; }
+        @Override public double readLinearAccelerationYG() { return 0.0; }
+        @Override public double readLinearAccelerationZG() { return 0.0; }
+        @Override public void writeYawDegrees(ActionContext context, double yawDegrees) { }
     }
 }

@@ -15,8 +15,8 @@ class TypedApiEquivalenceTest {
         Range range = Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0));
 
         assertEquals(Units.Degrees, range.unit());
-        assertEquals(-270.0, range.minimumInUnit(), 0.0);
-        assertEquals(270.0, range.maximumInUnit(), 0.0);
+        assertEquals(-270.0, range.raw().minimumInUnit(), 0.0);
+        assertEquals(270.0, range.raw().maximumInUnit(), 0.0);
         assertEquals(270.0, range.clamp(300.0), 0.0);
         assertEquals(-45.0, range.clamp(-45.0), 0.0);
     }
@@ -39,7 +39,7 @@ class TypedApiEquivalenceTest {
 
         assertEquals(freeSpeed, motor.freeSpeed().in(Units.RadiansPerSecond), 1e-9);
         assertEquals(0.12, motor.resistance().in(Units.Ohms), 1e-12);
-        assertEquals(freeSpeed / (12.0 - 0.12 * 2.0), motor.speedConstantRadPerSecPerVolt(), 1e-9);
+        assertEquals(freeSpeed / (12.0 - 0.12 * 2.0), motor.raw().speedConstantRadPerSecPerVolt(), 1e-9);
         assertEquals(0.02 * 3.0, motor.torqueAt(Units.Amps.of(3.0)).in(Units.NewtonMeters), 1e-12);
         assertEquals(freeSpeed, motor.expectedUnloadedSpeed(Units.Volts.of(12.0)).in(Units.RadiansPerSecond), 1e-9);
     }
@@ -56,6 +56,6 @@ class TypedApiEquivalenceTest {
         assertEquals(0.5, profile.burstDuration().in(Units.Seconds), 1e-9);
         assertEquals(10.0, profile.rampStep().in(Units.Amps), 1e-9);
         assertEquals(0.1, profile.rampInterval().in(Units.Seconds), 1e-9);
-        assertEquals(100.0, profile.rampAmpsPerSecond(), 1e-9);
+        assertEquals(100.0, profile.raw().rampAmpsPerSecond(), 1e-9);
     }
 }

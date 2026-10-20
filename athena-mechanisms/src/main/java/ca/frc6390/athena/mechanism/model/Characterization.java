@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.model;
 
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 import ca.frc6390.athena.api.hardware.MotorKind;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorConstants;
@@ -185,9 +187,11 @@ public final class Characterization implements TelemetrySource {
      * measures a distance, the default of 1 is used; {@link #gearRatio(double)} overrides it either way.
      */
     static double gearFromFeedback(ControlBinding<?> control) {
-        if (control.feedback() == null || !(control.feedback().position() instanceof EncoderDevice encoder)) {
+        if (control.feedback() == null
+                || !(control.feedback().position() instanceof EncoderDevice.PositionFeedback feedback)) {
             return 1.0;
         }
+        EncoderDevice encoder = feedback.encoder();
         if (!(encoder.measuresUnit() instanceof AngleUnit angle)) {
             return 1.0;
         }
@@ -557,7 +561,7 @@ public final class Characterization implements TelemetrySource {
         if (output != null) {
             MotorConstants constants = MotorConstants.forKind(output.kind()).orElse(null);
             if (constants != null) {
-                torque = constants.torqueConstantNmPerAmp();
+                torque = constants.raw().torqueConstantNmPerAmp();
                 resistance = constants.resistance().in(Units.Ohms);
             }
         }

@@ -408,7 +408,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 Double.isFinite(pose.averageTargetDistanceMeters())
                         ? pose.averageTargetDistanceMeters()
                         : averageTargetDistance(result.targets()),
-                MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+                MeasurementStdDevs.of(Meters.of(Double.POSITIVE_INFINITY), Meters.of(Double.POSITIVE_INFINITY), Radians.of(Double.POSITIVE_INFINITY)),
                 source));
     }
 

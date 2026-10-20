@@ -1,5 +1,6 @@
 package ca.frc6390.athena.localization.pipeline;
 
+import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Seconds;
 
@@ -10,6 +11,7 @@ import java.util.Objects;
 import ca.frc6390.athena.runtime.measurement.PoseSignal;
 import ca.frc6390.athena.runtime.measurement.PoseMeasurementSample;
 import ca.frc6390.athena.runtime.geometry.Geometry2d;
+import edu.wpi.first.math.geometry.Translation2d;
 
 /**
  * Built-in localization filters. Each names its rejection (see {@link LocalizationFilter#rejectionReason}).
@@ -55,12 +57,12 @@ public final class LocalizationFilters {
         double max = Double.isFinite(meters) ? Math.max(0.0, meters) : Double.POSITIVE_INFINITY;
         return new ReasonedFilter("maxPoseJump", (pipeline, measurement, pose) -> {
             if (pose != null) {
-                return jumpReason(distance(pose, baseline.pose()), max);
+                return jumpReason(distance(pose, baseline.poseSnapshot()), max);
             }
             if (!(measurement instanceof PoseMeasurementSample sample)) {
                 return null;
             }
-            return jumpReason(distance(sample.pose(), baseline.pose()), max);
+            return jumpReason(distance(sample.pose(), baseline.poseSnapshot()), max);
         });
     }
 
@@ -69,12 +71,12 @@ public final class LocalizationFilters {
         Objects.requireNonNull(geometry, "geometry");
         return new ReasonedFilter("inside", (pipeline, measurement, pose) -> {
             if (pose != null) {
-                return geometry.contains(pose) ? null : "pose outside the allowed area";
+                return geometry.contains(new Translation2d(pose.xMeters(), pose.yMeters())) ? null : "pose outside the allowed area";
             }
             if (!(measurement instanceof PoseMeasurementSample sample)) {
                 return null;
             }
-            return geometry.contains(sample.pose()) ? null : "pose outside the allowed area";
+            return geometry.contains(new Translation2d(sample.pose().xMeters(), sample.pose().yMeters())) ? null : "pose outside the allowed area";
         });
     }
 

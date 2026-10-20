@@ -1,5 +1,8 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.Distance;
+import edu.wpi.first.units.measure.Time;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
@@ -56,46 +59,46 @@ public interface MeasurementSignal {
     /**
      * Applies standard deviations with one translation value shared by both field axes.
      *
-     * @param translationMeters translation standard deviation
-     * @param headingRadians heading standard deviation
+     * @param translation translation standard deviation
+     * @param heading heading standard deviation
      * @return configured measurement signal
      */
-    default MeasurementSignal stdDevs(double translationMeters, double headingRadians) {
-        return stdDevs(translationMeters, translationMeters, headingRadians);
+    default MeasurementSignal stdDevs(Distance translation, Angle heading) {
+        return stdDevs(translation, translation, heading);
     }
 
     /**
      * Applies standard deviations directly without requiring a configuration object.
      *
-     * @param xMeters x standard deviation
-     * @param yMeters y standard deviation
-     * @param headingRadians heading standard deviation
+     * @param xStdDev x standard deviation
+     * @param yStdDev y standard deviation
+     * @param headingStdDev heading standard deviation
      * @return configured measurement signal
      */
-    default MeasurementSignal stdDevs(double xMeters, double yMeters, double headingRadians) {
-        return stdDevs(MeasurementStdDevs.of(xMeters, yMeters, headingRadians));
+    default MeasurementSignal stdDevs(Distance xStdDev, Distance yStdDev, Angle headingStdDev) {
+        return stdDevs(MeasurementStdDevs.of(xStdDev, yStdDev, headingStdDev));
     }
 
     /**
      * Filters measurements with latency above a limit.
      *
-     * @param seconds latency limit
+     * @param limit latency limit
      * @return configured measurement signal
      */
-    default MeasurementSignal latencyLimit(double seconds) {
-        return new ConfiguredMeasurementSignal(this, null, seconds, Double.POSITIVE_INFINITY, null, "");
+    default MeasurementSignal latencyLimit(Time limit) {
+        return new ConfiguredMeasurementSignal(this, null, PoseSignals.seconds(limit), Double.POSITIVE_INFINITY, null, "");
     }
 
     /**
      * Filters measurements older than a limit.
      *
-     * @param nowSeconds current timestamp
-     * @param seconds max age
+     * @param now current timestamp
+     * @param maxAge max age
      * @return configured measurement signal
      */
-    default MeasurementSignal maxAge(double nowSeconds, double seconds) {
-        return new ConfiguredMeasurementSignal(this, null, Double.POSITIVE_INFINITY, seconds, () -> true, "",
-                nowSeconds);
+    default MeasurementSignal maxAge(Time now, Time maxAge) {
+        return new ConfiguredMeasurementSignal(this, null, Double.POSITIVE_INFINITY, PoseSignals.seconds(maxAge), () -> true, "",
+                PoseSignals.seconds(now));
     }
 
     /**

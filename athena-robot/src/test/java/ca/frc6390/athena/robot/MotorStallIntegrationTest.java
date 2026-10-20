@@ -21,8 +21,8 @@ class MotorStallIntegrationTest {
         MotorDevice fortyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(Units.Amps.of(40));
         MotorDevice sixtyAmpMotor = MotorDevice.of(MotorKinds.KRAKEN_X44, 70).statorCurrentLimit(Units.Amps.of(60));
 
-        assertEquals(36.0, fortyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
-        assertEquals(54.0, sixtyAmpMotor.stall().currentThresholdAmps(), 1.0e-9);
+        assertEquals(36.0, fortyAmpMotor.stall().raw().currentThresholdAmps(), 1.0e-9);
+        assertEquals(54.0, sixtyAmpMotor.stall().raw().currentThresholdAmps(), 1.0e-9);
         assertEquals(0, fortyAmpMotor.currentLimits().supply().in(Units.Amps));
         assertEquals(60, sixtyAmpMotor.currentLimits().stator().in(Units.Amps));
     }

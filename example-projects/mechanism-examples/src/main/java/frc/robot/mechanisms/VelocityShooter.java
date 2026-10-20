@@ -80,6 +80,6 @@ public final class VelocityShooter implements Mechanism {
 
     @Telemetry("measuredVelocityRps")
     public double measuredVelocity() {
-        return velocity.velocity();
+        return velocity.velocityAngular().in(edu.wpi.first.units.Units.RotationsPerSecond);
     }
 }

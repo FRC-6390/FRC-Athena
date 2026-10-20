@@ -1,9 +1,10 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.measure.Current;
 import ca.frc6390.athena.hardware.units.UnitConversions;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationData;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationModel;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -226,7 +227,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
                 }
             }
             if (present) continue;
-            updated.add(new Entry(() -> point, () -> value, point, RecordMetadata.at(Double.NaN)));
+            updated.add(new Entry(() -> point, () -> value, point, RecordMetadata.atSeconds(Double.NaN)));
             changed = true;
         }
         if (changed) {
@@ -338,32 +339,32 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         }
     }
 
-    private synchronized Point2d[] configuredPoints() {
-        if (entries.isEmpty()) return new Point2d[0];
+    private synchronized Translation2d[] configuredPoints() {
+        if (entries.isEmpty()) return new Translation2d[0];
         try {
             runtimeData.beginEvaluation();
-            Point2d[] points = new Point2d[entries.size()];
+            Translation2d[] points = new Translation2d[entries.size()];
             for (int index = 0; index < points.length; index++) {
-                points[index] = new Point2d(runtimeData.point(index), runtimeData.value(index));
+                points[index] = new Translation2d(runtimeData.point(index), runtimeData.value(index));
             }
             return points;
         } catch (RuntimeException exception) {
-            return new Point2d[0];
+            return new Translation2d[0];
         }
     }
 
-    private synchronized Point2d[] curvePoints() {
+    private synchronized Translation2d[] curvePoints() {
         if (entries.size() < 2) return configuredPoints();
         try {
             return sampledCurvePoints();
         } catch (RuntimeException exception) {
-            return new Point2d[0];
+            return new Translation2d[0];
         }
     }
 
-    private Point2d[] sampledCurvePoints() {
+    private Translation2d[] sampledCurvePoints() {
         runtimeData.beginEvaluation();
-        Point2d[] points = new Point2d[(entries.size() - 1) * CURVE_SAMPLES_PER_SEGMENT + 1];
+        Translation2d[] points = new Translation2d[(entries.size() - 1) * CURVE_SAMPLES_PER_SEGMENT + 1];
         int output = 0;
         for (int segment = 0; segment < entries.size() - 1; segment++) {
             double start = runtimeData.point(segment);
@@ -372,7 +373,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
             for (int sample = firstSample; sample <= CURVE_SAMPLES_PER_SEGMENT; sample++) {
                 double amount = sample / (double) CURVE_SAMPLES_PER_SEGMENT;
                 double curveInput = start + (end - start) * amount;
-                points[output++] = new Point2d(
+                points[output++] = new Translation2d(
                         curveInput,
                         requireFinite(model.interpolate(curveInput, runtimeData), "Interpolated target"));
             }
@@ -380,8 +381,8 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         return points;
     }
 
-    private synchronized Point2d[] currentPoint() {
-        return sampled ? new Point2d[] {new Point2d(lastInput, lastTarget)} : new Point2d[0];
+    private synchronized Translation2d[] currentPoint() {
+        return sampled ? new Translation2d[] {new Translation2d(lastInput, lastTarget)} : new Translation2d[0];
     }
 
     private static double requireFinite(double value, String description) {

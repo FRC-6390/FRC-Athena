@@ -41,8 +41,14 @@ import java.util.function.Supplier;
  * @param <E> stage enum
  */
 public final class Staging<E extends Enum<E>> {
-    /** Stage transition, for reporting. */
-    public record Change<E>(E from, E to, double seconds) {
+    /**
+     * Stage transition, for reporting.
+     *
+     * @param from stage left
+     * @param to stage entered
+     * @param time monotonic runtime time of the transition
+     */
+    public record Change<E>(E from, E to, Time time) {
     }
 
     private static final int CHANGE_HISTORY = 32;
@@ -244,7 +250,7 @@ public final class Staging<E extends Enum<E>> {
         current = to;
         Definition<E> entering = definitions.get(to);
         if (entering != null && entering.action() != null) host.request(entering.action());
-        changes.add(new Change<>(from, to, nowSeconds));
+        changes.add(new Change<>(from, to, Units.Seconds.of(nowSeconds)));
         if (changes.size() > CHANGE_HISTORY) changes.remove(0);
         RuntimeEvents.emit(RuntimeEvents.STAGE_CHANGE, from + " -> " + to + " t=" + nowSeconds);
     }

@@ -268,7 +268,7 @@ public record ControlBinding<U extends Unit>(
 
     public ControlBinding<U> feedback(EncoderDevice encoder) {
         Objects.requireNonNull(encoder, "encoder");
-        return feedback(new FeedbackBinding(encoder, encoder));
+        return feedback(new FeedbackBinding(encoder.positionSignal(), encoder.velocitySignal()));
     }
 
     /** Uses one position signal as feedback when no independent velocity signal is required. */
@@ -488,13 +488,13 @@ public record ControlBinding<U extends Unit>(
             throw new IllegalArgumentException("Arm feedforward needs an angle unit (Degrees, Radians or "
                     + "Rotations), but this control measures " + unit.name() + ".");
         }
-        if (feedback.position() instanceof EncoderDevice encoder) {
-            Unit measured = encoder.measuresUnit();
+        if (feedback.position() instanceof EncoderDevice.PositionFeedback positionFeedback) {
+            Unit measured = positionFeedback.encoder().measuresUnit();
             if (measured instanceof AngleUnit angle) {
                 return angle;
             }
             throw new IllegalArgumentException("Arm feedforward needs an angle, but encoder "
-                    + encoder.defaultName() + " measures " + measured.name() + ".");
+                    + positionFeedback.encoder().defaultName() + " measures " + measured.name() + ".");
         }
         throw new IllegalArgumentException("Arm feedforward cannot tell the angle unit of this feedback. Use an "
                 + "encoder declared with measures(...) or a typed control such as Controls.position(motor, Units.Rotations).followers(Degrees).");
@@ -765,7 +765,7 @@ public record ControlBinding<U extends Unit>(
         return new BindingCheck(() -> {
             double velocity = feedback.velocity().velocity() * factor;
             return Math.abs(velocity) < STOPPED_SPEED ? Math.abs(appliedVoltage(motor)) : 0.0;
-        }, 1.0, true, 0.2, MonotonicClock.SYSTEM);
+        }, 1.0, true, edu.wpi.first.units.Units.Seconds.of(0.2), MonotonicClock.SYSTEM);
     }
 
     /**
@@ -782,7 +782,7 @@ public record ControlBinding<U extends Unit>(
                 return 0.0;
             }
             return -feedback.velocity().velocity() * Math.signum(applied);
-        }, 0.05, true, 0.1, MonotonicClock.SYSTEM);
+        }, 0.05, true, edu.wpi.first.units.Units.Seconds.of(0.1), MonotonicClock.SYSTEM);
     }
 
     /**
@@ -798,11 +798,11 @@ public record ControlBinding<U extends Unit>(
                 return 0.0;
             }
             try {
-                return Math.abs(motor.statorCurrentAmps());
+                return Math.abs(motor.raw().statorCurrentAmps());
             } catch (RuntimeException unavailable) {
                 return Double.NaN;
             }
-        }, 2.0, true, 0.1, MonotonicClock.SYSTEM);
+        }, 2.0, true, edu.wpi.first.units.Units.Seconds.of(0.1), MonotonicClock.SYSTEM);
     }
 
     /**
@@ -820,7 +820,7 @@ public record ControlBinding<U extends Unit>(
         Objects.requireNonNull(ratio, "ratio");
         FeedbackBinding feedback = requireFeedback();
         return new SlipCheck(() -> feedback.position().position(),
-                () -> second.position() * ratio.ratio(), tolerance);
+                () -> second.raw().position() * ratio.ratio(), tolerance);
     }
 
     private ModelFeedforward requireModelLoop(String feature) {
@@ -841,7 +841,7 @@ public record ControlBinding<U extends Unit>(
 
     private static double appliedVoltage(MotorDevice motor) {
         try {
-            return motor.appliedVoltageVolts();
+            return motor.raw().appliedVoltageVolts();
         } catch (RuntimeException unavailable) {
             return Double.NaN;
         }
@@ -860,7 +860,10 @@ public record ControlBinding<U extends Unit>(
     }
 
     private static void checkEncoderUnit(Unit unit, Object signal, String channel) {
-        if (!(signal instanceof EncoderDevice encoder)) {
+        EncoderDevice encoder = signal instanceof EncoderDevice.PositionFeedback position
+                ? position.encoder()
+                : signal instanceof EncoderDevice.VelocityFeedback velocity ? velocity.encoder() : null;
+        if (encoder == null) {
             return;
         }
         Unit measured = encoder.measuresUnit();

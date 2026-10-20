@@ -137,7 +137,7 @@ one cycle. Use the test Actions for precise fits, and treat continuous learning 
 
 ## History and drift
 
-`recordDisable(enabledSeconds)` snapshots the running estimate when the robot was enabled for more than
+`recordDisable(Time enabled)` snapshots the running estimate when the robot was enabled for more than
 30 s. `recordMatchEnd()` snapshots it at the end of a match. Both keep at most 32 snapshots.
 
 `drift()` compares the running estimate with the baseline. Parameter `p` drifts when
@@ -183,7 +183,7 @@ error. Until then the payload counts as external load.
 ## Checks (B3)
 
 Model-equipped bindings expose checks. A check is a `BindingCheck`, a `BooleanSupplier`. It has
-`threshold(value)` and `forSeconds(seconds)` overrides and reports true once its condition has held for
+`threshold(value)` and `forTime(Time)` overrides and reports true once its condition has held for
 the debounce time.
 
 | Method | Needs a model | Condition (default threshold, debounce) |

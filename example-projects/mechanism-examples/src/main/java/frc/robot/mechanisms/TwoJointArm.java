@@ -29,7 +29,7 @@ public final class TwoJointArm implements Mechanism {
     private final SimModel shoulderSimulation = SimModel.arm(shoulderMotor)
             .encoder(shoulderEncoder)
             .range(shoulderTravel)
-            .limit(homeSwitch, shoulderTravel.minimumInUnit())
+            .limit(homeSwitch, shoulderTravel.minimum().magnitude())
             .length(edu.wpi.first.units.Units.Meters.of(Units.inchesToMeters(22.0)))
             .gearRatio(GearRatio.reduction(60.0, 1.0));
     @SuppressWarnings("unused")
@@ -44,7 +44,7 @@ public final class TwoJointArm implements Mechanism {
             .constraints(
                     Constraints.range(shoulderTravel),
                     Constraints.require(context -> context.requested() >= 5.0
-                            || wristEncoder.position() <= 45.0),
+                            || wristEncoder.positionAngle().in(edu.wpi.first.units.Units.Degrees) <= 45.0),
                     Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(80.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(180.0)));
     private final ControlBinding wrist = Controls.position(wristMotor, edu.wpi.first.units.Units.Degrees)
             .feedback(wristEncoder)
@@ -52,7 +52,7 @@ public final class TwoJointArm implements Mechanism {
             .constraints(
                     Constraints.range(wristTravel),
                     Constraints.require(context -> context.requested() <= 45.0
-                            || shoulderEncoder.position() >= 5.0),
+                            || shoulderEncoder.positionAngle().in(edu.wpi.first.units.Units.Degrees) >= 5.0),
                     Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(120.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(280.0)));
 
     public final Action stow = Actions.sequence()

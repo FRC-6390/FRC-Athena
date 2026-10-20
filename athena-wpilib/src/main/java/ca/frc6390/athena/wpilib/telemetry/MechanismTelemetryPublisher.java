@@ -1,12 +1,15 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
+import edu.wpi.first.units.measure.Time;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Meters;
 import ca.frc6390.athena.mechanism.core.TelemetryAction;
 import ca.frc6390.athena.mechanism.core.TelemetryNode;
 import ca.frc6390.athena.mechanism.core.TelemetrySchema;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.runtime.geometry.Circle2d;
 import ca.frc6390.athena.runtime.geometry.Geometry2d;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import ca.frc6390.athena.runtime.geometry.Polygon2d;
 import ca.frc6390.athena.runtime.geometry.Rectangle2d;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -54,7 +57,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     }
 
     /** Sets the read-only diagnostic value period without delaying writable controls or actions. */
-    public MechanismTelemetryPublisher readOnlyPeriodSeconds(double periodSeconds) {
+    public MechanismTelemetryPublisher readOnlyPeriod(Time period) {
+        double periodSeconds = Objects.requireNonNull(period, "period").in(Seconds);
         if (!Double.isFinite(periodSeconds) || periodSeconds < 0.02 || periodSeconds > 5.0) {
             throw new IllegalArgumentException("Telemetry period must be between 0.02 and 5 seconds.");
         }
@@ -129,10 +133,10 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     static Pose2d[] outline(Geometry2d geometry) {
         if (geometry instanceof Rectangle2d rectangle) {
             Pose2d[] result = new Pose2d[5];
-            result[0] = pose(rectangle.minimumX(), rectangle.minimumY());
-            result[1] = pose(rectangle.maximumX(), rectangle.minimumY());
-            result[2] = pose(rectangle.maximumX(), rectangle.maximumY());
-            result[3] = pose(rectangle.minimumX(), rectangle.maximumY());
+            result[0] = pose(rectangle.minimumX().in(Meters), rectangle.minimumY().in(Meters));
+            result[1] = pose(rectangle.maximumX().in(Meters), rectangle.minimumY().in(Meters));
+            result[2] = pose(rectangle.maximumX().in(Meters), rectangle.maximumY().in(Meters));
+            result[3] = pose(rectangle.minimumX().in(Meters), rectangle.maximumY().in(Meters));
             result[4] = result[0];
             return result;
         }
@@ -140,8 +144,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             int count = polygon.vertices().size();
             Pose2d[] result = new Pose2d[count + 1];
             for (int index = 0; index < count; index++) {
-                Point2d point = polygon.vertices().get(index);
-                result[index] = pose(point.x(), point.y());
+                Translation2d point = polygon.vertices().get(index);
+                result[index] = pose(point.getX(), point.getY());
             }
             result[count] = result[0];
             return result;
@@ -151,8 +155,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             for (int index = 0; index < result.length; index++) {
                 double angle = 2.0 * Math.PI * index / (result.length - 1);
                 result[index] = pose(
-                        circle.center().x() + circle.radius() * Math.cos(angle),
-                        circle.center().y() + circle.radius() * Math.sin(angle));
+                        circle.center().getX() + circle.radius().in(Meters) * Math.cos(angle),
+                        circle.center().getY() + circle.radius().in(Meters) * Math.sin(angle));
             }
             return result;
         }
@@ -292,12 +296,12 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 return;
             }
             if (pointsPublisher != null) {
-                Point2d[] points = (Point2d[]) value.value();
-                if (!published || !(lastObject instanceof Point2d[] previous)
+                Translation2d[] points = (Translation2d[]) value.value();
+                if (!published || !(lastObject instanceof Translation2d[] previous)
                         || !Arrays.equals(previous, points)) {
                     Translation2d[] translated = new Translation2d[points.length];
                     for (int index = 0; index < points.length; index++) {
-                        translated[index] = new Translation2d(points[index].x(), points[index].y());
+                        translated[index] = new Translation2d(points[index].getX(), points[index].getY());
                     }
                     pointsPublisher.set(translated);
                     lastObject = points.clone();
@@ -457,7 +461,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 case BOOLEAN -> lastBoolean = value.bool();
                 case STRING -> lastObject = String.valueOf(value.value());
                 case NUMBER_ARRAY -> lastObject = ((double[]) value.value()).clone();
-                case POINTS -> lastObject = ((Point2d[]) value.value()).clone();
+                case POINTS -> lastObject = ((Translation2d[]) value.value()).clone();
                 case GEOMETRY -> { }
             }
         }

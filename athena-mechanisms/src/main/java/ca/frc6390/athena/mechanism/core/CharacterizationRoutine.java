@@ -167,9 +167,10 @@ public final class CharacterizationRoutine {
     }
 
     private static SysIdUnit inferUnit(ControlBinding<?> control) {
-        if (!(control.feedback().position() instanceof EncoderDevice encoder)) {
+        if (!(control.feedback().position() instanceof EncoderDevice.PositionFeedback feedback)) {
             return SysIdUnit.ROTATIONS;
         }
+        EncoderDevice encoder = feedback.encoder();
         Unit measured = encoder.measuresUnit();
         if (measured == Units.Degrees) {
             return SysIdUnit.DEGREES;

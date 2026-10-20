@@ -136,7 +136,9 @@ class ModelPlantSimulationTest {
         assertEquals(KINETIC_FRICTION, fitted.kineticFrictionVolts(), 0.06, "kinetic friction");
         assertEquals(STATIC_FRICTION, fitted.staticFrictionVolts(), 0.08, "static friction");
         assertEquals(gravity, fitted.kG(), 0.08, "gravity amplitude");
-        assertEquals(configured.inertia(), fitted.inertia(), 0.05 * configured.inertia(), "inertia");
+        double configuredInertia = configured.inertia().in(Units.KilogramSquareMeters);
+        double fittedInertia = fitted.inertia().in(Units.KilogramSquareMeters);
+        assertEquals(configuredInertia, fittedInertia, 0.05 * configuredInertia, "inertia");
         assertTrue(fitted.rSquared() > 0.95, "r2 " + fitted.rSquared());
     }
 

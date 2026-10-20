@@ -3,7 +3,7 @@ package ca.frc6390.athena.wpilib.controls;
 import ca.frc6390.athena.mechanism.core.TelemetrySource;
 import ca.frc6390.athena.mechanism.core.TelemetryValue;
 import ca.frc6390.athena.mechanism.interpolation.CurveMapping;
-import ca.frc6390.athena.runtime.geometry.Point2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.Timer;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,7 +32,7 @@ public final class AxisSignal implements TelemetrySource {
     private volatile double lastInput;
     private volatile boolean sampled;
     private volatile long plotCurveFingerprint = Long.MIN_VALUE;
-    private volatile Point2d[] cachedPlotCurve;
+    private volatile Translation2d[] cachedPlotCurve;
 
     AxisSignal(DoubleSupplier source) {
         this(null, "axis", source, Timer::getFPGATimestamp,
@@ -281,37 +281,37 @@ public final class AxisSignal implements TelemetrySource {
         return outputs;
     }
 
-    private Point2d[] plotCurve() {
+    private Translation2d[] plotCurve() {
         double[] inputs = curveInputs();
         long fingerprint = 1L;
         for (double input : inputs) {
             fingerprint = 31L * fingerprint + Double.doubleToLongBits(mapRaw(input));
         }
-        Point2d[] cached = cachedPlotCurve;
+        Translation2d[] cached = cachedPlotCurve;
         if (cached != null && fingerprint == plotCurveFingerprint) return cached;
 
-        Point2d[] points = new Point2d[inputs.length];
+        Translation2d[] points = new Translation2d[inputs.length];
         for (int index = 0; index < inputs.length; index++) {
-            points[index] = new Point2d(inputs[index], mapRaw(inputs[index]));
+            points[index] = new Translation2d(inputs[index], mapRaw(inputs[index]));
         }
         cachedPlotCurve = points;
         plotCurveFingerprint = fingerprint;
         return points;
     }
 
-    private Point2d[] plotRaw() {
-        return new Point2d[] {new Point2d(raw(), 0.0)};
+    private Translation2d[] plotRaw() {
+        return new Translation2d[] {new Translation2d(raw(), 0.0)};
     }
 
-    private Point2d[] plotMapped() {
+    private Translation2d[] plotMapped() {
         double current = raw();
-        return new Point2d[] {new Point2d(current, mapRaw(current))};
+        return new Translation2d[] {new Translation2d(current, mapRaw(current))};
     }
 
-    private Point2d[] plotOutput() {
+    private Translation2d[] plotOutput() {
         double input = sampled ? lastInput : raw();
         double output = sampled ? lastOutput : mapRaw(input);
-        return new Point2d[] {new Point2d(input, output)};
+        return new Translation2d[] {new Translation2d(input, output)};
     }
 
     private static double[] curveInputs() {

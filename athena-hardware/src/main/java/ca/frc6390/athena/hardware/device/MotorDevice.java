@@ -176,11 +176,11 @@ public record MotorDevice(
 
     /** Returns the thermal load in {@code [0, 1]}: 0 at the derate start, 1 at the derate end. */
     public double thermalLoad() {
-        return thermalCurve().loadCelsius(fusedTemperatureCelsius());
+        return thermalCurve().raw().loadCelsius(fusedTemperatureCelsius());
     }
 
-    /** Per-cycle primitive: fused winding temperature in Celsius. Teams should use {@link #temperature()}. */
-    public double fusedTemperatureCelsius() {
+    /** Per-cycle primitive: fused winding temperature in Celsius. Robot code should use {@link #temperature()}. */
+    double fusedTemperatureCelsius() {
         RuntimeMotor runtime = RUNTIMES.find(this);
         return runtime == null ? MotorThermalSpec.GENERIC.ambientCelsius() : runtime.thermal().celsius();
     }
@@ -222,7 +222,7 @@ public record MotorDevice(
     /** Commands this motor to a fixed voltage. */
     @SuppressWarnings("unchecked")
     public <T extends DeviceAction> T voltage(Voltage volts) {
-        return (T) DeviceActionFactories.get().motorVoltage(this, Objects.requireNonNull(volts, "volts").in(Units.Volts));
+        return (T) DeviceActionFactories.get().motorVoltage(this, Objects.requireNonNull(volts, "volts"));
     }
 
     /** Commands this motor to a voltage read when the action executes. */
@@ -380,18 +380,18 @@ public record MotorDevice(
 
     /**
      * Per-cycle primitive: latest applied voltage in volts. Athena's hot paths use this to avoid
-     * allocating measures; teams should use {@link #appliedVoltage()}.
+     * allocating measures; robot code should use {@link #appliedVoltage()}.
      */
-    public double appliedVoltageVolts() { return runtime().handle().appliedVoltage(); }
+    double appliedVoltageVolts() { return runtime().handle().appliedVoltage(); }
 
-    /** Per-cycle primitive: latest supply current in amps. Teams should use {@link #supplyCurrent()}. */
-    public double supplyCurrentAmps() { return runtime().handle().supplyCurrentAmps(); }
+    /** Per-cycle primitive: latest supply current in amps. Robot code should use {@link #supplyCurrent()}. */
+    double supplyCurrentAmps() { return runtime().handle().supplyCurrentAmps(); }
 
-    /** Per-cycle primitive: latest stator current in amps. Teams should use {@link #statorCurrent()}. */
-    public double statorCurrentAmps() { return runtime().handle().statorCurrentAmps(); }
+    /** Per-cycle primitive: latest stator current in amps. Robot code should use {@link #statorCurrent()}. */
+    double statorCurrentAmps() { return runtime().handle().statorCurrentAmps(); }
 
-    /** Per-cycle primitive: latest integrated velocity in rotations per second. Teams should use {@link #velocity()}. */
-    public double velocityRotationsPerSecond() { return runtime().handle().integratedVelocityRotationsPerSecond(); }
+    /** Per-cycle primitive: latest integrated velocity in rotations per second. Robot code should use {@link #velocity()}. */
+    double velocityRotationsPerSecond() { return runtime().handle().integratedVelocityRotationsPerSecond(); }
 
     /** Returns the motor's latest supply-current snapshot. */
     public Current supplyCurrent() { return Units.Amps.of(runtime().handle().supplyCurrentAmps()); }
@@ -550,5 +550,48 @@ public record MotorDevice(
 
     private static String sanitize(String key) {
         return key.toLowerCase(Locale.ROOT).replace(':', '_').replace('-', '_');
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive per-cycle motor readings in the units the names state. Athena's
+     * hot paths read these; robot code uses the typed accessors (appliedVoltage(), supplyCurrent(),
+     * statorCurrent(), velocity(), temperature()).
+     */
+    public static final class Raw {
+        private final MotorDevice owner;
+
+        private Raw(MotorDevice owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see MotorDevice#appliedVoltageVolts. */
+        public double appliedVoltageVolts() {
+            return owner.appliedVoltageVolts();
+        }
+
+        /** Internal: see MotorDevice#supplyCurrentAmps. */
+        public double supplyCurrentAmps() {
+            return owner.supplyCurrentAmps();
+        }
+
+        /** Internal: see MotorDevice#statorCurrentAmps. */
+        public double statorCurrentAmps() {
+            return owner.statorCurrentAmps();
+        }
+
+        /** Internal: see MotorDevice#velocityRotationsPerSecond. */
+        public double velocityRotationsPerSecond() {
+            return owner.velocityRotationsPerSecond();
+        }
+
+        /** Internal: see MotorDevice#fusedTemperatureCelsius. */
+        public double fusedTemperatureCelsius() {
+            return owner.fusedTemperatureCelsius();
+        }
     }
 }

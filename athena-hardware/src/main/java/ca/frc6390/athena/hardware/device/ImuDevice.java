@@ -68,7 +68,7 @@ public record ImuDevice(
      *
      * @return yaw degrees
      */
-    public double yawDegrees() {
+    public double readYawDegrees() {
         return runtimeHandle().yawDegrees();
     }
 
@@ -77,47 +77,47 @@ public record ImuDevice(
      *
      * @return accumulated angle degrees
      */
-    public double angleDegrees() {
+    public double readAngleDegrees() {
         return runtimeHandle().angleDegrees();
     }
 
     @Override
-    public double pitchDegrees() {
+    public double readPitchDegrees() {
         return runtimeHandle().pitchDegrees();
     }
 
     @Override
-    public double rollDegrees() {
+    public double readRollDegrees() {
         return runtimeHandle().rollDegrees();
     }
 
     @Override
-    public double yawRateDegreesPerSecond() {
+    public double readYawRateDegreesPerSecond() {
         return runtimeHandle().yawRateDegreesPerSecond();
     }
 
     @Override
-    public double pitchRateDegreesPerSecond() {
+    public double readPitchRateDegreesPerSecond() {
         return runtimeHandle().pitchRateDegreesPerSecond();
     }
 
     @Override
-    public double rollRateDegreesPerSecond() {
+    public double readRollRateDegreesPerSecond() {
         return runtimeHandle().rollRateDegreesPerSecond();
     }
 
     @Override
-    public double linearAccelerationXG() {
+    public double readLinearAccelerationXG() {
         return runtimeHandle().linearAccelerationXG();
     }
 
     @Override
-    public double linearAccelerationYG() {
+    public double readLinearAccelerationYG() {
         return runtimeHandle().linearAccelerationYG();
     }
 
     @Override
-    public double linearAccelerationZG() {
+    public double readLinearAccelerationZG() {
         return runtimeHandle().linearAccelerationZG();
     }
 
@@ -140,7 +140,7 @@ public record ImuDevice(
     }
 
     @Override
-    public double lastUpdateSeconds() {
+    public double readLastUpdateSeconds() {
         try {
             return runtimeHandle().lastUpdateSeconds();
         } catch (RuntimeException exception) {
@@ -154,7 +154,7 @@ public record ImuDevice(
     }
 
     @Override
-    public void applyYawDegrees(ActionContext context, double yawDegrees) {
+    public void writeYawDegrees(ActionContext context, double yawDegrees) {
         Objects.requireNonNull(context, "context").imu(this).setYawDegrees(yawDegrees);
     }
 

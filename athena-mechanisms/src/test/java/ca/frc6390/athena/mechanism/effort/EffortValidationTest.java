@@ -96,7 +96,7 @@ class EffortValidationTest {
         double gearing = 25.0;
         double[] amps = EffortUnits.perMotorAmps(Units.NewtonMeters.of(torque), EffortUnits.Kind.TORQUE,
                 List.of(KRAKEN, KRAKEN_2), gearing, null);
-        double expected = torque / (2 * gearing * kraken.torqueConstantNmPerAmp());
+        double expected = torque / (2 * gearing * kraken.raw().torqueConstantNmPerAmp());
         assertEquals(expected, amps[0], 1e-9);
         assertEquals(expected, amps[1], 1e-9);
         // Round trip through the model: N motors at this current produce the declared torque.
@@ -109,7 +109,7 @@ class EffortValidationTest {
                 List.of(KRAKEN), 10.0, Units.Inches.of(2.0));
         double torque = 200 * Units.Inches.of(2.0).in(Units.Meters);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(torque / (10.0 * kraken.torqueConstantNmPerAmp()), amps[0], 1e-9);
+        assertEquals(torque / (10.0 * kraken.raw().torqueConstantNmPerAmp()), amps[0], 1e-9);
     }
 
     @Test
@@ -120,12 +120,12 @@ class EffortValidationTest {
         Action action = arm.position(Units.Rotations.of(0.5)).effort(Units.NewtonMeters.of(4));
         var position = assertInstanceOf(Actions.ControlPosition.class, action);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), position.effort().currentLimitAmps(), 1e-9);
+        assertEquals(4.0 / (25.0 * kraken.raw().torqueConstantNmPerAmp()), position.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-9);
         // Amps on the action need no gearing.
         var amps = assertInstanceOf(Actions.ControlPosition.class,
                 Controls.position(KRAKEN, Units.Rotations).feedback(EncoderDevice.of(EncoderKinds.CANCODER, 8)
                         .measures(Units.Rotations)).position(Units.Rotations.of(0.5)).effort(Units.Amps.of(12)));
-        assertEquals(12.0, amps.effort().currentLimitAmps(), 1e-12);
+        assertEquals(12.0, amps.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
     }
 
     @Test
@@ -145,9 +145,9 @@ class EffortValidationTest {
                 .then(arm.position(Units.Rotations.of(0.0))).effort(Units.Amps.of(3));
         Actions.Conditional conditional = assertInstanceOf(Actions.Conditional.class, composed);
         var first = assertInstanceOf(Actions.ControlPosition.class, conditional.action());
-        assertEquals(3.0, first.effort().currentLimitAmps(), 1e-12);
+        assertEquals(3.0, first.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
         var next = assertInstanceOf(Actions.ControlPosition.class, conditional.next());
-        assertEquals(3.0, next.effort().currentLimitAmps(), 1e-12);
+        assertEquals(3.0, next.effort().currentLimit().in(edu.wpi.first.units.Units.Amps), 1e-12);
     }
 
     @Test
@@ -189,6 +189,6 @@ class EffortValidationTest {
         assertTrue(telemetry.containsKey("ActiveEffort"));
         assertEquals(4.0, telemetry.get("Ceiling").number(), 1e-12);
         MotorConstants kraken = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow();
-        assertEquals(4.0 / (25.0 * kraken.torqueConstantNmPerAmp()), telemetry.get("CeilingAmps").number(), 1e-9);
+        assertEquals(4.0 / (25.0 * kraken.raw().torqueConstantNmPerAmp()), telemetry.get("CeilingAmps").number(), 1e-9);
     }
 }

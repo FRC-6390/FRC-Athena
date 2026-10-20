@@ -16,104 +16,106 @@ import java.util.function.Supplier;
  * Runtime orientation and inertial readings from a physical or derived source.
  *
  * <p>Robot code reads the typed accessors ({@link #yaw()}, {@link #yawRate()},
- * {@link #linearAccelerationX()}, ...). Each typed accessor is a default method over a primitive
- * per-cycle reading in degrees, degrees per second or G. Implementers provide the primitives; Athena's
- * derived sources (mounting, inversion, relative, transform) use them so the control path does not
- * allocate measures.</p>
+ * {@link #linearAccelerationX()}, ...). Each typed accessor is a default method over a primitive reading in
+ * degrees, degrees per second or G. Athena's own per-cycle code reads those primitives through
+ * {@link #raw()}, so the control path does not allocate measures.</p>
+ *
+ * <p>The {@code read*} and {@code writeYawDegrees} methods are the implementer SPI: a vendor or simulated source
+ * overrides them. They are not the team API; use the typed accessors or {@link #raw()} instead.</p>
  *
  * <p>Control signals ({@link #headingSignal()}, {@link #yawRateSignal()}, ...) are base-unit feedback
  * signals for the control framework: radians, radians per second and G, documented per method.</p>
  */
 public interface ImuSource {
-    // Per-cycle primitives. Implementers provide these; robot code should use the typed accessors.
+    // Implementer SPI: primitive readings a source provides. Robot code does not call these; see raw().
 
-    /** Yaw in degrees. Per-cycle primitive; teams use {@link #yaw()}. */
-    double yawDegrees();
+    /** Yaw in degrees. Implementer SPI; robot code uses {@link #yaw()}. */
+    double readYawDegrees();
 
-    /** Pitch in degrees. Per-cycle primitive; teams use {@link #pitch()}. */
-    double pitchDegrees();
+    /** Pitch in degrees. Implementer SPI; robot code uses {@link #pitch()}. */
+    double readPitchDegrees();
 
-    /** Roll in degrees. Per-cycle primitive; teams use {@link #roll()}. */
-    double rollDegrees();
+    /** Roll in degrees. Implementer SPI; robot code uses {@link #roll()}. */
+    double readRollDegrees();
 
-    /** Accumulated, unwrapped angle in degrees. Per-cycle primitive; teams use {@link #angle()}. */
-    double angleDegrees();
+    /** Accumulated, unwrapped angle in degrees. Implementer SPI; robot code uses {@link #angle()}. */
+    double readAngleDegrees();
 
-    /** Yaw rate in degrees per second. Per-cycle primitive; teams use {@link #yawRate()}. */
-    double yawRateDegreesPerSecond();
+    /** Yaw rate in degrees per second. Implementer SPI; robot code uses {@link #yawRate()}. */
+    double readYawRateDegreesPerSecond();
 
-    /** Pitch rate in degrees per second. Per-cycle primitive; teams use {@link #pitchRate()}. */
-    default double pitchRateDegreesPerSecond() {
+    /** Pitch rate in degrees per second. Implementer SPI; robot code uses {@link #pitchRate()}. */
+    default double readPitchRateDegreesPerSecond() {
         throw new UnsupportedOperationException("IMU source does not provide pitch rate.");
     }
 
-    /** Roll rate in degrees per second. Per-cycle primitive; teams use {@link #rollRate()}. */
-    default double rollRateDegreesPerSecond() {
+    /** Roll rate in degrees per second. Implementer SPI; robot code uses {@link #rollRate()}. */
+    default double readRollRateDegreesPerSecond() {
         throw new UnsupportedOperationException("IMU source does not provide roll rate.");
     }
 
-    /** X-axis linear acceleration in G. Per-cycle primitive; teams use {@link #linearAccelerationX()}. */
-    double linearAccelerationXG();
+    /** X-axis linear acceleration in G. Implementer SPI; robot code uses {@link #linearAccelerationX()}. */
+    double readLinearAccelerationXG();
 
-    /** Y-axis linear acceleration in G. Per-cycle primitive; teams use {@link #linearAccelerationY()}. */
-    double linearAccelerationYG();
+    /** Y-axis linear acceleration in G. Implementer SPI; robot code uses {@link #linearAccelerationY()}. */
+    double readLinearAccelerationYG();
 
-    /** Z-axis linear acceleration in G. Per-cycle primitive; teams use {@link #linearAccelerationZ()}. */
-    double linearAccelerationZG();
+    /** Z-axis linear acceleration in G. Implementer SPI; robot code uses {@link #linearAccelerationZ()}. */
+    double readLinearAccelerationZG();
 
-    /** Applies a yaw, in degrees, to the physical sensor. Per-cycle primitive; teams use {@link #applyYaw}. */
-    void applyYawDegrees(ActionContext context, double yawDegrees);
+    /** Applies a yaw, in degrees, to the physical sensor. Implementer hook; robot code uses {@link #applyYaw}. */
+    void writeYawDegrees(ActionContext context, double yawDegrees);
 
     // Typed readings.
 
     /** Returns the latest yaw. */
     default Angle yaw() {
-        return Units.Degrees.of(yawDegrees());
+        return Units.Degrees.of(readYawDegrees());
     }
 
     /** Returns the latest pitch. */
     default Angle pitch() {
-        return Units.Degrees.of(pitchDegrees());
+        return Units.Degrees.of(readPitchDegrees());
     }
 
     /** Returns the latest roll. */
     default Angle roll() {
-        return Units.Degrees.of(rollDegrees());
+        return Units.Degrees.of(readRollDegrees());
     }
 
     /** Returns the accumulated, unwrapped angle. */
     default Angle angle() {
-        return Units.Degrees.of(angleDegrees());
+        return Units.Degrees.of(readAngleDegrees());
     }
 
     /** Returns the latest yaw rate. */
     default AngularVelocity yawRate() {
-        return Units.DegreesPerSecond.of(yawRateDegreesPerSecond());
+        return Units.DegreesPerSecond.of(readYawRateDegreesPerSecond());
     }
 
     /** Returns the latest pitch rate. */
     default AngularVelocity pitchRate() {
-        return Units.DegreesPerSecond.of(pitchRateDegreesPerSecond());
+        return Units.DegreesPerSecond.of(readPitchRateDegreesPerSecond());
     }
 
     /** Returns the latest roll rate. */
     default AngularVelocity rollRate() {
-        return Units.DegreesPerSecond.of(rollRateDegreesPerSecond());
+        return Units.DegreesPerSecond.of(readRollRateDegreesPerSecond());
     }
 
     /** Returns the latest X-axis linear acceleration. */
     default LinearAcceleration linearAccelerationX() {
-        return Units.Gs.of(linearAccelerationXG());
+        return Units.Gs.of(readLinearAccelerationXG());
     }
 
     /** Returns the latest Y-axis linear acceleration. */
     default LinearAcceleration linearAccelerationY() {
-        return Units.Gs.of(linearAccelerationYG());
+        return Units.Gs.of(readLinearAccelerationYG());
     }
 
     /** Returns the latest Z-axis linear acceleration. */
     default LinearAcceleration linearAccelerationZ() {
-        return Units.Gs.of(linearAccelerationZG());
+        return Units.Gs.of(readLinearAccelerationZG());
     }
 
     // Control signals (base units, for the feedback framework).
@@ -124,7 +126,7 @@ public interface ImuSource {
         return new PositionSignal() {
             @Override
             public double position() {
-                return normalizeRadians(Math.toRadians(source.yawDegrees()));
+                return normalizeRadians(Math.toRadians(source.readYawDegrees()));
             }
 
             @Override
@@ -138,7 +140,7 @@ public interface ImuSource {
     default PositionSignal continuousHeadingSignal() {
         ImuSource source = this;
         return new PositionSignal() {
-            @Override public double position() { return Math.toRadians(source.angleDegrees()); }
+            @Override public double position() { return Math.toRadians(source.readAngleDegrees()); }
             @Override public List<?> dependencies() { return source.dependencies(); }
         };
     }
@@ -149,7 +151,7 @@ public interface ImuSource {
         return new PositionSignal() {
             @Override
             public double position() {
-                return Math.toRadians(source.pitchDegrees());
+                return Math.toRadians(source.readPitchDegrees());
             }
 
             @Override
@@ -165,7 +167,7 @@ public interface ImuSource {
         return new PositionSignal() {
             @Override
             public double position() {
-                return Math.toRadians(source.rollDegrees());
+                return Math.toRadians(source.readRollDegrees());
             }
 
             @Override
@@ -178,37 +180,37 @@ public interface ImuSource {
     /** Returns yaw rate as a velocity feedback signal in radians per second. */
     default VelocitySignal yawRateSignal() {
         ImuSource source = this;
-        return velocitySignal(source, source::yawRateDegreesPerSecond);
+        return velocitySignal(source, source::readYawRateDegreesPerSecond);
     }
 
     /** Returns pitch rate in radians per second. */
     default VelocitySignal pitchRateSignal() {
         ImuSource source = this;
-        return velocitySignal(source, source::pitchRateDegreesPerSecond);
+        return velocitySignal(source, source::readPitchRateDegreesPerSecond);
     }
 
     /** Returns roll rate in radians per second. */
     default VelocitySignal rollRateSignal() {
         ImuSource source = this;
-        return velocitySignal(source, source::rollRateDegreesPerSecond);
+        return velocitySignal(source, source::readRollRateDegreesPerSecond);
     }
 
     /** Returns robot X-axis linear acceleration as a scalar signal in G. */
     default ScalarSignal accelerationXSignal() {
         ImuSource source = this;
-        return scalarSignal(source, source::linearAccelerationXG);
+        return scalarSignal(source, source::readLinearAccelerationXG);
     }
 
     /** Returns robot Y-axis linear acceleration as a scalar signal in G. */
     default ScalarSignal accelerationYSignal() {
         ImuSource source = this;
-        return scalarSignal(source, source::linearAccelerationYG);
+        return scalarSignal(source, source::readLinearAccelerationYG);
     }
 
     /** Returns robot Z-axis linear acceleration as a scalar signal in G. */
     default ScalarSignal accelerationZSignal() {
         ImuSource source = this;
-        return scalarSignal(source, source::linearAccelerationZG);
+        return scalarSignal(source, source::readLinearAccelerationZG);
     }
 
     default ImuSource relative() {
@@ -257,7 +259,7 @@ public interface ImuSource {
 
     /** Applies a yaw to the physical sensor. */
     default void applyYaw(ActionContext context, Angle yaw) {
-        applyYawDegrees(context, Objects.requireNonNull(yaw, "yaw").in(Units.Degrees));
+        writeYawDegrees(context, Objects.requireNonNull(yaw, "yaw").in(Units.Degrees));
     }
 
     default List<?> dependencies() {
@@ -275,7 +277,7 @@ public interface ImuSource {
     }
 
     /** Returns the monotonic timestamp of the latest successful update, in seconds. */
-    default double lastUpdateSeconds() {
+    default double readLastUpdateSeconds() {
         return System.nanoTime() * 1.0e-9;
     }
 
@@ -285,9 +287,86 @@ public interface ImuSource {
         if (!Double.isFinite(maxAgeSeconds) || maxAgeSeconds < 0.0) {
             throw new IllegalArgumentException("Maximum IMU age must be finite and non-negative.");
         }
-        double updated = lastUpdateSeconds();
+        double updated = readLastUpdateSeconds();
         return isConnected() && !isCalibrating() && Double.isFinite(updated)
                 && System.nanoTime() * 1.0e-9 - updated <= maxAgeSeconds;
+    }
+
+    /** Returns an internal, primitive view of this source. Not for robot code: use the typed accessors. */
+    default Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive readings in degrees, degrees per second, G and seconds, for Athena's
+     * per-cycle code. Robot code uses the typed accessors ({@link #yaw()}, {@link #yawRate()}, ...).
+     */
+    final class Raw {
+        private final ImuSource source;
+
+        private Raw(ImuSource source) {
+            this.source = source;
+        }
+
+        /** Internal: yaw in degrees. */
+        public double yawDegrees() {
+            return source.readYawDegrees();
+        }
+
+        /** Internal: pitch in degrees. */
+        public double pitchDegrees() {
+            return source.readPitchDegrees();
+        }
+
+        /** Internal: roll in degrees. */
+        public double rollDegrees() {
+            return source.readRollDegrees();
+        }
+
+        /** Internal: accumulated, unwrapped angle in degrees. */
+        public double angleDegrees() {
+            return source.readAngleDegrees();
+        }
+
+        /** Internal: yaw rate in degrees per second. */
+        public double yawRateDegreesPerSecond() {
+            return source.readYawRateDegreesPerSecond();
+        }
+
+        /** Internal: pitch rate in degrees per second. */
+        public double pitchRateDegreesPerSecond() {
+            return source.readPitchRateDegreesPerSecond();
+        }
+
+        /** Internal: roll rate in degrees per second. */
+        public double rollRateDegreesPerSecond() {
+            return source.readRollRateDegreesPerSecond();
+        }
+
+        /** Internal: X-axis linear acceleration in G. */
+        public double linearAccelerationXG() {
+            return source.readLinearAccelerationXG();
+        }
+
+        /** Internal: Y-axis linear acceleration in G. */
+        public double linearAccelerationYG() {
+            return source.readLinearAccelerationYG();
+        }
+
+        /** Internal: Z-axis linear acceleration in G. */
+        public double linearAccelerationZG() {
+            return source.readLinearAccelerationZG();
+        }
+
+        /** Internal: monotonic timestamp of the latest update, in seconds. */
+        public double lastUpdateSeconds() {
+            return source.readLastUpdateSeconds();
+        }
+
+        /** Internal: applies a yaw, in degrees, to the physical sensor. */
+        public void applyYawDegrees(ActionContext context, double yawDegrees) {
+            source.writeYawDegrees(context, yawDegrees);
+        }
     }
 
     private static VelocitySignal velocitySignal(ImuSource source, DoubleSupplier reading) {

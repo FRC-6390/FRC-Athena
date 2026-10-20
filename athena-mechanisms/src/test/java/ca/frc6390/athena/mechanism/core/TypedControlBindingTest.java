@@ -137,8 +137,8 @@ class TypedControlBindingTest {
                 .constraint(Constraints.range(Units.Degrees.of(-90.0), Units.Degrees.of(90.0)));
 
         Range limits = Constraints.positionRange(control.constraints());
-        assertEquals(-0.25, limits.minimumInUnit(), 1e-12);
-        assertEquals(0.25, limits.maximumInUnit(), 1e-12);
+        assertEquals(-0.25, limits.raw().minimumInUnit(), 1e-12);
+        assertEquals(0.25, limits.raw().maximumInUnit(), 1e-12);
     }
 
     @Test
@@ -177,8 +177,8 @@ class TypedControlBindingTest {
         var control = Controls.position(motor(), Units.Rotations)
                 .continuous(Units.Degrees.of(0.0), Units.Degrees.of(360.0));
 
-        assertEquals(0.0, control.continuousRange().minimumInUnit(), 1e-12);
-        assertEquals(1.0, control.continuousRange().maximumInUnit(), 1e-12);
+        assertEquals(0.0, control.continuousRange().raw().minimumInUnit(), 1e-12);
+        assertEquals(1.0, control.continuousRange().raw().maximumInUnit(), 1e-12);
     }
 
     @Test
@@ -224,16 +224,15 @@ class TypedControlBindingTest {
     }
 
     /**
-     * A velocity binding takes its range in units per second (the velocity target) and its motion as an
-     * acceleration and its rate. The same typed constraints on a position binding are rejected.
+     * A velocity binding takes its range in units per second (the velocity target) and its motion as a velocity
+     * clamp and an acceleration slew. A position binding rejects the per-second range.
      */
     @Test
     void velocityBindingsTakeTypedRangeAndMotionInUnitsPerSecond() {
         var shooter = Controls.velocity(motor(), Units.Rotations)
                 .constraints(
                         Constraints.range(Units.RotationsPerSecond.of(-200.0), Units.RotationsPerSecond.of(200.0)),
-                        Constraints.motion(Units.RotationsPerSecondPerSecond.of(200.0),
-                                Units.RotationsPerSecondPerSecond.per(Units.Seconds).of(200.0)),
+                        Constraints.motion(Units.RotationsPerSecond.of(200.0), Units.RotationsPerSecondPerSecond.of(200.0)),
                         Constraints.maxVoltage(Units.Volts.of(12.0)));
 
         var high = Constraints.evaluate(shooter.constraints(),
@@ -243,19 +242,12 @@ class TypedControlBindingTest {
                 new ConstraintContext<>(0.0, -500.0, ca.frc6390.athena.mechanism.core.MechanismContext.empty()));
         assertEquals(-200.0, low.value(), 1.0e-9);
 
-        var motion = shooter.constraints().stream()
-                .filter(c -> c instanceof Constraints.VelocityMotionConstraint)
-                .map(c -> (Constraints.VelocityMotionConstraint) c)
-                .findFirst().orElseThrow();
-        assertEquals(200.0, motion.acceleration(), 1.0e-9);
-        assertEquals(200.0, motion.jerk(), 1.0e-9);
+        var profile = Constraints.motionProfile(shooter.constraints());
+        assertEquals(200.0, profile.maxVelocity(), 1.0e-9);
+        assertEquals(200.0, profile.maxAcceleration(), 1.0e-9);
 
         assertThrows(IllegalArgumentException.class, () -> Controls.position(motor(), Units.Rotations)
                 .constraint(Constraints.range(Units.RotationsPerSecond.of(-200.0), Units.RotationsPerSecond.of(200.0))));
-        // A position binding reads motion as velocity and acceleration, so a jerk-sized second limit is rejected.
-        assertThrows(IllegalArgumentException.class, () -> Controls.position(motor(), Units.Rotations)
-                .constraint(Constraints.motion(Units.RotationsPerSecond.of(200.0),
-                        Units.RotationsPerSecondPerSecond.per(Units.Seconds).of(200.0))));
     }
 
     /** Equivalence: the same physical key gives the same target whether the input is read in inches or meters. */

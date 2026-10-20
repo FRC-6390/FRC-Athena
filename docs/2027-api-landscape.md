@@ -164,12 +164,12 @@ Robot code reads runtime-owned sensor snapshots directly from declarations. Read
 `ActionContext`, hook context, mechanism context, or runtime object:
 
 ```java
-double armPosition = armEncoder.position();
-double armVelocity = armEncoder.velocity();
-double moduleAngle = moduleEncoder.absolutePosition();
+Angle armAngle = armEncoder.positionAngle();                  // encoder measures(Units.Degrees)
+AngularVelocity armVelocity = armEncoder.velocityAngular();
+Angle moduleAngle = moduleEncoder.absolutePositionAngle();
 Angle heading = imu.yaw();
 boolean atHome = homeSwitch.active();
-Optional<PoseSnapshot> cameraPose = camera.pose().value();
+Optional<Pose2d> cameraPose = camera.pose().value();
 Optional<TargetMeasurementSample> target = camera.targets().latest();
 ```
 
@@ -179,9 +179,10 @@ vendor APIs again. A declaration read before registration, or after its runtime 
 `IllegalStateException`. Multiple simultaneous runtimes are isolated by runtime scope so tests and simulation cannot
 silently read another runtime's device.
 
-`PositionSignal` and `VelocitySignal` use context-free `position()` and `velocity()` methods, so custom feedback,
-constraints, hooks, and ordinary helper methods all use the same API. `EncoderDevice.absolutePosition()` is the
-numeric absolute channel; `absoluteSignal()` adapts that channel when a control binding needs a `PositionSignal`.
+`EncoderDevice` reads are typed: `positionAngle()` or `positionDistance()` (by declaration), `absolutePositionAngle()` or
+`absolutePositionDistance()`, and `velocityAngular()` or `velocityLinear()`. `positionSignal()`, `velocitySignal()` and
+`absoluteSignal()` adapt an encoder to the feedback signal types that control bindings take. The primitive reads sit
+behind `encoder.raw()` for Athena's own runtime code (see `docs/typed-units.md`).
 Camera pose and target signals expose typed optional reads because no measurement is a valid state. Legacy
 `PoseSignal.pose()` remains an origin-fallback convenience, not the authoritative missing-data API.
 

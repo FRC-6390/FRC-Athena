@@ -36,11 +36,11 @@ class SwerveDriveEncoderEquivalenceTest {
                     .measures(Units.Meters)
                     .travelPerRevolution(Units.Meters.of(Math.PI * model.wheelDiameter().in(Units.Meters)));
             for (double rotations : new double[] {0.0, 1.0, -2.5, 13.75}) {
-                assertEquals(legacy.positionFromRotations(rotations), typed.positionFromRotations(rotations), 0.0,
+                assertEquals(legacy.raw().positionFromRotations(rotations), typed.raw().positionFromRotations(rotations), 0.0,
                         model.name() + " position");
             }
             for (double rate : new double[] {0.0, 3.0, -7.5}) {
-                assertEquals(legacy.velocityFromRotationsPerSecond(rate), typed.velocityFromRotationsPerSecond(rate),
+                assertEquals(legacy.raw().velocityFromRotationsPerSecond(rate), typed.raw().velocityFromRotationsPerSecond(rate),
                         0.0, model.name() + " velocity");
             }
         }

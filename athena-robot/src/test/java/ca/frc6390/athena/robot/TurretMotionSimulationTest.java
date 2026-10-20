@@ -41,7 +41,7 @@ class TurretMotionSimulationTest {
             runtime.simulationPeriodic(now, 0.02);
         }
 
-        double travelled = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+        double travelled = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
         assertTrue(Math.abs(travelled) < 5.0,
                 () -> "a braked turret released at 180 deg/s should stop within a few degrees, travelled "
                         + travelled);
@@ -70,13 +70,13 @@ class TurretMotionSimulationTest {
                 }
                 lastSign = sign;
             }
-            double degrees = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+            double degrees = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
             if (firstWithinHalfDegree < 0.0 && degrees >= 89.5) {
                 firstWithinHalfDegree = now;
             }
         }
 
-        double finalDegrees = turret.angle.positionFromRotations(simulation.encoder(turret.angle).positionRotations());
+        double finalDegrees = turret.angle.raw().positionFromRotations(simulation.encoder(turret.angle).positionRotations());
         int changes = signChanges;
         assertTrue(changes <= 2, () -> "the geared turret's voltage should not bang-bang, sign changes " + changes);
         double reached = firstWithinHalfDegree;
@@ -99,10 +99,10 @@ class TurretMotionSimulationTest {
                 .feedback(angle)
                 .dependency(chassisImu)
                 .loop(ControlLoops.targetTransform(binding -> context ->
-                        ControlOutput.position(context.target() - chassisImu.angleDegrees())))
+                        ControlOutput.position(context.target() - chassisImu.raw().angleDegrees())))
                 .pid(0.144, 0.0, 0.006)
                 .constraints(Constraints.range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))), Constraints.motion(Units.DegreesPerSecond.of(180.0), Units.DegreesPerSecondPerSecond.of(540.0)))
-                .planner(MotionPlanners.boundedAngular(360.0));
+                .planner(MotionPlanners.boundedAngular(Units.Degrees.of(360.0), Units.Degrees));
         private final Action neutral = fieldHeading.neutral();
     }
 }

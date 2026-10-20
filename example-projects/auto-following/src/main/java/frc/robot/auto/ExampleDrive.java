@@ -35,7 +35,7 @@ public final class ExampleDrive implements Mechanism {
     public final RobotVelocityPool.Channel autoVelocity = velocity.channel();
     public final Action pooledDrive = kinematics.drive(
             velocity,
-            () -> pose.getRotation().getRadians());
+            () -> pose.getRotation());
     public final SwervePathFollower pathFollower = kinematics.follow(
             FollowerBackend.CHOREO,
             this::pose,

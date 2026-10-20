@@ -49,7 +49,7 @@ class ImuActionTest {
 
         assertEquals(-90.0, handle.yawDegrees, 1.0e-9);
         assertEquals(90.0,
-                RuntimeHardwareAccess.call(context, mechanism.heading::yawDegrees),
+                RuntimeHardwareAccess.call(context, mechanism.heading.raw()::yawDegrees),
                 1.0e-9);
     }
 
@@ -112,7 +112,7 @@ class ImuActionTest {
                 new EventContext(0.0, 0.02, LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, false)));
 
         assertEquals(-180.0,
-                RuntimeHardwareAccess.call(context, mechanism.driverHeading::yawDegrees),
+                RuntimeHardwareAccess.call(context, mechanism.driverHeading.raw()::yawDegrees),
                 1.0e-9);
     }
 
@@ -132,7 +132,7 @@ class ImuActionTest {
 
         runLifecycle(scheduler, context, LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, 0.0);
         runLifecycle(scheduler, context, LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, 0.02);
-        assertEquals(0.0, RuntimeHardwareAccess.call(context, mechanism.driverHeading::yawDegrees), 1.0e-9);
+        assertEquals(0.0, RuntimeHardwareAccess.call(context, mechanism.driverHeading.raw()::yawDegrees), 1.0e-9);
 
         handle.yawDegrees = 35.0;
         runLifecycle(scheduler, context, LifecycleMode.DISABLED, LifecyclePhase.INIT, false, 0.04);
@@ -140,7 +140,7 @@ class ImuActionTest {
         runLifecycle(scheduler, context, LifecycleMode.AUTONOMOUS, LifecyclePhase.INIT, true, 0.06);
         runLifecycle(scheduler, context, LifecycleMode.AUTONOMOUS, LifecyclePhase.EXIT, true, 0.08);
 
-        assertEquals(-180.0, RuntimeHardwareAccess.call(context, mechanism.driverHeading::yawDegrees), 1.0e-9);
+        assertEquals(-180.0, RuntimeHardwareAccess.call(context, mechanism.driverHeading.raw()::yawDegrees), 1.0e-9);
     }
 
     private static void runLifecycle(

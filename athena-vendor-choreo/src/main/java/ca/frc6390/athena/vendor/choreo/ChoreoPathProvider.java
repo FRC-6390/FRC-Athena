@@ -1,5 +1,8 @@
 package ca.frc6390.athena.vendor.choreo;
 
+import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.RadiansPerSecond;
+
 import static edu.wpi.first.units.Units.Meters;
 import static edu.wpi.first.units.Units.Radians;
 import static edu.wpi.first.units.Units.Seconds;
@@ -288,7 +291,7 @@ public final class ChoreoPathProvider implements PathProvider {
         }
         return follower.follow(new SwervePathSample(
                 sample.getPose(),
-                RobotVelocity.field(sample.vx, sample.vy, sample.omega)), dtSeconds);
+                RobotVelocity.field(MetersPerSecond.of(sample.vx), MetersPerSecond.of(sample.vy), RadiansPerSecond.of(sample.omega))), dtSeconds);
     }
 
     private static final class ActivePath {

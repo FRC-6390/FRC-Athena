@@ -25,7 +25,7 @@ public final class LocalizationExamples implements Mechanism {
      * Blue-alliance geometry. Blue is the identity; red sees the same layout rotated 180 degrees about the field
      * center. Resolved against the Driver Station on each call.
      */
-    public static final AllianceTransform ALLIANCE = AllianceTransform.rotate180(16.54, 8.21);
+    public static final AllianceTransform ALLIANCE = AllianceTransform.rotate180(Meters.of(16.54), Meters.of(8.21));
 
     /** A pose on the blue side of the field, mapped to the current alliance on every call. */
     public final Supplier<Pose2d> blueStartPose = ALLIANCE.poseSupplier(
@@ -50,7 +50,7 @@ public final class LocalizationExamples implements Mechanism {
                 .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
-                .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.54), Meters.of(8.21))))
                 .name("filteredVision");
         fusedVision = Localizations.covarianceIntersection()
                 .input(filteredVision)
@@ -93,7 +93,7 @@ public final class LocalizationExamples implements Mechanism {
                 .filter(VisionFilters.maxLatency(Seconds.of(0.15)))
                 .filter(VisionFilters.maxAmbiguity(0.20))
                 .filter(VisionFilters.maxAverageTagDistance(Meters.of(6.0)))
-                .filter(LocalizationFilters.inside(Rectangle2d.field(16.54, 8.21)))
+                .filter(LocalizationFilters.inside(Rectangle2d.field(Meters.of(16.54), Meters.of(8.21))))
                 .name(name);
     }
 

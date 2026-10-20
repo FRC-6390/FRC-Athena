@@ -30,7 +30,7 @@ public final class ExperimentalArm implements Mechanism {
             .pid(0.96, 0.0, 0.024)
             .constraint(Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(75.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(180.0)))
             .loop(ControlLoops.arbitraryFeedforward(binding -> context ->
-                    ControlOutput.voltage(0.45 * Math.cos(Math.toRadians(context.position())))));
+                    ControlOutput.voltage(edu.wpi.first.units.Units.Volts.of(0.45 * Math.cos(Math.toRadians(context.position()))))));
 
     public final Action home = arm.position(edu.wpi.first.units.Units.Degrees.of(0.0));
     public final Action score = arm.position(edu.wpi.first.units.Units.Degrees.of(75.0));

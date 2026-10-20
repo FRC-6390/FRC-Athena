@@ -63,16 +63,43 @@ public record Thermal(Temperature start, Temperature end, double minFraction) {
     }
 
     /** Per-cycle primitive: {@link #derateFraction(Temperature)} in Celsius. */
-    public double derateFractionCelsius(double celsius) {
+    double derateFractionCelsius(double celsius) {
         if (Double.isNaN(celsius)) return 1.0;
         return 1.0 - (1.0 - minFraction) * loadCelsius(celsius);
     }
 
     /** Per-cycle primitive: {@link #load(Temperature)} in Celsius. */
-    public double loadCelsius(double celsius) {
+    double loadCelsius(double celsius) {
         if (Double.isNaN(celsius)) return 0.0;
         double startCelsius = start.in(Units.Celsius);
         double endCelsius = end.in(Units.Celsius);
         return Math.max(0.0, Math.min(1.0, (celsius - startCelsius) / (endCelsius - startCelsius)));
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive derate math on Celsius values. Robot code uses
+     * derateFraction(Temperature) and load(Temperature).
+     */
+    public static final class Raw {
+        private final Thermal owner;
+
+        private Raw(Thermal owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see Thermal#derateFractionCelsius. */
+        public double derateFractionCelsius(double celsius) {
+            return owner.derateFractionCelsius(celsius);
+        }
+
+        /** Internal: see Thermal#loadCelsius. */
+        public double loadCelsius(double celsius) {
+            return owner.loadCelsius(celsius);
+        }
     }
 }

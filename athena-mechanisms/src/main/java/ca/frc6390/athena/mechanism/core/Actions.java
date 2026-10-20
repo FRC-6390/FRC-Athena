@@ -1,5 +1,6 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.measure.Voltage;
 import ca.frc6390.athena.hardware.runtime.ActionBinding;
 import ca.frc6390.athena.hardware.runtime.ActionContext;
 import ca.frc6390.athena.hardware.runtime.DeviceAction;
@@ -58,7 +59,7 @@ public final class Actions {
 
     /** Label suffix describing a control's effort limit, empty when it has none. */
     static String effortLabel(EffortRequest effort) {
-        return effort == null || !effort.limited() ? "" : " effort " + effort.currentLimitAmps() + "A";
+        return effort == null || !effort.limited() ? "" : " effort " + effort.limitValue() + "A";
     }
 
     public static Action neutral() {
@@ -89,8 +90,8 @@ public final class Actions {
         return new DynamicControlPercent(control, percent);
     }
 
-    static Action voltage(MotorDevice motor, double volts) {
-        return new MotorVoltage(motor, volts);
+    static Action voltage(MotorDevice motor, edu.wpi.first.units.measure.Voltage volts) {
+        return new MotorVoltage(motor, volts.in(edu.wpi.first.units.Units.Volts));
     }
 
     static Action voltage(MotorDevice motor, DoubleSupplier volts) {
@@ -109,8 +110,8 @@ public final class Actions {
         return new EncoderSetPosition(encoder, position);
     }
 
-    static Action setYaw(ImuSource imu, double yawDegrees) {
-        return new ImuSetYaw(imu, yawDegrees);
+    static Action setYaw(ImuSource imu, edu.wpi.first.units.measure.Angle yaw) {
+        return new ImuSetYaw(imu, yaw.in(edu.wpi.first.units.Units.Degrees));
     }
 
     static Action setYaw(ImuSource imu, DoubleSupplier yawDegrees) {
@@ -937,7 +938,7 @@ public final class Actions {
 
         @Override
         default void apply(ActionContext context) {
-            imu().applyYawDegrees(context, requestedYawDegrees());
+            imu().raw().applyYawDegrees(context, requestedYawDegrees());
         }
     }
 

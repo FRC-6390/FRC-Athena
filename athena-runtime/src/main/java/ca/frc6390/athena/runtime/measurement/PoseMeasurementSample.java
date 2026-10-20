@@ -1,5 +1,6 @@
 package ca.frc6390.athena.runtime.measurement;
 
+import edu.wpi.first.units.measure.Time;
 import ca.frc6390.athena.runtime.control.RobotVelocity;
 import ca.frc6390.athena.runtime.filter.PoseSnapshot;
 
@@ -60,11 +61,11 @@ public interface PoseMeasurementSample extends Measurement {
     /**
      * Returns a copy with timing metadata.
      *
-     * @param timestampSeconds timestamp
-     * @param latencySeconds latency
+     * @param timestamp timestamp
+     * @param latency latency
      * @return updated sample
      */
-    default PoseMeasurementSample timing(double timestampSeconds, double latencySeconds) {
+    default PoseMeasurementSample timing(Time timestamp, Time latency) {
         return this;
     }
 
