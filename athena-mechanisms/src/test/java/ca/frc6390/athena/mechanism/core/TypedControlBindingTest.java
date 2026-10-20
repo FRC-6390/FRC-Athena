@@ -14,6 +14,7 @@ import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.constraint.Constraint;
+import ca.frc6390.athena.mechanism.constraint.ConstraintContext;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.constraint.UnitConstraint;
 import ca.frc6390.athena.mechanism.interpolation.InterpolationKinds;
@@ -83,7 +84,7 @@ class TypedControlBindingTest {
         assertEquals(1.0, fromDegrees.velocity(), 1e-12);
 
         assertThrows(IllegalArgumentException.class, () -> control.velocity(Units.Degrees.of(90.0)));
-        assertThrows(IllegalArgumentException.class, () -> control.position(Units.Meters.of(1.0)));
+        assertThrows(IllegalStateException.class, () -> control.position(Units.Meters.of(1.0)));
     }
 
     @Test
@@ -97,17 +98,13 @@ class TypedControlBindingTest {
     }
 
     @Test
-    void typedApiRequiresAUnitTypedBinding() {
-        var raw = Controls.position(motor());
+    void dimensionlessBindingsRejectAngleAndDistanceMeasures() {
+        var dimensionless = Controls.position(motor(), Units.Value);
 
-        assertNull(raw.unit());
-        assertEquals(MotionKind.UNSPECIFIED, raw.motionKind());
-        assertThrows(IllegalStateException.class, () -> raw.position(Units.Degrees.of(90.0)));
-        assertThrows(IllegalStateException.class, () -> raw.continuous(Units.Degrees.of(0), Units.Degrees.of(360)));
-        assertThrows(IllegalStateException.class, () -> raw.constraint(
-                Constraints.range(Units.Degrees.of(-10.0), Units.Degrees.of(10.0))));
-        // Existing raw doubles keep working unchanged.
-        assertEquals(90.0, assertInstanceOf(Actions.ControlPosition.class, raw.position(90.0)).position());
+        assertEquals(Units.Value, dimensionless.unit());
+        assertEquals(MotionKind.UNSPECIFIED, dimensionless.motionKind());
+        assertThrows(IllegalArgumentException.class, () -> dimensionless.position(Units.Degrees.of(90.0)));
+        assertThrows(IllegalArgumentException.class, () -> dimensionless.continuous(Units.Degrees.of(0), Units.Degrees.of(360)));
     }
 
     @Test
@@ -206,11 +203,11 @@ class TypedControlBindingTest {
         assertEquals(0.025, wrapped.tolerance(), 1e-12);
 
         var velocity = assertInstanceOf(Actions.WithinTolerance.class,
-                Controls.velocity(motor(), Units.Rotations).velocity(1.0).untilWithin(Units.RPM.of(60.0)));
+                Controls.velocity(motor(), Units.Rotations).velocity(Units.RotationsPerSecond.of(1.0)).untilWithin(Units.RPM.of(60.0)));
         assertEquals(1.0, velocity.tolerance(), 1e-12);
 
         assertThrows(IllegalArgumentException.class,
-                () -> control.position(0.5).untilWithin(Units.Meters.of(1.0)));
+                () -> control.position(Units.Rotations.of(0.5)).untilWithin(Units.Meters.of(1.0)));
     }
 
     @Test
@@ -226,10 +223,66 @@ class TypedControlBindingTest {
                 () -> interpolated.at(Units.Degrees.of(0.0), Units.Degrees.of(0.0)));
     }
 
+    /**
+     * A velocity binding takes its range in units per second (the velocity target) and its motion as an
+     * acceleration and its rate. The same typed constraints on a position binding are rejected.
+     */
+    @Test
+    void velocityBindingsTakeTypedRangeAndMotionInUnitsPerSecond() {
+        var shooter = Controls.velocity(motor(), Units.Rotations)
+                .constraints(
+                        Constraints.range(Units.RotationsPerSecond.of(-200.0), Units.RotationsPerSecond.of(200.0)),
+                        Constraints.motion(Units.RotationsPerSecondPerSecond.of(200.0),
+                                Units.RotationsPerSecondPerSecond.per(Units.Seconds).of(200.0)),
+                        Constraints.maxVoltage(Units.Volts.of(12.0)));
+
+        var high = Constraints.evaluate(shooter.constraints(),
+                new ConstraintContext<>(0.0, 300.0, ca.frc6390.athena.mechanism.core.MechanismContext.empty()));
+        assertEquals(200.0, high.value(), 1.0e-9);
+        var low = Constraints.evaluate(shooter.constraints(),
+                new ConstraintContext<>(0.0, -500.0, ca.frc6390.athena.mechanism.core.MechanismContext.empty()));
+        assertEquals(-200.0, low.value(), 1.0e-9);
+
+        var motion = shooter.constraints().stream()
+                .filter(c -> c instanceof Constraints.VelocityMotionConstraint)
+                .map(c -> (Constraints.VelocityMotionConstraint) c)
+                .findFirst().orElseThrow();
+        assertEquals(200.0, motion.acceleration(), 1.0e-9);
+        assertEquals(200.0, motion.jerk(), 1.0e-9);
+
+        assertThrows(IllegalArgumentException.class, () -> Controls.position(motor(), Units.Rotations)
+                .constraint(Constraints.range(Units.RotationsPerSecond.of(-200.0), Units.RotationsPerSecond.of(200.0))));
+        // A position binding reads motion as velocity and acceleration, so a jerk-sized second limit is rejected.
+        assertThrows(IllegalArgumentException.class, () -> Controls.position(motor(), Units.Rotations)
+                .constraint(Constraints.motion(Units.RotationsPerSecond.of(200.0),
+                        Units.RotationsPerSecondPerSecond.per(Units.Seconds).of(200.0))));
+    }
+
+    /** Equivalence: the same physical key gives the same target whether the input is read in inches or meters. */
+    @Test
+    void interpolationKeyInInchesAndMetersGivesTheSameTarget() {
+        double[] inches = {60.0};
+        var control = Controls.position(motor(), Units.Rotations);
+        var keyedInInches = control.interpolate(InterpolationKinds.LINEAR, () -> inches[0], Units.Inches)
+                .at(Units.Inches.of(40.0), Units.Rotations.of(10.0))
+                .at(Units.Inches.of(80.0), Units.Rotations.of(20.0));
+        assertEquals(15.0, keyedInInches.target(), 1.0e-9);
+
+        double[] meters = {Units.Inches.of(60.0).in(Units.Meters)};
+        var keyedInMeters = control.interpolate(InterpolationKinds.LINEAR, () -> meters[0], Units.Meters)
+                .at(Units.Inches.of(40.0), Units.Rotations.of(10.0))
+                .at(Units.Meters.of(2.032), Units.Rotations.of(20.0));
+        assertEquals(keyedInInches.target(), keyedInMeters.target(), 1.0e-9);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> control.interpolate(InterpolationKinds.LINEAR, () -> meters[0], Units.Meters)
+                        .at(Units.Degrees.of(40.0), Units.Rotations.of(10.0)));
+    }
+
     @Test
     void typedInterpolationPointsNeedAnInputUnit() {
-        var untyped = Controls.position(motor(), Units.Rotations).interpolate(InterpolationKinds.LINEAR, () -> 1.0);
-        assertThrows(IllegalStateException.class,
+        var untyped = Controls.position(motor(), Units.Rotations).interpolate(InterpolationKinds.LINEAR, () -> 1.0, Units.Value);
+        assertThrows(IllegalArgumentException.class,
                 () -> untyped.at(Units.Inches.of(0.0), Units.Rotations.of(0.0)));
     }
 

@@ -177,7 +177,7 @@ class TelemetrySchemaTest {
         assertEquals(0.8, scheduler.traceSnapshots().get(0).motors().get(0).commandValue(), 1e-9);
         run.cancel();
 
-        Action beyondMaximum = mechanism.control.position(10.0);
+        Action beyondMaximum = mechanism.control.position(Units.Rotations.of(10.0));
         scheduler.request(beyondMaximum).periodic(
                 new MechanismContext(0.02, 0.0, 0.02, true, false, false),
                 EventContext.empty());
@@ -202,7 +202,7 @@ class TelemetrySchemaTest {
         assertEquals(10.0, values.get(config + "MaximumVelocity").number());
         assertEquals(2.0, values.get(config + "MaximumAcceleration").number());
 
-        Action target = mechanism.control.velocity(20.0);
+        Action target = mechanism.control.velocity(Units.RotationsPerSecond.of(20.0));
         scheduler.request(target).periodic(
                 new MechanismContext(0.0, 0.0, 0.1, true, false, false), EventContext.empty());
         var first = scheduler.traceSnapshots().get(0).controls().get(0);
@@ -226,26 +226,26 @@ class TelemetrySchemaTest {
 
     private static final class SysIdMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
-        private final ControlBinding<?> control = Controls.position(motor).feedback(motor.encoder());
+        private final ControlBinding<?> control = Controls.position(motor, Units.Rotations).feedback(motor.encoder());
         public final Characterization sysId = control.characterization();
     }
 
     private static final class CommissioningMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4);
-        private final ControlBinding<?> control = Controls.position(motor)
+        private final ControlBinding<?> control = Controls.position(motor, Units.Rotations)
                 .feedback(motor.encoder())
                 .constraints(
                         Constraints.range(Range.of(Units.Value.of(-1.0), Units.Value.of(2.0))),
-                        Constraints.motion(5.0, 3.0),
-                        Constraints.clamp(9.0));
+                        Constraints.motion(Units.RotationsPerSecond.of(5.0), Units.RotationsPerSecondPerSecond.of(3.0)),
+                        Constraints.maxVoltage(Units.Volts.of(9.0)));
     }
 
     private static final class VelocityCommissioningMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
-        private final ControlBinding<?> control = Controls.velocity(motor)
+        private final ControlBinding<?> control = Controls.velocity(motor, Units.Rotations)
                 .feedback(motor.encoder())
                 .constraints(
-                        Constraints.motion(10.0, 2.0),
-                        Constraints.clamp(9.6));
+                        Constraints.motion(Units.RotationsPerSecond.of(10.0), Units.RotationsPerSecondPerSecond.of(2.0)),
+                        Constraints.maxVoltage(Units.Volts.of(9.6)));
     }
 }

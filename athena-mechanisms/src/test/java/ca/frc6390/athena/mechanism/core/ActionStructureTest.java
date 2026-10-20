@@ -24,7 +24,7 @@ class ActionStructureTest {
     private static List<Case> composites() {
         Action leaf = MOTOR.percent(0.2);
         Action other = MOTOR.voltage(Units.Volts.of(3.0));
-        ControlBinding<?> position = Controls.position(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
         return List.of(
                 new Case("sequence steps and then",
                         Actions.sequence().run(leaf).run(other).then(leaf),
@@ -67,16 +67,16 @@ class ActionStructureTest {
                         Actions.then(leaf, other),
                         "", List.of("first", "then")),
                 new Case("within tolerance",
-                        position.position(1.0).untilWithin(0.1),
+                        position.position(Units.Rotations.of(1.0)).untilWithin(Units.Rotations.of(0.1)),
                         "WITHIN 0.1", List.of("body")),
                 new Case("within tolerance settled and velocity limited",
-                        position.position(1.0).untilWithin(0.1).settled(Seconds.of(0.2)).maxVelocity(3.0),
+                        position.position(Units.Rotations.of(1.0)).untilWithin(Units.Rotations.of(0.1)).settled(Seconds.of(0.2)).maxVelocity(Units.RotationsPerSecond.of(3.0)),
                         "WITHIN 0.1 settled 0.2s maxVelocity 3.0", List.of("body")),
                 new Case("interruptible",
                         leaf.interruptible(Interrupt.ANYTIME),
                         "INTERRUPT Interrupt.ANYTIME", List.of("body")),
                 new Case("effort-limited control",
-                        position.position(1.0).effort(Units.Amps.of(10)),
+                        position.position(Units.Rotations.of(1.0)).effort(Units.Amps.of(10)),
                         "POSITION 1.0 effort 10.0A", List.of()),
                 new Case("wait",
                         Actions.waitSeconds(Seconds.of(1.5)),

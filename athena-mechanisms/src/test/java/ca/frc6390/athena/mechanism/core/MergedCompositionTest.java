@@ -74,8 +74,8 @@ class MergedCompositionTest {
 
     @Test
     void effortLimitedControlSurvivesComposition() {
-        ControlBinding<?> position = Controls.position(MOTOR);
-        Action limited = position.position(1.0).effort(Units.Amps.of(10)).untilWithin(0.1);
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
+        Action limited = position.position(Units.Rotations.of(1.0)).effort(Units.Amps.of(10)).untilWithin(Units.Rotations.of(0.1));
 
         Actions.WithinTolerance within = assertInstanceOf(Actions.WithinTolerance.class, limited);
         Actions.ControlPosition control = assertInstanceOf(Actions.ControlPosition.class, within.action());

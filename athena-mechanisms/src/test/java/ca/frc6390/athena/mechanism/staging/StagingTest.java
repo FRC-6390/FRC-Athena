@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class StagingTest {
     enum Health { NORMAL, STRAINED, HOT, SAFE }
 
-    private static final ControlBinding<?> ANGLE = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 61));
+    private static final ControlBinding<?> ANGLE = Controls.velocity(MotorDevice.of(MotorKinds.KRAKEN_X60, 61), Units.Rotations);
 
     /** Records stage Action requests and cancels in order, and reports gate state. */
     private static final class Host implements StageHost {

@@ -63,7 +63,7 @@ class CharacterizationRoutineTest {
     void dynamicReverseUsesStepVoltageAndStopsAtTimeout() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization()
                 .maxVoltage(Volts.of(6.0))
                 .timeout(Seconds.of(0.5))
@@ -85,7 +85,7 @@ class CharacterizationRoutineTest {
     void characterizationDoesNotLogWhenANewerActionWinsTheMotor() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization().exportTo(log);
         TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
@@ -111,7 +111,7 @@ class CharacterizationRoutineTest {
         boolean[] held = {true};
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization().maxVoltage(Volts.of(4.0)).timeout(Seconds.of(0.1)).exportTo(log);
         Action action = sysId.dynamicForward();
         HeldMechanism mechanism = new HeldMechanism(control, held, action);
@@ -141,7 +141,7 @@ class CharacterizationRoutineTest {
     void sysIdCommandsEveryMotorInAControlGroup() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.velocity(MOTOR, FOLLOWER).feedback(ENCODER);
+        ControlBinding<?> control = Controls.velocity(MOTOR, Units.Degrees).followers(FOLLOWER).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.characterization().maxVoltage(Volts.of(6.0)).exportTo(log).dynamicForward());
@@ -160,7 +160,7 @@ class CharacterizationRoutineTest {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(MOTOR).telemetryUnavailable = true;
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.characterization().maxVoltage(Volts.of(4.25)).exportTo(log).dynamicForward());
@@ -176,10 +176,11 @@ class CharacterizationRoutineTest {
 
     @Test
     void sysIdRequiresAnOutputFeedbackAndPositiveConfiguration() {
-        assertThrows(IllegalStateException.class, () -> Controls.of(ControlMode.POSITION).characterization());
-        assertThrows(IllegalStateException.class, () -> Controls.position(MOTOR).characterization());
+        assertThrows(IllegalStateException.class, () -> new ControlBinding<>(ControlMode.POSITION, null, 0, null, null, null, null,
+                null, null, null, null, false, null, null, Units.Rotations, null, null, null).characterization());
+        assertThrows(IllegalStateException.class, () -> Controls.position(MOTOR, Units.Rotations).characterization());
 
-        Characterization sysId = Controls.position(MOTOR).feedback(ENCODER).characterization();
+        Characterization sysId = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER).characterization();
         assertThrows(IllegalArgumentException.class, () -> sysId.rampRate(voltsPerSecond(0.0)));
         assertThrows(IllegalArgumentException.class, () -> sysId.maxVoltage(Volts.of(-1.0)));
         assertThrows(IllegalArgumentException.class, () -> sysId.timeout(Seconds.of(Double.NaN)));
@@ -190,7 +191,7 @@ class CharacterizationRoutineTest {
         RecordingContext hardware = new RecordingContext();
         hardware.encoder.positionRotations = Double.NaN;
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         TestMechanism mechanism = new TestMechanism(
                 control,
                 control.characterization().exportTo(log).dynamicForward());
@@ -206,7 +207,7 @@ class CharacterizationRoutineTest {
     void oneRoutineLoggerRemainsValidAcrossSequentialDirections() {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization().exportTo(log);
         MultiTestMechanism mechanism = new MultiTestMechanism(control, sysId);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
@@ -229,7 +230,7 @@ class CharacterizationRoutineTest {
         RecordingContext hardware = new RecordingContext();
         hardware.encoder.positionRotations = 0.5;
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization()
                 .maxVoltage(Volts.of(4.0))
                 .range(Degrees.of(-90.0), Degrees.of(90.0))
@@ -253,7 +254,7 @@ class CharacterizationRoutineTest {
     private static void assertTestOutput(SysIdState state, double expectedVoltage, double elapsedSeconds) {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         Characterization sysId = control.characterization()
                 .rampRate(voltsPerSecond(0.5))
                 .maxVoltage(Volts.of(5.5))
@@ -279,7 +280,7 @@ class CharacterizationRoutineTest {
     }
 
     private static final class SysIdMechanism implements Mechanism {
-        private final ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        private final ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         private final Characterization sysId;
         private final Action quasistaticForward;
         private final HookBinding binding;

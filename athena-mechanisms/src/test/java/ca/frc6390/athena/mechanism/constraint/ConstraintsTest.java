@@ -38,7 +38,7 @@ class ConstraintsTest {
 
     @Test
     void clampAppliesOnlyDuringOutputEvaluation() {
-        Constraint<Double> clamp = Constraints.clamp(-2.0, 3.0);
+        Constraint<Double> clamp = Constraints.clamp(Units.Volts.of(-2.0), Units.Volts.of(3.0));
         ConstraintContext<Double> context =
                 new ConstraintContext<>(0.0, 8.0, MechanismContext.empty());
 
@@ -48,20 +48,20 @@ class ConstraintsTest {
 
     @Test
     void symmetricClampAndInvalidBoundsAreHandled() {
-        Constraint<Double> clamp = Constraints.clamp(4.0);
+        Constraint<Double> clamp = Constraints.maxVoltage(Units.Volts.of(4.0));
 
         assertEquals(-4.0, Constraints.evaluateOutput(
                 List.of(clamp),
                 new ConstraintContext<>(0.0, -7.0, MechanismContext.empty())).value(), 1.0e-9);
-        assertThrows(IllegalArgumentException.class, () -> Constraints.clamp(3.0, -3.0));
-        assertThrows(IllegalArgumentException.class, () -> Constraints.clamp(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> Constraints.clamp(Units.Volts.of(3.0), Units.Volts.of(-3.0)));
+        assertThrows(IllegalArgumentException.class, () -> Constraints.maxVoltage(Units.Volts.of(Double.NaN)));
     }
 
     @Test
     void outputConstraintGroupsRetainTheirStage() {
         Constraint<Double> grouped = Constraints.all(
-                Constraints.clamp(-5.0, 5.0),
-                Constraints.clamp(-2.0, 3.0));
+                Constraints.clamp(Units.Volts.of(-5.0), Units.Volts.of(5.0)),
+                Constraints.clamp(Units.Volts.of(-2.0), Units.Volts.of(3.0)));
         ConstraintContext<Double> context =
                 new ConstraintContext<>(0.0, 8.0, MechanismContext.empty());
 
@@ -69,7 +69,7 @@ class ConstraintsTest {
         assertEquals(3.0, Constraints.evaluateOutput(List.of(grouped), context).value(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> Constraints.all(
                 Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-1.0), Units.Value.of(1.0))),
-                Constraints.clamp(1.0)));
+                Constraints.maxVoltage(Units.Volts.of(1.0))));
     }
 
     @Test
@@ -77,8 +77,8 @@ class ConstraintsTest {
         List<Constraint<Double>> constraints = List.of(
                 Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-5.0), Units.Value.of(8.0))),
                 Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-2.0), Units.Value.of(10.0))),
-                Constraints.motion(12.0, 30.0),
-                Constraints.motion(9.0, 40.0));
+                typedMotion(12.0, 30.0),
+                typedMotion(9.0, 40.0));
 
         var range = Constraints.positionRange(constraints);
         var motion = Constraints.motionProfile(constraints);
@@ -92,7 +92,7 @@ class ConstraintsTest {
     void groupedRangeAndMotionDeclarationsExposeTheirMetadata() {
         Constraint<Double> grouped = Constraints.all(
                 Constraints.range(ca.frc6390.athena.hardware.device.Range.of(Units.Value.of(-2.0), Units.Value.of(4.0))),
-                Constraints.motion(3.0, 7.0));
+                typedMotion(3.0, 7.0));
 
         var range = Constraints.positionRange(List.of(grouped));
         var motion = Constraints.motionProfile(List.of(grouped));
@@ -103,4 +103,10 @@ class ConstraintsTest {
         assertEquals(7.0, motion.maxAcceleration(), 1.0e-9);
     }
 
+
+    /** Typed motion limit in rotations, reduced to the plain form a rotary binding would store. */
+    private static Constraint<Double> typedMotion(double velocity, double acceleration) {
+        return ((UnitConstraint) Constraints.motion(Units.RotationsPerSecond.of(velocity),
+                Units.RotationsPerSecondPerSecond.of(acceleration))).expressedIn(Units.Rotations);
+    }
 }

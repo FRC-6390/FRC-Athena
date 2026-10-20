@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -48,7 +50,7 @@ class MechanismReasonTest {
     }
 
     static final class ReasonMechanism implements Mechanism {
-        private final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 9));
-        public final Action move = control.position(5.0);
+        private final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 9), Units.Rotations);
+        public final Action move = control.position(Units.Rotations.of(5.0));
     }
 }

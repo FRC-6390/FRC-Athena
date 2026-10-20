@@ -19,7 +19,7 @@ class OutputApplierSoftwareFollowerTest {
         RecordingMotor firstHandle = new RecordingMotor(first);
         RecordingMotor secondHandle = new RecordingMotor(second);
         RecordingMotor thirdHandle = new RecordingMotor(third);
-        ControlBinding<?> control = Controls.velocity(first, second, third);
+        ControlBinding<?> control = Controls.velocity(first, Units.Rotations).followers(second, third);
         ActionContext context = new ActionContext() {
             @Override
             public MotorHandle motor(MotorDevice device) {

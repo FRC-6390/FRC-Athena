@@ -87,7 +87,7 @@ class ModelPersistenceTest {
         first.flush();
 
         PersistentStore reopened = PersistentStore.open(directory);
-        Characterization characterization = Characterization.of(Controls.position(MOTOR).feedback(ENCODER))
+        Characterization characterization = Characterization.of(Controls.position(MOTOR, Units.Degrees).feedback(ENCODER))
                 .persistAs(new PersistentModelStorage(reopened), KEY);
         assertEquals(1.5, characterization.model().kV(), 0.0, "boot restores the persisted model");
         assertEquals(characterization.model(), characterization.baseline());

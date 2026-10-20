@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static edu.wpi.first.units.Units.Seconds;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -34,16 +36,16 @@ class MotionPolicyTest {
 
     /** P-only control on a stationary measurement: the output voltage equals kP times the reference. */
     private static ControlBinding<?> stationaryArm() {
-        return Controls.position(ARM).feedback(ARM_ENCODER).pid(1.0, 0.0, 0.0);
+        return Controls.position(ARM, Units.Rotations).feedback(ARM_ENCODER).pid(1.0, 0.0, 0.0);
     }
 
     @Test
     void bumplessGainChangeKeepsTheOutputContinuous() {
         RecordingContext hardware = new RecordingContext();
         PidGains gains = PidGains.of(2.0, 0.5, 0.0);
-        ControlBinding<?> arm = Controls.position(ARM).feedback(ARM_ENCODER).pid(gains);
+        ControlBinding<?> arm = Controls.position(ARM, Units.Rotations).feedback(ARM_ENCODER).pid(gains);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
-        scheduler.request(arm.position(3.0));
+        scheduler.request(arm.position(Units.Rotations.of(3.0)));
         for (int cycle = 0; cycle < 20; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
         double before = hardware.motor(ARM).voltage;
 
@@ -76,10 +78,10 @@ class MotionPolicyTest {
                 .profile(new MotionProfile(1.0, 2.0))
                 .retarget(retarget);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
-        scheduler.request(arm.position(10.0));
+        scheduler.request(arm.position(Units.Rotations.of(10.0)));
         for (int cycle = 0; cycle < 10; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
         double before = hardware.motor(ARM).voltage;
-        scheduler.request(arm.position(-10.0));
+        scheduler.request(arm.position(Units.Rotations.of(-10.0)));
         scheduler.teleopPeriodic(10 * DT, DT);
         return new double[] {before, hardware.motor(ARM).voltage};
     }
@@ -88,7 +90,7 @@ class MotionPolicyTest {
     void smoothResumeAfterAnIdleGapInheritsTheReferenceVelocity() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm().profile(new MotionProfile(1.0, 2.0));
-        Action move = arm.position(10.0);
+        Action move = arm.position(Units.Rotations.of(10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(move);
         for (int cycle = 0; cycle < 10; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
@@ -106,10 +108,10 @@ class MotionPolicyTest {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm().profile(new MotionProfile(1.0, 2.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
-        scheduler.request(arm.position(10.0));
+        scheduler.request(arm.position(Units.Rotations.of(10.0)));
         for (int cycle = 0; cycle < 10; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
         double before = hardware.motor(ARM).voltage;
-        scheduler.request(arm.position(-10.0).retarget(Retarget.IMMEDIATE));
+        scheduler.request(arm.position(Units.Rotations.of(-10.0)).retarget(Retarget.IMMEDIATE));
         scheduler.teleopPeriodic(10 * DT, DT);
         assertTrue(hardware.motor(ARM).voltage - before < 0.0);
     }
@@ -118,7 +120,7 @@ class MotionPolicyTest {
     void holdKeepsTheLastReferenceAfterTheLeaseEnds() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm().release(Release.HOLD);
-        Action move = arm.position(5.0);
+        Action move = arm.position(Units.Rotations.of(5.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(move);
         for (int cycle = 0; cycle < 3; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
@@ -134,7 +136,7 @@ class MotionPolicyTest {
     void neutralReleaseStopsTheMotorAfterTheLeaseEnds() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        Action move = arm.position(5.0);
+        Action move = arm.position(Units.Rotations.of(5.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(move);
         for (int cycle = 0; cycle < 3; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
@@ -147,7 +149,7 @@ class MotionPolicyTest {
     void neutralModeReleaseOverridesUntilTheMotorIsCommandedAgain() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm().release(Release.neutral(MotorNeutralMode.BRAKE));
-        Action move = arm.position(5.0);
+        Action move = arm.position(Units.Rotations.of(5.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(move);
         for (int cycle = 0; cycle < 3; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
@@ -166,7 +168,7 @@ class MotionPolicyTest {
         ControlBinding<?> arm = stationaryArm()
                 .profile(new MotionProfile(1.0, 2.0))
                 .release(Release.DECELERATE);
-        Action move = arm.position(10.0);
+        Action move = arm.position(Units.Rotations.of(10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(move);
         for (int cycle = 0; cycle < 40; cycle++) scheduler.teleopPeriodic(cycle * DT, DT);
@@ -187,8 +189,8 @@ class MotionPolicyTest {
     void afterCompleteHoldsNewerRequestsForOverlappingResources() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        Action first = arm.position(10.0).atMost(Duration.ofMillis(200)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action second = arm.position(-10.0);
+        Action first = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofMillis(200)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action second = arm.position(Units.Rotations.of(-10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(first);
         scheduler.request(second);
@@ -208,9 +210,9 @@ class MotionPolicyTest {
         RecordingContext hardware = new RecordingContext();
         boolean[] allowed = {false};
         ControlBinding<?> arm = stationaryArm();
-        Action first = arm.position(10.0).atMost(Duration.ofSeconds(5))
+        Action first = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofSeconds(5))
                 .interruptible(Interrupt.after(() -> allowed[0]));
-        Action second = arm.position(-10.0);
+        Action second = arm.position(Units.Rotations.of(-10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(new Holder(arm, ARM_ENCODER));
         scheduler.request(first);
         scheduler.request(second);
@@ -226,8 +228,8 @@ class MotionPolicyTest {
     void disableOverridesAnInterruptCommitment() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        Action hold = arm.position(10.0).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action blocked = arm.position(-10.0);
+        Action hold = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action blocked = arm.position(Units.Rotations.of(-10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(arm, ARM_ENCODER, hold, blocked));
         scheduler.request(hold);
@@ -243,9 +245,9 @@ class MotionPolicyTest {
     void heldRequestOnDisjointResourcesRunsImmediately() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        ControlBinding<?> other = Controls.position(OTHER);
-        Action hold = arm.position(10.0).atMost(Duration.ofSeconds(1)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action blocked = arm.position(-10.0);
+        ControlBinding<?> other = Controls.position(OTHER, Units.Rotations);
+        Action hold = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofSeconds(1)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action blocked = arm.position(Units.Rotations.of(-10.0));
         Action unrelated = other.percent(0.5);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(arm, other, ARM_ENCODER));
@@ -262,8 +264,8 @@ class MotionPolicyTest {
     void cancelAndAbortOverrideTheInterruptPolicy() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        Action hold = arm.position(10.0).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action blocked = arm.position(-10.0);
+        Action hold = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action blocked = arm.position(Units.Rotations.of(-10.0));
         Holder holder = new Holder(arm, ARM_ENCODER, hold, blocked);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(holder);
         scheduler.request(hold);
@@ -281,8 +283,8 @@ class MotionPolicyTest {
     void cancelOfARunningPolicyActionStartsTheHeldRequest() {
         RecordingContext hardware = new RecordingContext();
         ControlBinding<?> arm = stationaryArm();
-        Action hold = arm.position(10.0).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
-        Action blocked = arm.position(-10.0);
+        Action hold = arm.position(Units.Rotations.of(10.0)).atMost(Duration.ofSeconds(10)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action blocked = arm.position(Units.Rotations.of(-10.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(arm, ARM_ENCODER, hold, blocked));
         scheduler.request(hold);
@@ -296,7 +298,7 @@ class MotionPolicyTest {
     @Test
     void boundedCommitmentIsCheckedAtDeclaration() {
         ControlBinding<?> arm = stationaryArm();
-        Action open = arm.position(10.0);
+        Action open = arm.position(Units.Rotations.of(10.0));
         IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class,
                 () -> open.interruptible(Interrupt.AFTER_COMPLETE));
         assertTrue(rejected.getMessage().contains("bounded"), rejected.getMessage());
@@ -317,7 +319,7 @@ class MotionPolicyTest {
     @Test
     void nestedInterruptPolicyIsRejected() {
         ControlBinding<?> arm = stationaryArm();
-        Action policied = arm.position(1.0).atMost(Duration.ofSeconds(1)).interruptible(Interrupt.AFTER_COMPLETE);
+        Action policied = arm.position(Units.Rotations.of(1.0)).atMost(Duration.ofSeconds(1)).interruptible(Interrupt.AFTER_COMPLETE);
         Action nested = Actions.parallel(policied, Actions.waitSeconds(Seconds.of(0.1)));
         MechanismScheduler scheduler = MechanismScheduler.create(new RecordingContext())
                 .register(new Holder(arm, ARM_ENCODER));

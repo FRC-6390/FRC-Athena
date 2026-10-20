@@ -59,10 +59,39 @@ class ArmFeedforwardTest {
 
     @Test
     void gravityOffsetIsAddedToTheAngleInRadians() {
-        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, Math.PI / 2.0).withGravityAngle(Units.Degrees);
+        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, Units.Radians.of(Math.PI / 2.0)).withGravityAngle(Units.Degrees);
         // cos(0 + pi/2) = 0: the offset moves the zero of the gravity term.
         assertEquals(0.0, gravity(arm, 0.0), TOLERANCE);
         assertEquals(-KG, gravity(arm, 90.0), TOLERANCE);
+    }
+
+    /** Equivalence: an arm offset given in degrees is the same gravity term as the same offset in radians. */
+    @Test
+    void gravityOffsetInDegreesMatchesTheSameOffsetInRadians() {
+        FeedforwardGains degrees = FeedforwardGains.arm(0.0, 0.0, KG, Units.Degrees.of(30.0)).withGravityAngle(Units.Degrees);
+        FeedforwardGains radians = FeedforwardGains.arm(0.0, 0.0, KG, Units.Radians.of(Math.toRadians(30.0)))
+                .withGravityAngle(Units.Degrees);
+
+        assertEquals(Math.toRadians(30.0), degrees.gravityOffset().in(Units.Radians), 1.0e-12);
+        assertEquals(radians.gravityOffset().in(Units.Radians), degrees.gravityOffset().in(Units.Radians), 1.0e-12);
+        for (double angle : new double[] {-90.0, 0.0, 15.0, 90.0, 200.0}) {
+            assertEquals(gravity(radians, angle), gravity(degrees, angle), 1.0e-12);
+        }
+    }
+
+    /** Equivalence: a typed offset on a binding gives the same arm feedforward as the same offset in radians. */
+    @Test
+    void bindingArmOffsetKeepsTheNumbersOfTheRadianForm() {
+        EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 11).measures(Units.Degrees);
+        FeedforwardGains typed = feedforward(Controls.position(motor(), Units.Degrees)
+                .feedback(encoder)
+                .armFf(0.0, 0.0, KG, Units.Degrees.of(-12.5)));
+        FeedforwardGains plain = feedforward(Controls.position(motor(), Units.Degrees)
+                .feedback(encoder)
+                .armFf(0.0, 0.0, KG, Units.Radians.of(Math.toRadians(-12.5))));
+
+        assertEquals(plain.gravityOffset().in(Units.Radians), typed.gravityOffset().in(Units.Radians), 1.0e-12);
+        assertEquals(gravity(plain, 40.0), gravity(typed, 40.0), 1.0e-12);
     }
 
     @Test
@@ -76,7 +105,7 @@ class ArmFeedforwardTest {
     @Test
     void armGravityAgreesWithTheIdentifiedRotaryModel() {
         double offset = 0.3;
-        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, offset).withGravityAngle(Units.Rotations);
+        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, Units.Radians.of(offset)).withGravityAngle(Units.Rotations);
         for (double rotations : new double[] {-0.4, 0.0, 0.125, 0.5}) {
             assertEquals(Identification.gravityVolts(MotionKind.ROTARY, KG, offset, rotations),
                     gravity(arm, rotations), TOLERANCE);
@@ -95,7 +124,7 @@ class ArmFeedforwardTest {
     }
 
     @Test
-    void untypedEncoderDeclaredInDegreesRotationsAndRadiansIsUsed() {
+    void typedEncoderDeclaredInDegreesRotationsAndRadiansIsUsed() {
         assertEquals(Units.Degrees, boundAngle(Units.Degrees));
         assertEquals(Units.Rotations, boundAngle(Units.Rotations));
         assertEquals(Units.Radians, boundAngle(Units.Radians));
@@ -103,7 +132,7 @@ class ArmFeedforwardTest {
 
     @Test
     void encoderMeasuringDegreesIsUsedForAnUntypedBinding() {
-        ControlBinding<?> control = Controls.position(motor())
+        ControlBinding<?> control = Controls.position(motor(), Units.Degrees)
                 .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 4).measures(Units.Degrees))
                 .armFf(0.0, 0.0, KG);
         assertSame(Units.Degrees, feedforward(control).gravityAngle());
@@ -125,7 +154,7 @@ class ArmFeedforwardTest {
 
     @Test
     void armFfRejectsEncodersThatMeasureADistance() {
-        ControlBinding<?> linear = Controls.position(motor())
+        ControlBinding<?> linear = Controls.position(motor(), Units.Meters)
                 .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 7).measures(Units.Meters));
         IllegalArgumentException raised = assertThrows(IllegalArgumentException.class,
                 () -> linear.armFf(0.0, 0.0, KG));
@@ -134,7 +163,7 @@ class ArmFeedforwardTest {
 
     @Test
     void armFfUsesRotationsForAnEncoderThatDeclaresNoAngleUnit() {
-        ControlBinding<?> rotations = Controls.position(motor())
+        ControlBinding<?> rotations = Controls.position(motor(), Units.Rotations)
                 .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 7))
                 .armFf(0.0, 0.0, KG);
         assertEquals(Units.Rotations, feedforward(rotations).gravityAngle());
@@ -170,10 +199,10 @@ class ArmFeedforwardTest {
 
     @Test
     void armGainsKeepTheirFormWhenAccelerationIsSet() {
-        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, 0.1).withGravityAngle(Units.Degrees);
+        FeedforwardGains arm = FeedforwardGains.arm(0.0, 0.0, KG, Units.Radians.of(0.1)).withGravityAngle(Units.Degrees);
         FeedforwardGains withAcceleration = arm.acceleration(0.5);
         assertTrue(withAcceleration.isArm());
-        assertEquals(0.1, withAcceleration.gravityOffsetRadians(), TOLERANCE);
+        assertEquals(0.1, withAcceleration.gravityOffset().in(Units.Radians), TOLERANCE);
         assertSame(Units.Degrees, withAcceleration.gravityAngle());
     }
 
@@ -184,9 +213,9 @@ class ArmFeedforwardTest {
         assertThrows(IllegalStateException.class, () -> FeedforwardGains.of(0.0, 0.0, KG).withGravityAngle(Units.Degrees));
     }
 
-    /** Angle unit the arm form binds to for an untyped binding whose encoder declares {@code measures(...)}. */
+    /** Angle unit the arm form binds to for a typed binding whose encoder declares the same {@code measures(...)}. */
     private static AngleUnit boundAngle(AngleUnit units) {
-        ControlBinding<?> control = Controls.position(motor())
+        ControlBinding<?> control = Controls.position(motor(), units)
                 .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 10).measures(units))
                 .armFf(0.0, 0.0, KG);
         return feedforward(control).gravityAngle();

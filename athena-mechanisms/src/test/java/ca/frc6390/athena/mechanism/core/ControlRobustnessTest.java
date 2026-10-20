@@ -38,8 +38,8 @@ class ControlRobustnessTest {
     void untilWithinComparesAgainstTheRangeConstrainedTarget() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 5.0;
-        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))));
-        Action raise = arm.position(10.0).untilWithin(0.1);
+        ControlBinding<?> arm = Controls.position(ARM, Units.Rotations).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))));
+        Action raise = arm.position(Units.Rotations.of(10.0)).untilWithin(Units.Rotations.of(0.1));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm));
 
         scheduler.request(raise);
@@ -54,9 +54,9 @@ class ControlRobustnessTest {
         double[] speed = {100.0};
         boolean[] fed = {false};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> shooter = Controls.velocity(SHOOTER).feedback(() -> 0.0, () -> speed[0]);
+        ControlBinding<?> shooter = Controls.velocity(SHOOTER, Units.Rotations).feedback(() -> 0.0, () -> speed[0]);
         Action shoot = Actions.parallel(
-                shooter.velocity(100.0).untilWithin(5.0),
+                shooter.velocity(Units.RotationsPerSecond.of(100.0)).untilWithin(Units.RotationsPerSecond.of(5.0)),
                 Actions.waitUntil(() -> fed[0]));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(shooter));
 
@@ -78,10 +78,10 @@ class ControlRobustnessTest {
         double[] distance = {1.0};
         double[] movingPoint = {2.0};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> hood = Controls.position(HOOD);
-        InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> distance[0])
-                .at(0.0, 10.0)
-                .at(() -> movingPoint[0], 30.0);
+        ControlBinding<?> hood = Controls.position(HOOD, Units.Rotations);
+        InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> distance[0], Units.Value)
+                .at(Units.Value.of(0.0), Units.Rotations.of(10.0))
+                .at(() -> movingPoint[0], Units.Value, () -> 30.0, Units.Rotations);
         MechanismScheduler scheduler = scheduler(hardware, new Holder(hood));
         FaultIsolation.drainWarnings();
 
@@ -104,10 +104,10 @@ class ControlRobustnessTest {
     @Test
     void interpolatedTargetWithoutAnyValidSampleIsNeutral() {
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> hood = Controls.position(HOOD);
-        InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> Double.NaN)
-                .at(0.0, 10.0)
-                .at(1.0, 30.0);
+        ControlBinding<?> hood = Controls.position(HOOD, Units.Rotations);
+        InterpolatedControlAction aim = hood.interpolate(InterpolationKinds.LINEAR, () -> Double.NaN, Units.Value)
+                .at(Units.Value.of(0.0), Units.Rotations.of(10.0))
+                .at(Units.Value.of(1.0), Units.Rotations.of(30.0));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(hood));
 
         scheduler.request(aim);
@@ -121,8 +121,8 @@ class ControlRobustnessTest {
     void dynamicControlTargetHoldsLastFiniteSample() {
         double[] target = {3.0};
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> hood = Controls.position(HOOD);
-        Action track = hood.position(() -> target[0]);
+        ControlBinding<?> hood = Controls.position(HOOD, Units.Rotations);
+        Action track = hood.position(() -> target[0], Units.Rotations);
         MechanismScheduler scheduler = scheduler(hardware, new Holder(hood));
 
         scheduler.request(track);
@@ -136,11 +136,11 @@ class ControlRobustnessTest {
     @Test
     void encoderSetPositionReseedsARunningProfiledControl() {
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> arm = Controls.position(ARM)
+        ControlBinding<?> arm = Controls.position(ARM, Units.Rotations)
                 .feedback(ARM_ENCODER)
                 .pid(1.0, 0.0, 0.0)
                 .profile(new MotionProfile(1.0, 100.0));
-        Action move = arm.position(10.0);
+        Action move = arm.position(Units.Rotations.of(10.0));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm, ARM_ENCODER));
 
         scheduler.request(move);
@@ -159,7 +159,7 @@ class ControlRobustnessTest {
     void finalGuardProbeIsIndependentOfControlUnits() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 0.5;
-        ControlBinding<?> arm = Controls.position(ARM)
+        ControlBinding<?> arm = Controls.position(ARM, Units.Rotations)
                 .constraint(Constraints.require(context -> context.requested() < 0.9));
         MechanismScheduler scheduler = scheduler(hardware, new Holder(arm));
 
@@ -176,7 +176,7 @@ class ControlRobustnessTest {
     void dashboardTunedLimitsAlsoBoundThePlannerResult() {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).position = 350.0;
-        ControlBinding<?> turret = Controls.position(ARM)
+        ControlBinding<?> turret = Controls.position(ARM, Units.Rotations)
                 .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(400.0))))
                 .planner(MotionPlanners.boundedAngular(360.0));
         RuntimeOverrides overrides = new RuntimeOverrides();
@@ -194,7 +194,7 @@ class ControlRobustnessTest {
         RecordingContext hardware = new RecordingContext();
         hardware.motor(ARM).capabilities = MotorControlCapabilities.voltageClosedLoop(1);
         hardware.motor(ARM).position = 350.0;
-        ControlBinding<?> wrapped = Controls.position(ARM).pid(0.01, 0.0, 0.0).continuous(0.0, 360.0);
+        ControlBinding<?> wrapped = Controls.position(ARM, Units.Rotations).pid(0.01, 0.0, 0.0).continuous(Units.Rotations.of(0.0), Units.Rotations.of(360.0));
         Output target = Outputs.position(10.0);
 
         OutputApplier.using(hardware).apply(new ResolvedOutput(OutputRequest.of(wrapped, target), target));
@@ -205,10 +205,10 @@ class ControlRobustnessTest {
 
     @Test
     void nonOverlappingRangesFailWhenTheBindingIsDeclaredAndTuningIsCached() {
-        assertThrows(IllegalArgumentException.class, () -> Controls.position(ARM)
+        assertThrows(IllegalArgumentException.class, () -> Controls.position(ARM, Units.Rotations)
                 .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))))
                 .constraint(Constraints.range(Range.of(Units.Value.of(2.0), Units.Value.of(3.0)))));
-        ControlBinding<?> arm = Controls.position(ARM).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
+        ControlBinding<?> arm = Controls.position(ARM, Units.Rotations).constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
         RuntimeOverrides overrides = new RuntimeOverrides();
         assertSame(overrides.tuning(arm), overrides.tuning(arm));
     }
@@ -258,17 +258,17 @@ class ControlRobustnessTest {
         RecordingContext hardware = new RecordingContext();
         hardware.encoder(ARM_ENCODER).position = 164.8;
         hardware.motor(ARM).position = 164.8;
-        ControlBinding<?> turret = Controls.position(ARM)
+        ControlBinding<?> turret = Controls.position(ARM, Units.Rotations)
                 .feedback(ARM_ENCODER)
                 .loop(ControlLoops.targetTransform(binding -> context -> ControlOutput.position(context.target())))
                 .pid(0.144, 0.0, 0.006)
-                .constraints(Constraints.range(Range.of(Units.Value.of(-270.0), Units.Value.of(270.0))), Constraints.motion(180.0, 540.0))
+                .constraints(Constraints.range(Range.of(Units.Value.of(-270.0), Units.Value.of(270.0))), Constraints.motion(Units.RotationsPerSecond.of(180.0), Units.RotationsPerSecondPerSecond.of(540.0)))
                 .planner(MotionPlanners.boundedAngular(360.0));
         MechanismScheduler scheduler = MechanismScheduler.create(hardware)
                 .register(new Holder(turret, ARM_ENCODER))
                 .traceLevel(MechanismTraceLevel.CAPTURE)
                 .tracePeriodSeconds(0.0);
-        scheduler.request(turret.position(90.0));
+        scheduler.request(turret.position(Units.Rotations.of(90.0)));
 
         for (int cycle = 0; cycle < 25; cycle++) {
             scheduler.teleopPeriodic(cycle * 0.02, 0.02);

@@ -133,13 +133,13 @@ class MechanismReasonCausesTest {
     }
 
     private static final class BlockedRobot implements Mechanism {
-        private final ControlBinding<?> control = Controls.velocity(BLOCKED_MOTOR)
+        private final ControlBinding<?> control = Controls.velocity(BLOCKED_MOTOR, Units.Rotations)
                 .constraint(Constraints.require(() -> false));
         public final Action push = control.percent(0.8);
     }
 
     private static final class GuardRobot implements Mechanism {
-        private final ControlBinding<?> control = Controls.position(GUARD_MOTOR)
+        private final ControlBinding<?> control = Controls.position(GUARD_MOTOR, Units.Rotations)
                 .feedback(GUARD_ENCODER)
                 .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(1.0))));
         public final Action push = control.percent(0.2);
@@ -147,7 +147,7 @@ class MechanismReasonCausesTest {
 
     private static final class StageRobot implements Mechanism {
         boolean hot;
-        private final ControlBinding<?> control = Controls.velocity(STAGE_MOTOR);
+        private final ControlBinding<?> control = Controls.velocity(STAGE_MOTOR, Units.Rotations);
         @SuppressWarnings("unused")
         private final Staging<Health> health = Staging.of(Health.NORMAL)
                 .stage(Health.HOT, () -> hot, control.limitEffort(0.5))
@@ -156,17 +156,17 @@ class MechanismReasonCausesTest {
     }
 
     private static final class PowerRobot implements Mechanism {
-        private final ControlBinding<?> control = Controls.velocity(POWER_MOTOR);
+        private final ControlBinding<?> control = Controls.velocity(POWER_MOTOR, Units.Rotations);
         public final Action drive = control.percent(0.6);
     }
 
     private static final class ThermalRobot implements Mechanism {
-        private final ControlBinding<?> control = Controls.velocity(THERMAL_MOTOR);
+        private final ControlBinding<?> control = Controls.velocity(THERMAL_MOTOR, Units.Rotations);
         public final Action drive = control.percent(0.6);
     }
 
     private static final class FaultRobot implements Mechanism {
-        private final ControlBinding<?> control = Controls.velocity(FAULT_MOTOR)
+        private final ControlBinding<?> control = Controls.velocity(FAULT_MOTOR, Units.Rotations)
                 .constraint(Constraints.require(context -> {
                     throw new IllegalStateException("constraint crashed");
                 }));

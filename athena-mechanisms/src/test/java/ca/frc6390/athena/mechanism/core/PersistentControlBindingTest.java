@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,11 +75,11 @@ class PersistentControlBindingTest {
         private final Action secondTarget;
 
         private ControlledMechanism(CountingLoop loop) {
-            position = Controls.position(motor)
+            position = Controls.position(motor, Units.Rotations)
                     .feedback(() -> 0.0)
                     .loop(loop);
-            firstTarget = position.position(1.0);
-            secondTarget = position.position(2.0);
+            firstTarget = position.position(Units.Rotations.of(1.0));
+            secondTarget = position.position(Units.Rotations.of(2.0));
         }
     }
 

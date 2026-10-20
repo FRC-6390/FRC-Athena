@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static edu.wpi.first.units.Units.Seconds;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -240,12 +242,12 @@ class LeaseReservationTest {
     private static final class DriveRobot implements Mechanism {
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
-        private final ControlBinding<?> heading = Controls.position(angular)
+        private final ControlBinding<?> heading = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0)
                 .pid(1.0, 0.0, 0.0)
-                .constraint(Constraints.clamp(0.5));
+                .constraint(Constraints.maxVoltage(Units.Volts.of(0.5)));
         private final Action pooledDrive = DRIVE.percent(() -> pool.robotRelative(0.0).angularRadiansPerSecond());
-        private final Action faceHub = heading.position(2.0);
+        private final Action faceHub = heading.position(Units.Rotations.of(2.0));
         @SuppressWarnings("unused")
         private final MotorDevice driveMotor = DRIVE;
         @SuppressWarnings("unused")

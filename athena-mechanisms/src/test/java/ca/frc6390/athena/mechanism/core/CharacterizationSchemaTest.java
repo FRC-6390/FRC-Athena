@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -38,7 +40,7 @@ class CharacterizationSchemaTest {
     private static final class CharacterizedMechanism implements Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 7);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 8);
-        private final ControlBinding<?> control = Controls.position(motor).feedback(encoder);
+        private final ControlBinding<?> control = Controls.position(motor, Units.Rotations).feedback(encoder);
         public final Characterization characterization = control.characterization();
     }
 }

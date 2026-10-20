@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -118,21 +120,21 @@ class InterpolatedRecordTest {
 
     static final class CurveMechanism implements Mechanism {
         final double[] input = {1.0};
-        final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 7));
+        final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 7), Units.Rotations);
         final InterpolatedControlAction curve = control
-                .interpolate(InterpolationKinds.LINEAR, () -> input[0])
-                .at(1.0, 10.0)
-                .at(3.0, 30.0)
+                .interpolate(InterpolationKinds.LINEAR, () -> input[0], Units.Value)
+                .at(Units.Value.of(1.0), Units.Rotations.of(10.0))
+                .at(Units.Value.of(3.0), Units.Rotations.of(30.0))
                 .persisted();
         final Action record = curve.record();
     }
 
     static final class UnpersistedMechanism implements Mechanism {
         final double[] input = {1.0};
-        final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 8));
+        final ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 8), Units.Rotations);
         final InterpolatedControlAction curve = control
-                .interpolate(InterpolationKinds.LINEAR, () -> input[0])
-                .at(1.0, 10.0)
-                .at(3.0, 30.0);
+                .interpolate(InterpolationKinds.LINEAR, () -> input[0], Units.Value)
+                .at(Units.Value.of(1.0), Units.Rotations.of(10.0))
+                .at(Units.Value.of(3.0), Units.Rotations.of(30.0));
     }
 }

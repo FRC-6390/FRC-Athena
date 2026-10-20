@@ -157,7 +157,7 @@ class CharacterizationTest {
     @Test
     void payloadIsLearnedOnlyWhileTheGateIsTrueAndIsConfident() {
         boolean[] loaded = {true};
-        Characterization characterization = Characterization.of(rawControl())
+        Characterization characterization = Characterization.of(linearControl())
                 .payloadWhen(() -> loaded[0])
                 .defaults(linearModel(0.0, 2.0, 0.2));
         Random random = new Random(6);
@@ -205,7 +205,7 @@ class CharacterizationTest {
 
     @Test
     void controlBindingFeedforwardUsesTheModelUntilFfReplacesIt() {
-        ControlBinding<?> control = Controls.velocity(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.velocity(MOTOR, Units.Degrees).feedback(ENCODER);
         ControlBinding<?> modelled = control.model(linearModel(0.4, 2.0, 0.2));
 
         assertTrue(modelled.loops().stream().anyMatch(loop -> loop instanceof ModelFeedforward));
@@ -217,21 +217,22 @@ class CharacterizationTest {
     @Test
     void modelFeedforwardDrivesTheMotorThroughTheScheduler() {
         RecordingContext hardware = new RecordingContext();
-        ControlBinding<?> control = Controls.velocity(MOTOR).feedback(ENCODER)
+        ControlBinding<?> control = Controls.velocity(MOTOR, Units.Degrees).feedback(ENCODER)
                 .model(linearModel(0.4, 2.0, 0.0));
         VelocityMechanism mechanism = new VelocityMechanism(control);
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
-        scheduler.request(control.velocity(0.5));
+        scheduler.request(control.velocity(Units.DegreesPerSecond.of(0.5)));
         scheduler.teleopPeriodic(0.0, DT);
         scheduler.teleopPeriodic(DT, DT);
 
-        assertEquals(0.4 + 2.0 * 0.5, hardware.motor(MOTOR).voltage, 1.0e-9);
+        // Typed degree bindings fit and evaluate models in rotations: 0.5 deg/s is 0.5 / 360 rotations/s.
+        assertEquals(0.4 + 2.0 * (0.5 / 360.0), hardware.motor(MOTOR).voltage, 1.0e-9);
     }
 
     @Test
     void checksRequireTheirDataAndDebounce() {
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(ENCODER);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
         assertThrows(IllegalStateException.class, control::load);
         assertThrows(IllegalStateException.class, control::blocked);
         assertThrows(IllegalStateException.class, control::backdriven);
@@ -240,9 +241,9 @@ class CharacterizationTest {
 
     @Test
     void slipCheckIsOnlyCreatedWhenConfiguredAndReportsDisagreement() {
-        ControlBinding<?> control = Controls.position(MOTOR).feedback(() -> 10.0, () -> 0.0);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Rotations).feedback(() -> 10.0, () -> 0.0);
         EncoderDevice second = EncoderDevice.of(EncoderKinds.CANCODER, 6);
-        SlipCheck check = control.slipCheck(second, new GearRatio(1.0), 0.5);
+        SlipCheck check = control.slipCheck(second, new GearRatio(1.0), Units.Rotations.of(0.5));
 
         assertEquals(0.5, check.tolerance(), 1.0e-12);
         SlipCheck slipping = new SlipCheck(() -> 10.0, () -> 9.4, 0.5);
@@ -260,7 +261,7 @@ class CharacterizationTest {
 
     @Test
     void velocityBindingsDefaultToNoGravityAndFitWithoutAGravityTerm() {
-        Characterization characterization = Characterization.of(Controls.velocity(MOTOR).feedback(ENCODER));
+        Characterization characterization = Characterization.of(Controls.velocity(MOTOR, Units.Degrees).feedback(ENCODER));
         assertEquals(Gravity.NONE, characterization.gravity());
 
         Random random = new Random(7);
@@ -298,7 +299,13 @@ class CharacterizationTest {
     }
 
     private static ControlBinding<?> rawControl() {
-        return Controls.position(MOTOR).feedback(ENCODER);
+        return Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
+    }
+
+    /** A linear (meters) binding, so the fit uses a linear gravity model as the payload test expects. */
+    private static ControlBinding<?> linearControl() {
+        return Controls.position(MOTOR, Units.Meters)
+                .feedback(EncoderDevice.of(EncoderKinds.CANCODER, 9).measures(Units.Meters));
     }
 
     /** Runs a single Action (for example one that only mutates the characterization) to completion. */

@@ -20,8 +20,8 @@ class EffortPolicyCompositionTest {
 
     @Test
     void retargetAfterEffortKeepsTheEffortLimit() {
-        ControlBinding<?> control = Controls.position(MOTOR);
-        Action action = control.position(1.0).effort(Units.Amps.of(10)).retarget(Retarget.IMMEDIATE);
+        ControlBinding<?> control = Controls.position(MOTOR, Units.Rotations);
+        Action action = control.position(Units.Rotations.of(1.0)).effort(Units.Amps.of(10)).retarget(Retarget.IMMEDIATE);
 
         Actions.ControlPosition position = assertInstanceOf(Actions.ControlPosition.class, action);
         assertEquals(Retarget.IMMEDIATE, position.policy().retarget());
@@ -30,8 +30,8 @@ class EffortPolicyCompositionTest {
 
     @Test
     void effortAfterRetargetKeepsTheMotionPolicy() {
-        ControlBinding<?> control = Controls.velocity(MOTOR);
-        Action action = control.velocity(5.0).retarget(Retarget.IMMEDIATE).effort(Units.Amps.of(10));
+        ControlBinding<?> control = Controls.velocity(MOTOR, Units.Rotations);
+        Action action = control.velocity(Units.RotationsPerSecond.of(5.0)).retarget(Retarget.IMMEDIATE).effort(Units.Amps.of(10));
 
         Actions.ControlVelocity velocity = assertInstanceOf(Actions.ControlVelocity.class, action);
         assertEquals(Retarget.IMMEDIATE, velocity.policy().retarget());

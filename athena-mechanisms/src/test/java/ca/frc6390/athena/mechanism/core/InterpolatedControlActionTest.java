@@ -23,10 +23,10 @@ class InterpolatedControlActionTest {
     @Test
     void linearInterpolationSortsPointsInterpolatesAndClamps() {
         double[] input = {2.0};
-        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1));
-        InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> input[0])
-                .at(3.0, 30.0)
-                .at(1.0, 10.0);
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 1), Units.Rotations);
+        InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> input[0], Units.Value)
+                .at(Units.Value.of(3.0), Units.Rotations.of(30.0))
+                .at(Units.Value.of(1.0), Units.Rotations.of(10.0));
 
         assertEquals(20.0, action.target(), 1.0e-9);
         input[0] = -5.0;
@@ -38,10 +38,10 @@ class InterpolatedControlActionTest {
     @Test
     void curvedInterpolationShapesSegmentsAndPublishesTheCompleteGraph() {
         double[] input = {5.0};
-        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 20))
-                .interpolate(InterpolationKinds.curved(value -> value * value), () -> input[0])
-                .at(10.0, 20.0)
-                .at(0.0, 0.0);
+        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 20), Units.Rotations)
+                .interpolate(InterpolationKinds.curved(value -> value * value), () -> input[0], Units.Value)
+                .at(Units.Value.of(10.0), Units.Rotations.of(20.0))
+                .at(Units.Value.of(0.0), Units.Rotations.of(0.0));
 
         assertEquals(5.0, action.target(), 1.0e-9);
         Point2d[] configured = (Point2d[]) action.telemetry().get("Visualization/Points").value();
@@ -64,19 +64,19 @@ class InterpolatedControlActionTest {
         AtomicInteger secondSamples = new AtomicInteger();
         InterpolationModel custom = (input, data) ->
                 data.value(0) + data.value(0) + data.value(data.size() - 1) + input;
-        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 2))
+        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 2), Units.Rotations)
                 .interpolate(custom, () -> {
                     inputSamples.incrementAndGet();
                     return 4.0;
-                })
-                .at(1.0, () -> {
+                }, Units.Value)
+                .at(Units.Value.of(1.0), () -> {
                     firstSamples.incrementAndGet();
                     return 2.0;
-                })
-                .at(3.0, () -> {
+                }, Units.Rotations)
+                .at(Units.Value.of(3.0), () -> {
                     secondSamples.incrementAndGet();
                     return 5.0;
-                });
+                }, Units.Rotations);
 
         assertEquals(13.0, action.target(), 1.0e-9);
         assertEquals(1, inputSamples.get());
@@ -90,16 +90,16 @@ class InterpolatedControlActionTest {
         double[] secondPoint = {3.0};
         AtomicInteger firstSamples = new AtomicInteger();
         AtomicInteger secondSamples = new AtomicInteger();
-        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 7))
-                .interpolate(InterpolationKinds.LINEAR, () -> 2.0)
+        InterpolatedControlAction action = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 7), Units.Rotations)
+                .interpolate(InterpolationKinds.LINEAR, () -> 2.0, Units.Value)
                 .at(() -> {
                     firstSamples.incrementAndGet();
                     return firstPoint[0];
-                }, 10.0)
+                }, Units.Value, () -> 10.0, Units.Rotations)
                 .at(() -> {
                     secondSamples.incrementAndGet();
                     return secondPoint[0];
-                }, 30.0);
+                }, Units.Value, () -> 30.0, Units.Rotations);
 
         assertEquals(20.0, action.target(), 1.0e-9);
         assertEquals(1, firstSamples.get());
@@ -119,14 +119,14 @@ class InterpolatedControlActionTest {
     void outputResolutionUsesTheControlBindingsTargetMode() {
         MotorDevice positionMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 3);
         MotorDevice velocityMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 4);
-        InterpolatedControlAction position = Controls.position(positionMotor)
-                .interpolate(InterpolationKinds.LINEAR, () -> 0.5)
-                .at(0.0, 2.0)
-                .at(1.0, 4.0);
-        InterpolatedControlAction velocity = Controls.velocity(velocityMotor)
-                .interpolate(InterpolationKinds.LINEAR, () -> 0.5)
-                .at(0.0, 20.0)
-                .at(1.0, 40.0);
+        InterpolatedControlAction position = Controls.position(positionMotor, Units.Rotations)
+                .interpolate(InterpolationKinds.LINEAR, () -> 0.5, Units.Value)
+                .at(Units.Value.of(0.0), Units.Rotations.of(2.0))
+                .at(Units.Value.of(1.0), Units.Rotations.of(4.0));
+        InterpolatedControlAction velocity = Controls.velocity(velocityMotor, Units.Rotations)
+                .interpolate(InterpolationKinds.LINEAR, () -> 0.5, Units.Value)
+                .at(Units.Value.of(0.0), Units.RotationsPerSecond.of(20.0))
+                .at(Units.Value.of(1.0), Units.RotationsPerSecond.of(40.0));
         OutputResolver resolver = OutputResolver.empty();
         Mechanism mechanism = new Mechanism() { };
 
@@ -141,11 +141,11 @@ class InterpolatedControlActionTest {
     void schedulerOwnsAndAppliesInterpolatedControlActions() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 5);
         RecordingMotor handle = new RecordingMotor(motor);
-        ControlBinding<?> control = Controls.position(motor)
+        ControlBinding<?> control = Controls.position(motor, Units.Rotations)
                 .constraint(Constraints.range(Range.of(Units.Value.of(0.0), Units.Value.of(5.0))));
-        InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> 2.0)
-                .at(1.0, 4.0)
-                .at(3.0, 8.0);
+        InterpolatedControlAction action = control.interpolate(InterpolationKinds.LINEAR, () -> 2.0, Units.Value)
+                .at(Units.Value.of(1.0), Units.Rotations.of(4.0))
+                .at(Units.Value.of(3.0), Units.Rotations.of(8.0));
         Mechanism mechanism = new Mechanism() {
             @SuppressWarnings("unused")
             private final ControlBinding<?> position = control;
@@ -165,18 +165,18 @@ class InterpolatedControlActionTest {
 
     @Test
     void invalidTablesAndRuntimeValuesFailClearly() {
-        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 6));
-        InterpolatedControlAction empty = control.interpolate(InterpolationKinds.LINEAR, () -> 0.0);
+        ControlBinding<?> control = Controls.position(MotorDevice.of(MotorKinds.KRAKEN_X60, 6), Units.Rotations);
+        InterpolatedControlAction empty = control.interpolate(InterpolationKinds.LINEAR, () -> 0.0, Units.Value);
 
         assertThrows(IllegalStateException.class, empty::target);
-        assertThrows(IllegalArgumentException.class, () -> empty.at(Double.NaN, 1.0));
-        assertThrows(IllegalArgumentException.class, () -> empty.at(1.0, Double.NaN));
-        InterpolatedControlAction one = empty.at(1.0, 2.0);
-        assertThrows(IllegalArgumentException.class, () -> one.at(1.0, 3.0));
+        assertThrows(IllegalArgumentException.class, () -> empty.at(Units.Value.of(Double.NaN), Units.Rotations.of(1.0)));
+        assertThrows(IllegalArgumentException.class, () -> empty.at(Units.Value.of(1.0), Units.Rotations.of(Double.NaN)));
+        InterpolatedControlAction one = empty.at(Units.Value.of(1.0), Units.Rotations.of(2.0));
+        assertThrows(IllegalArgumentException.class, () -> one.at(Units.Value.of(1.0), Units.Rotations.of(3.0)));
         assertThrows(IllegalArgumentException.class,
-                () -> control.interpolate(InterpolationKinds.LINEAR, () -> Double.NaN)
-                        .at(0.0, 1.0)
-                        .at(1.0, 2.0)
+                () -> control.interpolate(InterpolationKinds.LINEAR, () -> Double.NaN, Units.Value)
+                        .at(Units.Value.of(0.0), Units.Rotations.of(1.0))
+                        .at(Units.Value.of(1.0), Units.Rotations.of(2.0))
                         .target());
     }
 

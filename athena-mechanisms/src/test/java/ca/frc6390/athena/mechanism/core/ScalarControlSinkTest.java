@@ -1,5 +1,7 @@
 package ca.frc6390.athena.mechanism.core;
 
+import edu.wpi.first.units.Units;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -71,10 +73,10 @@ class ScalarControlSinkTest {
     void pidOutputIsClampedAndAppliedToAngularChannel() {
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.AngularChannel angular = pool.angularChannel();
-        ControlBinding<?> control = Controls.position(angular)
+        ControlBinding<?> control = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0, () -> 0.0)
                 .pid(2.0, 0.0, 0.0)
-                .constraint(Constraints.clamp(1.5));
+                .constraint(Constraints.maxVoltage(Units.Volts.of(1.5)));
         Output target = Outputs.position(4.0);
         OutputApplier applier = OutputApplier.using(ActionContext.empty());
 
@@ -94,10 +96,10 @@ class ScalarControlSinkTest {
     void invertedAngularChannelReversesControlBindingOutput() {
         RobotVelocityPool pool = new RobotVelocityPool();
         RobotVelocityPool.AngularChannel angular = pool.angularChannel().inverted();
-        ControlBinding<?> control = Controls.position(angular)
+        ControlBinding<?> control = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0, () -> 0.0)
                 .pid(2.0, 0.0, 0.0)
-                .constraint(Constraints.clamp(1.5));
+                .constraint(Constraints.maxVoltage(Units.Volts.of(1.5)));
         Output target = Outputs.position(4.0);
 
         OutputApplier.using(ActionContext.empty())
@@ -111,10 +113,10 @@ class ScalarControlSinkTest {
     void continuousPositionUsesShortestWrappedError() {
         double measurement = Math.toRadians(179.0);
         RobotVelocityPool.AngularChannel angular = new RobotVelocityPool().angularChannel();
-        ControlBinding<?> control = Controls.position(angular)
+        ControlBinding<?> control = Controls.position(angular, Units.Rotations)
                 .feedback(() -> measurement, () -> 0.0)
                 .pid(1.0, 0.0, 0.0)
-                .continuous(-Math.PI, Math.PI);
+                .continuous(Units.Rotations.of(-Math.PI), Units.Rotations.of(Math.PI));
         Output target = Outputs.position(Math.toRadians(-179.0));
 
         OutputApplier.using(ActionContext.empty())
@@ -126,8 +128,8 @@ class ScalarControlSinkTest {
     @Test
     void outputOnlyClampDoesNotRequireFeedback() {
         RobotVelocityPool.AngularChannel angular = new RobotVelocityPool().angularChannel();
-        ControlBinding<?> control = Controls.position(angular)
-                .constraint(Constraints.clamp(0.75));
+        ControlBinding<?> control = Controls.position(angular, Units.Rotations)
+                .constraint(Constraints.maxVoltage(Units.Volts.of(0.75)));
         Output target = Outputs.position(2.0);
 
         OutputApplier.using(ActionContext.empty())
@@ -139,23 +141,23 @@ class ScalarControlSinkTest {
     private static final class AimMechanism implements Mechanism {
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
-        private final ControlBinding<?> heading = Controls.position(angular)
+        private final ControlBinding<?> heading = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0)
                 .pid(2.0, 0.0, 0.0)
-                .constraint(Constraints.clamp(1.0));
-        public final Action aim = heading.position(2.0);
+                .constraint(Constraints.maxVoltage(Units.Volts.of(1.0)));
+        public final Action aim = heading.position(Units.Rotations.of(2.0));
     }
 
     private static final class SharedSinkMechanism implements Mechanism {
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.AngularChannel angular = pool.angularChannel();
-        private final ControlBinding<?> slowControl = Controls.position(angular)
+        private final ControlBinding<?> slowControl = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0)
                 .pid(1.0, 0.0, 0.0);
-        private final ControlBinding<?> fastControl = Controls.position(angular)
+        private final ControlBinding<?> fastControl = Controls.position(angular, Units.Rotations)
                 .feedback(() -> 0.0)
                 .pid(1.0, 0.0, 0.0);
-        public final Action slow = slowControl.position(1.0);
-        public final Action fast = fastControl.position(2.0);
+        public final Action slow = slowControl.position(Units.Rotations.of(1.0));
+        public final Action fast = fastControl.position(Units.Rotations.of(2.0));
     }
 }

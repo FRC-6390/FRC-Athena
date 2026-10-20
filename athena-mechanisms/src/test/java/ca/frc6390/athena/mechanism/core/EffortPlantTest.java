@@ -227,7 +227,7 @@ class EffortPlantTest {
                 .feedback(plantPosition(plant), plantVelocity(plant))
                 .pid(10.0, 0.0, 0.0)
                 .effort(Effort.max(Units.Amps.of(5.0)));
-        Rig rig = rigFor(plant, angle, angle.position(-0.5));
+        Rig rig = rigFor(plant, angle, angle.position(Units.Rotations.of(-0.5)));
         rig.plant.stopMin = 0.0;
         double peak = 0.0;
         for (int i = 0; i < 150; i++) {
@@ -245,7 +245,7 @@ class EffortPlantTest {
         ControlBinding<?> angle = Controls.position(MOTOR, Units.Rotations)
                 .feedback(plantPosition(plant), plantVelocity(plant))
                 .pid(10.0, 0.0, 0.0);
-        Rig rig = rigFor(plant, angle, angle.position(-0.5));
+        Rig rig = rigFor(plant, angle, angle.position(Units.Rotations.of(-0.5)));
         rig.plant.stopMin = 0.0;
         double peak = 0.0;
         for (int i = 0; i < 150; i++) {
@@ -262,7 +262,7 @@ class EffortPlantTest {
                 .feedback(plantPosition(plant), plantVelocity(plant))
                 .pid(10.0, 0.0, 0.0)
                 .effort(Effort.max(Units.Amps.of(5.0)));
-        Rig rig = rigFor(plant, angle, angle.position(3.0));
+        Rig rig = rigFor(plant, angle, angle.position(Units.Rotations.of(3.0)));
         double peak = 0.0;
         double peakSpeed = 0.0;
         for (int i = 0; i < 100; i++) {
@@ -283,7 +283,7 @@ class EffortPlantTest {
                 .feedback(plantPosition(plant), plantVelocity(plant))
                 .pid(10.0, 0.0, 0.0)
                 .effort(Effort.max(Units.NewtonMeters.of(torque)).gearing(1.0));
-        Rig rig = rigFor(plant, angle, angle.position(-0.5));
+        Rig rig = rigFor(plant, angle, angle.position(Units.Rotations.of(-0.5)));
         rig.plant.stopMin = 0.0;
         double peak = 0.0;
         for (int i = 0; i < 150; i++) {
@@ -306,9 +306,9 @@ class EffortPlantTest {
                 .pid(10.0, 0.0, 0.0)
                 .model(model());
         double stow = -0.2;
-        Action action = angle.position(stow).effort(Units.Amps.of(8.0))
+        Action action = angle.position(Units.Rotations.of(stow)).effort(Units.Amps.of(8.0))
                 .until(angle.blocked().threshold(0.1).forSeconds(0.0))
-                .then(angle.position(stow).effort(Units.Amps.of(1.0)));
+                .then(angle.position(Units.Rotations.of(stow)).effort(Units.Amps.of(1.0)));
         Rig rig = rigFor(plant, angle, action);
         rig.plant.theta = 0.4;
         rig.plant.stopMin = 0.0;
@@ -354,7 +354,7 @@ class EffortPlantTest {
                 .model(model())
                 .effort(Effort.max(Units.NewtonMeters.of(0.2)).gearing(1.0)
                         .onLoad(LoadResponse.YIELD.recoverAfter(Units.Seconds.of(0.1))));
-        Rig rig = rigFor(plant, angle, angle.position(0.2));
+        Rig rig = rigFor(plant, angle, angle.position(Units.Rotations.of(0.2)));
         for (int i = 0; i < 75; i++) {
             rig.cycle();
         }

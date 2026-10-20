@@ -141,7 +141,7 @@ class TorqueVelocityTest {
             }
             control = build.apply(motors);
             runtime = MechanismRuntime.of(new Shooter(control), this);
-            runtime.set(control.velocity(TARGET));
+            runtime.set(control.velocity(Units.RotationsPerSecond.of(TARGET)));
         }
 
         @Override public MotorHandle motor(MotorDevice ref) { return handles.get(ref); }
@@ -201,14 +201,14 @@ class TorqueVelocityTest {
     private static final Tuning TUNING = new Tuning();
 
     private static ControlBinding<?> voltageControl(Flywheel plant, List<MotorDevice> motors) {
-        return Controls.velocity(motors.get(0), motors.subList(1, motors.size()).toArray(new MotorDevice[0]))
+        return Controls.velocity(motors.get(0), Units.Rotations).followers(motors.subList(1, motors.size()).toArray(new MotorDevice[0]))
                 .feedback(position(plant), velocity(plant))
                 .pid(TUNING.kpVolts, TUNING.kiVolts, 0.0)
                 .feedforward(FeedforwardGains.of(0.0, TUNING.kvVolts, TUNING.kaVolts, 0.0));
     }
 
     private static ControlBinding<?> torqueControl(Flywheel plant, List<MotorDevice> motors, double observerTau) {
-        return Controls.velocity(motors.get(0), motors.subList(1, motors.size()).toArray(new MotorDevice[0]))
+        return Controls.velocity(motors.get(0), Units.Rotations).followers(motors.subList(1, motors.size()).toArray(new MotorDevice[0]))
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(TUNING.kpAmps, TUNING.kiAmps, 0.0)
                         .inertia(TUNING.kaAmps)
@@ -218,10 +218,10 @@ class TorqueVelocityTest {
     @Test
     void voltageIsResistiveDropPlusBackEmfOfTheMeasuredSpeed() {
         Flywheel plant = new Flywheel(1);
-        Rig rig = new Rig(plant, 1, motors -> Controls.velocity(motors.get(0))
+        Rig rig = new Rig(plant, 1, motors -> Controls.velocity(motors.get(0), Units.Rotations)
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0)));
-        rig.runtime.set(rig.control.velocity(20.0));
+        rig.runtime.set(rig.control.velocity(Units.RotationsPerSecond.of(20.0)));
         int checked = 0;
         for (int cycle = 0; cycle < 60; cycle++) {
             double omegaBefore = plant.omega;
@@ -335,7 +335,7 @@ class TorqueVelocityTest {
     void antiWindupRecoversAfterASaturatedStep() {
         Flywheel plant = new Flywheel(1);
         Rig rig = new Rig(plant, 1, motors -> torqueControl(plant, motors, 0.0));
-        rig.runtime.set(rig.control.velocity(150.0));
+        rig.runtime.set(rig.control.velocity(Units.RotationsPerSecond.of(150.0)));
         double largestVoltage = 0.0;
         for (int cycle = 0; cycle < 75; cycle++) {
             rig.cycle();
@@ -344,7 +344,7 @@ class TorqueVelocityTest {
         assertEquals(12.0, largestVoltage, 1e-9, "the voltage saturates at 12 V");
         assertTrue(plant.rps() < 110.0, "the flywheel cannot reach 150 rps, reached " + plant.rps());
 
-        rig.runtime.set(rig.control.velocity(TARGET));
+        rig.runtime.set(rig.control.velocity(Units.RotationsPerSecond.of(TARGET)));
         double lowest = Double.POSITIVE_INFINITY;
         boolean crossed = false;
         for (int cycle = 0; cycle < 250; cycle++) {
@@ -396,7 +396,7 @@ class TorqueVelocityTest {
             @Override public MotorHandle motor(MotorDevice ref) { return handles.get(ref); }
         };
         motor.bindRuntime(SCOPE, handles.get(motor));
-        ControlBinding<?> control = Controls.velocity(motor)
+        ControlBinding<?> control = Controls.velocity(motor, Units.Rotations)
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(TUNING.kpAmps, TUNING.kiAmps, 0.0));
         PowerRuntime power = new PowerRuntime();
@@ -425,7 +425,7 @@ class TorqueVelocityTest {
         MotorDevice minion = MotorDevice.of(MotorKinds.MINION, IDS.incrementAndGet());
         Flywheel plant = new Flywheel(1);
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> Controls.velocity(minion)
+                () -> Controls.velocity(minion, Units.Rotations)
                         .feedback(position(plant), velocity(plant))
                         .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0)));
         assertTrue(error.getMessage().contains("motor constants"), error.getMessage());
@@ -435,7 +435,7 @@ class TorqueVelocityTest {
     void torqueVelocityNeedsAVelocityBinding() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, IDS.incrementAndGet());
         Flywheel plant = new Flywheel(1);
-        assertThrows(IllegalStateException.class, () -> Controls.position(motor)
+        assertThrows(IllegalStateException.class, () -> Controls.position(motor, Units.Rotations)
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0)));
     }
@@ -444,7 +444,7 @@ class TorqueVelocityTest {
     void voltageLoopsCannotBeStackedOnTorqueVelocity() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, IDS.incrementAndGet());
         Flywheel plant = new Flywheel(1);
-        ControlBinding<?> torque = Controls.velocity(motor)
+        ControlBinding<?> torque = Controls.velocity(motor, Units.Rotations)
                 .feedback(position(plant), velocity(plant))
                 .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0));
         assertThrows(IllegalStateException.class, () -> torque.pid(1.0, 0.0, 0.0));
@@ -455,7 +455,7 @@ class TorqueVelocityTest {
     void declaringTorqueVelocityReplacesEarlierVoltageLoops() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, IDS.incrementAndGet());
         Flywheel plant = new Flywheel(1);
-        ControlBinding<?> binding = Controls.velocity(motor)
+        ControlBinding<?> binding = Controls.velocity(motor, Units.Rotations)
                 .feedback(position(plant), velocity(plant))
                 .pid(1.0, 0.0, 0.0)
                 .ff(0.0, 0.1, 0.0)
@@ -467,15 +467,15 @@ class TorqueVelocityTest {
     @Test
     void followerCountSplitsTheCurrentAcrossTheMotors() {
         Flywheel single = new Flywheel(1);
-        Rig one = new Rig(single, 1, motors -> Controls.velocity(motors.get(0))
+        Rig one = new Rig(single, 1, motors -> Controls.velocity(motors.get(0), Units.Rotations)
                 .feedback(position(single), velocity(single))
                 .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0)));
         Flywheel pair = new Flywheel(2);
-        Rig two = new Rig(pair, 2, motors -> Controls.velocity(motors.get(0), motors.get(1))
+        Rig two = new Rig(pair, 2, motors -> Controls.velocity(motors.get(0), Units.Rotations).followers(motors.get(1))
                 .feedback(position(pair), velocity(pair))
                 .torqueVelocity(TorqueVelocityGains.of(1.0, 0.0, 0.0)));
-        one.runtime.set(one.control.velocity(20.0));
-        two.runtime.set(two.control.velocity(20.0));
+        one.runtime.set(one.control.velocity(Units.RotationsPerSecond.of(20.0)));
+        two.runtime.set(two.control.velocity(Units.RotationsPerSecond.of(20.0)));
         // At rest the back-EMF is zero, so the voltage is I R per motor: the pair draws half the current each.
         double voltageOne = one.command();
         double voltageTwo = two.command();

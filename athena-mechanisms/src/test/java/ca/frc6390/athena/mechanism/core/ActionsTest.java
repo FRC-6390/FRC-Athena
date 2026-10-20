@@ -24,7 +24,7 @@ class ActionsTest {
 
     @Test
     void controlNeutralRetainsItsTargetControl() {
-        ControlBinding<?> speed = Controls.velocity(MOTOR);
+        ControlBinding<?> speed = Controls.velocity(MOTOR, Units.Rotations);
 
         Actions.ControlNeutral neutral = (Actions.ControlNeutral) speed.neutral();
 
@@ -97,48 +97,48 @@ class ActionsTest {
 
     @Test
     void untilWithinOnlyAcceptsClosedLoopTargetsAndValidTolerance() {
-        ControlBinding<?> position = Controls.position(MOTOR);
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
         Action openLoop = MOTOR.percent(0.2);
 
-        assertThrows(IllegalArgumentException.class, () -> openLoop.untilWithin(0.1));
-        assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(-0.1));
-        assertThrows(IllegalArgumentException.class, () -> position.position(1.0).untilWithin(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> openLoop.untilWithin(Units.Rotations.of(0.1)));
+        assertThrows(IllegalArgumentException.class, () -> position.position(Units.Rotations.of(1.0)).untilWithin(Units.Rotations.of(-0.1)));
+        assertThrows(IllegalArgumentException.class, () -> position.position(Units.Rotations.of(1.0)).untilWithin(Units.Rotations.of(Double.NaN)));
     }
 
     @Test
     void settleAndVelocityOptionsRequireUntilWithinAndValidValues() {
-        ControlBinding<?> position = Controls.position(MOTOR);
-        Action target = position.position(1.0);
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
+        Action target = position.position(Units.Rotations.of(1.0));
 
         assertThrows(IllegalArgumentException.class, () -> target.settled(Seconds.of(0.1)));
-        assertThrows(IllegalArgumentException.class, () -> target.maxVelocity(5.0));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Seconds.of(-0.1)));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).settled(Seconds.of(Double.NaN)));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(-1.0));
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.1).maxVelocity(Double.NaN));
+        assertThrows(IllegalArgumentException.class, () -> target.maxVelocity(Units.RotationsPerSecond.of(5.0)));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(Units.Rotations.of(0.1)).settled(Seconds.of(-0.1)));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(Units.Rotations.of(0.1)).settled(Seconds.of(Double.NaN)));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(Units.Rotations.of(0.1)).maxVelocity(Units.RotationsPerSecond.of(-1.0)));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(Units.Rotations.of(0.1)).maxVelocity(Units.RotationsPerSecond.of(Double.NaN)));
     }
 
     @Test
     void velocityControlsRejectMaxVelocityButAcceptSettle() {
-        ControlBinding<?> velocity = Controls.velocity(MOTOR);
-        Action target = velocity.velocity(3.0);
+        ControlBinding<?> velocity = Controls.velocity(MOTOR, Units.Rotations);
+        Action target = velocity.velocity(Units.RotationsPerSecond.of(3.0));
 
-        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(0.5).maxVelocity(1.0));
+        assertThrows(IllegalArgumentException.class, () -> target.untilWithin(Units.RotationsPerSecond.of(0.5)).maxVelocity(Units.RotationsPerSecond.of(1.0)));
         assertEquals(0.1, assertInstanceOf(Actions.WithinTolerance.class,
-                target.untilWithin(0.5).settled(Seconds.of(0.1))).settleSeconds(), 1.0e-9);
+                target.untilWithin(Units.RotationsPerSecond.of(0.5)).settled(Seconds.of(0.1))).settleSeconds(), 1.0e-9);
     }
 
     @Test
     void settledOptionsPreserveToleranceAndDefaultsStayLegacy() {
-        ControlBinding<?> position = Controls.position(MOTOR);
-        Action target = position.position(1.0);
+        ControlBinding<?> position = Controls.position(MOTOR, Units.Rotations);
+        Action target = position.position(Units.Rotations.of(1.0));
 
-        Actions.WithinTolerance legacy = assertInstanceOf(Actions.WithinTolerance.class, target.untilWithin(0.5));
+        Actions.WithinTolerance legacy = assertInstanceOf(Actions.WithinTolerance.class, target.untilWithin(Units.Rotations.of(0.5)));
         assertEquals(0.0, legacy.settleSeconds(), 1.0e-9);
         assertTrue(Double.isInfinite(legacy.maxVelocity()));
 
         Actions.WithinTolerance settled = assertInstanceOf(Actions.WithinTolerance.class,
-                target.untilWithin(0.5).maxVelocity(2.0).settled(java.time.Duration.ofMillis(250)));
+                target.untilWithin(Units.Rotations.of(0.5)).maxVelocity(Units.RotationsPerSecond.of(2.0)).settled(java.time.Duration.ofMillis(250)));
         assertEquals(0.5, settled.tolerance(), 1.0e-9);
         assertEquals(0.25, settled.settleSeconds(), 1.0e-9);
         assertEquals(2.0, settled.maxVelocity(), 1.0e-9);
