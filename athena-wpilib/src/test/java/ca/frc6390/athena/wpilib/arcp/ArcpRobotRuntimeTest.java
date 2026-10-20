@@ -186,6 +186,7 @@ class ArcpRobotRuntimeTest {
         store.put(GAIN, 3.5);
         start(runtime, ArcpPolicy.of().controlPort(0).realtimePort(0), store);
         cycles(3);
+        bridge.awaitExports();
 
         ArcpTestClient.Reply list = client.fileList();
         assertEquals(ArcpTestClient.STATUS_OK, list.status(), list.reason());
@@ -232,6 +233,7 @@ class ArcpRobotRuntimeTest {
         client = new ArcpTestClient(bridge.controlPort());
         assertEquals(ArcpTestClient.STATUS_OK, client.hello(0).status());
         cycles(3);
+        bridge.awaitExports();
         ArcpTestClient.Reply diffReply = client.fileDownload("tuning/diff.txt");
         assertEquals(ArcpTestClient.STATUS_OK, diffReply.status(), diffReply.reason());
         String diff = text(diffReply);

@@ -6,6 +6,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.IdentityHashMap;
+import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import ca.frc6390.athena.hardware.backend.BackendRegistry;
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
@@ -65,6 +70,14 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      */
     private final Map<MotorDevice, MotorLookup> motorLookups = new IdentityHashMap<>();
     private long motorEpoch;
+    /** Placeholder handle for each declaration that failed to bind; the loop uses it until the binder succeeds. */
+    private final Map<Object, Object> placeholders = new IdentityHashMap<>();
+    /** Declarations whose background attempt is queued or running, with the identity each one binds. */
+    private final Map<Object, HardwareIdentity> pendingBindings = new IdentityHashMap<>();
+    /** How many pending declarations bind each identity. */
+    private final Map<HardwareIdentity, Integer> pendingIdentities = new HashMap<>();
+    private ExecutorService binderExecutor;
+    private LongSupplier clock = System::nanoTime;
 
     private record MotorLookup(MotorHandle handle, long epoch) {
     }
@@ -102,8 +115,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     public synchronized MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
         // Steady state: the same declaration resolves to the same handle every cycle. The cached entry is only
-        // used while no binding failure is recorded for the declaration, because a recorded failure makes the
-        // slow path retry the binding.
+        // used while no binding failure is recorded for the declaration.
         MotorLookup cached = motorLookups.get(device);
         if (cached != null && cached.epoch() == motorEpoch && !bindingFailures.containsKey(device)) {
             return cached.handle();
@@ -115,32 +127,52 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                     + ". First declaration: " + existing.device()
                     + "; conflicting declaration: " + device);
         }
+        if (existing != null) {
+            // Already bound by another declaration with the same identity: bind to it without any vendor call.
+            MotorHandle bound = createMotor(device);
+            motorLookups.put(device, new MotorLookup(bound, motorEpoch));
+            return bound;
+        }
+        if (bindingFailures.containsKey(device) || isIdentityPending(identity)) {
+            // A failed or background-pending declaration is never re-created inline: that would put a vendor create
+            // on the caller's thread every cycle. The binder retries it; until then the unavailable handle is returned.
+            return unavailableMotor(device);
+        }
         try {
             MotorHandle handle = createMotor(device);
-            if (!bindingFailures.containsKey(device)) {
-                motorLookups.put(device, new MotorLookup(handle, motorEpoch));
-            }
+            motorLookups.put(device, new MotorLookup(handle, motorEpoch));
             return handle;
         } catch (RuntimeException exception) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
-            bindingFailures.put(device, exception);
-            MotorHandle unavailable = new UnavailableMotorHandle(device);
-            bindRuntime(device, unavailable);
-            return unavailable;
+            recordBindingFailure(device, exception);
+            return unavailableMotor(device);
         }
     }
 
+    private MotorHandle unavailableMotor(MotorDevice device) {
+        MotorHandle placeholder = (MotorHandle) placeholders.computeIfAbsent(
+                device, ignored -> new UnavailableMotorHandle(device));
+        bindRuntime(device, placeholder);
+        return placeholder;
+    }
+
+    /** Synchronous bind used by registration and by loop lookups of a declaration that is not failed. */
     private MotorHandle createMotor(MotorDevice device) {
         HardwareIdentity identity = identity(device);
         MotorHandle existing = motors.get(identity);
         if (existing != null) {
             bindRuntime(device, existing);
-            bindingFailures.remove(device);
+            clearFailure(device);
             return existing;
         }
         MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
+        return installMotor(device, prepareMotor(device, leader));
+    }
+
+    /** Vendor work for a motor, with no graph state read or written. The leader handle is passed in. */
+    private PreparedMotor prepareMotor(MotorDevice device, MotorHandle leader) {
         MotorBackend backend = backends
                 .motorBackendFor(device.kind())
                 .orElseThrow(() -> new IllegalStateException(
@@ -155,10 +187,19 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                 ? new SoftwareFollowerMotorHandle(device, created)
                 : created;
         handle.activate();
-        ActionContext.SoftwareMotorFollower softwareFollower = null;
         if (leader != null && !softwareFollow) {
             handle.follow(backendHandle(leader), device.isInverted());
-        } else if (softwareFollow) {
+        }
+        return new PreparedMotor(created, handle, softwareFollow);
+    }
+
+    /** Publishes a prepared motor into the graph. Caller holds the graph lock; makes no vendor calls. */
+    private MotorHandle installMotor(MotorDevice device, PreparedMotor prepared) {
+        HardwareIdentity identity = identity(device);
+        MotorHandle handle = prepared.handle();
+        boolean declaresLeader = device.follower() != null;
+        ActionContext.SoftwareMotorFollower softwareFollower = null;
+        if (declaresLeader && prepared.softwareFollow()) {
             HardwareIdentity leaderIdentity = identity(device.follower().leader());
             softwareFollower = new ActionContext.SoftwareMotorFollower(device, handle);
             softwareFollowers.computeIfAbsent(leaderIdentity, ignored -> new ArrayList<>())
@@ -168,14 +209,14 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         MotorGroup ledGroup = motorGroups.get(identity);
         if (ledGroup != null) {
             handle = ledGroup.adoptLeader(handle);
-        } else if (leader != null) {
+        } else if (declaresLeader) {
             MotorGroup followedGroup = motorGroups.get(identity(device.follower().leader()));
             if (followedGroup != null) followedGroup.adoptFollower(device, identity, handle, softwareFollower);
         }
         motors.put(identity, handle);
         motorEpoch++;
         bindRuntime(device, handle);
-        bindingFailures.remove(device);
+        clearFailure(device);
         return handle;
     }
 
@@ -192,50 +233,95 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     @Override
     public synchronized EncoderHandle encoder(EncoderDevice device) {
         Objects.requireNonNull(device, "device");
+        HardwareIdentity identity = identity(device);
+        EncoderHandle existing = encoders.get(identity);
+        if (existing != null) {
+            bindRuntime(device, existing);
+            clearFailure(device);
+            return existing;
+        }
+        if (bindingFailures.containsKey(device) || isIdentityPending(identity)) {
+            return unavailableEncoder(device);
+        }
         try {
-            return createEncoder(device);
+            return installEncoder(device, prepareEncoder(device, sourceMotor(device)));
         } catch (RuntimeException exception) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
-            bindingFailures.put(device, exception);
-            EncoderHandle unavailable = new UnavailableEncoderHandle(device);
-            bindRuntime(device, unavailable);
-            return unavailable;
+            recordBindingFailure(device, exception);
+            return unavailableEncoder(device);
         }
     }
 
-    private EncoderHandle createEncoder(EncoderDevice device) {
-        EncoderHandle handle;
-        if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
-            MotorHandle motor = motor(integrated.motor());
-            handle = encoders.get(identity(device));
-            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
-                motor.enableIntegratedEncoder();
-                return adjustable(new IntegratedEncoderHandle(device, motor));
-            });
-        } else if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
-            MotorHandle motor = motor(absolute.motor());
-            handle = encoders.get(identity(device));
-            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
-                motor.enableAbsoluteEncoder();
-                return adjustable(new AbsoluteMotorEncoderHandle(device, motor));
-            });
-        } else {
-            handle = encoders.get(identity(device));
-            if (handle == null) handle = encoders.computeIfAbsent(identity(device), ignored -> {
-                EncoderHandle created = backends
-                        .encoderBackendFor(device)
-                        .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
-                                "encoder", device.kind().key() + " over " + device.connection().identity())))
-                        .create(device);
-                created.activate();
-                return adjustable(created);
-            });
+    private EncoderHandle unavailableEncoder(EncoderDevice device) {
+        EncoderHandle placeholder = (EncoderHandle) placeholders.computeIfAbsent(
+                device, ignored -> new UnavailableEncoderHandle(device));
+        bindRuntime(device, placeholder);
+        return placeholder;
+    }
+
+    /** The motor an encoder reads from, or null for a standalone encoder. Bound synchronously. */
+    private MotorHandle sourceMotor(EncoderDevice device) {
+        MotorDevice source = sourceMotorDevice(device);
+        return source == null ? null : motor(source);
+    }
+
+    /** The motor an encoder reads from, found without creating it: the binder waits until it is bound. */
+    private MotorHandle boundSourceMotor(EncoderDevice device) {
+        MotorDevice source = sourceMotorDevice(device);
+        if (source == null) {
+            return null;
         }
-        bindRuntime(device, handle);
-        bindingFailures.remove(device);
+        MotorHandle handle = motors.get(identity(source));
+        if (handle == null) {
+            throw new IllegalStateException("Motor " + HardwareIdentity.motor(source).key() + " is not bound yet.");
+        }
         return handle;
+    }
+
+    private static MotorDevice sourceMotorDevice(EncoderDevice device) {
+        if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor integrated) {
+            return integrated.motor();
+        }
+        if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute absolute) {
+            return absolute.motor();
+        }
+        return null;
+    }
+
+    /** Vendor work for an encoder. Integrated and absolute encoders are configured on their motor. */
+    private EncoderHandle prepareEncoder(EncoderDevice device, MotorHandle motor) {
+        if (device.source() instanceof EncoderDevice.EncoderSource.IntegratedMotor) {
+            motor.enableIntegratedEncoder();
+            return adjustable(new IntegratedEncoderHandle(device, motor));
+        }
+        if (device.source() instanceof EncoderDevice.EncoderSource.MotorAbsolute) {
+            motor.enableAbsoluteEncoder();
+            return adjustable(new AbsoluteMotorEncoderHandle(device, motor));
+        }
+        EncoderHandle created = backends
+                .encoderBackendFor(device)
+                .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
+                        "encoder", device.kind().key() + " over " + device.connection().identity())))
+                .create(device);
+        created.activate();
+        return adjustable(created);
+    }
+
+    /** Publishes a prepared encoder. Caller holds the graph lock. */
+    private EncoderHandle installEncoder(EncoderDevice device, EncoderHandle prepared) {
+        HardwareIdentity identity = identity(device);
+        EncoderHandle installed = encoders.get(identity);
+        if (installed == null) {
+            installed = prepared;
+            encoders.put(identity, installed);
+        } else if (installed != prepared) {
+            closeHandle(prepared);
+        }
+        bindRuntime(device, installed);
+        clearFailure(device);
+        return installed;
     }
 
     public RuntimeScope runtimeScope() {
@@ -329,35 +415,59 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * @param device IMU declaration
      * @return runtime IMU
      */
+    @Override
     public synchronized ImuHandle imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
+        HardwareIdentity identity = identity(device);
+        ImuHandle existing = imus.get(identity);
+        if (existing != null) {
+            bindRuntime(device, existing);
+            clearFailure(device);
+            return existing;
+        }
+        if (bindingFailures.containsKey(device) || isIdentityPending(identity)) {
+            return unavailableImu(device);
+        }
         try {
-            return createImu(device);
+            return installImu(device, prepareImu(device));
         } catch (RuntimeException exception) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
-            bindingFailures.put(device, exception);
-            ImuHandle unavailable = new UnavailableImuHandle(device);
-            bindRuntime(device, unavailable);
-            return unavailable;
+            recordBindingFailure(device, exception);
+            return unavailableImu(device);
         }
     }
 
-    private ImuHandle createImu(ImuDevice device) {
-        ImuHandle handle = imus.get(identity(device));
-        if (handle == null) handle = imus.computeIfAbsent(identity(device), ignored -> {
-            ImuHandle created = backends
-                    .imuBackendFor(device)
-                    .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
-                            "IMU", device.kind().key() + " over " + device.connection().identity())))
-                    .create(device);
-            created.activate();
-            return created;
-        });
-        bindRuntime(device, handle);
-        bindingFailures.remove(device);
-        return handle;
+    private ImuHandle unavailableImu(ImuDevice device) {
+        ImuHandle placeholder = (ImuHandle) placeholders.computeIfAbsent(
+                device, ignored -> new UnavailableImuHandle(device));
+        bindRuntime(device, placeholder);
+        return placeholder;
+    }
+
+    private ImuHandle prepareImu(ImuDevice device) {
+        ImuHandle created = backends
+                .imuBackendFor(device)
+                .orElseThrow(() -> new IllegalStateException(backends.missingBackendMessage(
+                        "IMU", device.kind().key() + " over " + device.connection().identity())))
+                .create(device);
+        created.activate();
+        return created;
+    }
+
+    private ImuHandle installImu(ImuDevice device, ImuHandle prepared) {
+        HardwareIdentity identity = identity(device);
+        ImuHandle installed = imus.get(identity);
+        if (installed == null) {
+            installed = prepared;
+            imus.put(identity, installed);
+        } else if (installed != prepared) {
+            closeHandle(prepared);
+        }
+        bindRuntime(device, installed);
+        clearFailure(device);
+        return installed;
     }
 
     private void bindRuntime(MotorDevice device, MotorHandle handle) {
@@ -593,31 +703,238 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         return null;
     }
 
+    /**
+     * Retries declarations whose binding failed and whose backoff has elapsed. Runs on the loop thread, so it only
+     * queues work for the binder; the vendor calls happen there.
+     */
     private void retryBindings(long nowNanos) {
         if (bindingFailures.isEmpty()) return;
         for (Object declaration : new ArrayList<>(bindingFailures.keySet())) {
+            if (pendingBindings.containsKey(declaration)) continue;
             RefreshBackoff backoff = bindingRetryBackoffs.get(declaration);
             if (backoff != null && nowNanos < backoff.retryAtNanos()) continue;
-            resolve(declaration);
-            if (!bindingFailures.containsKey(declaration)) {
-                bindingRetryBackoffs.remove(declaration);
-                continue;
-            }
-            int failureCount = backoff == null ? 1 : backoff.failureCount() + 1;
-            bindingRetryBackoffs.put(declaration, new RefreshBackoff(
-                    failureCount,
-                    nowNanos + retryDelayMillis(failureCount) * 1_000_000L));
+            submitBinding(declaration);
         }
     }
 
-    private void resolve(Object declaration) {
-        if (declaration instanceof MotorDevice motor) {
-            motor(motor);
-        } else if (declaration instanceof EncoderDevice encoder) {
-            encoder(encoder);
-        } else if (declaration instanceof ImuDevice imu) {
-            imu(imu);
+    private void submitBinding(Object declaration) {
+        HardwareIdentity identity = identityOf(declaration);
+        pendingBindings.put(declaration, identity);
+        pendingIdentities.merge(identity, 1, Integer::sum);
+        binder().execute(() -> attemptBinding(declaration));
+    }
+
+    private ExecutorService binder() {
+        if (binderExecutor == null) {
+            binderExecutor = Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "athena-hardware-binder");
+                thread.setDaemon(true);
+                return thread;
+            });
         }
+        return binderExecutor;
+    }
+
+    /**
+     * One background bind attempt. Vendor work runs with the graph lock released; only the bookkeeping takes it. An
+     * {@link Error} from a vendor library is recorded as a failure too, so the declaration is not retried every cycle.
+     */
+    private void attemptBinding(Object declaration) {
+        try {
+            if (declaration instanceof MotorDevice motor) {
+                attemptMotor(motor);
+            } else if (declaration instanceof EncoderDevice encoder) {
+                attemptEncoder(encoder);
+            } else {
+                attemptImu((ImuDevice) declaration);
+            }
+        } catch (RuntimeException | Error error) {
+            synchronized (this) {
+                recordBinderFailure(declaration, error instanceof RuntimeException runtime
+                        ? runtime
+                        : new IllegalStateException("Hardware binding failed.", error));
+            }
+        } finally {
+            synchronized (this) {
+                HardwareIdentity identity = pendingBindings.remove(declaration);
+                if (identity != null) {
+                    pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
+                }
+                notifyAll();
+            }
+        }
+    }
+
+    private void attemptMotor(MotorDevice device) {
+        PreparedMotor prepared;
+        try {
+            MotorHandle leader = null;
+            synchronized (this) {
+                if (closed || !bindingFailures.containsKey(device)) return;
+                if (motors.containsKey(identity(device))) {
+                    createMotor(device);
+                    return;
+                }
+                if (device.follower() != null) {
+                    MotorDevice leaderDevice = device.follower().leader();
+                    leader = motors.get(identity(leaderDevice));
+                    if (leader == null) {
+                        throw new IllegalStateException(
+                                "Motor " + HardwareIdentity.motor(leaderDevice).key() + " is not bound yet.");
+                    }
+                }
+            }
+            prepared = prepareMotor(device, leader);
+        } catch (RuntimeException exception) {
+            synchronized (this) {
+                recordBinderFailure(device, exception);
+            }
+            return;
+        }
+        synchronized (this) {
+            if (closed) {
+                closeHandle(prepared.created());
+                return;
+            }
+            try {
+                installMotor(device, prepared);
+            } catch (RuntimeException exception) {
+                closeHandle(prepared.created());
+                recordBinderFailure(device, exception);
+            }
+        }
+    }
+
+    private void attemptEncoder(EncoderDevice device) {
+        EncoderHandle prepared;
+        try {
+            MotorHandle motor;
+            synchronized (this) {
+                if (closed || !bindingFailures.containsKey(device)) return;
+                EncoderHandle existing = encoders.get(identity(device));
+                if (existing != null) {
+                    bindRuntime(device, existing);
+                    clearFailure(device);
+                    return;
+                }
+                motor = boundSourceMotor(device);
+            }
+            prepared = prepareEncoder(device, motor);
+        } catch (RuntimeException exception) {
+            synchronized (this) {
+                recordBinderFailure(device, exception);
+            }
+            return;
+        }
+        synchronized (this) {
+            if (closed) {
+                closeHandle(prepared);
+                return;
+            }
+            try {
+                installEncoder(device, prepared);
+            } catch (RuntimeException exception) {
+                closeHandle(prepared);
+                recordBinderFailure(device, exception);
+            }
+        }
+    }
+
+    private void attemptImu(ImuDevice device) {
+        ImuHandle prepared;
+        try {
+            synchronized (this) {
+                if (closed || !bindingFailures.containsKey(device)) return;
+                ImuHandle existing = imus.get(identity(device));
+                if (existing != null) {
+                    bindRuntime(device, existing);
+                    clearFailure(device);
+                    return;
+                }
+            }
+            prepared = prepareImu(device);
+        } catch (RuntimeException exception) {
+            synchronized (this) {
+                recordBinderFailure(device, exception);
+            }
+            return;
+        }
+        synchronized (this) {
+            if (closed) {
+                closeHandle(prepared);
+                return;
+            }
+            try {
+                installImu(device, prepared);
+            } catch (RuntimeException exception) {
+                closeHandle(prepared);
+                recordBinderFailure(device, exception);
+            }
+        }
+    }
+
+    private HardwareIdentity identityOf(Object declaration) {
+        if (declaration instanceof MotorDevice motor) return identity(motor);
+        if (declaration instanceof EncoderDevice encoder) return identity(encoder);
+        return identity((ImuDevice) declaration);
+    }
+
+    private boolean isIdentityPending(HardwareIdentity identity) {
+        return pendingIdentities.containsKey(identity);
+    }
+
+    /** Records a failed synchronous bind and schedules its retry. */
+    private void recordBindingFailure(Object declaration, RuntimeException exception) {
+        bindingFailures.put(declaration, exception);
+        bindingRetryBackoffs.put(declaration, nextBackoff(declaration));
+    }
+
+    /**
+     * Records a background bind failure. It is also queued for the loop's operation-failure drain, which reports it
+     * once per backoff step (the binder runs once per step, never once per cycle).
+     */
+    private void recordBinderFailure(Object declaration, RuntimeException exception) {
+        recordBindingFailure(declaration, exception);
+        operationFailures.put(declaration, exception);
+    }
+
+    private RefreshBackoff nextBackoff(Object declaration) {
+        RefreshBackoff previous = bindingRetryBackoffs.get(declaration);
+        int failureCount = previous == null ? 1 : previous.failureCount() + 1;
+        return new RefreshBackoff(failureCount, clock.getAsLong() + retryDelayMillis(failureCount) * 1_000_000L);
+    }
+
+    private void clearFailure(Object declaration) {
+        bindingFailures.remove(declaration);
+        bindingRetryBackoffs.remove(declaration);
+        placeholders.remove(declaration);
+    }
+
+    /** Closes a handle that was created but will not be published. Its close failure cannot be acted on here. */
+    private static void closeHandle(Object handle) {
+        if (handle instanceof AutoCloseable closeable) {
+            try {
+                closeable.close();
+            } catch (Exception ignored) {
+                // The handle was never published, so there is nothing else to undo.
+            }
+        }
+    }
+
+    /** Test hook: waits until no background binding is queued or running. Returns false on timeout. */
+    synchronized boolean awaitBindingsIdle(long timeoutMillis) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (!pendingBindings.isEmpty()) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) return false;
+            TimeUnit.NANOSECONDS.timedWait(this, remaining);
+        }
+        return true;
+    }
+
+    /** Replaces the clock that backoff deadlines are measured on. Tests use it; production keeps System.nanoTime. */
+    synchronized void setBindingClock(LongSupplier source) {
+        clock = Objects.requireNonNull(source, "source");
     }
 
     /**
@@ -722,39 +1039,63 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        closed = true;
-        while (activeRefreshCycles > 0) {
-            try {
-                wait();
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while waiting for hardware refresh to finish.", exception);
+    public void close() {
+        ExecutorService binder;
+        synchronized (this) {
+            closed = true;
+            binder = binderExecutor;
+            binderExecutor = null;
+            while (activeRefreshCycles > 0) {
+                try {
+                    wait();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Interrupted while waiting for hardware refresh to finish.", exception);
+                }
             }
+            closeAll(runtimeBindings);
+            runtimeBindings.clear();
+            runtimeBindingHandles.clear();
+            motorLookups.clear();
+            motorEpoch++;
+            closeAll(imus);
+            closeAll(encoders);
+            closeAll(motors);
+            softwareFollowers.clear();
+            softwareFollowerViews.clear();
+            motorGroups.clear();
+            motorGroupArray = new MotorGroup[0];
+            motorIdentities.clear();
+            encoderIdentities.clear();
+            imuIdentities.clear();
+            refreshFailures.clear();
+            refreshFailureSnapshot = List.of();
+            refreshFailureSnapshotDirty = false;
+            refreshBackoffs.clear();
+            bindingRetryBackoffs.clear();
+            placeholders.clear();
+            refreshTasks = new RefreshTask[0];
+            refreshTaskHandleCount = -1;
+            cycleSnapshot = HardwareCycleSnapshot.empty();
         }
-        closeAll(runtimeBindings);
-        runtimeBindings.clear();
-        runtimeBindingHandles.clear();
-        motorLookups.clear();
-        motorEpoch++;
-        closeAll(imus);
-        closeAll(encoders);
-        closeAll(motors);
-        softwareFollowers.clear();
-        softwareFollowerViews.clear();
-        motorGroups.clear();
-        motorGroupArray = new MotorGroup[0];
-        motorIdentities.clear();
-        encoderIdentities.clear();
-        imuIdentities.clear();
-        refreshFailures.clear();
-        refreshFailureSnapshot = List.of();
-        refreshFailureSnapshotDirty = false;
-        refreshBackoffs.clear();
-        bindingRetryBackoffs.clear();
-        refreshTasks = new RefreshTask[0];
-        refreshTaskHandleCount = -1;
-        cycleSnapshot = HardwareCycleSnapshot.empty();
+        if (binder != null) {
+            stopBinder(binder);
+        }
+    }
+
+    /**
+     * Stops the binder without waiting on a vendor call that never returns: the thread is a daemon, and any binding
+     * that finishes after close is discarded because {@link #closed} is set.
+     */
+    private static void stopBinder(ExecutorService binder) {
+        binder.shutdown();
+        try {
+            if (!binder.awaitTermination(1, TimeUnit.SECONDS)) {
+                binder.shutdownNow();
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static void closeAll(Map<?, ?> handles) {
@@ -996,6 +1337,10 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
 
     private record ImuSnapshotSource(
             HardwareIdentity identity, ImuHandle handle, String name) {
+    }
+
+    /** A motor created off the graph lock, with its vendor handle kept for disposal if it is not published. */
+    private record PreparedMotor(MotorHandle created, MotorHandle handle, boolean softwareFollow) {
     }
 
     private record RefreshBackoff(int failureCount, long retryAtNanos) {

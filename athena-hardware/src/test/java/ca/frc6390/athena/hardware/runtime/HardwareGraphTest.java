@@ -115,7 +115,7 @@ class HardwareGraphTest {
     }
 
     @Test
-    void transientCreationFailuresRetryAndRebindDeclarations() {
+    void transientCreationFailuresRetryInTheBinderAndRebindDeclarations() throws InterruptedException {
         FakeMotorBackend motorBackend = new FakeMotorBackend();
         FakeEncoderBackend encoderBackend = new FakeEncoderBackend();
         FakeImuBackend imuBackend = new FakeImuBackend();
@@ -126,6 +126,8 @@ class HardwareGraphTest {
                 List.of(motorBackend),
                 List.of(encoderBackend),
                 List.of(imuBackend)));
+        long[] now = {0L};
+        graph.setBindingClock(() -> now[0]);
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 11);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 12);
         ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 13);
@@ -134,6 +136,14 @@ class HardwareGraphTest {
         assertEquals(0.0, graph.encoder(encoder).positionRotations(), 1.0e-9);
         assertEquals(0.0, graph.imu(imu).yawDegrees(), 1.0e-9);
         assertEquals(3, graph.bindingFailures().size());
+
+        // The loop never re-creates a failed declaration inline, even once its backoff has elapsed.
+        graph.motor(motor);
+        assertEquals(1, motorBackend.created);
+
+        now[0] = 100_000_000L;
+        graph.refreshInputs(now[0]);
+        assertTrue(graph.awaitBindingsIdle(5_000));
 
         FakeMotorHandle recoveredMotor = assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
         graph.encoder(encoder);
@@ -153,26 +163,142 @@ class HardwareGraphTest {
     }
 
     @Test
-    void refreshInputsAutomaticallyRetriesFailedBindingsWithBackoff() {
+    void refreshInputsRetriesFailedBindingsInTheBinderWithBackoff() throws InterruptedException {
         FakeEncoderBackend backend = new FakeEncoderBackend();
         backend.failuresRemaining = 2;
         HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(
                 List.of(), List.of(backend), List.of()));
+        long[] now = {0L};
+        graph.setBindingClock(() -> now[0]);
         EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 14);
 
-        graph.encoder(encoder);
-        graph.refreshInputs(0L);
+        graph.encoder(encoder);                       // attempt 1 at t=0 fails; next retry due at 100 ms
         graph.refreshInputs(99_999_999L);
-
-        assertEquals(2, backend.created);
+        assertEquals(1, backend.created);
         assertEquals(1, graph.bindingFailures().size());
 
-        graph.refreshInputs(100_000_000L);
+        now[0] = 100_000_000L;
+        graph.refreshInputs(now[0]);                  // attempt 2 runs in the binder and fails; next due at 300 ms
+        assertTrue(graph.awaitBindingsIdle(5_000));
+        assertEquals(2, backend.created);
+
+        now[0] = 299_999_999L;
+        graph.refreshInputs(now[0]);
+        assertTrue(graph.awaitBindingsIdle(5_000));
+        assertEquals(2, backend.created, "still backing off");
+
+        now[0] = 300_000_000L;
+        graph.refreshInputs(now[0]);                  // attempt 3 succeeds
+        assertTrue(graph.awaitBindingsIdle(5_000));
+        assertEquals(3, backend.created);
         backend.last.position = 0.625;
 
-        assertEquals(3, backend.created);
         assertEquals(0.625, encoder.raw().position(), 1.0e-9);
         assertTrue(graph.bindingFailures().isEmpty());
+    }
+
+    @Test
+    void cyclesKeepRunningWhileABackgroundBindIsBlockedInVendorCode() throws Exception {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        backend.failuresRemaining = 1;
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(backend), List.of(), List.of()));
+        long[] now = {0L};
+        graph.setBindingClock(() -> now[0]);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 21);
+        graph.motor(motor);                           // synchronous attempt fails at t=0
+
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch gate = new CountDownLatch(1);
+        backend.entered = entered;
+        backend.gate = gate;
+        ExecutorService loop = Executors.newSingleThreadExecutor();
+        try {
+            now[0] = 100_000_000L;
+            graph.refreshInputs(now[0]);              // queues the retry; the binder enters the blocked create
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+            // 500 loop cycles, each with a lookup, must complete while the vendor create is still blocked.
+            Future<?> cycles = loop.submit(() -> {
+                for (int cycle = 0; cycle < 500; cycle++) {
+                    graph.refreshInputs(now[0] + cycle);
+                    assertFalse(graph.motor(motor) instanceof FakeMotorHandle, "not live until the bind completes");
+                }
+                return null;
+            });
+            cycles.get(5, TimeUnit.SECONDS);
+            assertFalse(graph.awaitBindingsIdle(0), "the bind is still in flight");
+
+            gate.countDown();
+            assertTrue(graph.awaitBindingsIdle(5_000));
+            assertInstanceOf(FakeMotorHandle.class, graph.motor(motor));
+            assertTrue(graph.bindingFailures().isEmpty());
+        } finally {
+            gate.countDown();
+            loop.shutdownNow();
+        }
+    }
+
+    @Test
+    void failingBackgroundBindBacksOffAndReportsOncePerStep() throws InterruptedException {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        backend.failuresRemaining = 1000;
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(backend), List.of(), List.of()));
+        long[] now = {0L};
+        graph.setBindingClock(() -> now[0]);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 22);
+        graph.motor(motor);                           // t=0: fails, retry due at 100 ms
+        assertEquals(1, backend.created);
+
+        now[0] = 100_000_000L;
+        graph.refreshInputs(now[0]);                  // background attempt 2 fails; next retry due at 300 ms
+        assertTrue(graph.awaitBindingsIdle(5_000));
+        assertEquals(2, backend.created);
+        assertEquals(1, graph.drainOperationFailures().size(), "one report for this backoff step");
+
+        for (int cycle = 0; cycle < 200; cycle++) {
+            graph.refreshInputs(now[0] + cycle);
+            graph.motor(motor);
+        }
+        assertEquals(2, backend.created, "no vendor create from loop cycles or lookups while backing off");
+        assertEquals(0, graph.drainOperationFailures().size());
+
+        now[0] = 300_000_000L;
+        graph.refreshInputs(now[0]);
+        assertTrue(graph.awaitBindingsIdle(5_000));
+        assertEquals(3, backend.created);
+        assertEquals(1, graph.drainOperationFailures().size());
+    }
+
+    @Test
+    void closeDoesNotWaitForAVendorCallThatNeverReturns() throws Exception {
+        FakeMotorBackend backend = new FakeMotorBackend();
+        backend.failuresRemaining = 1;
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(backend), List.of(), List.of()));
+        long[] now = {0L};
+        graph.setBindingClock(() -> now[0]);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 23);
+        graph.motor(motor);
+
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch gate = new CountDownLatch(1);
+        backend.entered = entered;
+        backend.gate = gate;
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        try {
+            now[0] = 100_000_000L;
+            graph.refreshInputs(now[0]);
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+            caller.submit(graph::close).get(5, TimeUnit.SECONDS);
+
+            // The stuck create finishes after close: its handle is discarded, never published.
+            gate.countDown();
+            assertTrue(graph.awaitBindingsIdle(5_000));
+            assertEquals(1, backend.last.closeCalls, "a handle created after close is closed, not installed");
+        } finally {
+            gate.countDown();
+            caller.shutdownNow();
+        }
     }
 
     @Test
@@ -708,6 +834,10 @@ class HardwareGraphTest {
         private int created;
         private int failuresRemaining;
         private FakeMotorHandle last;
+        /** Counted down when a create starts; lets a test know the background bind is inside the vendor call. */
+        private CountDownLatch entered;
+        /** When set, every create waits here before returning, like a vendor call blocked on CAN. */
+        private CountDownLatch gate;
 
         @Override
         public boolean supports(MotorKind kind) {
@@ -717,6 +847,8 @@ class HardwareGraphTest {
         @Override
         public MotorHandle create(MotorDevice device) {
             created++;
+            if (entered != null) entered.countDown();
+            awaitGate(gate);
             if (failuresRemaining-- > 0) {
                 throw new IllegalStateException("transient motor creation failure");
             }
@@ -727,6 +859,16 @@ class HardwareGraphTest {
         @Override
         public boolean supportsHardwareFollowing(MotorDevice follower, MotorDevice leader) {
             return follower.canbus().equalsIgnoreCase(leader.canbus());
+        }
+    }
+
+    private static void awaitGate(CountDownLatch gate) {
+        if (gate == null) return;
+        try {
+            // Bounded so a broken test cannot hang the run; the test releases the gate in a finally block.
+            gate.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -35,6 +35,8 @@ final class ArcpTuning {
 
     private final Map<String, Object> deployed;
     private final Path exportDirectory;
+    /** Where generated files are queued; null writes them on the calling thread. */
+    private final ExportWriter writer;
     private String lastDiff = "";
     private String lastPull = "";
 
@@ -43,8 +45,18 @@ final class ArcpTuning {
      * @param exportDirectory directory the generated files are written to
      */
     ArcpTuning(Map<String, Object> deployed, Path exportDirectory) {
+        this(deployed, exportDirectory, null);
+    }
+
+    /**
+     * @param deployed deployed tuning entries, as read at boot
+     * @param exportDirectory directory the generated files are written to
+     * @param writer background writer for the generated files, or null to write them synchronously
+     */
+    ArcpTuning(Map<String, Object> deployed, Path exportDirectory, ExportWriter writer) {
         this.deployed = Map.copyOf(Objects.requireNonNull(deployed, "deployed"));
         this.exportDirectory = Objects.requireNonNull(exportDirectory, "exportDirectory");
+        this.writer = writer;
     }
 
     /** Reads a deployed tuning file. A missing file is an empty layer. */
@@ -132,6 +144,10 @@ final class ArcpTuning {
     }
 
     private void write(String name, String contents) {
-        writeFile(exportDirectory, name, contents);
+        if (writer != null) {
+            writer.write(exportDirectory, name, contents);
+        } else {
+            writeFile(exportDirectory, name, contents);
+        }
     }
 }

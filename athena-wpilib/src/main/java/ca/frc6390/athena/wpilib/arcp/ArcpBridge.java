@@ -48,6 +48,8 @@ public final class ArcpBridge implements AutoCloseable {
     private final ReplayRecorder recorder;
     private final Supplier<Map<String, Object>> codeDefaults;
     private final Path statusDirectory;
+    /** Background writer for the tuning and status files; null when the bridge is disabled. */
+    private final ExportWriter exports;
     private double lastExportSeconds = Double.NaN;
     private String lastFailure = "";
     /** Contents of the last status.txt written, so an unchanged status costs no file write. */
@@ -55,13 +57,14 @@ public final class ArcpBridge implements AutoCloseable {
     private boolean closed;
 
     private ArcpBridge(NativeArcpServer server, ArcpSignals signals, ArcpTuning tuning, ReplayRecorder recorder,
-            Supplier<Map<String, Object>> codeDefaults, Path statusDirectory) {
+            Supplier<Map<String, Object>> codeDefaults, Path statusDirectory, ExportWriter exports) {
         this.server = server;
         this.signals = signals;
         this.tuning = tuning;
         this.recorder = recorder;
         this.codeDefaults = codeDefaults;
         this.statusDirectory = statusDirectory;
+        this.exports = exports;
     }
 
     /**
@@ -146,9 +149,10 @@ public final class ArcpBridge implements AutoCloseable {
         if (server == null) {
             return disabled();
         }
-        ArcpTuning tuning = new ArcpTuning(ArcpTuning.readDeployed(deployed), tuningExports);
+        ExportWriter writer = new ExportWriter();
+        ArcpTuning tuning = new ArcpTuning(ArcpTuning.readDeployed(deployed), tuningExports, writer);
         ArcpBridge bridge = new ArcpBridge(server, signals, tuning, recorder,
-                () -> runtime.telemetryPersistence().codeDefaults(), statusDirectory);
+                () -> runtime.telemetryPersistence().codeDefaults(), statusDirectory, writer);
         try {
             server.publishDictionary(signals.dictionary(), List.of());
         } catch (RuntimeException failure) {
@@ -238,7 +242,7 @@ public final class ArcpBridge implements AutoCloseable {
     }
 
     private static ArcpBridge disabled() {
-        return new ArcpBridge(null, null, null, null, Map::of, null);
+        return new ArcpBridge(null, null, null, null, Map::of, null, null);
     }
 
     /** TCP control port of the running server, or -1 when disabled. */
@@ -300,10 +304,11 @@ public final class ArcpBridge implements AutoCloseable {
      * Regenerates the tuning and status exports. Runs on the robot thread at the export cadence (about once a second),
      * and writes a file only when its contents changed.
      *
-     * <p>The value reads ({@link ArcpSignals#persistedValues()} and the code defaults) must stay on the robot thread:
-     * they call mechanism suppliers and runtime maps that are not thread-safe. The string building and file writes that
-     * follow only touch the captured maps, {@link ArcpTuning} and the export files, so they could move to a background
-     * thread; they stay here because the file service is expected to serve the files as soon as a cycle returns.</p>
+     * <p>The value reads ({@link ArcpSignals#persistedValues()} and the code defaults) and the string building stay on
+     * the robot thread: they call mechanism suppliers and runtime maps that are not thread-safe. The file writes go to
+     * the {@link ExportWriter} thread, which coalesces them, so the robot thread never waits on file I/O. A client
+     * downloading a file sees the latest contents once the writer has flushed them, a few milliseconds after the cycle
+     * that produced them.</p>
      */
     private void refreshExports() {
         try {
@@ -336,7 +341,7 @@ public final class ArcpBridge implements AutoCloseable {
             }
             String statusText = text.toString();
             if (!statusText.equals(lastStatusText)) {
-                ArcpTuning.writeFile(statusDirectory, "status.txt", statusText);
+                exports.write(statusDirectory, "status.txt", statusText);
                 lastStatusText = statusText;
             }
         } catch (RuntimeException failure) {
@@ -370,8 +375,22 @@ public final class ArcpBridge implements AutoCloseable {
             return;
         }
         closed = true;
+        if (exports != null) {
+            exports.close();
+        }
         if (server != null) {
             server.close();
+        }
+    }
+
+    /**
+     * Test hook: waits until the export files queued so far are on disk.
+     *
+     * @throws InterruptedException when interrupted while waiting
+     */
+    void awaitExports() throws InterruptedException {
+        if (exports != null && !exports.awaitIdle(5_000)) {
+            throw new IllegalStateException("Export files were not written within 5 s.");
         }
     }
 }
