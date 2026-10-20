@@ -9,14 +9,26 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * ARCP server for the robot. The protocol is implemented in Rust ({@code arcp-server}); this class
  * only marshals the robot's data across JNI and dispatches client requests to the robot.
  *
  * <p>All methods are called from the robot thread. Clients connect over TCP and UDP on their own
- * threads inside the native server, so nothing here runs on those threads.</p>
+ * threads inside the native server, so nothing here runs on those threads, except that
+ * {@link #publishCycle} hands the cycle to a single publisher thread: the native cycle publish writes the
+ * realtime frames to the sockets, which would otherwise hold the robot thread for every connected client. Cycles
+ * are still delivered in order. The queue holds a few cycles; when it is full the robot thread waits, as it
+ * always did, so nothing is dropped. Dictionary, marker and replay publishes wait for queued cycles first.</p>
  *
  * <p>Call {@link #serviceRequests()} once per robot cycle so queued writes, actions and backfill
  * requests are answered. A request left unanswered for the native reply timeout is rejected by the
@@ -88,6 +100,34 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
 
     private long handle;
 
+    /** Cycles handed to the publisher thread that have not been sent yet; a full queue blocks the robot thread. */
+    private static final int PUBLISH_QUEUE_CAPACITY = 8;
+    private final ThreadPoolExecutor publisher = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(PUBLISH_QUEUE_CAPACITY), NativeArcpServer::publisherThread,
+            (task, executor) -> {
+                if (executor.isShutdown()) {
+                    throw new RejectedExecutionException("ARCP publisher is shut down");
+                }
+                try {
+                    executor.getQueue().put(task);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new RejectedExecutionException("interrupted while waiting for ARCP publish", interrupted);
+                }
+            });
+    /** Direct buffers the publisher thread has finished with, reused for the next cycle. */
+    private final Queue<ByteBuffer> freeCycleBuffers = new ConcurrentLinkedQueue<>();
+    /** First failure of a background publish, rethrown on the robot thread at its next call. */
+    private final AtomicReference<RuntimeException> publishFailure = new AtomicReference<>();
+    /** Session count seen by the last direct status call; read while cycles are still queued. */
+    private volatile long lastSessions;
+
+    private static Thread publisherThread(Runnable task) {
+        Thread thread = new Thread(task, "athena-arcp-publisher");
+        thread.setDaemon(true);
+        return thread;
+    }
+
     /** Starts the server with NT4 mirroring disabled and no categories. */
     public NativeArcpServer(Config config, WriteHandler writes, ActionHandler actions) {
         this(config, Map.of(), writes, actions, Nt4Bridge.DISABLED);
@@ -150,6 +190,7 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         Objects.requireNonNull(entries, "entries");
         Objects.requireNonNull(schemas, "schemas");
         long h = requireOpen();
+        awaitQueuedCycles();
         dictionaryOut.dictionary(entries, schemas);
         ArcpNative.publishDictionary(h, dictionaryOut.buffer(), dictionaryOut.length());
 
@@ -169,8 +210,17 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     public synchronized void publishCycle(long cycleTimestampMicros, ArcpCycle cycle) {
         Objects.requireNonNull(cycle, "cycle");
         long h = requireOpen();
+        rethrowPublishFailure();
         cycleOut.cycle(cycle);
-        ArcpNative.publishCycle(h, cycleTimestampMicros, cycleOut.buffer(), cycleOut.length());
+        int length = cycleOut.length();
+        ByteBuffer copy = takeCycleBuffer(length);
+        copy.put(0, cycleOut.buffer(), 0, length);
+        try {
+            publisher.execute(() -> publishNative(h, cycleTimestampMicros, copy, length));
+        } catch (RejectedExecutionException rejected) {
+            recycleCycleBuffer(copy);
+            throw rejected;
+        }
         if (nt4 != Nt4Bridge.DISABLED) {
             for (int i = 0, n = cycle.size(); i < n; i++) {
                 ArcpDictEntry entry = dictionary.get(cycle.signalId(i));
@@ -183,7 +233,9 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
 
     @Override
     public synchronized void marker(long timestampMicros, int kind, String message, long signalId) {
-        ArcpNative.marker(requireOpen(), timestampMicros, kind, signalId, message == null ? "" : message);
+        long h = requireOpen();
+        awaitQueuedCycles();
+        ArcpNative.marker(h, timestampMicros, kind, signalId, message == null ? "" : message);
     }
 
     @Override
@@ -192,6 +244,7 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
             return;
         }
         long h = requireOpen();
+        awaitQueuedCycles();
         recordsOut.reset();
         recordsOut.bytes(records, 0, length);
         ArcpNative.publishRecords(h, recordsOut.buffer(), recordsOut.length());
@@ -323,6 +376,76 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         return last != null ? last : requested;
     }
 
+    private void publishNative(long h, long timestampMicros, ByteBuffer cycle, int length) {
+        try {
+            ArcpNative.publishCycle(h, timestampMicros, cycle, length);
+        } catch (RuntimeException failure) {
+            publishFailure.compareAndSet(null, failure);
+        } finally {
+            recycleCycleBuffer(cycle);
+        }
+    }
+
+    private void rethrowPublishFailure() {
+        RuntimeException failure = publishFailure.getAndSet(null);
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    /** A direct buffer of at least {@code length} bytes, reused from the publisher thread when possible. */
+    private ByteBuffer takeCycleBuffer(int length) {
+        ByteBuffer buffer = freeCycleBuffers.poll();
+        if (buffer == null || buffer.capacity() < length) {
+            buffer = ByteBuffer.allocateDirect(Math.max(length, ArcpMarshal.INITIAL_CAPACITY))
+                    .order(ByteOrder.LITTLE_ENDIAN);
+        }
+        buffer.clear();
+        return buffer;
+    }
+
+    private void recycleCycleBuffer(ByteBuffer buffer) {
+        // Enough buffers for the queue, the one being published and the one being filled.
+        if (freeCycleBuffers.size() < PUBLISH_QUEUE_CAPACITY + 2) {
+            freeCycleBuffers.add(buffer);
+        }
+    }
+
+    /** Waits until every cycle handed to the publisher thread has been sent. */
+    private void awaitQueuedCycles() {
+        rethrowPublishFailure();
+        if (publisher.getQueue().isEmpty() && publisher.getActiveCount() == 0) {
+            return;
+        }
+        try {
+            publisher.submit(() -> { }).get();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while waiting for ARCP publish", interrupted);
+        } catch (ExecutionException | RejectedExecutionException failure) {
+            throw new IllegalStateException("ARCP publish failed", failure);
+        }
+        rethrowPublishFailure();
+    }
+
+    /**
+     * True while at least one client session is connected. Reads the native status directly when no cycle is queued;
+     * while cycles are queued the status lock may be held by the publisher, so the last count it saw is used.
+     */
+    public boolean hasSessions() {
+        if (handle == 0) {
+            return false;
+        }
+        if (publisher.getQueue().isEmpty() && publisher.getActiveCount() == 0) {
+            synchronized (this) {
+                if (handle != 0) {
+                    lastSessions = ArcpNative.status(handle)[0];
+                }
+            }
+        }
+        return lastSessions > 0;
+    }
+
     @Override
     public synchronized ArcpStatus status() {
         if (handle == 0) {
@@ -345,7 +468,18 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     @Override
     public synchronized void close() {
         if (handle != 0) {
-            ArcpNative.destroy(handle);
+            publisher.shutdown();
+            boolean drained;
+            try {
+                drained = publisher.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                drained = false;
+            }
+            // A publish still inside the native server must not race the destroy: keep the handle in that case.
+            if (drained) {
+                ArcpNative.destroy(handle);
+            }
             handle = 0;
         }
     }

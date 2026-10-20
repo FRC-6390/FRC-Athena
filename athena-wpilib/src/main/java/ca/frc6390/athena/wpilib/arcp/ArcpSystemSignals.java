@@ -435,6 +435,30 @@ final class ArcpSystemSignals {
         }
     }
 
+    /** Forgets every last value sent, so the next {@link #sample} sends all current values again. */
+    void forgetSent() {
+        lastMode = null;
+        lastAlliance = null;
+        lastMatchTime = Double.NaN;
+        lastBatteryVolts = Double.NaN;
+        lastDemandAmps = Double.NaN;
+        lastShedding = null;
+        for (MotorChannel channel : motors.values()) {
+            channel.lastCurrent = Double.NaN;
+            channel.lastCap = Double.NaN;
+        }
+        for (VisionChannel channel : vision.values()) {
+            channel.lastState = null;
+            channel.lastReason = null;
+            channel.lastAccepted = Double.NaN;
+            channel.lastRejected = Double.NaN;
+            channel.lastFrameAgeMs = Double.NaN;
+            channel.lastTagCount = null;
+            channel.lastSeconds = Double.NaN;
+            channel.lastTimeSync = null;
+        }
+    }
+
     /** Writes a finite value that changed; returns the value to remember. Non-finite values are not sent. */
     private static double publishIfChanged(ArcpCycle cycle, long signalId, double value, double last) {
         if (!Double.isFinite(value) || value == last) {

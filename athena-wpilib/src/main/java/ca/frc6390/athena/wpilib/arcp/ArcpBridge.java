@@ -49,9 +49,16 @@ public final class ArcpBridge implements AutoCloseable {
     private final Supplier<Map<String, Object>> codeDefaults;
     private final Path statusDirectory;
     private double lastExportSeconds = Double.NaN;
+    /**
+     * The file store of the replay directory, looked up once: resolving it parses the mount table, which is far more
+     * expensive than the free-space query on the store itself.
+     */
+    private java.nio.file.FileStore replayStore;
     private String lastFailure = "";
     /** Contents of the last status.txt written, so an unchanged status costs no file write. */
     private String lastStatusText = "";
+    /** True when the last cycles sampled nothing because no client was connected. */
+    private boolean idle;
     private boolean closed;
 
     private ArcpBridge(NativeArcpServer server, ArcpSignals signals, ArcpTuning tuning, ReplayRecorder recorder,
@@ -268,9 +275,19 @@ public final class ArcpBridge implements AutoCloseable {
         }
         try {
             server.serviceRequests();
-            signals.sample(cycle);
-            if (cycle.size() > 0) {
-                server.publishCycle(micros(nowSeconds), cycle);
+            // With no client connected nothing is sent, so the signals are not sampled either. The first cycle with a
+            // client sends every current value again.
+            if (!server.hasSessions()) {
+                idle = true;
+            } else {
+                if (idle) {
+                    signals.forgetSent();
+                    idle = false;
+                }
+                signals.sample(cycle);
+                if (cycle.size() > 0) {
+                    server.publishCycle(micros(nowSeconds), cycle);
+                }
             }
         } catch (RuntimeException failure) {
             report(failure);
@@ -328,9 +345,12 @@ public final class ArcpBridge implements AutoCloseable {
                 text.append("retention.keepsMatchesOverPractice=")
                         .append(retention.keepsMatchesOverPractice()).append('\n');
                 try {
-                    text.append("disk.usableBytes=")
-                            .append(Files.getFileStore(recorder.directory()).getUsableSpace()).append('\n');
+                    if (replayStore == null) {
+                        replayStore = Files.getFileStore(recorder.directory());
+                    }
+                    text.append("disk.usableBytes=").append(replayStore.getUsableSpace()).append('\n');
                 } catch (java.io.IOException | RuntimeException unavailable) {
+                    replayStore = null;
                     text.append("disk.usableBytes=unknown\n");
                 }
             }
