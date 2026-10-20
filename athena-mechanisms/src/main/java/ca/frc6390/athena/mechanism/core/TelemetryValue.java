@@ -21,9 +21,13 @@ public final class TelemetryValue {
     private final boolean constant;
     private Meta meta = Meta.DEFAULT;
 
-    /** Metadata that does not change how the value is read: persistence, publication, and lock state. */
-    private record Meta(boolean persisted, boolean published, Class<?> lockGroup, java.util.function.BooleanSupplier lockCondition) {
-        static final Meta DEFAULT = new Meta(false, true, null, null);
+    /**
+     * Metadata that does not change how the value is read: persistence, publication, lock state, and whether the value
+     * is published at the read-only period instead of every cycle.
+     */
+    private record Meta(boolean persisted, boolean published, Class<?> lockGroup,
+            java.util.function.BooleanSupplier lockCondition, boolean periodic) {
+        static final Meta DEFAULT = new Meta(false, true, null, null, false);
     }
 
     /** Outcome of a dashboard or runtime write attempted through {@link #tryWrite(Object)}. */
@@ -213,12 +217,12 @@ public final class TelemetryValue {
      * changes. Only writable numeric, boolean, and string values persist; other values are ignored.
      */
     public TelemetryValue persisted() {
-        return withMeta(new Meta(true, meta.published(), meta.lockGroup(), meta.lockCondition()));
+        return withMeta(new Meta(true, meta.published(), meta.lockGroup(), meta.lockCondition(), meta.periodic()));
     }
 
     /** Returns a copy that is kept local: it is not sent to NetworkTables. */
     public TelemetryValue unpublished() {
-        return withMeta(new Meta(meta.persisted(), false, meta.lockGroup(), meta.lockCondition()));
+        return withMeta(new Meta(meta.persisted(), false, meta.lockGroup(), meta.lockCondition(), meta.periodic()));
     }
 
     /**
@@ -229,8 +233,20 @@ public final class TelemetryValue {
      */
     public TelemetryValue lock(Class<?> group) {
         java.util.Objects.requireNonNull(group, "group");
-        return withMeta(new Meta(meta.persisted(), meta.published(), group, meta.lockCondition()));
+        return withMeta(new Meta(meta.persisted(), meta.published(), group, meta.lockCondition(), meta.periodic()));
     }
+
+    /**
+     * Returns a copy published at the read-only telemetry period instead of every cycle. Use it for a value that
+     * changes only when it is tuned or when its configuration changes, such as a curve drawn from tuned points.
+     * Live values (a stick position, a current draw) keep the every-cycle default.
+     */
+    public TelemetryValue periodic() {
+        return withMeta(new Meta(meta.persisted(), meta.published(), meta.lockGroup(), meta.lockCondition(), true));
+    }
+
+    /** Returns true when the value is published at the read-only period rather than every cycle. */
+    public boolean isPeriodic() { return meta.periodic(); }
 
     /** Returns true when the value is persisted. */
     public boolean isPersisted() { return meta.persisted(); }
@@ -261,7 +277,7 @@ public final class TelemetryValue {
 
     /** Returns a copy whose lock state comes from the supplied condition. Set by the schema builder. */
     TelemetryValue withLockCondition(java.util.function.BooleanSupplier condition) {
-        return withMeta(new Meta(meta.persisted(), meta.published(), meta.lockGroup(), condition));
+        return withMeta(new Meta(meta.persisted(), meta.published(), meta.lockGroup(), condition, meta.periodic()));
     }
 
     private TelemetryValue withMeta(Meta updated) {

@@ -207,9 +207,9 @@ public final class AxisSignal implements TelemetrySource {
         values.put("Config/Squared", TelemetryValue.constant(squared));
         values.put("Config/Inverted", TelemetryValue.constant(inverted));
         values.put("Curve/Type", TelemetryValue.constant(curve.type()));
-        values.put("Curve/Input", TelemetryValue.constant(curveInputs()));
+        values.put("Curve/Input", TelemetryValue.constant(CURVE_INPUTS));
         values.put("Curve/Output", TelemetryValue.numberArray(this::curveOutputs));
-        values.put("Visualization/Curve", TelemetryValue.points(this::plotCurve));
+        values.put("Visualization/Curve", TelemetryValue.points(this::plotCurve).periodic());
         values.put("Visualization/Raw", TelemetryValue.points(this::plotRaw));
         values.put("Visualization/Mapped", TelemetryValue.points(this::plotMapped));
         values.put("Visualization/Output", TelemetryValue.points(this::plotOutput));
@@ -314,7 +314,14 @@ public final class AxisSignal implements TelemetrySource {
         return new Translation2d[] {new Translation2d(input, output)};
     }
 
+    /** The sample inputs of the curve plot, shared and never written; callers only read them. */
+    private static final double[] CURVE_INPUTS = curveInputsTable();
+
     private static double[] curveInputs() {
+        return CURVE_INPUTS;
+    }
+
+    private static double[] curveInputsTable() {
         double[] inputs = new double[CURVE_SAMPLE_COUNT];
         for (int index = 0; index < inputs.length; index++) {
             inputs[index] = -1.0 + 2.0 * index / (inputs.length - 1.0);
