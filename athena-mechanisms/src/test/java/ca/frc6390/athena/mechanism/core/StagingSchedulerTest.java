@@ -53,7 +53,7 @@ class StagingSchedulerTest {
         Robot robot = new Robot();
         Hardware hardware = new Hardware();
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
-        assertEquals(7.5, scheduler.powerPolicy().floorVolts(), 1e-9);
+        assertEquals(7.5, scheduler.powerPolicy().raw().floorVolts(), 1e-9);
 
         scheduler.teleopPeriodic(0.00, 0.02);
         assertTrue(Double.isNaN(hardware.motor(MOTOR).percent), "nothing driven while normal");

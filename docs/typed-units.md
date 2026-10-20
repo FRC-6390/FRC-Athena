@@ -30,6 +30,30 @@ revolution is one rotation); `measures(...)` changes it.
   the encoder's dimension; it is converted to the declared unit first. `measure(double)` wraps a value in the
   declared unit when a stored double is all there is.
 
+## Reading an encoder
+
+Encoder reads are typed to match the declaration. Use the accessor for the dimension you declared:
+
+```java
+Angle turretAngle = turretEncoder.positionAngle();               // measures(Degrees): an angle
+AngularVelocity turretRate = turretEncoder.velocityAngular();
+Angle turretAbsolute = turretEncoder.absolutePositionAngle();
+
+Distance travel = elevatorEncoder.positionDistance();            // measures(Meters): a distance
+LinearVelocity speed = elevatorEncoder.velocityLinear();
+```
+
+- `positionAngle()`, `absolutePositionAngle()` and `velocityAngular()` require an angle declaration.
+- `positionDistance()`, `absolutePositionDistance()` and `velocityLinear()` require a distance declaration.
+- A read in the other dimension throws `IllegalStateException`, naming the accessor to use. The check runs
+  on every read, so a mistake fails at the first call instead of returning a number in the wrong unit.
+- The returned measure has the same magnitude as the value in the declared unit, so `positionAngle().in(Units.Degrees)`
+  is the configured position in degrees with no extra rounding beyond the unit conversion.
+
+To feed a control, pass the encoder itself (`ControlBinding.feedback(encoder)`). `positionSignal()`,
+`velocitySignal()` and `absoluteSignal()` return the feedback signal types for the mixed case, such as a
+position from one encoder and a velocity from another.
+
 ## Declaring a unit-typed control
 
 ```java
@@ -96,6 +120,10 @@ The encoder declaration is typed-only. These members are gone:
 | `EncoderDevice.rotationsFromPosition(double)` | `rotationsFromPosition(Measure)`, for example `Degrees.of(90)`; or `rotationsFromPosition(encoder.measure(value))` for a stored double |
 | `EncoderUnit.RAW` | the default declaration (rotations, one revolution per raw turn) |
 | `EncoderUnit.METERS` | `measures(Units.Meters)` |
+| `EncoderDevice.position()`, `absolutePosition()`, `velocity()` (`double`) | `positionAngle()` / `positionDistance()`, `absolutePositionAngle()` / `absolutePositionDistance()`, `velocityAngular()` / `velocityLinear()` |
+| `EncoderDevice.positionFromRotations(double)`, `velocityFromRotationsPerSecond(double)` (`double`) | `encoder.raw().positionFromRotations(...)` for Athena internals; robot code reads the typed accessors |
+| `ImuSource.yawDegrees()` and the other primitive IMU readings | typed accessors (`yaw()`, `yawRate()`, ...); internals use `raw()`; implementers override `readYawDegrees()` and friends |
+| `EncoderDevice` as a `PositionSignal` or `VelocitySignal` | `encoder.positionSignal()`, `encoder.velocitySignal()`, `encoder.absoluteSignal()`; `feedback(encoder)` still works |
 
 ## Removed timing API
 
@@ -238,6 +266,42 @@ RobotVelocity.field(MetersPerSecond.of(1.0), MetersPerSecond.of(0.0), DegreesPer
 runtime.fastSignalSampling(Milliseconds.of(5), scheduler);
 driveTrain.drive(pool, () -> pose.getRotation());
 ```
+
+## Raw views and implementer hooks
+
+Athena's per-cycle code (control loops, odometry, simulation, telemetry) reads primitive doubles so it does not
+allocate a measure every cycle. Those primitives are internal. Each type with primitive readings exposes them
+through one nested `Raw` view, reached with `raw()`, and its javadoc says "Internal, not for robot code". Within the
+same package the primitive methods are package-private. Robot code uses the typed accessor in the table.
+
+| Type | `raw()` members | Typed team API |
+| --- | --- | --- |
+| `MotorDevice` | `appliedVoltageVolts()`, `supplyCurrentAmps()`, `statorCurrentAmps()`, `velocityRotationsPerSecond()`, `fusedTemperatureCelsius()` | `appliedVoltage()`, `supplyCurrent()`, `statorCurrent()`, `velocity()`, `temperature()` |
+| `MotorConstants` | `torqueConstantNmPerAmp()`, `speedConstantRadPerSecPerVolt()`, `expectedUnloadedSpeedRadPerSec(double)` | `expectedUnloadedSpeed(Voltage)` |
+| `MotorStallSignal` | `durationSeconds()`, `rearmSeconds()`, `currentThresholdAmps()`, `currentAmps()` | `duration()`, `rearmAfter()`, `currentThreshold()`, `current()` |
+| `PowerProfile` | `sustainedAmps()`, `burstAmps()`, `burstSeconds()`, `rampAmpsPerSecond()` | `sustainedCurrent()`, `burstCurrent()`, `burstDuration()`, `rampStep()` |
+| `PowerPolicy` | `floorVolts()`, `staggerSeconds()`, `defaultBatteryOhms()` | `floor()`, `staggerStarts()`, `defaultBatteryResistance()` |
+| `Thermal` | `derateFractionCelsius(double)`, `loadCelsius(double)` | `derateFraction(Temperature)`, `load(Temperature)` |
+| `Range` | `minimumInUnit()`, `maximumInUnit()` | `minimum()`, `maximum()` |
+| `ImuSource` / `ImuDevice` | `yawDegrees()`, `pitchDegrees()`, `rollDegrees()`, `angleDegrees()`, `*RateDegreesPerSecond()`, `linearAccelerationXG()` / `YG()` / `ZG()`, `lastUpdateSeconds()`, `applyYawDegrees(ctx, double)` | `yaw()`, `pitch()`, `roll()`, `angle()`, `yawRate()`, `pitchRate()`, `rollRate()`, `linearAccelerationX()` / `Y()` / `Z()`, `applyYaw(ctx, Angle)` |
+| `EncoderDevice` | `position()`, `absolutePosition()`, `velocity()`, `positionFromRotations(double)`, `velocityFromRotationsPerSecond(double)` | `positionAngle()`, `positionDistance()`, `absolutePositionAngle()`, `absolutePositionDistance()`, `velocityAngular()`, `velocityLinear()` |
+
+For example, a robot reads a motor's supply current with `motor.supplyCurrent()`. Athena's control code reads
+`motor.raw().supplyCurrentAmps()` for the same value without allocating a measure.
+
+### Implementer SPI
+
+Some interfaces must keep public primitive methods because vendors and simulation implement them. Those methods are
+the implementer SPI. They are documented as not for robot code, and the names say so.
+
+- `ImuSource` hooks are renamed so they do not look like the team API: `readYawDegrees()`,
+  `readPitchDegrees()`, `readRollDegrees()`, `readAngleDegrees()`, `readYawRateDegreesPerSecond()`,
+  `readPitchRateDegreesPerSecond()`, `readRollRateDegreesPerSecond()`, `readLinearAccelerationXG()` / `YG()` / `ZG()`,
+  `readLastUpdateSeconds()`, and `writeYawDegrees(ActionContext, double)`. Robot code calls the typed accessors or
+  `raw()`, which delegates to these hooks.
+- `MotorHandle`, `EncoderHandle` and `ImuHandle` (in `ca.frc6390.athena.hardware.backend`) keep their primitive
+  methods (`appliedVoltage()`, `positionRotations()`, `yawDegrees()`, ...). Teams never receive these handles, and
+  the interfaces are documented as backend SPI.
 
 ## Summary
 

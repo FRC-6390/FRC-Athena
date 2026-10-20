@@ -35,11 +35,11 @@ class EncoderApiEquivalenceTest {
         assertEquals(expected.conversion(), actual.conversion(), 0.0, "conversion");
         assertEquals(expected.measuresUnit(), actual.measuresUnit(), "measuresUnit");
         for (double rotations : ROTATIONS) {
-            assertEquals(expected.positionFromRotations(rotations), actual.positionFromRotations(rotations), 0.0);
+            assertEquals(expected.raw().positionFromRotations(rotations), actual.raw().positionFromRotations(rotations), 0.0);
         }
         for (double rate : RATES) {
-            assertEquals(expected.velocityFromRotationsPerSecond(rate),
-                    actual.velocityFromRotationsPerSecond(rate), 0.0);
+            assertEquals(expected.raw().velocityFromRotationsPerSecond(rate),
+                    actual.raw().velocityFromRotationsPerSecond(rate), 0.0);
         }
     }
 

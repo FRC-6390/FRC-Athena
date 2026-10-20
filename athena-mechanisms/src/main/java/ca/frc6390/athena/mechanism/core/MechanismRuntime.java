@@ -1915,7 +1915,7 @@ final class MechanismRuntime {
                 return false;
             }
             if (Double.isNaN(node.stallSinceSeconds)) node.stallSinceSeconds = context.nowSeconds();
-            if (Actions.hasElapsed(context.nowSeconds() - node.stallSinceSeconds, signal.durationSeconds())) {
+            if (Actions.hasElapsed(context.nowSeconds() - node.stallSinceSeconds, signal.raw().durationSeconds())) {
                 node.terminal = true;
             }
             return node.terminal;
@@ -1958,7 +1958,7 @@ final class MechanismRuntime {
             }
             double error = goal - measurement;
             if (target.mode() == ControlMode.POSITION && control.continuousRange() != null) {
-                double span = control.continuousRange().maximumInUnit() - control.continuousRange().minimumInUnit();
+                double span = control.continuousRange().raw().maximumInUnit() - control.continuousRange().raw().minimumInUnit();
                 error = Math.IEEEremainder(error, span);
             }
             if (Math.abs(error) > tolerance) {

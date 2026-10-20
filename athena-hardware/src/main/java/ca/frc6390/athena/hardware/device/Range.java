@@ -104,12 +104,12 @@ public final class Range {
     }
 
     /** Returns the lower bound as a plain value in {@link #unit()}. */
-    public double minimumInUnit() {
+    double minimumInUnit() {
         return minimumInUnit;
     }
 
     /** Returns the upper bound as a plain value in {@link #unit()}. */
-    public double maximumInUnit() {
+    double maximumInUnit() {
         return maximumInUnit;
     }
 
@@ -145,5 +145,32 @@ public final class Range {
     @Override
     public String toString() {
         return "Range[minimum=" + minimum + ", maximum=" + maximum + "]";
+    }
+
+    /** Returns an internal, primitive view of this value. Not for robot code. */
+    public Raw raw() {
+        return new Raw(this);
+    }
+
+    /**
+     * Internal, not for robot code: primitive bounds in the range's unit, for Athena's hot paths. Robot code
+     * uses minimum() and maximum().
+     */
+    public static final class Raw {
+        private final Range owner;
+
+        private Raw(Range owner) {
+            this.owner = owner;
+        }
+
+        /** Internal: see Range#minimumInUnit. */
+        public double minimumInUnit() {
+            return owner.minimumInUnit();
+        }
+
+        /** Internal: see Range#maximumInUnit. */
+        public double maximumInUnit() {
+            return owner.maximumInUnit();
+        }
     }
 }

@@ -82,8 +82,8 @@ class ConstraintsTest {
 
         var range = Constraints.positionRange(constraints);
         var motion = Constraints.motionProfile(constraints);
-        assertEquals(-2.0, range.minimumInUnit(), 1.0e-9);
-        assertEquals(8.0, range.maximumInUnit(), 1.0e-9);
+        assertEquals(-2.0, range.raw().minimumInUnit(), 1.0e-9);
+        assertEquals(8.0, range.raw().maximumInUnit(), 1.0e-9);
         assertEquals(9.0, motion.maxVelocity(), 1.0e-9);
         assertEquals(30.0, motion.maxAcceleration(), 1.0e-9);
     }
@@ -97,8 +97,8 @@ class ConstraintsTest {
         var range = Constraints.positionRange(List.of(grouped));
         var motion = Constraints.motionProfile(List.of(grouped));
 
-        assertEquals(-2.0, range.minimumInUnit(), 1.0e-9);
-        assertEquals(4.0, range.maximumInUnit(), 1.0e-9);
+        assertEquals(-2.0, range.raw().minimumInUnit(), 1.0e-9);
+        assertEquals(4.0, range.raw().maximumInUnit(), 1.0e-9);
         assertEquals(3.0, motion.maxVelocity(), 1.0e-9);
         assertEquals(7.0, motion.maxAcceleration(), 1.0e-9);
     }

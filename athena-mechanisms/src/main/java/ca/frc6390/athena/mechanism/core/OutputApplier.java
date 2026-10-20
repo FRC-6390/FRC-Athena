@@ -1349,12 +1349,12 @@ final class OutputApplier {
         if (feedback == null) {
             return true;
         }
-        if (!(feedback.position() instanceof EncoderDevice position)
-                || !(feedback.velocity() instanceof EncoderDevice velocity)
-                || !position.equals(velocity)) {
+        if (!(feedback.position() instanceof EncoderDevice.PositionFeedback position)
+                || !(feedback.velocity() instanceof EncoderDevice.VelocityFeedback velocity)
+                || !position.encoder().equals(velocity.encoder())) {
             return false;
         }
-        return isNativeFeedback(control.output(), position);
+        return isNativeFeedback(control.output(), position.encoder());
     }
 
     private static boolean isNativeFeedback(MotorDevice output, EncoderDevice feedback) {

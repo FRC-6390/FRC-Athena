@@ -35,11 +35,11 @@ public final class AdvancedFeedback implements Mechanism {
     // encoder then supplies smooth motion between gated absolute corrections.
     private final PositionSignal trackedPosition = FeedbackSignals.absoluteRelative(
             modularAbsolute,
-            modularMotor.encoder(),
+            modularMotor.encoder().positionSignal(),
             0.25,
             0.02);
     private final VelocitySignal filteredVelocity = FeedbackSignals.lowPass(
-            modularMotor.encoder(),
+            modularMotor.encoder().velocitySignal(),
             0.15);
 
     // The ordinary case remains terse and pays no FeedbackBinding API cost.
@@ -56,13 +56,13 @@ public final class AdvancedFeedback implements Mechanism {
     private final EncoderDevice redundantA = Constants.RIO.encoder(EncoderKinds.CANCODER, 32);
     private final EncoderDevice redundantB = Constants.RIO.encoder(EncoderKinds.CANCODER, 33);
     private final PositionSignal medianPosition = FeedbackSignals.median(
-            redundantA,
-            redundantB,
-            redundantMotor.encoder());
+            redundantA.positionSignal(),
+            redundantB.positionSignal(),
+            redundantMotor.encoder().positionSignal());
     private final ControlBinding redundant = Controls.position(redundantMotor)
             .feedback(new FeedbackBinding(
                     medianPosition,
-                    FeedbackSignals.lowPass(redundantMotor.encoder(), 0.2)))
+                    FeedbackSignals.lowPass(redundantMotor.encoder().velocitySignal(), 0.2)))
             .pid(1.2, 0.0, 0.012);
 
     public final Action ordinaryRelativeMove = ordinary.position(2.0);

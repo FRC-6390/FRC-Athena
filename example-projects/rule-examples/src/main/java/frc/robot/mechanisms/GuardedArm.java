@@ -26,8 +26,8 @@ public final class GuardedArm implements Mechanism {
     private final SimModel simulation = SimModel.arm(motor)
             .encoder(motor.encoder())
             .range(travel)
-            .limit(home, travel.minimumInUnit())
-            .limit(hardStop, travel.maximumInUnit());
+            .limit(home, travel.minimum().magnitude())
+            .limit(hardStop, travel.maximum().magnitude());
     private final ControlBinding position = Controls.position(motor)
             .feedback(motor.encoder())
             .pid(0.72, 0.0, 0.0)

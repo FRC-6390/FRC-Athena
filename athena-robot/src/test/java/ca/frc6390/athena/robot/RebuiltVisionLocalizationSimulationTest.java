@@ -225,7 +225,7 @@ class RebuiltVisionLocalizationSimulationTest {
         public final SwerveOdometry odometry = kinematics.odometry(imu);
         private final RobotVelocityPool pool = new RobotVelocityPool();
         private final RobotVelocityPool.Channel driver = pool.channel();
-        private final Action drive = kinematics.drive(pool, () -> Rotation2d.fromDegrees(imu.yawDegrees()));
+        private final Action drive = kinematics.drive(pool, () -> new Rotation2d(imu.yaw()));
 
         private static SwerveModule offseasonModule(
                 int driveId,

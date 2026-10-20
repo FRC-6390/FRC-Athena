@@ -67,7 +67,7 @@ class SimModelPhysicsTest {
         // The integrated encoder counts motor rotations; its configured gearing gives mechanism degrees.
         assertEquals(motorRotationsPerSecond, rawEncoderRotationsPerSecond, 1.0e-9);
         assertEquals(motorRotationsPerSecond / 100.0,
-                encoder.velocityFromRotationsPerSecond(rawEncoderRotationsPerSecond), 1.0e-9);
+                encoder.raw().velocityFromRotationsPerSecond(rawEncoderRotationsPerSecond), 1.0e-9);
         assertEquals(KRAKEN_X44_FREE_SPEED_RAD_PER_SECOND / (2.0 * Math.PI), motorRotationsPerSecond,
                 0.03 * KRAKEN_X44_FREE_SPEED_RAD_PER_SECOND / (2.0 * Math.PI));
     }

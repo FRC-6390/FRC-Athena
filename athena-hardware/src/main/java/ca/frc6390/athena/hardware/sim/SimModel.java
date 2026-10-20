@@ -221,7 +221,7 @@ public final class SimModel {
     public SimModel range(Range range) {
         Objects.requireNonNull(range, "range");
         Range plantRange = range.unit() == Units.Degrees
-                ? Range.of(Units.Rotations.of(range.minimumInUnit() / 360.0), Units.Rotations.of(range.maximumInUnit() / 360.0))
+                ? Range.of(Units.Rotations.of(range.raw().minimumInUnit() / 360.0), Units.Rotations.of(range.raw().maximumInUnit() / 360.0))
                 : range;
         return copy(momentOfInertia, length, gearRatio, simulatesGravity,
                 directMotors, directEncoders, plantRange, directLimits, directDigitalInputs);

@@ -4,6 +4,9 @@ import ca.frc6390.athena.hardware.device.ImuDevice;
 
 /**
  * Runtime IMU created by a backend.
+ *
+ * <p>Backend SPI: vendors implement these primitive methods. Robot code never calls them; it reads the
+ * typed device accessors, or {@code raw()} for Athena's own per-cycle code. Not for robot code.</p>
  */
 public interface ImuHandle {
     /**

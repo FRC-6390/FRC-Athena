@@ -63,7 +63,7 @@ class MotorStallModelTest {
 
             // Moving at the speed the voltage predicts: not a stall even with some load.
             handle.statorCurrent = 30.0;
-            double expectedRps = stall.constants().expectedUnloadedSpeedRadPerSec(10.0) / (2.0 * Math.PI);
+            double expectedRps = stall.constants().raw().expectedUnloadedSpeedRadPerSec(10.0) / (2.0 * Math.PI);
             handle.velocity = 0.9 * expectedRps;
             assertFalse(stall.instantaneousActive());
         }

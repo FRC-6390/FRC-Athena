@@ -140,8 +140,8 @@ class TypedControlBindingTest {
                 .constraint(Constraints.range(Units.Degrees.of(-90.0), Units.Degrees.of(90.0)));
 
         Range limits = Constraints.positionRange(control.constraints());
-        assertEquals(-0.25, limits.minimumInUnit(), 1e-12);
-        assertEquals(0.25, limits.maximumInUnit(), 1e-12);
+        assertEquals(-0.25, limits.raw().minimumInUnit(), 1e-12);
+        assertEquals(0.25, limits.raw().maximumInUnit(), 1e-12);
     }
 
     @Test
@@ -180,8 +180,8 @@ class TypedControlBindingTest {
         var control = Controls.position(motor(), Units.Rotations)
                 .continuous(Units.Degrees.of(0.0), Units.Degrees.of(360.0));
 
-        assertEquals(0.0, control.continuousRange().minimumInUnit(), 1e-12);
-        assertEquals(1.0, control.continuousRange().maximumInUnit(), 1e-12);
+        assertEquals(0.0, control.continuousRange().raw().minimumInUnit(), 1e-12);
+        assertEquals(1.0, control.continuousRange().raw().maximumInUnit(), 1e-12);
     }
 
     @Test

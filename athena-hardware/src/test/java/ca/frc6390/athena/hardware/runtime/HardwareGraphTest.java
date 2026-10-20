@@ -144,8 +144,8 @@ class HardwareGraphTest {
         recoveredImu.yaw = 37.0;
 
         assertEquals(1.25, motor.position().in(Units.Rotations), 1.0e-9);
-        assertEquals(2.5, encoder.position(), 1.0e-9);
-        assertEquals(37.0, imu.yawDegrees(), 1.0e-9);
+        assertEquals(2.5, encoder.raw().position(), 1.0e-9);
+        assertEquals(37.0, imu.raw().yawDegrees(), 1.0e-9);
         assertTrue(graph.bindingFailures().isEmpty());
         assertEquals(2, motorBackend.created);
         assertEquals(2, encoderBackend.created);
@@ -171,7 +171,7 @@ class HardwareGraphTest {
         backend.last.position = 0.625;
 
         assertEquals(3, backend.created);
-        assertEquals(0.625, encoder.position(), 1.0e-9);
+        assertEquals(0.625, encoder.raw().position(), 1.0e-9);
         assertTrue(graph.bindingFailures().isEmpty());
     }
 
@@ -387,12 +387,12 @@ class HardwareGraphTest {
         backend.last.absolutePosition = 0.5;
         backend.last.velocity = 2.0;
 
-        assertEquals(90.0, encoder.position(), 1.0e-9);
-        assertEquals(45.0, encoder.absolutePosition(), 1.0e-9);
-        assertEquals(360.0, encoder.velocity(), 1.0e-9);
+        assertEquals(90.0, encoder.raw().position(), 1.0e-9);
+        assertEquals(45.0, encoder.raw().absolutePosition(), 1.0e-9);
+        assertEquals(360.0, encoder.raw().velocity(), 1.0e-9);
 
         graph.close();
-        assertThrows(IllegalStateException.class, encoder::position);
+        assertThrows(IllegalStateException.class, encoder.raw()::position);
     }
 
     @Test
@@ -407,12 +407,12 @@ class HardwareGraphTest {
         firstBackend.last.position = 1.0;
         secondBackend.last.position = 2.0;
 
-        assertThrows(IllegalStateException.class, encoder::position);
-        assertEquals(1.0, first.runtimeScope().call(encoder::position), 1.0e-9);
-        assertEquals(2.0, second.runtimeScope().call(encoder::position), 1.0e-9);
+        assertThrows(IllegalStateException.class, encoder.raw()::position);
+        assertEquals(1.0, first.runtimeScope().call(encoder.raw()::position), 1.0e-9);
+        assertEquals(2.0, second.runtimeScope().call(encoder.raw()::position), 1.0e-9);
 
         first.close();
-        assertEquals(2.0, encoder.position(), 1.0e-9);
+        assertEquals(2.0, encoder.raw().position(), 1.0e-9);
         second.close();
     }
 
@@ -424,10 +424,10 @@ class HardwareGraphTest {
         graph.imu(imu);
         backend.last.yaw = 42.5;
 
-        assertEquals(42.5, imu.yawDegrees(), 1.0e-9);
+        assertEquals(42.5, imu.raw().yawDegrees(), 1.0e-9);
 
         graph.close();
-        assertThrows(IllegalStateException.class, imu::yawDegrees);
+        assertThrows(IllegalStateException.class, imu.raw()::yawDegrees);
     }
 
     @Test
@@ -523,8 +523,8 @@ class HardwareGraphTest {
         double rawRotations = encoder.rotationsFromPosition(Units.Degrees.of(-90.0));
 
         assertEquals(0.25, rawRotations, 1.0e-9);
-        assertEquals(-90.0, encoder.positionFromRotations(rawRotations), 1.0e-9);
-        assertEquals(-180.0, encoder.velocityFromRotationsPerSecond(1.0), 1.0e-9);
+        assertEquals(-90.0, encoder.raw().positionFromRotations(rawRotations), 1.0e-9);
+        assertEquals(-180.0, encoder.raw().velocityFromRotationsPerSecond(1.0), 1.0e-9);
     }
 
     @Test
@@ -658,8 +658,8 @@ class HardwareGraphTest {
     void simModelDegreeRangesBecomeMechanismRotations() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X44, 16);
         Range plant = SimModel.motor(motor).range(Range.of(Units.Degrees.of(-270.0), Units.Degrees.of(270.0))).range();
-        assertEquals(-0.75, plant.minimumInUnit(), 1e-12);
-        assertEquals(0.75, plant.maximumInUnit(), 1e-12);
+        assertEquals(-0.75, plant.raw().minimumInUnit(), 1e-12);
+        assertEquals(0.75, plant.raw().maximumInUnit(), 1e-12);
         assertEquals(edu.wpi.first.units.Units.Rotations, plant.unit());
         assertEquals(Range.of(Units.Rotations.of(-2.0), Units.Rotations.of(2.0)), SimModel.motor(motor).range(Range.of(Units.Rotations.of(-2.0), Units.Rotations.of(2.0))).range());
     }

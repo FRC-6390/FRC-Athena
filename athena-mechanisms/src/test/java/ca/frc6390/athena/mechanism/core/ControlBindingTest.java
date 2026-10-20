@@ -58,8 +58,8 @@ class ControlBindingTest {
                 .constraint(Constraints.clamp(2.0));
 
         assertSame(angular, control.sink());
-        assertEquals(-Math.PI, control.continuousRange().minimumInUnit(), 1.0e-9);
-        assertEquals(Math.PI, control.continuousRange().maximumInUnit(), 1.0e-9);
+        assertEquals(-Math.PI, control.continuousRange().raw().minimumInUnit(), 1.0e-9);
+        assertEquals(Math.PI, control.continuousRange().raw().maximumInUnit(), 1.0e-9);
         assertThrows(IllegalArgumentException.class, () -> control.continuous(1.0, 1.0));
         assertThrows(IllegalStateException.class,
                 () -> Controls.velocity(angular).continuous(-Math.PI, Math.PI));
@@ -102,8 +102,8 @@ class ControlBindingTest {
 
         ControlBinding<?> control = Controls.position(motor).feedback(encoder);
 
-        assertSame(encoder, control.feedback().position());
-        assertSame(encoder, control.feedback().velocity());
+        assertSame(encoder, ((EncoderDevice.PositionFeedback) control.feedback().position()).encoder());
+        assertSame(encoder, ((EncoderDevice.VelocityFeedback) control.feedback().velocity()).encoder());
         assertEquals(java.util.Set.of(encoder), control.feedback().encoders());
     }
 

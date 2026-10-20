@@ -1203,7 +1203,7 @@ class MechanismRuntimeTest {
         actions.encoder(related).position = 2.0;
         ControlBinding<?> control = Controls.position(MOTOR)
                 .feedback(ENCODER)
-                .constraint(Constraints.require(() -> related.position() >= 5.0));
+                .constraint(Constraints.require(() -> related.raw().position() >= 5.0));
         TestMechanism mechanism = new TestMechanism(control.percent(0.2));
         MechanismRuntime runtime = MechanismRuntime.of(mechanism, actions);
         runtime.set(mechanism.initial);
@@ -1858,7 +1858,7 @@ class MechanismRuntimeTest {
         RecordingActionContext actions = new RecordingActionContext(MOTOR);
         actions.encoder(MOTOR.encoder()).position = 0.5;
         actions.motor(MOTOR).capabilities = MotorControlCapabilities.voltageClosedLoop(4);
-        FeedbackBinding feedback = new FeedbackBinding(MOTOR.encoder(), () -> 0.0);
+        FeedbackBinding feedback = new FeedbackBinding(MOTOR.encoder().positionSignal(), () -> 0.0);
         ControlBinding<?> control = Controls.position(MOTOR)
                 .feedback(feedback)
                 .pid(0.2, 0.0, 0.0);

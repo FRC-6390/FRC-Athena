@@ -125,7 +125,7 @@ public final class Events {
                     inactiveSince = Double.NaN;
                 } else if (Double.isNaN(inactiveSince)) {
                     inactiveSince = now;
-                } else if (now - inactiveSince >= signal.rearmSeconds()) {
+                } else if (now - inactiveSince >= signal.raw().rearmSeconds()) {
                     armed = true;
                 }
                 return false;
@@ -137,7 +137,7 @@ public final class Events {
             if (Double.isNaN(candidateSince)) {
                 candidateSince = now;
             }
-            return now - candidateSince >= signal.durationSeconds();
+            return now - candidateSince >= signal.raw().durationSeconds();
         }
 
         @Override

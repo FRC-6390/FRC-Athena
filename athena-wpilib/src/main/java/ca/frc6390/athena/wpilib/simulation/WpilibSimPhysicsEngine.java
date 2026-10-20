@@ -314,8 +314,8 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
                     gearing(model),
                     momentOfInertia(model),
                     model.length().map(length -> length.in(edu.wpi.first.units.Units.Meters)).orElse(DEFAULT_ARM_LENGTH_METERS),
-                    rotationsToRadians(range.minimumInUnit()),
-                    rotationsToRadians(range.maximumInUnit()),
+                    rotationsToRadians(range.raw().minimumInUnit()),
+                    rotationsToRadians(range.raw().maximumInUnit()),
                     model.simulatesGravity(),
                     rotationsToRadians(range.clamp(0.0)));
         }
@@ -340,8 +340,8 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
                     gearing(model),
                     DEFAULT_ELEVATOR_MASS_KG,
                     DEFAULT_ELEVATOR_DRUM_RADIUS_METERS,
-                    range.minimumInUnit(),
-                    range.maximumInUnit(),
+                    range.raw().minimumInUnit(),
+                    range.raw().maximumInUnit(),
                     model.simulatesGravity(),
                     range.clamp(0.0));
         }
@@ -428,11 +428,11 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
                 }
             }
             position += velocity * seconds;
-            if (position <= range.minimumInUnit() && velocity <= 0.0) {
-                position = range.minimumInUnit();
+            if (position <= range.raw().minimumInUnit() && velocity <= 0.0) {
+                position = range.raw().minimumInUnit();
                 velocity = 0.0;
-            } else if (position >= range.maximumInUnit() && velocity >= 0.0) {
-                position = range.maximumInUnit();
+            } else if (position >= range.raw().maximumInUnit() && velocity >= 0.0) {
+                position = range.raw().maximumInUnit();
                 velocity = 0.0;
             }
         }
