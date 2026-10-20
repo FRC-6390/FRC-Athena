@@ -5,8 +5,9 @@ plain doubles. The unit is part of the declaration: targets, feedback, constrain
 interpolation points are converted to base-unit doubles once, when the robot declares the
 mechanism. The control loop still works on primitive doubles and never allocates measures.
 
-Plain-double controls such as `Controls.position(motor)` keep working. Encoder declarations use the typed
-builders below.
+Every control binding declares its unit. There are no unit-less `Controls.position(motor)` or
+`Controls.velocity(motor)` factories: a dimensionless binding says so with `Units.Value`. Encoder
+declarations use the typed builders below.
 
 ## Declaring a unit-typed encoder
 
@@ -51,14 +52,48 @@ public final Action sweep = turret.position(() -> sweepDegrees, Units.Degrees); 
 - `position(Measure)` and `velocity(Measure)` accept any measure of the binding's dimension, so
   `Degrees.of(90)` works on a `Rotations` binding and `RPM.of(120)` on a `Rotations` velocity binding.
   A measure of the wrong dimension is rejected when declared.
-- `position(DoubleSupplier, U unit)` and `velocity(DoubleSupplier, U unit)` take primitive suppliers
-  with an explicit unit. The conversion factor is computed once.
+- `position(DoubleSupplier, Unit unit)`, `velocity(DoubleSupplier, Unit unit)` and `set(DoubleSupplier, Unit unit)`
+  take primitive suppliers with the unit stated. The conversion factor is computed once, when the action is
+  declared, and a unit of the wrong dimension is rejected then. Suppliers are primitive on purpose: a
+  `Supplier<Measure>` would allocate a measure every control cycle. The unit is required because a bare
+  `DoubleSupplier` does not say what its numbers mean, and a `velocity.velocity(() -> rps)` with no unit is
+  exactly the mistake the typed system removes.
 - `untilWithin(Measure)` on an action uses the control's unit for the tolerance, or the rate unit for
   velocity actions.
 - `continuous(Measure, Measure)` and `interpolate(...)` have typed forms (see below).
+- `error(Measure)` returns the signed error as a measure in the binding's unit (a rate for velocity bindings).
+- `isAt(Measure, Measure)` and `at(Measure, Measure)` (a `BooleanSupplier`) take the target and tolerance as measures.
+- `armFf(s, v, g, Angle offset)` takes the phase offset as an angle; any angle unit converts to radians once.
+- `voltage(Voltage)` and `voltage(DoubleSupplier, VoltageUnit)` set the voltage output.
 
 Declared constraints are converted to the binding's unit when the binding is declared. A typed
 constraint can be attached to any binding of the same dimension.
+
+Output voltage limits are output-stage constraints, not setpoint limits:
+
+```java
+.constraint(Constraints.maxVoltage(Volts.of(12.0)))            // drive voltage within +/- 12 V
+.constraint(Constraints.clamp(Volts.of(-10.0), Volts.of(8.0))) // asymmetric drive voltage limits
+```
+
+`Constraints.range(...)` limits the target (the setpoint), so it cannot replace an output clamp.
+
+Velocity bindings express typed constraints in their own rate units, because their target is a rate:
+
+- `Constraints.range(RotationsPerSecond.of(-200), RotationsPerSecond.of(200))` bounds the velocity target.
+- `Constraints.motion(acceleration, jerk)` takes an acceleration and its rate, for example
+  `RotationsPerSecondPerSecond.of(200)` and `RotationsPerSecondPerSecond.per(Seconds).of(200)`. A position
+  binding reads the same call as velocity and acceleration, so a jerk-sized second limit is rejected there.
+  The velocity loop records these limits; it does not enforce the acceleration limit yet.
+
+```java
+private final ControlBinding<?> shooter = Controls.velocity(leader, Units.Rotations)
+        .constraints(
+                Constraints.range(Units.RotationsPerSecond.of(-200), Units.RotationsPerSecond.of(200)),
+                Constraints.motion(Units.RotationsPerSecondPerSecond.of(200),
+                        Units.RotationsPerSecondPerSecond.per(Units.Seconds).of(200)),
+                Constraints.maxVoltage(Units.Volts.of(12)));
+```
 
 ## Interpolation
 
@@ -71,6 +106,16 @@ public final Action distanceShot = wheel.interpolate(InterpolationKinds.LINEAR, 
 The third argument is the unit of the input supplier. Points are measures of that unit, and values
 are measures of the binding's unit (or its per-second rate for velocity bindings).
 
+The key can be sampled at runtime, with each value stated in its own unit:
+
+```java
+wheel.interpolate(InterpolationKinds.LINEAR, () -> distanceInches, Units.Inches)
+        .at(Units.Inches.of(40.0), () -> rpsCommand, Units.RotationsPerSecond)
+```
+
+`at(Measure, DoubleSupplier, Unit)` takes a fixed point with a runtime value;
+`at(DoubleSupplier, Unit, DoubleSupplier, Unit)` takes both at runtime.
+
 ## Mismatch errors
 
 Binding a unit-typed control to an encoder whose unit differs fails when the mechanism is declared:
@@ -79,9 +124,9 @@ Binding a unit-typed control to an encoder whose unit differs fails when the mec
 Control unit Degrees does not match encoder ctre:cancoder_... which measures Rotations (position feedback).
 ```
 
-Raw bindings (`Controls.position(motor)`) have no unit, so typed methods on them throw
-`IllegalStateException`, and any encoder can be used as feedback. Arm feedforward on a raw binding needs an
-angle unit from the encoder's `measures(...)`.
+A binding always has a unit, so there are no raw bindings. Encoder feedback must measure the binding's
+unit, and an encoder that measures another unit is rejected when declared. A dimensionless binding
+(`Controls.position(motor, Units.Value)`) rejects angle and distance measures.
 
 ## Removed encoder API
 
@@ -107,14 +152,42 @@ Durations are WPILib `Time` measures. The `double` seconds overloads are gone.
 | `Action.timeout(double)`, `Actions.timeout(Action, double)`, `Actions.timeout(DeviceAction, double)` | `timeout(Time)`, `Actions.timeout(action, Time)` |
 | `DeviceAction.timeout(Number)` | `timeout(Time)` |
 | `Action.settled(double)`, `Actions.settled(Action, double)` | `settled(Time)`, `Actions.settled(action, Time)` (`java.time.Duration` overloads remain) |
-| `Action.untilSettled(double, double)` | `untilSettled(double, Time)` (tolerance is still a double in control units; see the note below) |
+| `Action.untilSettled(double, double)` | `untilSettled(Measure, Time)` |
 | `Attempt.within(double)` | `within(Time)` |
 | `Sequence.forTime(double, Action)`, `Sequence.waitSeconds(double)`, `Sequence.timeout(double)` | `Time` overloads |
 | `Cycle.forTime(double, Action)` | `forTime(Time, Action)` |
 | `Actions.WaitSeconds.seconds()`, `Actions.Timeout.seconds()` | `duration()`, which returns a `Time` |
 
-`Action.untilSettled(double, Time)` keeps a `double` tolerance for now, so the tolerance is still
-in control units. Its typed form, `untilSettled(Measure, Time)`, is the one to use with unit-typed bindings.
+`untilSettled(Measure, Time)` is the only form; see the removed control API table below.
+
+## Removed control API
+
+Every control binding is typed. These unit-less members are gone (migrated in the typed-only control pass):
+
+| Removed | Use instead |
+| --- | --- |
+| `Controls.position(motor)`, `Controls.velocity(motor)` | `Controls.position(motor, unit)`, `Controls.velocity(motor, unit)`; `Units.Rotations` for a motor-rotation control, `Units.Value` for a dimensionless one |
+| `Controls.position(motor, more...)`, `Controls.velocity(motor, more...)` (several motors) | `Controls.position(motor, unit).followers(more...)` |
+| `Controls.position(sink)`, `Controls.velocity(sink)` | `Controls.position(sink, unit)`, `Controls.velocity(sink, unit)`; `Units.Value` for a plain scalar sink |
+| `ControlBinding.position(double)`, `velocity(double)`, `set(double)` | `position(Measure)`, `velocity(Measure)`, `set(Measure)`, for example `position(Units.Degrees.of(90))` |
+| `ControlBinding.position(DoubleSupplier)`, `velocity(DoubleSupplier)`, `set(DoubleSupplier)` | `position(DoubleSupplier, Unit)`, `velocity(DoubleSupplier, Unit)`, `set(DoubleSupplier, Unit)`, for example `velocity(() -> rps, Units.Rotations)` |
+| `ControlBinding.voltage(double)` | `voltage(Voltage)`, for example `voltage(Volts.of(4.0))` |
+| `ControlBinding.voltage(DoubleSupplier)` | `voltage(DoubleSupplier, VoltageUnit)`, for example `voltage(() -> v, Units.Volts)` |
+| `ControlBinding.error(double)` | `error(Measure)`, which returns a measure in the binding's unit |
+| `ControlBinding.isAt(double, double)`, `at(double, double)`, `at(DoubleSupplier, double)` | `isAt(Measure, Measure)`, `at(Measure, Measure)`, `at(DoubleSupplier, Unit, Measure)` |
+| `ControlBinding.continuous(double, double)` | `continuous(Measure, Measure)` |
+| `ControlBinding.slipCheck(encoder, ratio, double)` | `slipCheck(encoder, ratio, Measure)` |
+| `ControlBinding.interpolate(model, DoubleSupplier)`, `interpolate(CurveMapping, DoubleSupplier)` | `interpolate(model, DoubleSupplier, Unit)`, `interpolate(CurveMapping, DoubleSupplier, Unit)` |
+| `ControlBinding.armFf(s, v, g, double radians)` | `armFf(s, v, g, Angle)`, for example `armFf(s, v, g, Units.Degrees.of(-30))` |
+| `FeedforwardGains.arm(s, v, g, double radians)` | `FeedforwardGains.arm(s, v, g, Angle)` |
+| `FeedforwardGains.gravityOffsetRadians()` | `gravityOffset()`, which returns an `Angle`; use `.in(Units.Radians)` for the radian value |
+| `InterpolatedControlAction.at(double, double)`, `at(double, DoubleSupplier)`, `at(DoubleSupplier, double)`, `at(DoubleSupplier, DoubleSupplier)` | `at(Measure, Measure)`, `at(Measure, DoubleSupplier, Unit)`, `at(DoubleSupplier, Unit, DoubleSupplier, Unit)` |
+| `Action.untilWithin(double)`, `Actions.untilWithin(action, double)` | `untilWithin(Measure)` |
+| `Action.maxVelocity(double)`, `Actions.maxVelocity(action, double)` | `maxVelocity(Measure)`, a rate of the binding unit per second |
+| `Action.untilSettled(double, Time)` | `untilSettled(Measure, Time)` |
+| `Constraints.clamp(double, double)` | `Constraints.clamp(Voltage, Voltage)`, an output-stage voltage limit |
+| `Constraints.clamp(double)` | `Constraints.maxVoltage(Voltage)`, a symmetric output-stage voltage limit |
+| `Constraints.motion(double, double)` | `Constraints.motion(Measure, Measure)`, for example `DegreesPerSecond.of(60)` and `DegreesPerSecondPerSecond.of(120)` (on a velocity binding: acceleration and its rate) |
 
 ## Motion kind
 
