@@ -18,12 +18,12 @@ public final class PositionElevator implements Mechanism {
     private final Range travel = Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.4));
     @SuppressWarnings("unused")
     private final SimModel simulation = SimModel.elevator(motor).encoder(height).range(travel);
-    private final ControlBinding lift = Controls.position(motor)
+    private final ControlBinding lift = Controls.position(motor, edu.wpi.first.units.Units.Rotations)
             .feedback(height)
             .pid(6.0, 0.0, 0.0)
-            .constraints(Constraints.range(travel), Constraints.motion(0.8, 1.8));
+            .constraints(Constraints.range(travel), Constraints.motion(edu.wpi.first.units.Units.RotationsPerSecond.of(0.8), edu.wpi.first.units.Units.RotationsPerSecondPerSecond.of(1.8)));
 
-    public final Action home = lift.position(0.0).untilWithin(0.03);
-    public final Action low = lift.position(0.35).untilWithin(0.03);
-    public final Action high = lift.position(1.25).untilWithin(0.03);
+    public final Action home = lift.position(edu.wpi.first.units.Units.Rotations.of(0.0)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
+    public final Action low = lift.position(edu.wpi.first.units.Units.Rotations.of(0.35)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
+    public final Action high = lift.position(edu.wpi.first.units.Units.Rotations.of(1.25)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
 }

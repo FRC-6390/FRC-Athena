@@ -12,8 +12,8 @@ import frc.robot.Constants;
 public final class SplitWheelShooter implements Mechanism {
     private final MotorDevice topMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 8).coast();
     private final MotorDevice bottomMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 9).inverted().coast();
-    private final ControlBinding top = Controls.velocity(topMotor).feedback(topMotor.encoder()).pid(0.08, 0.0, 0.0);
-    private final ControlBinding bottom = Controls.velocity(bottomMotor).feedback(bottomMotor.encoder()).pid(0.08, 0.0, 0.0);
+    private final ControlBinding top = Controls.velocity(topMotor, edu.wpi.first.units.Units.Rotations).feedback(topMotor.encoder()).pid(0.08, 0.0, 0.0);
+    private final ControlBinding bottom = Controls.velocity(bottomMotor, edu.wpi.first.units.Units.Rotations).feedback(bottomMotor.encoder()).pid(0.08, 0.0, 0.0);
 
     public final Action stop = Actions.parallel(topMotor.neutral(), bottomMotor.neutral());
     public final Action straightShot = velocity(70.0, 70.0);
@@ -21,7 +21,7 @@ public final class SplitWheelShooter implements Mechanism {
 
     private Action velocity(double topVelocity, double bottomVelocity) {
         return Actions.parallel(
-                top.velocity(topVelocity).untilWithin(2.0),
-                bottom.velocity(bottomVelocity).untilWithin(2.0));
+                top.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(topVelocity)).untilWithin(edu.wpi.first.units.Units.RotationsPerSecond.of(2.0)),
+                bottom.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(bottomVelocity)).untilWithin(edu.wpi.first.units.Units.RotationsPerSecond.of(2.0)));
     }
 }

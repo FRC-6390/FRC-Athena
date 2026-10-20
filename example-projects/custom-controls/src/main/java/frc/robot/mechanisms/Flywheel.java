@@ -18,7 +18,7 @@ public final class Flywheel implements Mechanism {
     private final SimModel simulation = SimModel.flywheel(motor)
             .encoder(motor.encoder())
             .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.006));
-    private final ControlBinding devicePid = Controls.velocity(motor)
+    private final ControlBinding devicePid = Controls.velocity(motor, edu.wpi.first.units.Units.Rotations)
             .feedback(motor.encoder())
             .slot(1)
             .pid(KP_VOLTS_PER_ROTATION_PER_SECOND, 0.0, 0.0);
@@ -27,6 +27,6 @@ public final class Flywheel implements Mechanism {
                     ControlOutput.voltage(0.4 + 0.02 * Math.abs(context.target()))));
 
     public final Action off = devicePid.neutral();
-    public final Action withDevicePid = devicePid.velocity(55.0);
-    public final Action withArbitraryFeedforward = assisted.velocity(75.0);
+    public final Action withDevicePid = devicePid.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(55.0));
+    public final Action withArbitraryFeedforward = assisted.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(75.0));
 }

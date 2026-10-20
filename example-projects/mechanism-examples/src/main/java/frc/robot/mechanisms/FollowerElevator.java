@@ -17,12 +17,12 @@ public final class FollowerElevator implements Mechanism {
             .inverted()
             .brake();
     private final Range travel = Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.7));
-    private final ControlBinding lift = Controls.position(leader)
+    private final ControlBinding lift = Controls.position(leader, edu.wpi.first.units.Units.Rotations)
             .feedback(leader.encoder())
             .pid(6.0, 0.0, 0.0)
-            .constraints(Constraints.range(travel), Constraints.motion(1.0, 2.0));
+            .constraints(Constraints.range(travel), Constraints.motion(edu.wpi.first.units.Units.RotationsPerSecond.of(1.0), edu.wpi.first.units.Units.RotationsPerSecondPerSecond.of(2.0)));
 
-    public final Action bottom = lift.position(0.0).untilWithin(0.03);
-    public final Action middle = lift.position(0.8).untilWithin(0.03);
-    public final Action top = lift.position(1.6).untilWithin(0.03);
+    public final Action bottom = lift.position(edu.wpi.first.units.Units.Rotations.of(0.0)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
+    public final Action middle = lift.position(edu.wpi.first.units.Units.Rotations.of(0.8)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
+    public final Action top = lift.position(edu.wpi.first.units.Units.Rotations.of(1.6)).untilWithin(edu.wpi.first.units.Units.Rotations.of(0.03));
 }

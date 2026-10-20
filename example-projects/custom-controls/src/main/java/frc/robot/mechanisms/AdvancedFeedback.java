@@ -43,12 +43,12 @@ public final class AdvancedFeedback implements Mechanism {
             0.15);
 
     // The ordinary case remains terse and pays no FeedbackBinding API cost.
-    private final ControlBinding ordinary = Controls.position(modularMotor)
+    private final ControlBinding ordinary = Controls.position(modularMotor, edu.wpi.first.units.Units.Rotations)
             .feedback(modularMotor.encoder())
             .pid(0.12, 0.0, 0.002);
 
     // Only the mixed case constructs FeedbackBinding explicitly.
-    private final ControlBinding modular = Controls.position(modularMotor)
+    private final ControlBinding modular = Controls.position(modularMotor, edu.wpi.first.units.Units.Rotations)
             .feedback(new FeedbackBinding(trackedPosition, filteredVelocity))
             .pid(1.44, 0.0, 0.024);
 
@@ -59,15 +59,15 @@ public final class AdvancedFeedback implements Mechanism {
             redundantA,
             redundantB,
             redundantMotor.encoder());
-    private final ControlBinding redundant = Controls.position(redundantMotor)
+    private final ControlBinding redundant = Controls.position(redundantMotor, edu.wpi.first.units.Units.Rotations)
             .feedback(new FeedbackBinding(
                     medianPosition,
                     FeedbackSignals.lowPass(redundantMotor.encoder(), 0.2)))
             .pid(1.2, 0.0, 0.012);
 
-    public final Action ordinaryRelativeMove = ordinary.position(2.0);
-    public final Action modularAbsoluteMove = modular.position(12.0);
-    public final Action redundantMove = redundant.position(3.0);
+    public final Action ordinaryRelativeMove = ordinary.position(edu.wpi.first.units.Units.Rotations.of(2.0));
+    public final Action modularAbsoluteMove = modular.position(edu.wpi.first.units.Units.Rotations.of(12.0));
+    public final Action redundantMove = redundant.position(edu.wpi.first.units.Units.Rotations.of(3.0));
     public final Action stop = Actions.parallel(
             modularMotor.percent(0.0),
             redundantMotor.percent(0.0));

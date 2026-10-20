@@ -43,18 +43,18 @@ public final class Turret implements Mechanism {
             .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.5))
             .range(Range.of(edu.wpi.first.units.Units.Rotations.of(-0.75), edu.wpi.first.units.Units.Rotations.of(0.75)));
 
-    private final ControlBinding fieldHeading = Controls.position(motor)
+    private final ControlBinding fieldHeading = Controls.position(motor, Units.Degrees)
             .feedback(angle)
             .dependency(chassisImu)
             .loop(ControlLoops.targetTransform(binding -> context ->
                     ControlOutput.position(context.target() - chassisImu.angleDegrees())))
             .pid(0.144, 0.0, 0.006)
-            .constraints(Constraints.range(travel), Constraints.motion(180.0, 540.0))
+            .constraints(Constraints.range(travel), Constraints.motion(Units.DegreesPerSecond.of(180.0), Units.DegreesPerSecondPerSecond.of(540.0)))
             .planner(MotionPlanners.boundedAngular(360.0));
 
-    public final Action forward = fieldHeading.position(0.0).untilWithin(1.5);
-    public final Action left = fieldHeading.position(90.0).untilWithin(1.5);
-    public final Action rear = fieldHeading.position(180.0).untilWithin(1.5);
+    public final Action forward = fieldHeading.position(Units.Degrees.of(0.0)).untilWithin(Units.Degrees.of(1.5));
+    public final Action left = fieldHeading.position(Units.Degrees.of(90.0)).untilWithin(Units.Degrees.of(1.5));
+    public final Action rear = fieldHeading.position(Units.Degrees.of(180.0)).untilWithin(Units.Degrees.of(1.5));
     public final Action neutral = fieldHeading.neutral();
     /** Identifies the turret: a rotary mechanism with no gravity load. Routine, quasistatic and dynamic actions. */
     public final Characterization characterization = fieldHeading.characterization()

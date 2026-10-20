@@ -1,5 +1,7 @@
 package frc.robot.mechanisms;
 
+import ca.frc6390.athena.hardware.device.EncoderDevice;
+
 import static edu.wpi.first.units.Units.Seconds;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -23,29 +25,30 @@ public final class GuardedArm implements Mechanism {
     private final DigitalInputDevice home = Constants.RIO.dio(1).digitalInput().inverted();
     private final DigitalInputDevice hardStop = Constants.RIO.dio(2).digitalInput().inverted();
     private final Range travel = Range.of(edu.wpi.first.units.Units.Degrees.of(0.0), edu.wpi.first.units.Units.Degrees.of(110.0));
+    private final EncoderDevice encoder = motor.encoder().measures(edu.wpi.first.units.Units.Degrees);
     private final SimModel simulation = SimModel.arm(motor)
-            .encoder(motor.encoder())
+            .encoder(encoder)
             .range(travel)
             .limit(home, travel.minimumInUnit())
             .limit(hardStop, travel.maximumInUnit());
-    private final ControlBinding position = Controls.position(motor)
-            .feedback(motor.encoder())
+    private final ControlBinding position = Controls.position(motor, edu.wpi.first.units.Units.Degrees)
+            .feedback(encoder)
             .pid(0.72, 0.0, 0.0)
             .constraints(
                     Constraints.range(travel),
                     Constraints.lower(home),
                     Constraints.upper(hardStop),
-                    Constraints.motion(70.0, 180.0));
+                    Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(70.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(180.0)));
 
     @SuppressWarnings("unused")
-    public final HookBinding zeroWhenHomed = Events.when(home).rising().onStart(motor.encoder().setPosition(0.0));
+    public final HookBinding zeroWhenHomed = Events.when(home).rising().onStart(encoder.setPosition(0.0));
 
     public final Action stop = position.neutral();
     public final Action homeSlowly = Actions.sequence()
             .until(home::active, position.percent(-0.12))
-            .then(position.position(0.0));
-    public final BooleanSupplier atScore = position.at(90.0, 2.0);
-    public final Action score = position.position(90.0).untilWithin(2.0);
+            .then(position.position(edu.wpi.first.units.Units.Degrees.of(0.0)));
+    public final BooleanSupplier atScore = position.at(edu.wpi.first.units.Units.Degrees.of(90.0), edu.wpi.first.units.Units.Degrees.of(2.0));
+    public final Action score = position.position(edu.wpi.first.units.Units.Degrees.of(90.0)).untilWithin(edu.wpi.first.units.Units.Degrees.of(2.0));
     public final Action nudgeUp = position.percent(0.2).until(hardStop::active);
     public final Action timedManualEscape = Actions.timeout(position.percent(-0.15), Seconds.of(0.4)).then(stop);
 }

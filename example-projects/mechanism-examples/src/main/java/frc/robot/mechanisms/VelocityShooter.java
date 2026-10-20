@@ -49,7 +49,7 @@ public final class VelocityShooter implements Mechanism {
     private final SimModel simulation = SimModel.flywheel(leader, follower)
             .encoder(velocity)
             .momentOfInertia(edu.wpi.first.units.Units.KilogramSquareMeters.of(0.006));
-    private final ControlBinding wheel = Controls.velocity(leader)
+    private final ControlBinding wheel = Controls.velocity(leader, edu.wpi.first.units.Units.Rotations)
             .feedback(velocity)
             .slot(0)
             .pid(PidGains.of(0.08, 0.0, 0.0))
@@ -57,22 +57,22 @@ public final class VelocityShooter implements Mechanism {
             .persistTuning(Locks.InMatch.class);
 
     public final Action stop = wheel.neutral();
-    public final Action idle = wheel.velocity(35.0);
-    public final Action podium = wheel.velocity(78.0).untilWithin(2.0);
+    public final Action idle = wheel.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(35.0));
+    public final Action podium = wheel.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(78.0)).untilWithin(edu.wpi.first.units.Units.RotationsPerSecond.of(2.0));
 
     /** Interpolated shot table. `persisted()` keeps the points across reboots. */
     public final InterpolatedControlAction distanceShot = wheel
-            .interpolate(InterpolationKinds.LINEAR, () -> shotDistanceMeters)
-            .at(1.0, 45.0)
-            .at(3.0, 68.0)
-            .at(5.0, 82.0)
-            .at(8.0, 96.0)
+            .interpolate(InterpolationKinds.LINEAR, () -> shotDistanceMeters, edu.wpi.first.units.Units.Meters)
+            .at(edu.wpi.first.units.Units.Meters.of(1.0), edu.wpi.first.units.Units.RotationsPerSecond.of(45.0))
+            .at(edu.wpi.first.units.Units.Meters.of(3.0), edu.wpi.first.units.Units.RotationsPerSecond.of(68.0))
+            .at(edu.wpi.first.units.Units.Meters.of(5.0), edu.wpi.first.units.Units.RotationsPerSecond.of(82.0))
+            .at(edu.wpi.first.units.Units.Meters.of(8.0), edu.wpi.first.units.Units.RotationsPerSecond.of(96.0))
             .persisted();
 
     /** Records the current distance and wheel speed as a new table point (the field-tuning workflow). */
     public final Action recordShot = distanceShot.record();
 
-    public final Action reverse = wheel.velocity(-25.0);
+    public final Action reverse = wheel.velocity(edu.wpi.first.units.Units.RotationsPerSecond.of(-25.0));
 
     /** Ends the match with a smaller share of the battery budget so the drivetrain keeps power. */
     public final Action endgame = SHOOT.update(profile -> profile.share(0.5));

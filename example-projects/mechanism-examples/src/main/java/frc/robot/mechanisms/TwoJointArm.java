@@ -20,8 +20,8 @@ import frc.robot.Constants;
 public final class TwoJointArm implements Mechanism {
     private final MotorDevice shoulderMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X60, 3).currentLimit(edu.wpi.first.units.Units.Amps.of(35));
     private final MotorDevice wristMotor = Constants.RIO.motor(MotorKinds.KRAKEN_X44, 4).currentLimit(edu.wpi.first.units.Units.Amps.of(20));
-    private final EncoderDevice shoulderEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 3);
-    private final EncoderDevice wristEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 4);
+    private final EncoderDevice shoulderEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 3).measures(edu.wpi.first.units.Units.Degrees);
+    private final EncoderDevice wristEncoder = Constants.RIO.encoder(EncoderKinds.CANCODER, 4).measures(edu.wpi.first.units.Units.Degrees);
     private final DigitalInputDevice homeSwitch = Constants.RIO.dio(0).digitalInput().inverted();
     private final Range shoulderTravel = Range.of(edu.wpi.first.units.Units.Degrees.of(-25.0), edu.wpi.first.units.Units.Degrees.of(95.0));
     private final Range wristTravel = Range.of(edu.wpi.first.units.Units.Degrees.of(-70.0), edu.wpi.first.units.Units.Degrees.of(80.0));
@@ -38,22 +38,22 @@ public final class TwoJointArm implements Mechanism {
             .range(wristTravel)
             .length(edu.wpi.first.units.Units.Meters.of(Units.inchesToMeters(12.0)))
             .gearRatio(GearRatio.reduction(30.0, 1.0));
-    private final ControlBinding shoulder = Controls.position(shoulderMotor)
+    private final ControlBinding shoulder = Controls.position(shoulderMotor, edu.wpi.first.units.Units.Degrees)
             .feedback(shoulderEncoder)
             .pid(0.96, 0.0, 0.024)
             .constraints(
                     Constraints.range(shoulderTravel),
                     Constraints.require(context -> context.requested() >= 5.0
                             || wristEncoder.position() <= 45.0),
-                    Constraints.motion(80.0, 180.0));
-    private final ControlBinding wrist = Controls.position(wristMotor)
+                    Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(80.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(180.0)));
+    private final ControlBinding wrist = Controls.position(wristMotor, edu.wpi.first.units.Units.Degrees)
             .feedback(wristEncoder)
             .pid(0.72, 0.0, 0.012)
             .constraints(
                     Constraints.range(wristTravel),
                     Constraints.require(context -> context.requested() <= 45.0
                             || shoulderEncoder.position() >= 5.0),
-                    Constraints.motion(120.0, 280.0));
+                    Constraints.motion(edu.wpi.first.units.Units.DegreesPerSecond.of(120.0), edu.wpi.first.units.Units.DegreesPerSecondPerSecond.of(280.0)));
 
     public final Action stow = Actions.sequence()
             .until(homeSwitch::active, shoulderMotor.percent(() -> homeSwitch.active() ? 0.0 : -0.15))
@@ -64,7 +64,7 @@ public final class TwoJointArm implements Mechanism {
 
     private Action pose(double shoulderDegrees, double wristDegrees) {
         return Actions.parallel(
-                shoulder.position(shoulderDegrees).untilWithin(2.0),
-                wrist.position(wristDegrees).untilWithin(2.0));
+                shoulder.position(edu.wpi.first.units.Units.Degrees.of(shoulderDegrees)).untilWithin(edu.wpi.first.units.Units.Degrees.of(2.0)),
+                wrist.position(edu.wpi.first.units.Units.Degrees.of(wristDegrees)).untilWithin(edu.wpi.first.units.Units.Degrees.of(2.0)));
     }
 }
