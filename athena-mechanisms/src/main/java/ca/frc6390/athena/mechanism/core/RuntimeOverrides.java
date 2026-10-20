@@ -52,7 +52,11 @@ final class RuntimeOverrides {
      * get the same object.
      */
     ControlSample controlSample(ControlBinding<?> control) {
-        return controlSamples.computeIfAbsent(control, key -> new ControlSample());
+        return controlSamples.computeIfAbsent(control, key -> {
+            ControlSample sample = new ControlSample();
+            ControlSample.publish(key, sample);
+            return sample;
+        });
     }
 
     /** Installs the power pass whose per-motor caps the motor telemetry reports. */

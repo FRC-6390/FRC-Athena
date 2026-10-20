@@ -786,23 +786,68 @@ public record ControlBinding<U extends Unit>(
     }
 
     /**
-     * True while the output draws current and the feedback does not move (default threshold 2 A for
-     * 0.1 s). Needs no model.
+     * True while the output draws current and the feedback does not move, while the control is still away
+     * from its goal (default threshold 2 A for 0.1 s). Needs no model.
+     *
+     * <p>Holding still at the goal also draws current without moving (a gravity hold, or a mechanism resting
+     * on its stop at the target), so a control within the hold tolerance of its goal is not stalled. The
+     * default tolerance is 2 degrees for an angular binding and 1 cm for a linear one; use
+     * {@link #feedbackStalled(Measure)} to set it.</p>
      */
     public BindingCheck feedbackStalled() {
+        return feedbackStalledWithin(defaultHoldTolerance());
+    }
+
+    /**
+     * {@link #feedbackStalled()} with an explicit hold tolerance: within {@code holdTolerance} of the goal the
+     * control is holding, not stalled. The tolerance measures this binding's unit (a rate for a velocity binding).
+     */
+    public BindingCheck feedbackStalled(Measure<?> holdTolerance) {
+        requireUnit("Typed hold tolerances");
+        return feedbackStalledWithin(Math.abs(modeValue(holdTolerance)));
+    }
+
+    private BindingCheck feedbackStalledWithin(double holdTolerance) {
         MotorDevice motor = requireOutput("feedbackStalled()");
         FeedbackBinding feedback = requireFeedback();
+        ControlBinding<U> self = this;
         return new BindingCheck(() -> {
-            double applied = appliedVoltage(motor);
-            if (!(Math.abs(applied) > 0.5) || Math.abs(feedback.velocity().velocity()) >= STOPPED_SPEED) {
-                return 0.0;
-            }
+            ControlSample sample = ControlSample.latest(self);
+            double goalError = sample == null ? Double.NaN : sample.error();
+            double current;
             try {
-                return Math.abs(motor.raw().statorCurrentAmps());
+                current = motor.raw().statorCurrentAmps();
             } catch (RuntimeException unavailable) {
-                return Double.NaN;
+                current = Double.NaN;
             }
+            return stallMetric(appliedVoltage(motor), feedback.velocity().velocity(), current,
+                    goalError, holdTolerance);
         }, 2.0, true, edu.wpi.first.units.Units.Seconds.of(0.1), MonotonicClock.SYSTEM);
+    }
+
+    /**
+     * Stator current while stalled away from the goal, otherwise 0. A NaN goal error (no sample yet) does not
+     * exclude the stall.
+     */
+    static double stallMetric(double appliedVolts, double velocity, double statorAmps, double goalError,
+            double holdTolerance) {
+        if (!(Math.abs(appliedVolts) > 0.5) || Math.abs(velocity) >= STOPPED_SPEED) {
+            return 0.0;
+        }
+        if (Double.isFinite(goalError) && Math.abs(goalError) <= holdTolerance) {
+            return 0.0;
+        }
+        return Math.abs(statorAmps);
+    }
+
+    private double defaultHoldTolerance() {
+        if (unit instanceof AngleUnit) {
+            return valueIn(Units.Degrees.of(2.0), unit);
+        }
+        if (unit instanceof edu.wpi.first.units.DistanceUnit) {
+            return valueIn(Units.Meters.of(0.01), unit);
+        }
+        return 0.0;
     }
 
     /**

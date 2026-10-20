@@ -188,7 +188,7 @@ the debounce time.
 
 | Method | Needs a model | Condition (default threshold, debounce) |
 | --- | --- | --- |
-| `feedbackStalled()` | no | Output draws more than 2 A while the feedback is still and the output is driven (2 A, 0.1 s). |
+| `feedbackStalled()` | no | Output draws more than 2 A while the feedback is still, the output is driven, and the control is away from its goal (2 A, 0.1 s). Holding still at the goal is not a stall: within 2 degrees (angular) or 1 cm (linear) of the goal it stays false. `feedbackStalled(tolerance)` sets that hold tolerance. |
 | `blocked()` | yes | Command voltage above 1 V while the feedback is still (1 V, 0.2 s). |
 | `backdriven()` | yes | Motion opposite to the drive direction above 0.05 units per second (0.05, 0.1 s). |
 | `load()` | yes | `DoubleSupplier`: applied minus predicted volts minus `kA * a`. In N m when motor constants are known, otherwise in volts. |

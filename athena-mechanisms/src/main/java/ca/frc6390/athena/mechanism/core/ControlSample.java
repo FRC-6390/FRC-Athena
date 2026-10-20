@@ -6,6 +6,21 @@ package ca.frc6390.athena.mechanism.core;
  * one object and recording allocates nothing. Every field is NaN while the control is not driven.
  */
 final class ControlSample {
+    /**
+     * Latest sample of each driven control, so a check declared on the binding (which has no runtime
+     * reference) can see the goal the runtime is driving. Written once per control when the runtime first
+     * samples it; read under the lock, which is uncontended on the robot loop.
+     */
+    private static final java.util.Map<ControlBinding<?>, ControlSample> LATEST = new java.util.IdentityHashMap<>();
+
+    static synchronized void publish(ControlBinding<?> control, ControlSample sample) {
+        LATEST.put(control, sample);
+    }
+
+    static synchronized ControlSample latest(ControlBinding<?> control) {
+        return LATEST.get(control);
+    }
+
     private double target = Double.NaN;
     private double referencePosition = Double.NaN;
     private double referenceVelocity = Double.NaN;
