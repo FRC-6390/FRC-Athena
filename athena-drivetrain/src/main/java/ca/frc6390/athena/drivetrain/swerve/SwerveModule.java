@@ -69,9 +69,9 @@ public abstract class SwerveModule implements MechanismTemplate {
                 .measures(Units.Meters)
                 .travelPerRevolution(model.wheelCircumference());
 
-        driveVelocity = Controls.velocity(drive.get())
+        driveVelocity = Controls.velocity(drive.get(), Units.Meters)
                 .feedback(driveDistance);
-        steerPosition = Controls.position(steer.get())
+        steerPosition = Controls.position(steer.get(), Units.Rotations)
                 .feedback(angle.get().absoluteSignal(), angle.get())
                 .planner(MotionPlanners.boundedAngular(1.0));
         if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
@@ -125,13 +125,14 @@ public abstract class SwerveModule implements MechanismTemplate {
         if (driveVelocity == null || steerPosition == null) {
             throw new IllegalStateException("Swerve module controls have not been configured.");
         }
-        return Actions.parallel(driveVelocity.voltage(volts), steerPosition.position(0.0));
+        return Actions.parallel(driveVelocity.voltage(Units.Volts.of(volts)),
+                steerPosition.position(Units.Rotations.of(0.0)));
     }
 
     private Action applyTarget(SwerveModuleTarget target) {
         return Actions.parallel(
-                driveVelocity.velocity(target.speedMetersPerSecond()),
-                steerPosition.position(target.angleRotations()));
+                driveVelocity.velocity(Units.MetersPerSecond.of(target.speedMetersPerSecond())),
+                steerPosition.position(Units.Rotations.of(target.angleRotations())));
     }
 
     private static double wrapHalfRotation(double rotations) {

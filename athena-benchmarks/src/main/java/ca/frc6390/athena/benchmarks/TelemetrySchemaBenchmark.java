@@ -3,7 +3,6 @@ package ca.frc6390.athena.benchmarks;
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
-import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.ControlBinding;
@@ -122,12 +121,12 @@ public class TelemetrySchemaBenchmark {
         private AxisMechanism(int index) {
             motor = MotorDevice.of(MotorKinds.KRAKEN_X60, index + 1);
             encoder = motor.encoder().measures(Units.Degrees);
-            position = Controls.position(motor)
+            position = Controls.position(motor, Units.Degrees)
                     .feedback(encoder)
                     .pid(0.1, 0.0, 0.0)
-                    .constraint(Constraints.range(Range.of(Units.Value.of(-180.0), Units.Value.of(180.0))))
+                    .constraint(Constraints.range(Units.Degrees.of(-180.0), Units.Degrees.of(180.0)))
                     .profile(MotionProfiles.trapezoid(180.0, 360.0));
-            hold = position.position(0.0);
+            hold = position.position(Units.Degrees.of(0.0));
         }
     }
 }
