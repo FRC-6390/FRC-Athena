@@ -172,6 +172,25 @@ public final class Constraints {
         return new ClampConstraint(-magnitude, magnitude);
     }
 
+    /**
+     * Limits the calculated output to {@code +/- maximumAbsolute} at the output stage, for controls whose
+     * output is not a motor voltage, such as a binding that drives a {@code RobotVelocityPool} angular channel
+     * (radians per second) or a linear velocity channel (meters per second). The output is clamped in the
+     * measure's SI base unit, which is the unit those channels take. Use {@link #maxVoltage(Voltage)} for
+     * motor outputs.
+     *
+     * @param maximumAbsolute largest output magnitude, non-negative and finite
+     * @return output-stage clamp
+     * @throws IllegalArgumentException when the magnitude is negative or not finite
+     */
+    public static Constraint<Double> maxOutput(Measure<?> maximumAbsolute) {
+        double magnitude = Objects.requireNonNull(maximumAbsolute, "maximumAbsolute").baseUnitMagnitude();
+        if (!Double.isFinite(magnitude) || magnitude < 0.0) {
+            throw new IllegalArgumentException("Control clamp magnitude must be finite and non-negative.");
+        }
+        return new ClampConstraint(-magnitude, magnitude);
+    }
+
     public static Constraint<Double> lower(BooleanSupplier blocked) {
         Objects.requireNonNull(blocked, "blocked");
         return named("lower", context -> blocked.getAsBoolean() && context.requested() < context.current()

@@ -47,6 +47,20 @@ class ConstraintsTest {
     }
 
     @Test
+    void maxOutputClampsInTheMeasuresBaseUnit() {
+        Constraint<Double> clamp = Constraints.maxOutput(Units.DegreesPerSecond.of(180.0));
+
+        assertEquals(Math.PI, Constraints.evaluateOutput(
+                List.of(clamp),
+                new ConstraintContext<>(0.0, 10.0, MechanismContext.empty())).value(), 1.0e-9);
+        assertEquals(-Math.PI, Constraints.evaluateOutput(
+                List.of(clamp),
+                new ConstraintContext<>(0.0, -10.0, MechanismContext.empty())).value(), 1.0e-9);
+        assertThrows(IllegalArgumentException.class,
+                () -> Constraints.maxOutput(Units.RadiansPerSecond.of(-1.0)));
+    }
+
+    @Test
     void symmetricClampAndInvalidBoundsAreHandled() {
         Constraint<Double> clamp = Constraints.maxVoltage(Units.Volts.of(4.0));
 
