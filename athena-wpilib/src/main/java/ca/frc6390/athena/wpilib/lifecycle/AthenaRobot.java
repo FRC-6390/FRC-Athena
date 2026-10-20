@@ -73,6 +73,9 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private ReplayBridge replay;
     /** Start of the current enabled period (autonomous, teleop or test), or NaN while disabled. */
     private double enabledSinceSeconds = Double.NaN;
+    /** Power telemetry follows the read-only telemetry period; building its snapshot every cycle is wasted work. */
+    private double powerPublishPeriodSeconds = 0.10;
+    private double lastPowerPublishSeconds = Double.NEGATIVE_INFINITY;
     private ArcpBridge arcp;
     private PersistentStore persistentStore;
     private boolean closed;
@@ -321,9 +324,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     }
 
     private void publishPowerTelemetry() {
-        if (runtime != null && powerTelemetryPublisher != null) {
-            powerTelemetryPublisher.publish(runtime.powerSnapshot());
-        }
+        if (runtime == null || powerTelemetryPublisher == null) return;
+        double now = timestampSeconds();
+        if (now - lastPowerPublishSeconds < powerPublishPeriodSeconds) return;
+        lastPowerPublishSeconds = now;
+        powerTelemetryPublisher.publish(runtime.powerSnapshot());
     }
 
     private void publishTraces() {
@@ -360,6 +365,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                 case WARNING -> Seconds.of(0.50);
                 case CRITICAL -> Seconds.of(1.00);
             });
+            powerPublishPeriodSeconds = switch (status.pressure()) {
+                case NORMAL -> 0.10;
+                case WARNING -> 0.50;
+                case CRITICAL -> 1.00;
+            };
             telemetryPeriodPressure = status.pressure();
         }
         while (reportedSystemFailures < status.failures().size()) {
