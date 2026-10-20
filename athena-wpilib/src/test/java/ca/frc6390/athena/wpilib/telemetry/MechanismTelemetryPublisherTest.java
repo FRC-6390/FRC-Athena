@@ -41,8 +41,12 @@ class MechanismTelemetryPublisherTest {
             assertEquals(-1.0, published[0].getX(), 1.0e-9);
             assertEquals(1.0, published[2].getX(), 1.0e-9);
 
+            // Points are read-only, so they follow the read-only period rather than every cycle.
             source[0] = new Translation2d[] {new Translation2d(0.6, -0.25)};
             publisher.publish(runtime.mechanismTelemetrySchema(), 0.02);
+            assertEquals(3, points.get().length, "points wait for the read-only period");
+
+            publisher.publish(runtime.mechanismTelemetrySchema(), 0.2);
             published = points.get();
             assertEquals(1, published.length);
             assertEquals(0.6, published[0].getX(), 1.0e-9);

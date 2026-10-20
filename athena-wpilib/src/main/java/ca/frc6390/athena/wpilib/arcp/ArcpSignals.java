@@ -39,6 +39,12 @@ import java.util.function.Predicate;
  * <p>Writes go through {@link TelemetryValue#tryWrite}, so the robot's lock rules and value ranges decide.
  * Actions go through {@link TelemetryAction#request()} and {@link TelemetryAction#cancel()}.</p>
  *
+ * <p>Read-only values are sampled only while an ARCP subscription matches them, or once they have been sent and the
+ * subscription set has not changed. The native server keeps the last value it received for every signal, so a late
+ * subscriber gets a current snapshot without the robot reading every value each cycle. Writable values are always
+ * sampled because the server remembers them for rejected writes. Call {@link #subscribed(long[])} whenever the server's
+ * subscription generation changes.</p>
+ *
  * <p>All sampling methods run on the robot thread and allocate nothing for numbers and booleans once the
  * table is built.</p>
  */
@@ -95,12 +101,13 @@ final class ArcpSignals {
     private final List<ArcpDictEntry> dictionary = new ArrayList<>();
     private final List<ValueChannel> values = new ArrayList<>();
     /**
-     * The values sampled every cycle, in dictionary order: {@link #values} without the constants once those have been
-     * sent. A constant never changes after the schema is built, so after its first sample it would only be re-read and
-     * compared every cycle for nothing.
+     * The values sampled each cycle, in dictionary order: the writable values and the read-only values that a
+     * subscription matches, without constants once they have been sent. A constant never changes after the schema is
+     * built, so after its first sample it would only be re-read and compared every cycle for nothing.
      */
     private ValueChannel[] sampled;
-    private boolean constantsSent;
+    /** Signal ids matched by any subscription, ascending. */
+    private long[] subscribedIds = new long[0];
     /** Persisted writable values, the only ones {@link #persistedValues()} reports. */
     private final List<ValueChannel> persisted = new ArrayList<>();
     private final List<ActionChannel> actions = new ArrayList<>();
@@ -122,7 +129,7 @@ final class ArcpSignals {
         this.locked = locked;
         Map<Class<?>, Boolean> groups = new LinkedHashMap<>();
         walk(schema.root(), "", groups);
-        sampled = values.toArray(ValueChannel[]::new);
+        rebuildSampled();
         for (Class<?> group : groups.keySet()) {
             long id = nextId++;
             locks.add(new LockChannel(id, group));
@@ -161,18 +168,46 @@ final class ArcpSignals {
     }
 
     /**
+     * Replaces the set of subscribed signal ids. Values that a subscription newly matches are sampled from the next
+     * {@link #sample(ArcpCycle)} on; the server's last value for them may be older, and the first sample sends any
+     * difference. Values no subscription matches are no longer read.
+     *
+     * @param ids signal ids matched by at least one subscription, ascending
+     */
+    void subscribed(long[] ids) {
+        subscribedIds = ids;
+        rebuildSampled();
+    }
+
+    private void rebuildSampled() {
+        List<ValueChannel> next = new ArrayList<>(values.size());
+        for (ValueChannel channel : values) {
+            if (channel.value.constant() && channel.published) {
+                continue;
+            }
+            if (channel.value.writable() || Arrays.binarySearch(subscribedIds, channel.signalId) >= 0) {
+                next.add(channel);
+            }
+        }
+        sampled = next.toArray(ValueChannel[]::new);
+    }
+
+    /**
      * Writes the cycle's changed values into {@code cycle}. Clears it first. Numbers, booleans and integers are
      * stored without allocation.
      */
     void sample(ArcpCycle cycle) {
         cycle.clear();
-        ValueChannel[] channels = sampled;
-        for (ValueChannel channel : channels) {
+        boolean constantSent = false;
+        for (ValueChannel channel : sampled) {
+            boolean wasPublished = channel.published;
             sampleValue(channel, cycle);
+            if (!wasPublished && channel.published && channel.value.constant()) {
+                constantSent = true;
+            }
         }
-        if (!constantsSent) {
-            constantsSent = true;
-            sampled = values.stream().filter(channel -> !channel.value.constant()).toArray(ValueChannel[]::new);
+        if (constantSent) {
+            rebuildSampled();
         }
         for (int i = 0, n = actions.size(); i < n; i++) {
             ActionChannel channel = actions.get(i);

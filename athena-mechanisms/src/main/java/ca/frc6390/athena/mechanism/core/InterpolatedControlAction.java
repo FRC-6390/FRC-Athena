@@ -30,6 +30,11 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     private String name = "interpolation";
     private boolean persistPoints;
     private volatile long pointVersion;
+    /** The model's live-editable parameters, read by the curve fingerprint. */
+    private final List<TelemetryValue> modelParameters;
+    /** Last sampled curve and the fingerprint of the inputs it was computed from. Guarded by this object's lock. */
+    private Translation2d[] cachedCurve;
+    private long cachedCurveFingerprint;
 
     InterpolatedControlAction(
             ControlBinding<?> control,
@@ -51,6 +56,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         this.inputUnit = inputUnit;
         this.entries = List.copyOf(entries);
         this.runtimeData = new RuntimeData(this.entries);
+        this.modelParameters = List.copyOf(model.telemetry().values());
     }
 
     /**
@@ -174,6 +180,7 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
     private void replaceEntries(List<Entry> updated) {
         entries = List.copyOf(updated);
         runtimeData = new RuntimeData(entries);
+        cachedCurve = null;
     }
 
     /** Names this interpolation by its telemetry path. Called by the schema builder. */
@@ -362,8 +369,17 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
         }
     }
 
+    /**
+     * The curve is recomputed only when the sampled points and values, or a live model parameter, differ from the last
+     * curve. A model whose output depends on state other than these is not seen until one of them changes.
+     */
     private Translation2d[] sampledCurvePoints() {
         runtimeData.beginEvaluation();
+        long fingerprint = curveFingerprint();
+        Translation2d[] cached = cachedCurve;
+        if (cached != null && fingerprint == cachedCurveFingerprint) {
+            return cached;
+        }
         Translation2d[] points = new Translation2d[(entries.size() - 1) * CURVE_SAMPLES_PER_SEGMENT + 1];
         int output = 0;
         for (int segment = 0; segment < entries.size() - 1; segment++) {
@@ -378,7 +394,26 @@ public final class InterpolatedControlAction implements Action, TelemetrySource 
                         requireFinite(model.interpolate(curveInput, runtimeData), "Interpolated target"));
             }
         }
+        cachedCurve = points;
+        cachedCurveFingerprint = fingerprint;
         return points;
+    }
+
+    private long curveFingerprint() {
+        long hash = 1L;
+        for (int index = 0; index < entries.size(); index++) {
+            hash = 31L * hash + Double.doubleToLongBits(runtimeData.point(index));
+            hash = 31L * hash + Double.doubleToLongBits(runtimeData.value(index));
+        }
+        for (TelemetryValue parameter : modelParameters) {
+            long bits = switch (parameter.type()) {
+                case NUMBER -> Double.doubleToLongBits(parameter.number());
+                case BOOLEAN -> parameter.bool() ? 1L : 0L;
+                default -> Objects.hashCode(parameter.value());
+            };
+            hash = 31L * hash + bits;
+        }
+        return hash;
     }
 
     private synchronized Translation2d[] currentPoint() {

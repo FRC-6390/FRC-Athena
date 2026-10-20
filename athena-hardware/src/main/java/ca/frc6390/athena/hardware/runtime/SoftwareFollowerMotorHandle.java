@@ -45,6 +45,7 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     }
     @Override public void activate() { delegate.activate(); }
     @Override public void refreshInputs() { delegate.refreshInputs(); }
+    @Override public void refreshInputs(long refreshPass) { delegate.refreshInputs(refreshPass); }
     @Override public boolean faulted() { return delegate.faulted(); }
     @Override public void stopFollowing() { delegate.stopFollowing(); }
     @Override public double appliedVoltage() { return delegate.appliedVoltage(); }

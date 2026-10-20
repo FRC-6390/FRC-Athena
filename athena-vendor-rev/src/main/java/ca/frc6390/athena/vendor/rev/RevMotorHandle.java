@@ -843,9 +843,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
         @Override
         public boolean fatalFault() {
-            // hasActiveFault() reads the cached status frame without allocating; getFaults() allocates, so it
-            // only runs on the rare cycle where some fault is active.
-            return spark.hasActiveFault() && (spark.getFaults().rawBits & FATAL_FAULT_BITS) != 0;
+            // One SPARK read: the fault word itself. hasActiveFault() followed by getFaults() cost two calls
+            // on every faulted cycle, and the fault word alone is equivalent since a zero word has no fatal bit.
+            return (spark.getFaults().rawBits & FATAL_FAULT_BITS) != 0;
         }
 
         @Override public void close() { spark.close(); }

@@ -323,6 +323,34 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         return last != null ? last : requested;
     }
 
+    /**
+     * Counter that changes whenever the set of subscribed signals may have changed. Read it each cycle; re-read
+     * {@link #subscribedSignalIds()} only when it differs from the last value seen. 0 when stopped.
+     *
+     * @return subscription generation
+     */
+    public synchronized long subscriptionGeneration() {
+        return handle == 0 ? 0L : ArcpNative.subscriptionGeneration(handle);
+    }
+
+    /**
+     * Sorted ids of the signals that at least one subscription of any session matches. Empty when stopped.
+     *
+     * @return subscribed signal ids, ascending
+     */
+    public synchronized long[] subscribedSignalIds() {
+        return handle == 0 ? new long[0] : ArcpNative.subscribedSignalIds(handle);
+    }
+
+    /**
+     * Number of connected control sessions. Zero when stopped.
+     *
+     * @return connected sessions
+     */
+    public synchronized int sessionCount() {
+        return handle == 0 ? 0 : ArcpNative.sessionCount(handle);
+    }
+
     @Override
     public synchronized ArcpStatus status() {
         if (handle == 0) {

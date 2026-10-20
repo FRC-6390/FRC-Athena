@@ -49,6 +49,8 @@ public final class ArcpBridge implements AutoCloseable {
     private final Supplier<Map<String, Object>> codeDefaults;
     private final Path statusDirectory;
     private double lastExportSeconds = Double.NaN;
+    /** Last subscription generation read from the server; -1 before the first read. */
+    private long subscriptionGeneration = -1;
     private String lastFailure = "";
     /** Contents of the last status.txt written, so an unchanged status costs no file write. */
     private String lastStatusText = "";
@@ -268,8 +270,11 @@ public final class ArcpBridge implements AutoCloseable {
         }
         try {
             server.serviceRequests();
+            syncSubscriptions();
             signals.sample(cycle);
-            if (cycle.size() > 0) {
+            // A connected session still gets keyframes and status from the native side, so it is published to even
+            // when no value changed.
+            if (cycle.size() > 0 || server.sessionCount() > 0) {
                 server.publishCycle(micros(nowSeconds), cycle);
             }
         } catch (RuntimeException failure) {
@@ -279,6 +284,18 @@ public final class ArcpBridge implements AutoCloseable {
             lastExportSeconds = nowSeconds;
             publishGrownDictionary();
             refreshExports();
+        }
+    }
+
+    /**
+     * Re-reads the subscribed signal set when the server's subscription generation has changed. The generation is read
+     * first, so a change made while the ids are read is picked up again on the next cycle.
+     */
+    private void syncSubscriptions() {
+        long generation = server.subscriptionGeneration();
+        if (generation != subscriptionGeneration) {
+            subscriptionGeneration = generation;
+            signals.subscribed(server.subscribedSignalIds());
         }
     }
 

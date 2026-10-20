@@ -328,6 +328,49 @@ pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_status<'local>(
     })
 }
 
+/// Changes whenever the set of subscribed signals may have changed.
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_subscriptionGeneration<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jlong {
+    run(&mut env, 0, |_| Ok(server(handle)?.server.subscription_generation() as jlong))
+}
+
+/// Sorted ids of the signals matched by at least one subscription.
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_subscribedSignalIds<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jlongArray {
+    let null: jlongArray = std::ptr::null_mut();
+    run(&mut env, null, |env| {
+        let ids: Vec<jlong> = server(handle)?
+            .server
+            .subscribed_signal_ids()
+            .into_iter()
+            .map(|id| id as jlong)
+            .collect();
+        let array: JLongArray = env.new_long_array(ids.len()).map_err(|e| e.to_string())?;
+        if !ids.is_empty() {
+            array.set_region(env, 0, &ids).map_err(|e| e.to_string())?;
+        }
+        Ok(array.into_raw())
+    })
+}
+
+/// Number of connected control sessions.
+#[no_mangle]
+pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_sessionCount<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> jint {
+    run(&mut env, 0, |_| Ok(server(handle)?.server.session_count() as jint))
+}
+
 /// Throttled subscriptions as `session/subscription pattern requested-rate divisor`, one per line.
 #[no_mangle]
 pub extern "system" fn Java_ca_frc6390_athena_arcp_ArcpNative_throttled<'local>(

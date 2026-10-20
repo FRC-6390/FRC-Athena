@@ -12,7 +12,19 @@ import java.util.Objects;
 public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
     private final ImuDevice device;
     private final NavxController controller;
-    private volatile Snapshot snapshot = Snapshot.empty();
+    // Each input is a volatile field written in place every refresh, so a refresh allocates nothing. Each getter reads
+    // one field, which is as consistent as the old per-getter reads of a shared snapshot.
+    private volatile double yawDegrees = Double.NaN;
+    private volatile double angleDegrees = Double.NaN;
+    private volatile double pitchDegrees = Double.NaN;
+    private volatile double rollDegrees = Double.NaN;
+    private volatile double yawRateDegreesPerSecond = Double.NaN;
+    private volatile double pitchRateDegreesPerSecond = Double.NaN;
+    private volatile double rollRateDegreesPerSecond = Double.NaN;
+    private volatile double linearAccelerationXG = Double.NaN;
+    private volatile double linearAccelerationYG = Double.NaN;
+    private volatile double linearAccelerationZG = Double.NaN;
+    private final double[] acceleration = new double[3];
     private volatile double lastUpdateSeconds = Double.NaN;
 
     /**
@@ -36,7 +48,7 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     @Override
     public double yawDegrees() {
-        return snapshot.yawDegrees();
+        return yawDegrees;
     }
 
     @Override
@@ -46,62 +58,63 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
-        double[] acceleration = controller.linearAccelerationG();
-        snapshot = new Snapshot(
-                controller.yawDegrees(),
-                controller.angleDegrees(),
-                controller.pitchDegrees(),
-                controller.rollDegrees(),
-                controller.yawRateDegreesPerSecond(),
-                controller.pitchRateDegreesPerSecond(),
-                controller.rollRateDegreesPerSecond(),
-                acceleration[0], acceleration[1], acceleration[2]);
+        controller.linearAccelerationG(acceleration);
+        yawDegrees = controller.yawDegrees();
+        angleDegrees = controller.angleDegrees();
+        pitchDegrees = controller.pitchDegrees();
+        rollDegrees = controller.rollDegrees();
+        yawRateDegreesPerSecond = controller.yawRateDegreesPerSecond();
+        pitchRateDegreesPerSecond = controller.pitchRateDegreesPerSecond();
+        rollRateDegreesPerSecond = controller.rollRateDegreesPerSecond();
+        linearAccelerationXG = acceleration[0];
+        linearAccelerationYG = acceleration[1];
+        linearAccelerationZG = acceleration[2];
         lastUpdateSeconds = System.nanoTime() * 1.0e-9;
     }
 
     @Override
     public double angleDegrees() {
-        return snapshot.angleDegrees();
+        return angleDegrees;
     }
 
     @Override
     public double pitchDegrees() {
-        return snapshot.pitchDegrees();
+        return pitchDegrees;
     }
 
     @Override
     public double rollDegrees() {
-        return snapshot.rollDegrees();
+        return rollDegrees;
     }
 
     @Override
     public double yawRateDegreesPerSecond() {
-        return snapshot.yawRateDegreesPerSecond();
+        return yawRateDegreesPerSecond;
     }
 
     @Override
     public double pitchRateDegreesPerSecond() {
-        return snapshot.pitchRateDegreesPerSecond();
+        return pitchRateDegreesPerSecond;
     }
 
     @Override
     public double rollRateDegreesPerSecond() {
-        return snapshot.rollRateDegreesPerSecond();
+        return rollRateDegreesPerSecond;
     }
 
     @Override
     public double linearAccelerationXG() {
-        return snapshot.linearAccelerationXG();
+        return linearAccelerationXG;
     }
 
     @Override
     public double linearAccelerationYG() {
-        return snapshot.linearAccelerationYG();
+        return linearAccelerationYG;
     }
 
     @Override
     public double linearAccelerationZG() {
-        return snapshot.linearAccelerationZG();
+        return linearAccelerationZG;
     }
 
     @Override public boolean isConnected() { return controller.isConnected(); }
@@ -125,23 +138,6 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
     private static AHRS createAhrs(ImuDevice device) {
         return new AHRS(comType(device), AHRS.NavXUpdateRate.k100Hz);
-    }
-
-    private record Snapshot(
-            double yawDegrees,
-            double angleDegrees,
-            double pitchDegrees,
-            double rollDegrees,
-            double yawRateDegreesPerSecond,
-            double pitchRateDegreesPerSecond,
-            double rollRateDegreesPerSecond,
-            double linearAccelerationXG,
-            double linearAccelerationYG,
-            double linearAccelerationZG) {
-        private static Snapshot empty() {
-            return new Snapshot(Double.NaN, Double.NaN, Double.NaN, Double.NaN,
-                    Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN);
-        }
     }
 
     private static AHRS.NavXComType comType(ImuDevice device) {
@@ -189,12 +185,11 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
         double linearAccelerationZG();
 
-        default double[] linearAccelerationG() {
-            return new double[] {
-                    linearAccelerationXG(),
-                    linearAccelerationYG(),
-                    linearAccelerationZG()
-            };
+        /** Writes the linear acceleration in g into {@code out[0..2]}; the handle reuses {@code out} each refresh. */
+        default void linearAccelerationG(double[] out) {
+            out[0] = linearAccelerationXG();
+            out[1] = linearAccelerationYG();
+            out[2] = linearAccelerationZG();
         }
 
         default boolean isConnected() { return true; }
@@ -259,22 +254,28 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
         @Override
         public double linearAccelerationXG() {
-            return sensorLinearAcceleration()[0];
+            double[] out = new double[3];
+            sensorLinearAcceleration(out);
+            return out[0];
         }
 
         @Override
         public double linearAccelerationYG() {
-            return sensorLinearAcceleration()[1];
+            double[] out = new double[3];
+            sensorLinearAcceleration(out);
+            return out[1];
         }
 
         @Override
         public double linearAccelerationZG() {
-            return sensorLinearAcceleration()[2];
+            double[] out = new double[3];
+            sensorLinearAcceleration(out);
+            return out[2];
         }
 
         @Override
-        public double[] linearAccelerationG() {
-            return sensorLinearAcceleration();
+        public void linearAccelerationG(double[] out) {
+            sensorLinearAcceleration(out);
         }
 
         @Override public boolean isConnected() { return ahrs().isConnected(); }
@@ -304,7 +305,7 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
             return ahrs;
         }
 
-        private double[] sensorLinearAcceleration() {
+        private void sensorLinearAcceleration(double[] out) {
             AHRS sensor = ahrs();
             double x = sensor.getWorldLinearAccelX();
             double y = sensor.getWorldLinearAccelY();
@@ -318,13 +319,11 @@ public final class StudicaImuHandle implements ImuHandle, AutoCloseable {
 
             // NavX reports gravity-corrected acceleration in its world frame. Rotate it back
             // into sensor axes so ImuMount can consistently produce robot-frame acceleration.
-            return new double[] {
-                    cy * cp * x + sy * cp * y - sp * z,
-                    (cy * sp * sr - sy * cr) * x
-                            + (sy * sp * sr + cy * cr) * y + cp * sr * z,
-                    (cy * sp * cr + sy * sr) * x
-                            + (sy * sp * cr - cy * sr) * y + cp * cr * z
-            };
+            out[0] = cy * cp * x + sy * cp * y - sp * z;
+            out[1] = (cy * sp * sr - sy * cr) * x
+                    + (sy * sp * sr + cy * cr) * y + cp * sr * z;
+            out[2] = (cy * sp * cr + sy * sr) * x
+                    + (sy * sp * cr - cy * sr) * y + cp * cr * z;
         }
     }
 }

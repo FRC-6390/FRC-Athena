@@ -111,9 +111,11 @@ is shown. NetworkTables publishes the same paths under `athena/vision/...` for l
 
 ### Realtime values
 
-Each robot cycle the bridge samples the values and publishes only those that changed (`ArcpCycle`, one JNI call).
+Each robot cycle the bridge samples the writable values and the read-only values that some subscription matches, and
+publishes only those that changed (`ArcpCycle`, one JNI call). Read-only values that nothing subscribes to are not read.
 Clients subscribe with mechanism-tree globs (`robot/turret/**`) and rates (`ON_CHANGE` or Hz). The server sends one
-frame per subscriber per cycle and a keyframe at least once per second.
+frame per subscriber per cycle and a keyframe at least once per second. A new subscription gets the server's last value
+of each newly matched signal at once; the robot's current value follows in the same cycle.
 
 ### Writes
 

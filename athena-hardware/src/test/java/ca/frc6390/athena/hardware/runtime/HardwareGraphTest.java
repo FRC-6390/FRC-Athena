@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -233,6 +234,22 @@ class HardwareGraphTest {
         assertEquals(-4.0, backendFollower.velocityTarget, 1.0e-9);
         softwareFollower.handle().stop();
         assertEquals(1, backendFollower.stopCalls);
+    }
+
+    @Test
+    void everyHandleInARefreshPassGetsTheSamePassTokenAndTokensNeverRepeat() {
+        FakeMotorBackend motorBackend = new FakeMotorBackend();
+        HardwareGraph graph = HardwareGraph.using(BackendRegistry.of(List.of(motorBackend), List.of(), List.of()));
+        FakeMotorHandle first = assertInstanceOf(FakeMotorHandle.class, graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 1)));
+        FakeMotorHandle second = assertInstanceOf(FakeMotorHandle.class, graph.motor(MotorDevice.of(MotorKinds.KRAKEN_X60, 2)));
+
+        graph.refreshInputs();
+        graph.refreshInputs();
+
+        assertEquals(2, first.refreshPasses.size());
+        assertEquals(first.refreshPasses, second.refreshPasses);
+        assertNotEquals(first.refreshPasses.get(0), first.refreshPasses.get(1));
+        assertEquals(2, first.refreshCalls);
     }
 
     @Test
@@ -781,6 +798,7 @@ class HardwareGraphTest {
         private int activateCalls;
         private int closeCalls;
         private int refreshCalls;
+        private final List<Long> refreshPasses = new java.util.ArrayList<>();
         private int positionReadCalls;
         private boolean failRefresh;
         private MotorHandle followLeader;
@@ -809,6 +827,12 @@ class HardwareGraphTest {
         @Override
         public void activate() {
             activateCalls++;
+        }
+
+        @Override
+        public void refreshInputs(long refreshPass) {
+            refreshPasses.add(refreshPass);
+            refreshInputs();
         }
 
         @Override

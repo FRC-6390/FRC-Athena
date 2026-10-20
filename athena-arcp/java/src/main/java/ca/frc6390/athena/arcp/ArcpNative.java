@@ -132,4 +132,13 @@ final class ArcpNative {
 
     /** Throttled subscriptions, one per line. */
     static native String throttled(long handle);
+
+    /** Changes whenever the set of subscribed signals may have changed. */
+    static native long subscriptionGeneration(long handle);
+
+    /** Sorted ids of the signals matched by at least one subscription. */
+    static native long[] subscribedSignalIds(long handle);
+
+    /** Number of connected control sessions. */
+    static native int sessionCount(long handle);
 }

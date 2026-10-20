@@ -44,6 +44,7 @@ final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     @Override public MotorDevice device() { return original.device(); }
     @Override public void activate() { original.activate(); }
     @Override public void refreshInputs() { original.refreshInputs(); }
+    @Override public void refreshInputs(long refreshPass) { original.refreshInputs(refreshPass); }
     @Override public boolean faulted() { return original.faulted(); }
     @Override public boolean supportsRuntimeConfiguration() { return route.handle.supportsRuntimeConfiguration(); }
 

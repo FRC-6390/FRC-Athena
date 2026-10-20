@@ -151,8 +151,13 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void refreshInputs() {
+        refreshInputs(CtreStatusBatch.UNSHARED);
+    }
+
+    @Override
+    public void refreshInputs(long refreshPass) {
         // The connection check reads the frame timestamps of this batch, so refresh first.
-        controller.refreshSignals();
+        controller.refreshSignals(refreshPass);
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE motor is disconnected: " + device.defaultName());
         }
@@ -427,8 +432,10 @@ public final class CtreMotorHandle implements MotorHandle {
 
         double velocityRotationsPerSecond();
 
-        /** Refreshes all cached status signals in one batched call before the getters are read. */
+        /** Refreshes all cached status signals; the batch refreshes the bus unless this pass already did. */
         default void refreshSignals() { }
+
+        default void refreshSignals(long refreshPass) { refreshSignals(); }
 
         default double appliedVoltage() { return 0.0; }
 
@@ -459,6 +466,7 @@ public final class CtreMotorHandle implements MotorHandle {
         private PhoenixTalonController(MotorDevice device) {
             talon = new TalonFX(device.id(), new CANBus(device.canbus()));
             signals = new TalonSignals(
+                    device.canbus(),
                     talon.getPosition(),
                     talon.getVelocity(),
                     talon.getMotorVoltage(),
@@ -563,7 +571,12 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void refreshSignals() {
-            signals.refresh();
+            signals.refresh(CtreStatusBatch.UNSHARED);
+        }
+
+        @Override
+        public void refreshSignals(long refreshPass) {
+            signals.refresh(refreshPass);
         }
 
         @Override
@@ -601,6 +614,7 @@ public final class CtreMotorHandle implements MotorHandle {
             talon = new TalonFXS(device.id(), new CANBus(device.canbus()));
             arrangement = arrangement(device);
             signals = new TalonSignals(
+                    device.canbus(),
                     talon.getPosition(),
                     talon.getVelocity(),
                     talon.getMotorVoltage(),
@@ -726,7 +740,12 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void refreshSignals() {
-            signals.refresh();
+            signals.refresh(CtreStatusBatch.UNSHARED);
+        }
+
+        @Override
+        public void refreshSignals(long refreshPass) {
+            signals.refresh(refreshPass);
         }
 
         @Override
@@ -787,8 +806,10 @@ public final class CtreMotorHandle implements MotorHandle {
         private final BaseStatusSignal[] fatalFaults;
         private final BaseStatusSignal[] all;
         private final SignalFreshness freshness;
+        private final CtreStatusBatch batch;
 
         private TalonSignals(
+                String canbus,
                 StatusSignal<Angle> position,
                 StatusSignal<AngularVelocity> velocity,
                 StatusSignal<Voltage> voltage,
@@ -807,6 +828,8 @@ public final class CtreMotorHandle implements MotorHandle {
             all = java.util.Arrays.copyOf(inputs, inputs.length + fatalFaults.length);
             System.arraycopy(fatalFaults, 0, all, inputs.length, fatalFaults.length);
             freshness = new SignalFreshness(position);
+            batch = CtreStatusBatch.forBus(canbus);
+            batch.join(all);
         }
 
         private boolean fatalFault() {
@@ -828,8 +851,8 @@ public final class CtreMotorHandle implements MotorHandle {
             return Double.isFinite(value) ? java.util.OptionalDouble.of(value) : java.util.OptionalDouble.empty();
         }
 
-        private void refresh() {
-            BaseStatusSignal.refreshAll(all);
+        private void refresh(long refreshPass) {
+            batch.refresh(refreshPass);
         }
 
         private double positionTimeSeconds() {

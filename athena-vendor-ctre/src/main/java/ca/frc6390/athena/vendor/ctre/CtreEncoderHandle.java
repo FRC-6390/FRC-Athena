@@ -2,7 +2,6 @@ package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
-import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusCode;
 import com.ctre.phoenix6.StatusSignal;
@@ -159,8 +158,13 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
     @Override
     public void refreshInputs() {
+        refreshInputs(CtreStatusBatch.UNSHARED);
+    }
+
+    @Override
+    public void refreshInputs(long refreshPass) {
         // The connection check reads the frame timestamps of this batch, so refresh first.
-        controller.refreshSignals();
+        controller.refreshSignals(refreshPass);
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE encoder is disconnected: " + device.defaultName());
         }
@@ -195,8 +199,10 @@ public final class CtreEncoderHandle implements EncoderHandle {
             return new MagnetConfig(0.0, true, ABSOLUTE_DISCONTINUITY_POINT_ROTATIONS);
         }
 
-        /** Refreshes all cached status signals in one batched call. */
+        /** Refreshes all cached status signals; the batch refreshes the bus unless this pass already did. */
         default void refreshSignals() { }
+
+        default void refreshSignals(long refreshPass) { refreshSignals(); }
 
         double positionRotations();
 
@@ -213,7 +219,7 @@ public final class CtreEncoderHandle implements EncoderHandle {
         private final StatusSignal<Angle> position;
         private final StatusSignal<Angle> absolutePosition;
         private final StatusSignal<AngularVelocity> velocity;
-        private final BaseStatusSignal[] signals;
+        private final CtreStatusBatch batch;
         private final SignalFreshness freshness;
         private final PendingPositionSet pendingPosition = new PendingPositionSet();
 
@@ -222,7 +228,8 @@ public final class CtreEncoderHandle implements EncoderHandle {
             position = encoder.getPosition();
             absolutePosition = encoder.getAbsolutePosition();
             velocity = encoder.getVelocity();
-            signals = new BaseStatusSignal[] {position, absolutePosition, velocity};
+            batch = CtreStatusBatch.forBus(device.canbus());
+            batch.join(position, absolutePosition, velocity);
             freshness = new SignalFreshness(position);
         }
 
@@ -258,7 +265,12 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
         @Override
         public void refreshSignals() {
-            BaseStatusSignal.refreshAll(signals);
+            refreshSignals(CtreStatusBatch.UNSHARED);
+        }
+
+        @Override
+        public void refreshSignals(long refreshPass) {
+            batch.refresh(refreshPass);
         }
 
         @Override

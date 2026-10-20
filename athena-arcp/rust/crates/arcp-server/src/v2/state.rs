@@ -99,6 +99,9 @@ pub(crate) struct State {
     pub schemas: Vec<StructSchema>,
     pub latest: HashMap<u64, arcp_core::v2::Value>,
     pub latest_ts: u64,
+    /// Bumped whenever the set of subscribed signal ids may have changed (subscribe, unsubscribe, dictionary,
+    /// session removal). Lets the robot thread re-read [`State::subscribed_ids`] only when it differs.
+    pub subscription_generation: u64,
     pub sessions: Vec<Session>,
     pub next_session_id: u32,
     pub budget_bytes_per_sec: u64,
@@ -120,6 +123,7 @@ impl State {
             schemas: Vec::new(),
             latest: HashMap::new(),
             latest_ts: 0,
+            subscription_generation: 0,
             sessions: Vec::new(),
             next_session_id: 1,
             budget_bytes_per_sec,
@@ -155,7 +159,33 @@ impl State {
     }
 
     pub fn remove_session(&mut self, id: u32) {
+        let before = self.sessions.len();
         self.sessions.retain(|s| s.id != id);
+        if self.sessions.len() != before {
+            self.subscription_generation += 1;
+        }
+    }
+
+    /// Drops sessions whose sockets failed. Their subscriptions go with them, so the subscribed set may change.
+    fn prune_dead(&mut self) {
+        let before = self.sessions.len();
+        self.sessions.retain(|s| !s.dead);
+        if self.sessions.len() != before {
+            self.subscription_generation += 1;
+        }
+    }
+
+    /// Sorted, deduplicated ids matched by at least one subscription of any session.
+    pub fn subscribed_ids(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .sessions
+            .iter()
+            .flat_map(|s| s.subs.iter())
+            .flat_map(|sub| sub.matches.iter().copied())
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
     }
 
     /// Pushes the full schema to every connected client (request id 0).
@@ -199,8 +229,9 @@ impl State {
                 sub.matches = match_signals(dict, &sub.pattern);
             }
         }
+        self.subscription_generation += 1;
         self.push_schema();
-        self.sessions.retain(|s| !s.dead);
+        self.prune_dead();
     }
 
     /// Records the cycle's values (only real changes are stored) and sends every due update.
@@ -225,7 +256,7 @@ impl State {
         }
         self.window_bytes += bytes;
         self.send_status(ts, udp);
-        self.sessions.retain(|s| !s.dead);
+        self.prune_dead();
     }
 
     /// Once per interval, sends the server status signals to every session with a UDP address,

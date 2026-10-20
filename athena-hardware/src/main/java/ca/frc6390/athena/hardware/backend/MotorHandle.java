@@ -32,6 +32,17 @@ public interface MotorHandle {
         // default no-op
     }
 
+    /**
+     * Refreshes runtime input snapshots for one refresh pass. Handles that share a vendor batched read use the
+     * pass token to read the shared bus once per pass; a token must not repeat across passes. The default ignores
+     * the token.
+     *
+     * @param refreshPass token unique to this refresh pass
+     */
+    default void refreshInputs(long refreshPass) {
+        refreshInputs();
+    }
+
     /** Returns whether this backend can apply portable motor configuration at runtime. */
     default boolean supportsRuntimeConfiguration() {
         return false;

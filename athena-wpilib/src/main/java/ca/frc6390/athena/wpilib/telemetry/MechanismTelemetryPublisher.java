@@ -53,7 +53,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private NetworkTableListenerPoller poller;
     private final List<ValueChannel> values = new ArrayList<>();
     /**
-     * The channels of {@link #values} updated on every publish (writable values and points), in the same order. A
+     * The channels of {@link #values} updated on every publish (writable values), in the same order. A
      * publish between two read-only periods walks only these instead of skipping the rest one by one.
      */
     private final List<ValueChannel> everyCycle = new ArrayList<>();
@@ -173,7 +173,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 }
             } else {
                 values.add(channel);
-                if (value.writable() || value.type() == TelemetryValue.Type.POINTS) {
+                if (value.writable()) {
                     everyCycle.add(channel);
                 }
                 if (channel.lockStatus != null) {
@@ -425,12 +425,9 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 Translation2d[] points = (Translation2d[]) value.value();
                 if (!published || !(lastObject instanceof Translation2d[] previous)
                         || !Arrays.equals(previous, points)) {
-                    Translation2d[] translated = new Translation2d[points.length];
-                    for (int index = 0; index < points.length; index++) {
-                        translated[index] = new Translation2d(points[index].getX(), points[index].getY());
-                    }
-                    pointsPublisher.set(translated);
-                    // TelemetryValue.points returns a fresh copy on every read, so this array is not shared.
+                    // Translation2d is immutable and TelemetryValue.points returns a fresh array on every read, so the
+                    // array can go to the publisher as it is.
+                    pointsPublisher.set(points);
                     lastObject = points;
                     published = true;
                 }

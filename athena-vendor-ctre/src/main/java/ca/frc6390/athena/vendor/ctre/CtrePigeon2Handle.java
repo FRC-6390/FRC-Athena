@@ -2,7 +2,6 @@ package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.hardware.backend.ImuHandle;
 import ca.frc6390.athena.hardware.device.ImuDevice;
-import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
 import com.ctre.phoenix6.hardware.Pigeon2;
@@ -56,8 +55,13 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        refreshInputs(CtreStatusBatch.UNSHARED);
+    }
+
+    @Override
+    public void refreshInputs(long refreshPass) {
         // The connection check reads the frame timestamps of this batch, so refresh first.
-        controller.refreshSignals();
+        controller.refreshSignals(refreshPass);
         if (!controller.isConnected()) {
             throw new IllegalStateException("CTRE IMU is disconnected: " + device.defaultName());
         }
@@ -170,8 +174,10 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     interface Pigeon2Controller extends AutoCloseable {
         default boolean isConnected() { return true; }
 
-        /** Refreshes all cached status signals in one batched call before the getters are read. */
+        /** Refreshes all cached status signals; the batch refreshes the bus unless this pass already did. */
         default void refreshSignals() { }
+
+        default void refreshSignals(long refreshPass) { refreshSignals(); }
 
         double yawDegrees();
 
@@ -215,7 +221,8 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         private final StatusSignal<Double> gravityX;
         private final StatusSignal<Double> gravityY;
         private final StatusSignal<Double> gravityZ;
-        private final BaseStatusSignal[] signals;
+        private final CtreStatusBatch batch;
+        private final CtreStatusBatch.Member member;
         private final SignalFreshness freshness;
 
         private PhoenixPigeon2Controller(ImuDevice device) {
@@ -232,10 +239,10 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
             gravityX = pigeon.getGravityVectorX();
             gravityY = pigeon.getGravityVectorY();
             gravityZ = pigeon.getGravityVectorZ();
-            signals = new BaseStatusSignal[] {
+            batch = CtreStatusBatch.forBus(device.canbus());
+            member = batch.join(
                 yaw, pitch, roll, yawRate, pitchRate, rollRate,
-                accelerationX, accelerationY, accelerationZ, gravityX, gravityY, gravityZ
-            };
+                accelerationX, accelerationY, accelerationZ, gravityX, gravityY, gravityZ);
             freshness = new SignalFreshness(yaw);
         }
 
@@ -243,7 +250,12 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         @Override
         public void refreshSignals() {
-            BaseStatusSignal.refreshAll(signals);
+            refreshSignals(CtreStatusBatch.UNSHARED);
+        }
+
+        @Override
+        public void refreshSignals(long refreshPass) {
+            batch.refresh(refreshPass);
         }
 
         // Phoenix reports these signals in degrees, degrees/second and g, so the raw doubles need no conversion.
@@ -304,6 +316,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         @Override
         public void close() {
+            batch.leave(member);
             pigeon.close();
         }
     }

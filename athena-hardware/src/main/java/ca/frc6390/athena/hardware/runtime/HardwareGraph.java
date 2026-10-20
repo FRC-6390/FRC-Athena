@@ -408,6 +408,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
         try {
             RefreshTask[] tasks;
+            // One token per pass lets handles that share a vendor batch (CTRE refreshAll per CAN bus) read the bus
+            // once per pass; tokens never repeat, so a skipped or failed handle cannot reuse an older pass.
+            long pass = REFRESH_PASSES.incrementAndGet();
             synchronized (this) {
                 retryBindings(nowNanos);
                 int handleCount = motors.size() + encoders.size() + imus.size();
@@ -423,7 +426,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                 tasks = refreshTasks;
             }
             for (RefreshTask task : tasks) {
-                if (!refresh(task, nowNanos)) return;
+                if (!refresh(task, nowNanos, pass)) return;
             }
             if (motorGroupArray.length > 0) evaluateMotorGroups();
             publishSnapshot(captureSnapshot(nowNanos));
@@ -677,7 +680,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         throw new IllegalStateException("No declaration exists for " + identity.key());
     }
 
-    private boolean refresh(RefreshTask task, long nowNanos) {
+    private boolean refresh(RefreshTask task, long nowNanos, long pass) {
         synchronized (this) {
             if (closed || task.inFlight) return false;
             RefreshBackoff backoff = refreshBackoffs.get(task.identity);
@@ -688,7 +691,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         RuntimeException failure = null;
         boolean completed = false;
         try {
-            task.refresh.run();
+            task.refresh.accept(pass);
             completed = true;
         } catch (RuntimeException exception) {
             failure = exception;
@@ -844,6 +847,11 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
 
         @Override
+        public void refreshInputs(long refreshPass) {
+            delegate.refreshInputs(refreshPass);
+        }
+
+        @Override
         public double positionRotations() {
             return delegate.positionRotations() + softwareOffsetRotations;
         }
@@ -908,12 +916,15 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
     }
 
+    private static final java.util.concurrent.atomic.AtomicLong REFRESH_PASSES = new java.util.concurrent.atomic.AtomicLong();
+
     private static final class RefreshTask {
         private final HardwareIdentity identity;
-        private final Runnable refresh;
+        /** Refreshes the handle for the given refresh pass token. */
+        private final java.util.function.LongConsumer refresh;
         private boolean inFlight;
 
-        private RefreshTask(HardwareIdentity identity, Runnable refresh) {
+        private RefreshTask(HardwareIdentity identity, java.util.function.LongConsumer refresh) {
             this.identity = Objects.requireNonNull(identity, "identity");
             this.refresh = Objects.requireNonNull(refresh, "refresh");
         }

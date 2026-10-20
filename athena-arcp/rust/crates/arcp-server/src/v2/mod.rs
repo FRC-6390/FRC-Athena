@@ -197,6 +197,22 @@ impl ArcpServerV2 {
         self.inner.lock().publish_records(records, &self.inner.udp);
     }
 
+    /// Changes whenever the set of subscribed signals may have changed. A caller that caches
+    /// [`Self::subscribed_signal_ids`] compares this value first and re-reads the ids only when it differs.
+    pub fn subscription_generation(&self) -> u64 {
+        self.inner.lock().subscription_generation
+    }
+
+    /// Sorted ids of the signals that at least one subscription of any session matches.
+    pub fn subscribed_signal_ids(&self) -> Vec<u64> {
+        self.inner.lock().subscribed_ids()
+    }
+
+    /// Number of connected control sessions.
+    pub fn session_count(&self) -> usize {
+        self.inner.lock().sessions.len()
+    }
+
     pub fn status(&self) -> ServerStatus {
         let state = self.inner.lock();
         let mut throttled = Vec::new();

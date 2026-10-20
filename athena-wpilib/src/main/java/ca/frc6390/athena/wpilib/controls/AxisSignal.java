@@ -14,6 +14,8 @@ import java.util.function.DoubleUnaryOperator;
 /** Immutable processing declaration with live-tunable runtime values for one controller axis. */
 public final class AxisSignal implements TelemetrySource {
     private static final int CURVE_SAMPLE_COUNT = 41;
+    /** The curve's sample inputs. They never change, so they are built once. Read only, never handed out. */
+    private static final double[] CURVE_INPUTS = curveInputs();
 
     private final ControlOwner owner;
     private final BindingGate gate;
@@ -33,6 +35,8 @@ public final class AxisSignal implements TelemetrySource {
     private volatile boolean sampled;
     private volatile long plotCurveFingerprint = Long.MIN_VALUE;
     private volatile Translation2d[] cachedPlotCurve;
+    /** Last curve outputs; returned again while the mapping gives the same outputs. */
+    private volatile double[] cachedCurveOutputs;
 
     AxisSignal(DoubleSupplier source) {
         this(null, "axis", source, Timer::getFPGATimestamp,
@@ -207,7 +211,7 @@ public final class AxisSignal implements TelemetrySource {
         values.put("Config/Squared", TelemetryValue.constant(squared));
         values.put("Config/Inverted", TelemetryValue.constant(inverted));
         values.put("Curve/Type", TelemetryValue.constant(curve.type()));
-        values.put("Curve/Input", TelemetryValue.constant(curveInputs()));
+        values.put("Curve/Input", TelemetryValue.constant(CURVE_INPUTS.clone()));
         values.put("Curve/Output", TelemetryValue.numberArray(this::curveOutputs));
         values.put("Visualization/Curve", TelemetryValue.points(this::plotCurve));
         values.put("Visualization/Raw", TelemetryValue.points(this::plotRaw));
@@ -273,16 +277,24 @@ public final class AxisSignal implements TelemetrySource {
     }
 
     private double[] curveOutputs() {
-        double[] inputs = curveInputs();
-        double[] outputs = new double[inputs.length];
-        for (int index = 0; index < inputs.length; index++) {
-            outputs[index] = mapRaw(inputs[index]);
+        double[] cached = cachedCurveOutputs;
+        if (cached != null) {
+            boolean unchanged = true;
+            for (int index = 0; unchanged && index < cached.length; index++) {
+                unchanged = Double.compare(cached[index], mapRaw(CURVE_INPUTS[index])) == 0;
+            }
+            if (unchanged) return cached;
         }
+        double[] outputs = new double[CURVE_INPUTS.length];
+        for (int index = 0; index < outputs.length; index++) {
+            outputs[index] = mapRaw(CURVE_INPUTS[index]);
+        }
+        cachedCurveOutputs = outputs;
         return outputs;
     }
 
     private Translation2d[] plotCurve() {
-        double[] inputs = curveInputs();
+        double[] inputs = CURVE_INPUTS;
         long fingerprint = 1L;
         for (double input : inputs) {
             fingerprint = 31L * fingerprint + Double.doubleToLongBits(mapRaw(input));

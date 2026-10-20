@@ -67,6 +67,8 @@ public final class Localization implements PoseSignal {
     private static final MeasurementStdDevs DEFAULT_STATE_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.1));
     private static final MeasurementStdDevs DEFAULT_VISION_STD_DEVS = MeasurementStdDevs.of(Meters.of(0.9), Meters.of(0.9), Radians.of(0.9));
     private static final double TWO_PI = Math.PI * 2.0;
+    /** Period of the vision status publish, in robot seconds. Matches the default read-only telemetry period. */
+    private static final double VISION_STATUS_PERIOD_SECONDS = 0.10;
 
     private final Strategy strategy;
     private final List<PoseSignal> inputs;
@@ -701,6 +703,13 @@ public final class Localization implements PoseSignal {
 
     private void publishVisionStatus(double nowSeconds) {
         state.visionNow = nowSeconds;
+        // Statuses change when frames arrive or go stale, both slower than the robot loop, so they are published at
+        // the telemetry period. visionStatus() still returns a live snapshot.
+        if (nowSeconds >= state.lastVisionStatusSeconds
+                && nowSeconds - state.lastVisionStatusSeconds < VISION_STATUS_PERIOD_SECONDS) {
+            return;
+        }
+        state.lastVisionStatusSeconds = nowSeconds;
         List<VisionSourceStatus> statuses = state.vision.snapshot(nowSeconds);
         VisionStatusRegistry.publish(state, statuses);
         if (publishNetworkTables) {
@@ -1046,6 +1055,7 @@ public final class Localization implements PoseSignal {
         private List<Rejection> rejections = List.of();
         private final VisionDiagnostics vision = new VisionDiagnostics();
         private double visionNow = Double.NaN;
+        private double lastVisionStatusSeconds = Double.NEGATIVE_INFINITY;
         private final Map<String, VisionTopics> visionTopics = new HashMap<>();
         private PoseSnapshot pendingReset;
         private boolean seeded;

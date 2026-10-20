@@ -630,3 +630,30 @@ fn server_status_signals_are_in_every_dictionary_and_sent_each_second() {
     assert_eq!(entries.iter().find(|e| e.signal_id == clients_id).unwrap().value, Value::I64(1));
     assert!(status_frames.len() <= 2, "at most one status frame per interval");
 }
+
+#[test]
+fn subscribed_ids_and_generation_follow_subscriptions() {
+    let (server, _) = server();
+    let (_udp, port) = udp_pair();
+    let mut client = Client::connect(server.control_addr());
+    client.hello(port);
+
+    let generation = server.subscription_generation();
+    assert!(server.subscribed_signal_ids().is_empty());
+    assert_eq!(server.session_count(), 1);
+
+    client.subscribe("robot/turret/**", Rate::OnChange);
+    let after_subscribe = server.subscription_generation();
+    assert!(after_subscribe > generation, "a subscribe changes the subscribed set");
+    let ids = server.subscribed_signal_ids();
+    assert!(ids.contains(&ANGLE), "{ids:?}");
+    assert!(!ids.contains(&OTHER));
+    assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "sorted and unique");
+
+    // A cycle that changes nothing in the subscribed set leaves the generation alone.
+    server.publish_cycle(1_000_000, &[Entry { signal_id: OTHER, value: Value::F64(1.0) }]);
+    assert_eq!(server.subscription_generation(), after_subscribe);
+
+    client.subscribe("robot/**", Rate::OnChange);
+    assert!(server.subscribed_signal_ids().contains(&OTHER), "a second subscription widens the set");
+}

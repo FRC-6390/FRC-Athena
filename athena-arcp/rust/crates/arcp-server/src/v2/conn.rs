@@ -118,6 +118,9 @@ impl Connection {
                     s.subs.retain(|sub| sub.id != subscription_id);
                     s.subs.len() != before
                 });
+                if removed {
+                    state.subscription_generation += 1;
+                }
                 drop(state);
                 if removed {
                     self.reply(request_id, Status::Ok, "", ReplyData::None)
@@ -191,6 +194,7 @@ impl Connection {
             .collect();
         let Some(session) = state.session_mut(self.session_id) else { return false };
         session.subs.push(Subscription { id: sub_id, pattern: glob, rate, divisor: 1, matches });
+        state.subscription_generation += 1;
         // Latest values for newly matched signals, once.
         state.snapshot(self.session_id, sub_id, &self.inner.udp);
         drop(state);
