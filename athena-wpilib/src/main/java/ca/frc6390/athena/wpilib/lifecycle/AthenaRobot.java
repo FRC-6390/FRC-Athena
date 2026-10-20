@@ -57,6 +57,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private TelemetrySchema mechanismTelemetrySchema;
     private AutoPreviewPublisher autoPreviewPublisher;
     private SystemRuntime systemRuntime;
+    /** Dashboard entries the mechanism telemetry creates per publish; the whole schema is bound in a few cycles. */
+    private static final int TELEMETRY_BINDINGS_PER_PUBLISH = 48;
     private SystemTelemetryPublisher systemTelemetryPublisher;
     private PowerTelemetryPublisher powerTelemetryPublisher;
     private LoopTimingPublisher loopTimingPublisher;
@@ -189,7 +191,9 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                 RobotBase.isSimulation() && traceProfile == MechanismTracePublisher.Profile.SUMMARY
                         ? MechanismTracePublisher.Profile.CAPTURE
                         : traceProfile);
-        mechanismTelemetryPublisher = new MechanismTelemetryPublisher();
+        // Creating dashboard entries is slow on the roboRIO: bind the schema a few entries per publish, so the
+        // robot's first cycles do not each create hundreds of entries at once.
+        mechanismTelemetryPublisher = new MechanismTelemetryPublisher().bindBudget(TELEMETRY_BINDINGS_PER_PUBLISH);
         autoPreviewPublisher = new AutoPreviewPublisher();
         systemRuntime = SystemRuntime.create(systemTuning, RobotBase.isReal());
         systemTelemetryPublisher = new SystemTelemetryPublisher();

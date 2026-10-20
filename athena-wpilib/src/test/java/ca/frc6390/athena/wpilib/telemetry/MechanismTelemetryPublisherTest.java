@@ -4,6 +4,7 @@ import static edu.wpi.first.units.Units.Seconds;
 import static edu.wpi.first.units.Units.Meters;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -19,6 +20,7 @@ import ca.frc6390.athena.sim.runtime.SimulationSession;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
@@ -267,6 +269,42 @@ class MechanismTelemetryPublisherTest {
                     samples[0], instance.getEntry(path).getDoubleArray(new double[0]));
         } finally {
             instance.close();
+        }
+    }
+
+    @Test
+    void bindBudgetCreatesTheSchemaOverSeveralPublishesWithoutChangingTheResult() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism);
+        var schema = runtime.mechanismTelemetrySchema();
+        String values = "/Athena/Mechanisms/dashboardMechanism/Values/";
+        List<String> topics = List.of(values + "outputPercent", values + "gain", values + "temperature",
+                values + "points");
+
+        NetworkTableInstance everything = NetworkTableInstance.create();
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(everything)) {
+            publisher.publish(schema, 0.0);
+            assertTrue(topics.stream().allMatch(topic -> everything.getTopic(topic).exists()),
+                    "the default publisher binds the whole schema in one publish");
+            assertEquals(0.2, everything.getEntry(topics.get(0)).getDouble(-1), 1e-9);
+        } finally {
+            everything.close();
+        }
+
+        NetworkTableInstance spread = NetworkTableInstance.create();
+        try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(spread).bindBudget(1)) {
+            publisher.publish(schema, 0.0);
+            assertFalse(topics.stream().allMatch(topic -> spread.getTopic(topic).exists()),
+                    "a budget of one binding cannot create every entry in the first publish");
+            int publishes = 1;
+            while (!topics.stream().allMatch(topic -> spread.getTopic(topic).exists()) && publishes < 100) {
+                publisher.publish(schema, 0.02 * publishes);
+                publishes++;
+            }
+            assertTrue(publishes > 1 && publishes < 100, "the schema is bound over " + publishes + " publishes");
+            assertEquals(0.2, spread.getEntry(topics.get(0)).getDouble(-1), 1e-9);
+        } finally {
+            spread.close();
         }
     }
 

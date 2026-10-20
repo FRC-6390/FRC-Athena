@@ -24,6 +24,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -65,6 +66,14 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private TelemetrySchema boundSchema;
     private double lastCustomPublish = Double.NEGATIVE_INFINITY;
     private double customPeriodSeconds = DEFAULT_CUSTOM_PERIOD_SECONDS;
+    /** Values and actions of the bound schema that have no NetworkTables entry yet, in publication order. */
+    private final ArrayDeque<PendingBinding> pendingBindings = new ArrayDeque<>();
+    /** Most bindings one publish performs. Unlimited unless the robot spreads the first binding over cycles. */
+    private int bindBudget = Integer.MAX_VALUE;
+
+    /** One value or action waiting to be bound; exactly one of the two is non-null. */
+    private record PendingBinding(String path, TelemetryValue value, TelemetryAction action) {
+    }
 
     public MechanismTelemetryPublisher() {
         this(NetworkTableInstance.getDefault());
@@ -89,11 +98,28 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         return this;
     }
 
+    /**
+     * Limits how many dashboard entries one publish creates. Creating an entry is a NetworkTables call that is slow on
+     * the roboRIO, so a large schema is bound over several publishes instead of in the first one. Values that are not
+     * bound yet are not published; the rest of the schema is unaffected. The default binds everything in one publish.
+     *
+     * @param bindingsPerPublish most values and actions bound by one publish, at least 1
+     * @return this publisher
+     */
+    public MechanismTelemetryPublisher bindBudget(int bindingsPerPublish) {
+        if (bindingsPerPublish < 1) {
+            throw new IllegalArgumentException("Telemetry bind budget must be at least 1.");
+        }
+        bindBudget = bindingsPerPublish;
+        return this;
+    }
+
     void publish(TelemetrySchema schema, double timestampSeconds) {
         Objects.requireNonNull(schema, "schema");
         if (schema != boundSchema) {
             bind(schema);
         }
+        bindPending(bindBudget);
         boolean publishReadOnly = timestampSeconds - lastCustomPublish >= customPeriodSeconds;
         if (publishReadOnly) {
             lastCustomPublish = timestampSeconds;
@@ -149,44 +175,64 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private void bind(TelemetrySchema schema) {
         closeChannels();
         boundSchema = schema;
-        bindNode(schema.root(), "");
+        collectBindings(schema.root(), "");
         lastCustomPublish = Double.NEGATIVE_INFINITY;
     }
 
-    private void bindNode(TelemetryNode node, String parentPath) {
+    /** Queues the bindings of a node and its children in the order they are published (values, actions, children). */
+    private void collectBindings(TelemetryNode node, String parentPath) {
         String nodePath = node.kind() == TelemetryNode.Kind.ROOT
                 ? parentPath
                 : join(parentPath, node.name());
         node.values().forEach((name, value) -> {
-            if (!value.isPublished()) return;
-            String path = join(nodePath, name);
-            ValueChannel channel = new ValueChannel(instance, path, value);
-            allValues.add(channel);
-            if (value.writable() && channel.entry != null) {
-                channel.watcher = watch(channel.entry);
+            if (value.isPublished()) {
+                pendingBindings.add(new PendingBinding(join(nodePath, name), value, null));
             }
-            if (value.constant()) {
-                try {
-                    channel.update(true);
-                } catch (RuntimeException exception) {
-                    reportOnce(path, exception);
-                }
+        });
+        node.actions().forEach((name, action) ->
+                pendingBindings.add(new PendingBinding(join(nodePath, name), null, action)));
+        node.children().forEach((name, child) -> collectBindings(child, nodePath));
+    }
+
+    /** Binds up to {@code budget} queued values and actions, in queue order. */
+    private void bindPending(int budget) {
+        for (int bound = 0; bound < budget && !pendingBindings.isEmpty(); bound++) {
+            PendingBinding next = pendingBindings.poll();
+            if (next.action() != null) {
+                bindAction(next.path(), next.action());
             } else {
-                values.add(channel);
-                if (value.writable() || value.type() == TelemetryValue.Type.POINTS) {
-                    everyCycle.add(channel);
-                }
-                if (channel.lockStatus != null) {
-                    channel.lockState = lockState(value);
-                }
+                bindValue(next.path(), next.value());
             }
-        });
-        node.actions().forEach((name, action) -> {
-            ActionChannel channel = new ActionChannel(instance, join(nodePath, name), action);
-            channel.watcher = watch(channel.commandRunning);
-            actions.add(channel);
-        });
-        node.children().forEach((name, child) -> bindNode(child, nodePath));
+        }
+    }
+
+    private void bindValue(String path, TelemetryValue value) {
+        ValueChannel channel = new ValueChannel(instance, path, value);
+        allValues.add(channel);
+        if (value.writable() && channel.entry != null) {
+            channel.watcher = watch(channel.entry);
+        }
+        if (value.constant()) {
+            try {
+                channel.update(true);
+            } catch (RuntimeException exception) {
+                reportOnce(path, exception);
+            }
+        } else {
+            values.add(channel);
+            if (value.writable() || value.type() == TelemetryValue.Type.POINTS) {
+                everyCycle.add(channel);
+            }
+            if (channel.lockStatus != null) {
+                channel.lockState = lockState(value);
+            }
+        }
+    }
+
+    private void bindAction(String path, TelemetryAction action) {
+        ActionChannel channel = new ActionChannel(instance, path, action);
+        channel.watcher = watch(channel.commandRunning);
+        actions.add(channel);
     }
 
     private void reportOnce(String path, RuntimeException exception) {
@@ -281,6 +327,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
         watchers.clear();
         for (ValueChannel channel : allValues) channel.close();
         for (ActionChannel channel : actions) channel.close();
+        pendingBindings.clear();
         values.clear();
         everyCycle.clear();
         lockStates.clear();
