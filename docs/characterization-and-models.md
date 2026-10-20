@@ -8,7 +8,7 @@ value. The model drives feedforward, simulation inertia, external-load estimates
 ## Declaring characterization
 
 ```java
-public final ControlBinding<?> turret = Controls.position(turretMotor).feedback(turretEncoder);
+public final ControlBinding<?> turret = Controls.position(turretMotor, Units.Degrees).feedback(turretEncoder);
 
 public final Characterization characterization = turret.characterization()
         .gravity(Gravity.NONE)                          // turret: no gravity load

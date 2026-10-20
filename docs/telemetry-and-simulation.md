@@ -49,7 +49,7 @@ A public `Characterization` field expands into its test actions automatically; r
 create WPILib command wrappers or duplicate action fields:
 
 ```java
-private final ControlBinding driveControl = Controls.velocity(driveMotor)
+private final ControlBinding driveControl = Controls.velocity(driveMotor, Units.Rotations)
         .feedback(driveEncoder);
 public final Characterization drive = driveControl.characterization()
         .maxVoltage(Volts.of(6.0));
@@ -85,12 +85,12 @@ Device state and setup live with the field that owns the device:
 Declare those defaults on the binding; dashboard edits are temporary overrides of this baseline:
 
 ```java
-private final ControlBinding armControl = Controls.position(armMotor)
+private final ControlBinding armControl = Controls.position(armMotor, Units.Degrees)
         .feedback(armEncoder)
         .constraints(
                 Constraints.range(Range.of(Degrees.of(0.0), Degrees.of(105.0))),
-                Constraints.motion(60.0, 120.0),
-                Constraints.clamp(8.4));
+                Constraints.motion(Units.DegreesPerSecond.of(60.0), Units.DegreesPerSecondPerSecond.of(120.0)),
+                Constraints.maxVoltage(Units.Volts.of(8.4)));
 ```
 
 `motionLimits` is valid for both control modes. A position control uses the values for its
@@ -98,11 +98,11 @@ trapezoidal reference profile. A velocity control clamps its requested velocity 
 reference by at most `maximumAcceleration * dt` each cycle:
 
 ```java
-private final ControlBinding shooterControl = Controls.velocity(shooterMotor)
+private final ControlBinding shooterControl = Controls.velocity(shooterMotor, Units.Rotations)
         .feedback(shooterEncoder)
         .constraints(
-                Constraints.motion(100.0, 250.0),
-                Constraints.clamp(10.8));
+                Constraints.motion(Units.RotationsPerSecond.of(100.0), Units.RotationsPerSecondPerSecond.of(250.0)),
+                Constraints.maxVoltage(Units.Volts.of(10.8)));
 ```
 
 Runtime motor configuration is deliberately temporary. It changes the already-created controller
@@ -194,11 +194,11 @@ private boolean homed() { return homeSwitch.active(); }
 @Telemetry(writable = true, min = 0.0, max = 30.0)
 private double target = 20.0;
 
-private final ControlBinding control = Controls.position(armMotor)
+private final ControlBinding control = Controls.position(armMotor, Units.Degrees)
         .feedback(encoder)
         .pid(2.0, 0.0, 0.0)
         .ff(0.1, 0.4, 0.0);
-public final Action move = control.position(() -> target);
+public final Action move = control.position(() -> target, Units.Degrees);
 ```
 
 Annotated methods are read-only. Annotated fields are read-only unless they explicitly request
@@ -248,7 +248,7 @@ Control tuning is persisted per binding. `persistTuning(...)` saves PID and feed
 temporary constraint overrides:
 
 ```java
-private final ControlBinding<?> armControl = Controls.position(armMotor)
+private final ControlBinding<?> armControl = Controls.position(armMotor, Units.Degrees)
         .feedback(armEncoder)
         .pid(2.0, 0.0, 0.0)
         .persistTuning(Locks.InMatch.class);
@@ -290,10 +290,10 @@ An interpolated control can capture its current input and output as a new point,
 tuning a lookup table from the field:
 
 ```java
-private final ControlBinding<?> shooter = Controls.velocity(flywheel);
+private final ControlBinding<?> shooter = Controls.velocity(flywheel, Units.Rotations);
 public final InterpolatedControlAction rpmByDistance = shooter
-        .interpolate(InterpolationKinds.LINEAR, distance::getAsDouble)
-        .at(1.0, 2800.0)
+        .interpolate(InterpolationKinds.LINEAR, distance::getAsDouble, Units.Meters)
+        .at(Units.Meters.of(1.0), Units.RPM.of(2800.0))
         .at(4.0, 3600.0)
         .persisted();
 public final Action recordShot = rpmByDistance.record();

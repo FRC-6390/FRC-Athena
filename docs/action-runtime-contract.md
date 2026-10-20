@@ -110,12 +110,12 @@ feedback is inside the window. That is the default and is unchanged. A mechanism
 the target at full speed therefore completes mid-swing, releases its control, and coasts past.
 Add an explicit settle condition when the mechanism must actually stop there:
 
-- `untilWithin(1.5).settled(0.1)` (or `.settled(Duration)`) requires the measurement to stay inside the
-  window continuously for 0.1 s. The timer restarts whenever the measurement leaves the window.
-- `untilWithin(1.5).maxVelocity(20.0)` (or `.maxVelocity(Measure)`, a rate of the control unit) also
-  requires `|measured velocity| <= 20` in control units per second. Position controls only: a velocity
+- `untilWithin(Units.Rotations.of(1.5)).settled(Seconds.of(0.1))` (or `.settled(Duration)`) requires the
+  measurement to stay inside the window continuously for 0.1 s. The timer restarts whenever the measurement leaves the window.
+- `untilWithin(Units.Rotations.of(1.5)).maxVelocity(Units.RotationsPerSecond.of(20.0))` also requires
+  `|measured velocity| <= 20` rotations per second. The limit is a rate of the control's unit. Position controls only: a velocity
   control's target already is a velocity, so `maxVelocity` on one is rejected when declared.
-- `untilSettled(1.5, 0.1)` is shorthand for `untilWithin(1.5).settled(0.1)`.
+- `untilSettled(Units.Rotations.of(1.5), Seconds.of(0.1))` is shorthand for `untilWithin(...).settled(...)`.
 
 `settled` and `maxVelocity` apply only to an `untilWithin` action; calling them on anything else
 throws. Both options survive `effort(...)` limits.

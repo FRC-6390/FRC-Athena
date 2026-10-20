@@ -25,7 +25,7 @@ public final ControlBinding<?> angle = Controls.position(motor, Units.Degrees)
 | --- | --- |
 | Rotary (`Units.Degrees`, `Units.Rotations`) | `Torque` (N m) or `Current` (A) |
 | Linear (`Units.Meters`, `Units.Inches`) | `Force` (N) or `Current` (A) |
-| Untyped (`Controls.position(motor)`) | `Current` only |
+| Dimensionless (`Units.Value`) | `Current` only |
 
 A wrong kind is an `IllegalArgumentException` when the binding is declared, with a message that names the
 accepted kinds. Torque and force need known gearing (`Effort.gearing(motorTurnsPerMechanismTurn)`). Linear

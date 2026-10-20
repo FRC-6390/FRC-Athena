@@ -112,7 +112,7 @@ staging (B9) can cap/override at the motion and effort layers.
   `.gearing(GearRatio)` typed alternatives to `.gearRatio(...)`; `gearRatio` and `wheelDiameterMeters` are removed.
 - `Controls.position(motor, Unit)` / `Controls.velocity(motor, Unit)` overloads return
   `ControlBinding<U>` where `U` is the unit type (`AngleUnit`, `DistanceUnit`). Existing
-  `Controls.position(motor)` keeps returning a binding usable with raw doubles.
+  Unit-less `Controls.position(motor)` was removed in the typed-only pass; every binding declares its unit (see `typed-units.md`).
 - Typed methods on bindings: `position(Measure<U>)`, `velocity(Measure<velocity of U>)`,
   `untilWithin(Measure<U>)`, `Constraints.range(Measure<U> min, Measure<U> max)`,
   `Constraints.motion(...)` typed overloads, interpolation with typed input/output.

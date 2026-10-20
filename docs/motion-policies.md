@@ -132,8 +132,8 @@ cause a step in the output. The integral is re-seeded so the next output equals 
 
 ```java
 PidGains gains = PidGains.of(2.0, 0.5, 0.0);
-ControlBinding<?> arm = Controls.position(ARM).feedback(ENCODER).pid(gains);
-// While arm.position(3.0) is running, gains.telemetry().get("p").set(6.0) changes kP
+ControlBinding<?> arm = Controls.position(ARM, Units.Rotations).feedback(ENCODER).pid(gains);
+// While arm.position(Units.Rotations.of(3.0)) is running, gains.telemetry().get("p").set(6.0) changes kP
 // without a voltage step at that cycle.
 ```
 

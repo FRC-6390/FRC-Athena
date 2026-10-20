@@ -258,8 +258,9 @@ measure per cycle.
 | `BindingCheck` clock (`DoubleSupplier`) | per-cycle monotonic clock |
 
 Still `double` in the public API, owned by another change: `ControlOutput.voltage(double)` (kept because `FeedforwardGains` and `PidGains`
-use it), `Actions.voltage(ControlBinding, double)` and `ControlBinding.voltage(double)`, `Constraints.motion(double, double)`,
-`Controls.position(motor)` raw bindings, and `MechanismDeviceActions.encoderSetPosition(EncoderDevice, double)`.
+use it), `Actions.voltage(ControlBinding, double)` (internal), and `MechanismDeviceActions.encoderSetPosition(EncoderDevice, double)`.
+The control API itself is typed-only: `ControlBinding.voltage`, `Constraints.motion`, and the unit-less `Controls.position(motor)`
+factories are removed (see the removed control API table).
 
 ## Motion kind
 
