@@ -22,29 +22,18 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.function.DoubleSupplier;
+import java.util.function.DoubleUnaryOperator;
 
 /**
- * Runs the electrical and thermal pass once per scheduler cycle, after controllers have produced their
- * outputs and before motor commands are applied.
- *
- * <p>Each cycle:</p>
- * <ol>
- *   <li>Reads each motor's measured stator/supply current, applied voltage and speed. Demand is
- *       {@code |V - omega/Kv| / R} when those are known, otherwise the measured supply current.</li>
- *   <li>Updates the battery resistance estimate from bus voltage and total supply current.</li>
- *   <li>Plans per-motor caps ({@link PowerPlanner}). The thermal derate fraction scales the declared
- *       limit before planning.</li>
- *   <li>Publishes each motor's cap through {@link #capAmps(MotorDevice)}. The output path reads it and
- *       folds it into the effort voltage clamp ({@code EffortRuntime}), so the cap applies to every motor
- *       command. Nothing is written to the controllers, so the cycle never blocks on CAN configuration.</li>
- *   <li>Advances each motor's lumped thermal model (I^2 R heating, first-order cooling, vendor fusion).</li>
- * </ol>
+ * Samples measured current for battery and thermal estimates, then allocates the prepared outputs
+ * before any motor command is committed. Exact shared-profile identity joins independently commanded
+ * roots; native/software followers retain their physical root-voltage constraint. Allocation uses
+ * positive battery supply amps, while profiles and thermal limits use winding amps. No per-cycle
+ * controller configuration or blocking hardware operation is issued by this pass.
  */
 final class PowerRuntime {
     private static final double MAX_DT_SECONDS = 0.5;
-    /** Smallest active cap. A cap of zero would be read as "no limit", so an active cap stays at or above 1 A. */
-    static final double MIN_ACTIVE_CAP_AMPS = 1.0;
-    private static final double REGEN_EPSILON_VOLTS = 1e-6;
+    private static final double ELECTRICAL_EPSILON = 1e-9;
     /** Store key of the rolling battery internal-resistance estimate. */
     static final String BATTERY_OHMS_KEY = "power/battery/internalResistanceOhms";
 
@@ -57,6 +46,18 @@ final class PowerRuntime {
     private final List<MotorState> active = new ArrayList<>();
     private final List<PowerPlanner.Channel> channels = new ArrayList<>();
     private double lastNowSeconds = Double.NaN;
+    private RuntimeOverrides cycleOverrides;
+    private double cycleDt;
+    private long cycleId;
+    private boolean commandsPlanned;
+    private final Map<Object, CommandPlan> commandPlans = new IdentityHashMap<>();
+    private final List<CommandPlan> commands = new ArrayList<>();
+    private final Map<ca.frc6390.athena.hardware.power.PowerProfile, CommandPlan> profileCommands = new IdentityHashMap<>();
+    private final Map<MotorHandle, CommandPlan> physicalCommands = new IdentityHashMap<>();
+    private final Map<MotorHandle, Member> physicalLoads = new IdentityHashMap<>();
+    private final java.util.Set<MotorHandle> measuredTargets = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final java.util.Set<MotorHandle> committedTargets = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private final java.util.Set<ThermalModel> steppedThermals = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
 
     private double measuredVolts = Double.NaN;
     private double openCircuitVolts = Double.NaN;
@@ -117,12 +118,13 @@ final class PowerRuntime {
             motors[index] = new PowerSnapshot.Motor(
                     state.name,
                     state.demandAmps,
-                    state.channel.capAmps(),
+                    state.outputSuppressed ? 0.0 : state.channel.capAmps(),
                     state.derate,
                     state.temperatureCelsius,
                     state.channel.shareWeight(),
                     state.profileSustainedAmps(),
-                    state.status);
+                    state.status,
+                    state.supplyDemandAmps);
         }
         cached = new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.raw().floorVolts(),
                 predictedVolts, budgetAmps, demandAmps, shedding, List.of(motors));
@@ -151,30 +153,46 @@ final class PowerRuntime {
     }
 
     /**
-     * Returns the effective current cap of a motor from the latest cycle, in amps: the planner cap, already
-     * combined with the declared limit and thermal derate. Positive infinity when the motor is uncapped or was
-     * not part of the cycle. The output path clamps the motor's voltage to this value.
+     * Returns the effective winding-current cap. For motors without electrical constants the output path
+     * instead uses a supply-current feedback estimate, so their winding cap is converted back to supply amps.
+     * Positive infinity means uncapped or not part of the cycle. Zero remains an active limit.
      */
     double capAmps(MotorDevice motor) {
         MotorState state = activeState(motor);
+        if (state != null && state.outputSuppressed) return 0.0;
         if (state == null || !Double.isFinite(state.channel.capAmps())) return Double.POSITIVE_INFINITY;
-        // Only a cap below the declared limit reaches the clamp. At or above it the controller's own limit
-        // already applies, so the output is left unchanged (model error would otherwise under-drive a motor).
-        if (state.channel.capAmps() >= state.configuredLimitAmps) return Double.POSITIVE_INFINITY;
-        return Math.max(0.0, state.channel.capAmps());
+        // Only the controller's winding limit is interchangeable with this winding-current clamp.
+        // A supply limit is not an equal winding limit at partial PWM duty.
+        if (state.channel.capAmps() >= state.configuredStatorLimitAmps && !state.profileHasCurrentCap()
+                && !state.channel.supplyBudgetActive() && state.derate >= 1.0 && !state.softwareSupplyLimit) {
+            return Double.POSITIVE_INFINITY;
+        }
+        double cap = Math.max(0.0, state.channel.capAmps());
+        if (state.constants.isEmpty() && state.demandAmps > ELECTRICAL_EPSILON) {
+            return cap * state.supplyDemandAmps / state.demandAmps;
+        }
+        return cap;
     }
 
     private MotorState activeState(MotorDevice motor) {
-        for (int index = 0; index < active.size(); index++) {
-            MotorState state = active.get(index);
-            if (state.device == motor) return state;
-        }
-        return null;
+        MotorState state = states.get(motor);
+        return state != null && state.sampledCycle == cycleId ? state : null;
     }
 
-    void cycle(Collection<MotorDevice> motors, ActionContext context, RuntimeOverrides overrides, double nowSeconds) {
+    void beginCycle(Collection<MotorDevice> motors, ActionContext context, RuntimeOverrides overrides, double nowSeconds) {
         double dt = Double.isNaN(lastNowSeconds) ? 0.0 : Math.max(0.0, Math.min(MAX_DT_SECONDS, nowSeconds - lastNowSeconds));
         lastNowSeconds = nowSeconds;
+        cycleDt = dt;
+        cycleId++;
+        commandsPlanned = false;
+        cycleOverrides = overrides;
+        commands.clear();
+        profileCommands.clear();
+        physicalCommands.clear();
+        physicalLoads.clear();
+        measuredTargets.clear();
+        committedTargets.clear();
+        steppedThermals.clear();
         snapshot = null;
         double bus = readBus();
         measuredVolts = bus;
@@ -193,23 +211,44 @@ final class PowerRuntime {
                 continue;
             }
             state.handle = handle;
-            state.readInputs(handle);
-            if (Double.isFinite(state.supplyAmps)) totalSupply += state.supplyAmps;
+            state.sampledCycle = cycleId;
+            state.readInputs(handle, bus);
+            if (measuredTargets.add(handle.commandTarget()) && Double.isFinite(state.supplyAmps)) {
+                totalSupply += state.supplyAmps;
+            }
             MotorRuntimeConfig config = overrides.config(motor);
+            state.declaredSupplyLimit = config.supplyCurrentLimitAmps();
+            state.planStatus = "";
+            state.outputSuppressed = false;
             state.derate = state.curve.raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius());
             state.temperatureCelsius = motor.raw().fusedTemperatureCelsius();
-            // The declared limits (applied once at configuration) bound the cap too, scaled by the derate.
-            // The tighter of supply and stator wins, because the cap is applied to the motor's voltage.
-            double declaredLimit = Math.min(
-                    config.supplyCurrentLimitAmps() > 0 ? config.supplyCurrentLimitAmps() : Double.POSITIVE_INFINITY,
-                    config.statorCurrentLimitAmps() > 0 ? config.statorCurrentLimitAmps() : Double.POSITIVE_INFINITY);
-            // A derated cap is never below 1 A: zero means "no limit" to the planner.
-            double declaredCap = Double.isFinite(declaredLimit)
-                    ? Math.max(MIN_ACTIVE_CAP_AMPS, declaredLimit * state.derate)
-                    : Double.POSITIVE_INFINITY;
+            double statorLimit = config.statorCurrentLimitAmps() > 0
+                    ? config.statorCurrentLimitAmps() : Double.POSITIVE_INFINITY;
+            double declaredCap = statorLimit;
+            double supplyAsWinding = config.supplyCurrentLimitAmps() > 0
+                    ? state.windingForSupply(config.supplyCurrentLimitAmps()) : Double.POSITIVE_INFINITY;
+            state.softwareSupplyLimit = !handle.enforcesSupplyCurrentLimit() && config.supplyCurrentLimitAmps() > 0;
+            if (state.softwareSupplyLimit) declaredCap = Math.min(declaredCap, supplyAsWinding);
+            if (state.derate < 1.0) {
+                // Thermal limits act on winding current, never directly on battery amps. If the only
+                // configured limit is supply-side, convert its allowed electrical power at this speed first.
+                double reference = Math.min(statorLimit, supplyAsWinding);
+                if (!Double.isFinite(reference) && state.constants.isPresent()) {
+                    reference = state.constants.get().stallCurrent().in(Units.Amps);
+                }
+                if (Double.isFinite(reference)) declaredCap = reference * state.derate;
+            }
             state.declaredCapAmps = declaredCap;
-            state.configuredLimitAmps = declaredLimit;
-            state.channel.inputs(motor.power(), state.demandAmps, declaredCap);
+            // Candidate power is constrained exactly in supply amps below; do not reuse the
+            // direction-dependent measured supply-to-winding estimate as a candidate torque cap.
+            state.candidateCapAmps = statorLimit;
+            if (state.derate < 1.0) {
+                // Preserve the thermal winding reference even for a supply-only declaration.
+                state.candidateCapAmps = state.derate <= 0.0 ? 0.0 : declaredCap;
+            }
+            state.configuredStatorLimitAmps = statorLimit;
+            state.channel.inputs(motor.power(), state.demandAmps, declaredCap, state.supplyDemandAmps,
+                    state.supplyToWinding, state.derate);
             active.add(state);
             channels.add(state.channel);
         }
@@ -224,24 +263,395 @@ final class PowerRuntime {
         openCircuitVolts = policy.estimateBatteryResistance()
                 ? estimator.openCircuitVolts()
                 : Double.isFinite(bus) ? bus + batteryOhms * totalSupply : Double.NaN;
-        PowerPlanner.Bus planBus = new PowerPlanner.Bus(bus, openCircuitVolts, batteryOhms);
-        planner.plan(planBus, nowSeconds, dt, channels);
+        for (MotorState state : active) {
+            ThermalModel model = state.device.thermalModel();
+            if (model == null || steppedThermals.add(model)) state.thermalStep(dt);
+        }
+    }
+
+    /** Compatibility path for direct measured-state tools/tests. Scheduler uses begin/prepare/plan/commit. */
+    void cycle(Collection<MotorDevice> motors, ActionContext context, RuntimeOverrides overrides, double nowSeconds) {
+        beginCycle(motors, context, overrides, nowSeconds);
+        planner.plan(planBus(), nowSeconds, cycleDt, channels);
+        updatePlanSnapshot();
+    }
+
+    private PowerPlanner.Bus planBus() {
+        return new PowerPlanner.Bus(measuredVolts, openCircuitVolts, batteryOhms);
+    }
+
+    private void updatePlanSnapshot() {
         shedding = planner.shedding();
-        predictedVolts = planBus.predictedVolts(totalDemand());
+        demandAmps = totalDemand();
+        predictedVolts = planBus().predictedVolts(demandAmps);
         budgetAmps = Double.isFinite(openCircuitVolts)
                 ? PowerBudget.budgetAmps(openCircuitVolts, batteryOhms, policy.raw().floorVolts())
                 : Double.POSITIVE_INFINITY;
-        demandAmps = totalDemand();
+        snapshot = null;
+        for (MotorState state : active) state.status = status(state, state.channel.capAmps());
+    }
 
+    /** Native closed loops cannot forecast/enforce this cycle's shared battery allocation. */
+    boolean requiresHostClamp(MotorDevice motor) {
+        MotorState state = states.get(motor);
+        return motor.power() != null || Double.isFinite(measuredVolts)
+                || state != null && (state.softwareSupplyLimit || state.derate < 1.0
+                || Double.isFinite(state.declaredCapAmps));
+    }
+
+    /** Globally commands a physical destination once, even when failover declarations alias it. */
+    boolean claimCommandTarget(MotorHandle handle) { return committedTargets.add(handle.commandTarget()); }
+
+    void registerCommand(Object key, List<MotorDevice> motors, MotorHandle[] handles,
+            double candidateVolts, double[] localAmps) {
+        Objects.requireNonNull(key, "command key");
+        CommandPlan command = commandPlans.computeIfAbsent(key, ignored -> new CommandPlan());
+        if (command.cycle == cycleId) throw new IllegalStateException("Output prepared twice in one power cycle");
+        command.reset(cycleId, candidateVolts);
+        commands.add(command);
+        for (int index = 0; index < motors.size(); index++) {
+            MotorDevice motor = motors.get(index);
+            MotorHandle handle = handles[index];
+            MotorState state = states.get(motor);
+            if (state == null) {
+                state = new MotorState(motor);
+                states.put(motor, state);
+            }
+            if (state.sampledCycle != cycleId && !motor.isDisabled()) {
+                state.sampledCycle = cycleId;
+                state.handle = handle;
+                state.readInputs(handle, measuredVolts);
+                state.declaredCapAmps = configuredCap(motor, state);
+                state.candidateCapAmps = state.declaredCapAmps;
+                state.outputSuppressed = false;
+                active.add(state);
+            }
+            Member member = command.member(index);
+            member.state = state;
+            member.handle = handle;
+            member.command = command;
+            member.localCap = index < localAmps.length && !Double.isNaN(localAmps[index])
+                    ? Math.max(0.0, localAmps[index]) : Double.POSITIVE_INFINITY;
+            member.scale = handle.voltageCommandScale();
+            member.eligible = !motor.isDisabled() && handle.configurationStatus().ready()
+                    && Double.isFinite(candidateVolts) && Double.isFinite(member.scale) && member.scale != 0.0;
+            member.accounted = false;
+            member.known = state.constants.isPresent() && Double.isFinite(state.backEmfVolts);
+            member.voltageAdded = member.supplyAdded = false;
+            if (motor.isDisabled()) continue;
+            // Even neutral/native outputs participate in collision detection. Aliased declarations
+            // must never make the winning physical command depend on mechanism traversal order.
+            MotorHandle physical = handle.commandTarget();
+            CommandPlan previous = physicalCommands.putIfAbsent(physical, command);
+            if (previous != null && previous != command) {
+                previous.suppressed = command.suppressed = true;
+                previous.failure = command.failure = "Conflicting physical command targets";
+            }
+            if (!Double.isFinite(candidateVolts)) continue;
+            if (!member.eligible) {
+                command.suppressed = true;
+                command.failure = "Physical command unavailable";
+                continue;
+            }
+            if (physicalLoads.putIfAbsent(physical, member) == null) member.accounted = true;
+            if (!command.anchorSet && member.known) {
+                command.anchor = state.backEmfVolts / member.scale;
+                command.anchorSet = true;
+            }
+        }
+        command.memberCount = motors.size();
+        command.slope = candidateVolts - command.anchor;
+    }
+
+    private double configuredCap(MotorDevice motor, MotorState state) {
+        MotorRuntimeConfig config = cycleOverrides.config(motor);
+        state.configuredStatorLimitAmps = config.statorCurrentLimitAmps() > 0
+                ? config.statorCurrentLimitAmps() : Double.POSITIVE_INFINITY;
+        state.declaredSupplyLimit = config.supplyCurrentLimitAmps();
+        state.softwareSupplyLimit = !state.handle.enforcesSupplyCurrentLimit() && state.declaredSupplyLimit > 0.0;
+        state.derate = motor.thermalCurve().raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius());
+        double reference = Math.min(state.configuredStatorLimitAmps,
+                state.declaredSupplyLimit > 0.0 ? state.windingForSupply(state.declaredSupplyLimit)
+                        : Double.POSITIVE_INFINITY);
+        if (!Double.isFinite(reference) && state.constants.isPresent())
+            reference = state.constants.get().stallCurrent().in(Units.Amps);
+        return state.derate <= 0.0 ? 0.0 : state.derate < 1.0 ? reference * state.derate
+                : state.configuredStatorLimitAmps;
+    }
+
+    /** Allocates requested outputs after every controller (including release holds) was evaluated once. */
+    void planCommands() {
+        channels.clear();
         for (MotorState state : active) {
-            state.thermalStep(dt);
-            state.status = status(state, state.channel.capAmps());
+            state.demandAmps = 0.0;
+            state.supplyDemandAmps = 0.0;
+            state.planStatus = "";
+            state.channel.couplingGroup(null);
+            state.channel.accountedLoad(true);
+            state.plannedMember = null;
+            state.channel.inputs(state.device.power(), 0.0, state.candidateCapAmps, 0.0,
+                    state.supplyToWinding, state.derate);
+        }
+        for (CommandPlan command : commands) {
+            for (int index = 0; index < command.memberCount; index++) {
+                Member member = command.members.get(index);
+                if (!member.eligible) continue;
+                var profile = member.state.device.power();
+                if (profile != null) {
+                    CommandPlan previous = profileCommands.putIfAbsent(profile, command);
+                    if (previous != null) union(command, previous);
+                }
+            }
+        }
+        for (CommandPlan command : commands) {
+            CommandPlan group = command.root();
+            if (command.suppressed) group.groupSuppressed = true;
+        }
+        for (CommandPlan command : commands) {
+            CommandPlan group = command.root();
+            for (int index = 0; index < command.memberCount; index++) {
+                Member member = command.members.get(index);
+                MotorState state = member.state;
+                if (!member.eligible || group.groupSuppressed) {
+                    state.planStatus = command.failure.isEmpty() ? "Neutral / unavailable" : command.failure;
+                    continue;
+                }
+                state.plannedMember = member;
+                double cap = Math.min(state.candidateCapAmps, member.localCap);
+                member.prepareModel();
+                if (!member.known && state.softwareSupplyLimit && state.declaredSupplyLimit > 0.0
+                        && state.constants.isPresent()) {
+                    group.groupSuppressed = true;
+                    state.planStatus = "Supply limit unavailable";
+                }
+                if (!member.known && (cap == 0.0 || !(Math.abs(member.currentSlope) > 0.0)
+                        && Math.abs(command.candidate) > ELECTRICAL_EPSILON
+                        && (requiresHostClamp(state.device) || Double.isFinite(member.localCap)))) {
+                    // No current model can turn a zero current allocation into an honest nonzero command.
+                    group.groupSuppressed = true;
+                    state.planStatus = "Current model unavailable";
+                }
+                double current = Math.abs(member.currentAtZero + member.currentSlope);
+                double supply = member.positiveSupply(1.0);
+                state.demandAmps = current;
+                state.supplyDemandAmps = member.accounted ? supply : 0.0;
+                state.channel.inputs(state.device.power(), current, cap, state.supplyDemandAmps,
+                        state.supplyToWinding, state.derate, member.model);
+                state.channel.couplingGroup(group);
+                state.channel.accountedLoad(member.accounted);
+                channels.add(state.channel);
+                // The bus limit is a physical feasibility constraint, rather than a post-allocation
+                // clip that would change one wheel's torque ratio independently of its profile group.
+                if (measuredVolts > 0.0 && Double.isFinite(measuredVolts)) {
+                    member.voltageChannel.inputs(null, Math.abs(member.scale * command.candidate), measuredVolts,
+                            0.0, value -> value, 1.0, member.voltageModel);
+                    member.voltageChannel.couplingGroup(group);
+                    member.voltageChannel.accountedLoad(false);
+                    member.voltageChannel.startupParticipant(false);
+                    channels.add(member.voltageChannel);
+                    member.voltageAdded = true;
+                } else if (state.softwareSupplyLimit && state.declaredSupplyLimit > 0.0) {
+                    group.groupSuppressed = true;
+                    state.planStatus = "Supply limit unavailable";
+                }
+                if (member.known && state.declaredSupplyLimit > 0.0 && measuredVolts > 0.0) {
+                    member.prepareSupplyConstraint();
+                    member.supplyChannel.inputs(null, 0.0, member.supplyRadius, 0.0, value -> value, 1.0,
+                            member.supplyModel);
+                    member.supplyChannel.couplingGroup(group);
+                    member.supplyChannel.accountedLoad(false);
+                    member.supplyChannel.startupParticipant(false);
+                    channels.add(member.supplyChannel);
+                    member.supplyAdded = true;
+                }
+            }
+        }
+        for (MotorState state : active) {
+            if (state.plannedMember == null) {
+                state.channel.couplingGroup(state.channel);
+                channels.add(state.channel);
+            }
+        }
+        // A failed group contributes no projected load. Other groups can use the remaining budget.
+        channels.removeIf(channel -> channel.couplingGroup() instanceof CommandPlan group
+                && group.root().groupSuppressed);
+        planner.plan(planBus(), lastNowSeconds, cycleDt, channels);
+        for (CommandPlan command : commands) {
+            CommandPlan group = command.root();
+            for (int index = 0; index < command.memberCount; index++) {
+                Member member = command.members.get(index);
+                if (!member.eligible || group.groupSuppressed) continue;
+                if (!member.state.channel.couplingFeasible()
+                        || member.voltageAdded && !member.voltageChannel.couplingFeasible()
+                        || member.supplyAdded && !member.supplyChannel.couplingFeasible()) group.groupSuppressed = true;
+                group.factor = Math.min(group.factor, member.state.channel.couplingScale());
+            }
+        }
+        for (CommandPlan command : commands) {
+            CommandPlan group = command.root();
+            command.suppressed |= group.groupSuppressed;
+            command.planned = Double.isFinite(command.candidate) && group.factor < 1.0
+                    ? command.anchor + group.factor * command.slope : command.candidate;
+            for (int index = 0; index < command.memberCount; index++) {
+                Member member = command.members.get(index);
+                if (command.suppressed) {
+                    member.state.outputSuppressed = true;
+                    member.state.supplyDemandAmps = 0.0;
+                    if (member.state.planStatus.isEmpty()) member.state.planStatus = command.failure.isEmpty()
+                            ? "Infeasible power group" : command.failure;
+                } else if (member.eligible && !member.known) member.state.planStatus = "Coupling estimated";
+            }
+        }
+        commandsPlanned = true;
+        updatePlanSnapshot();
+    }
+
+    /** A final guard applies before any write and cancels its entire shared command group. */
+    void suppressCommandGroup(Object key, String reason) {
+        CommandPlan command = commandPlans.get(key);
+        if (command == null || command.cycle != cycleId) return;
+        CommandPlan group = command.root();
+        group.groupSuppressed = true;
+        for (CommandPlan peer : commands) {
+            if (peer.root() != group) continue;
+            peer.suppressed = true;
+            peer.failure = reason;
+            for (int index = 0; index < peer.memberCount; index++) {
+                MotorState state = peer.members.get(index).state;
+                state.outputSuppressed = true;
+                state.supplyDemandAmps = 0.0;
+                state.planStatus = reason;
+                state.status = reason;
+            }
+        }
+        demandAmps = totalDemand();
+        predictedVolts = planBus().predictedVolts(demandAmps);
+        snapshot = null;
+    }
+
+    /** Removes a failed preparation before allocation; collision reservations stay conservative. */
+    void discardCommand(Object key) {
+        CommandPlan command = commandPlans.get(key);
+        if (command != null && command.cycle == cycleId) {
+            if (commandsPlanned) suppressCommandGroup(key, "Prepared output failed");
+            commands.remove(command);
+            command.memberCount = 0;
+            command.suppressed = true;
+        }
+    }
+
+    double plannedVoltage(Object key, double original) {
+        CommandPlan command = commandPlans.get(key);
+        return command == null || command.cycle != cycleId ? original : command.planned;
+    }
+
+    boolean commandSuppressed(Object key) {
+        CommandPlan command = commandPlans.get(key);
+        return command != null && command.cycle == cycleId && command.suppressed;
+    }
+
+    private static void union(CommandPlan first, CommandPlan second) {
+        CommandPlan a = first.root(), b = second.root();
+        if (a != b) b.parent = a;
+    }
+
+    private static final class CommandPlan {
+        final List<Member> members = new ArrayList<>();
+        int memberCount;
+        long cycle;
+        double candidate, anchor, slope, planned, factor;
+        boolean anchorSet, suppressed, groupSuppressed;
+        String failure;
+        CommandPlan parent;
+        void reset(long cycle, double volts) {
+            this.cycle = cycle;
+            memberCount = 0;
+            candidate = planned = volts;
+            anchor = 0.0;
+            factor = 1.0;
+            parent = this;
+            anchorSet = suppressed = groupSuppressed = false;
+            failure = "";
+        }
+        CommandPlan root() {
+            CommandPlan result = this;
+            while (result.parent != result) result = result.parent;
+            CommandPlan current = this;
+            while (current.parent != current) { CommandPlan next = current.parent; current.parent = result; current = next; }
+            return result;
+        }
+        Member member(int index) {
+            while (members.size() <= index) members.add(new Member());
+            return members.get(index);
+        }
+    }
+
+    private static final class Member {
+        MotorState state;
+        MotorHandle handle;
+        CommandPlan command;
+        double localCap, scale, currentAtZero, currentSlope, supplyRadius;
+        boolean eligible, accounted, known, voltageAdded, supplyAdded;
+        final PowerPlanner.Channel voltageChannel = new PowerPlanner.Channel();
+        final PowerPlanner.Channel supplyChannel = new PowerPlanner.Channel();
+        PowerPlanner.DemandModel model;
+        PowerPlanner.DemandModel voltageModel;
+        PowerPlanner.DemandModel supplyModel;
+
+        void prepareModel() {
+            double zeroVolts = scale * command.anchor;
+            double slopeVolts = scale * command.slope;
+            if (known) {
+                currentAtZero = (zeroVolts - state.backEmfVolts) / state.resistanceOhms;
+                currentSlope = slopeVolts / state.resistanceOhms;
+            } else {
+                currentAtZero = 0.0;
+                double estimate = state.measuredWindingAmps;
+                if (!(estimate > 0.0) && Double.isFinite(localCap)) estimate = Math.max(0.0, localCap);
+                currentSlope = Math.copySign(estimate, scale * command.candidate);
+            }
+            model = new PowerPlanner.DemandModel(currentAtZero, currentSlope, this::accountedSupply);
+            voltageModel = new PowerPlanner.DemandModel(zeroVolts, slopeVolts, ignored -> 0.0);
+        }
+        double accountedSupply(double factor) { return accounted ? positiveSupply(factor) : 0.0; }
+        double positiveSupply(double factor) {
+            double volts = scale * (command.anchor + factor * command.slope);
+            double current = currentAtZero + factor * currentSlope;
+            double bus = state.conversionBusVolts;
+            return bus > 0.0 ? Math.max(0.0, volts * current / bus)
+                    : Math.max(0.0, state.supplyAmps) * Math.max(0.0, factor);
+        }
+        void prepareSupplyConstraint() {
+            double a = scale * command.anchor, b = scale * command.slope;
+            double aa = b * currentSlope;
+            double bb = a * currentSlope + b * currentAtZero;
+            double cc = a * currentAtZero - state.declaredSupplyLimit * state.conversionBusVolts;
+            double low = 0.0, high = 1.0;
+            if (aa > 1e-12) {
+                double discriminant = bb * bb - 4.0 * aa * cc;
+                if (discriminant < 0.0) { low = 1.0; high = -1.0; }
+                else {
+                    double root = Math.sqrt(discriminant);
+                    low = Math.max(low, (-bb - root) / (2.0 * aa));
+                    high = Math.min(high, (-bb + root) / (2.0 * aa));
+                }
+            } else if (Math.abs(bb) > 1e-12) {
+                if (bb > 0.0) high = Math.min(high, -cc / bb);
+                else low = Math.max(low, -cc / bb);
+            } else if (cc > 0.0) { low = 1.0; high = -1.0; }
+            if (low > high) {
+                supplyRadius = 0.0;
+                supplyModel = new PowerPlanner.DemandModel(1.0, 0.0, ignored -> 0.0);
+            } else {
+                supplyRadius = 0.5 * (high - low);
+                supplyModel = new PowerPlanner.DemandModel(-0.5 * (high + low), 1.0, ignored -> 0.0);
+            }
         }
     }
 
     private double totalDemand() {
         double total = 0.0;
-        for (MotorState state : active) total += state.demandAmps;
+        for (MotorState state : active) total += state.supplyDemandAmps;
         return total;
     }
 
@@ -255,9 +665,15 @@ final class PowerRuntime {
     }
 
     private String status(MotorState state, double cap) {
-        // Power-limited only when the planner lowered the cap below the configured (already derated) limit.
-        if (cap < state.declaredCapAmps) return shedding ? "Power shed" : "Power capped";
+        if (!state.planStatus.isEmpty()) return state.planStatus;
+        if (state.channel.supplyLimited()) return "Power shed";
         if (state.derate < 1.0) return "Thermal derate";
+        if (cap < state.declaredCapAmps) return "Power capped";
+        if (state.softwareSupplyLimit && state.constants.isPresent()
+                && (!(state.conversionBusVolts > 0.0) || !Double.isFinite(state.backEmfVolts))) {
+            return "Supply limit unavailable";
+        }
+        if (state.softwareSupplyLimit && state.constants.isEmpty()) return "Supply limit estimated";
         return "Declared";
     }
 
@@ -276,20 +692,35 @@ final class PowerRuntime {
         final String name;
         final PowerPlanner.Channel channel = new PowerPlanner.Channel();
         /** Nominal constants, or empty for a motor kind without a MotorSpec row (demand then uses supply current). */
-        final Optional<MotorConstants> constants;
+        Optional<MotorConstants> constants;
+        ca.frc6390.athena.api.hardware.MotorKind electricalKind;
         /** Winding resistance of {@link #constants} in ohms, converted once; NaN without constants. */
-        final double resistanceOhms;
+        double resistanceOhms;
         /** Speed constant of {@link #constants} in rad/s per volt, converted once; NaN without constants. */
-        final double speedConstantRadPerSecPerVolt;
+        double speedConstantRadPerSecPerVolt;
         final ca.frc6390.athena.hardware.power.Thermal curve;
+        final DoubleUnaryOperator supplyToWinding = this::windingForSupply;
         MotorHandle handle;
+        long sampledCycle = Long.MIN_VALUE;
+        /** Winding-current magnitude for torque profiles and thermal limits. */
         double demandAmps;
+        double measuredWindingAmps;
+        double declaredSupplyLimit;
+        double candidateCapAmps = Double.POSITIVE_INFINITY;
+        Member plannedMember;
+        String planStatus = "";
+        boolean outputSuppressed;
+        /** Positive battery load; regeneration is not borrowed as headroom for another motor. */
+        double supplyDemandAmps;
         double supplyAmps = Double.NaN;
         double statorAmps = Double.NaN;
+        double conversionBusVolts;
+        double backEmfVolts = Double.NaN;
         double derate = 1.0;
         double declaredCapAmps = Double.POSITIVE_INFINITY;
-        /** Declared supply/stator limit before the derate; infinite when none is declared. */
-        double configuredLimitAmps = Double.POSITIVE_INFINITY;
+        /** Controller-enforced winding limit before thermal derating; supply limits stay in their own domain. */
+        double configuredStatorLimitAmps = Double.POSITIVE_INFINITY;
+        boolean softwareSupplyLimit;
         double temperatureCelsius = Double.NaN;
         String status = "Declared";
 
@@ -298,35 +729,87 @@ final class PowerRuntime {
             return profile == null ? 0.0 : profile.raw().sustainedAmps();
         }
 
+        boolean profileHasCurrentCap() {
+            var profile = device.power();
+            return profile != null && (profile.raw().sustainedAmps() > 0.0 || profile.sag() != null
+                    || profile.raw().rampAmpsPerSecond() > 0.0);
+        }
+
         MotorState(MotorDevice device) {
             this.device = device;
             this.name = device.defaultName();
-            this.constants = MotorConstants.forKind(device.kind());
+            updateConstants(device.kind());
+            this.curve = device.thermalCurve();
+        }
+
+        void updateConstants(ca.frc6390.athena.api.hardware.MotorKind kind) {
+            if (electricalKind == kind) return;
+            electricalKind = kind;
+            this.constants = MotorConstants.forKind(kind);
             this.resistanceOhms = constants.isPresent()
                     ? constants.get().resistance().in(edu.wpi.first.units.Units.Ohms)
                     : Double.NaN;
             this.speedConstantRadPerSecPerVolt = constants.isPresent()
                     ? constants.get().raw().speedConstantRadPerSecPerVolt()
                     : Double.NaN;
-            this.curve = device.thermalCurve();
         }
 
-        void readInputs(MotorHandle handle) {
+        void readInputs(MotorHandle handle, double bus) {
+            updateConstants(handle.commandTarget().device().kind());
             supplyAmps = read(handle::supplyCurrentAmps);
             statorAmps = read(handle::statorCurrentAmps);
             double volts = read(handle::appliedVoltage);
             double rotationsPerSecond = read(handle::integratedVelocityRotationsPerSecond);
-            if (constants.isPresent() && Double.isFinite(volts) && Math.abs(volts) > REGEN_EPSILON_VOLTS
-                    && Double.isFinite(rotationsPerSecond)) {
-                double omega = rotationsPerSecond * 2.0 * Math.PI;
-                double backEmf = omega / speedConstantRadPerSecPerVolt;
-                demandAmps = Math.abs(volts - backEmf) / resistanceOhms;
-            } else if (constants.isPresent() && Double.isFinite(volts)) {
-                demandAmps = 0.0;
+            // A measured terminal voltage is a lower bound on its supplying bus. Do not assume
+            // the policy floor still exists when bus telemetry is missing during a brownout.
+            conversionBusVolts = Double.isFinite(bus) && bus > 0.0 ? bus
+                    : Double.isFinite(volts) ? Math.abs(volts) : 0.0;
+            backEmfVolts = constants.isPresent() && Double.isFinite(rotationsPerSecond)
+                    ? rotationsPerSecond * 2.0 * Math.PI / speedConstantRadPerSecPerVolt : Double.NaN;
+            double modelCurrent = Double.isFinite(volts) && Double.isFinite(backEmfVolts)
+                    ? (volts - backEmfVolts) / resistanceOhms : Double.NaN;
+            double modelPower = volts * modelCurrent;
+            if (Double.isFinite(statorAmps)) {
+                demandAmps = Math.abs(statorAmps);
+            } else if (Double.isFinite(modelCurrent)) {
+                demandAmps = Math.abs(modelCurrent);
             } else {
-                // Unknown constants: the measured supply current is the demand estimate.
-                demandAmps = Double.isFinite(supplyAmps) ? Math.max(0.0, supplyAmps) : 0.0;
+                // Missing winding telemetry: use electrical power conversion when duty is known,
+                // otherwise keep the supply estimate without dividing by zero or inventing a large torque.
+                demandAmps = Double.isFinite(supplyAmps) ? Math.abs(supplyAmps) : 0.0;
+                if (Double.isFinite(volts) && Math.abs(volts) > ELECTRICAL_EPSILON
+                        && Double.isFinite(bus)) demandAmps *= bus / Math.abs(volts);
             }
+            if (!Double.isFinite(supplyAmps)) {
+                if (Double.isFinite(modelPower)) {
+                    supplyAmps = Double.isFinite(bus) && bus > 0.0 ? modelPower / bus
+                            : modelPower == 0.0 ? 0.0 : Math.copySign(Math.abs(modelCurrent), modelPower);
+                } else if (Double.isFinite(volts)) {
+                    supplyAmps = volts == 0.0 ? 0.0
+                            : Double.isFinite(bus) && bus > 0.0 ? Math.abs(volts) * demandAmps / bus : demandAmps;
+                } else {
+                    supplyAmps = demandAmps;
+                }
+            } else if (Double.isFinite(modelPower) && modelPower < -ELECTRICAL_EPSILON) {
+                // Some vendors report supply-current magnitude. Physical negative electrical power
+                // identifies regeneration even with such a reading; it is never positive demand.
+                supplyAmps = -Math.abs(supplyAmps);
+            }
+            supplyDemandAmps = Double.isFinite(supplyAmps) ? Math.max(0.0, supplyAmps) : 0.0;
+            measuredWindingAmps = demandAmps;
+        }
+
+        double windingForSupply(double amps) {
+            if (constants.isPresent()) {
+                // Without speed, the voltage clamp cannot cancel back-EMF. A zero cap produces
+                // zero voltage under that missing-speed fallback instead of guessing a power allowance.
+                if (!Double.isFinite(backEmfVolts)) return 0.0;
+                return PowerBudget.windingAmpsForSupply(amps, conversionBusVolts, backEmfVolts, resistanceOhms);
+            }
+            // No motor model: retain the existing feedback estimate; the output path scales voltage
+            // from measured supply current instead of claiming a hard model-based winding bound.
+            return supplyDemandAmps > ELECTRICAL_EPSILON
+                    ? demandAmps * Math.min(1.0, Math.max(0.0, amps) / supplyDemandAmps) : Math.max(0.0, amps);
         }
 
         void thermalStep(double dt) {
@@ -336,7 +819,7 @@ final class PowerRuntime {
                 OptionalDouble vendor = handle.temperatureCelsius();
                 model.vendorReading(vendor == null || vendor.isEmpty() ? Double.NaN : vendor.getAsDouble());
             }
-            model.step(Double.isFinite(statorAmps) ? statorAmps : 0.0, dt);
+            model.step(measuredWindingAmps, dt);
             temperatureCelsius = model.celsius();
         }
 

@@ -16,6 +16,9 @@ import java.util.OptionalDouble;
 final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     private final MotorHandle original;
     private volatile Route route;
+    private java.util.function.BooleanSupplier groupReady = () -> true;
+
+    void groupReady(java.util.function.BooleanSupplier ready) { groupReady = ready; }
 
     FailoverMotorHandle(MotorHandle original) {
         this.original = Objects.requireNonNull(original, "original");
@@ -25,6 +28,8 @@ final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     MotorHandle original() { return original; }
 
     MotorHandle target() { return route.handle; }
+
+    @Override public MotorHandle commandTarget() { return route.handle.commandTarget(); }
 
     /** Leads with another motor. Direction maps this group's command frame onto that motor's controller. */
     void lead(MotorHandle handle, double direction, boolean controllerInverted, double offsetRotations) {
@@ -42,10 +47,17 @@ final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     @Override public MotorDevice device() { return original.device(); }
+    @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+        var status = route.handle.configurationStatus();
+        return status.ready() && !groupReady.getAsBoolean()
+                ? new ca.frc6390.athena.hardware.backend.ConfigurationStatus(
+                        status.requestedGeneration(), status.appliedGeneration(), true, "") : status;
+    }
     @Override public void activate() { original.activate(); }
     @Override public void refreshInputs() { original.refreshInputs(); }
     @Override public boolean faulted() { return original.faulted(); }
     @Override public boolean supportsRuntimeConfiguration() { return route.handle.supportsRuntimeConfiguration(); }
+    @Override public boolean enforcesSupplyCurrentLimit() { return route.handle.enforcesSupplyCurrentLimit(); }
 
     @Override
     public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
@@ -61,6 +73,17 @@ final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     @Override public double appliedVoltage() { Route r = route; return r.direction * r.handle.appliedVoltage(); }
     @Override public double supplyCurrentAmps() { return route.handle.supplyCurrentAmps(); }
     @Override public double statorCurrentAmps() { return route.handle.statorCurrentAmps(); }
+    @Override public double voltageCommandScale() {
+        Route r = route;
+        // Both voltage commands and velocity reads apply r.direction, so it cancels in this handle's frame.
+        return r.scale * r.handle.voltageCommandScale();
+    }
+
+    /** Group command to the active backend's untransformed feedback frame. */
+    double targetVoltageCommandScale() {
+        Route r = route;
+        return r.direction * r.scale * r.handle.voltageCommandScale();
+    }
 
     @Override
     public void follow(MotorHandle leader, boolean inverted) {
@@ -68,31 +91,37 @@ final class FailoverMotorHandle implements MotorHandle, AutoCloseable {
     }
 
     @Override public void setPercentOutput(double percent) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setPercentOutput(r.direction * r.scale * percent);
     }
 
     @Override public void setVoltage(double volts) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setVoltage(r.direction * r.scale * volts);
     }
 
     @Override public void setPositionTargetRotations(double rotations) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setPositionTargetRotations(r.direction * (rotations - r.offset));
     }
 
     @Override public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setPositionTargetRotations(r.direction * (rotations - r.offset), directed(request, r.direction));
     }
 
     @Override public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setVelocityTargetRotationsPerSecond(r.direction * rotationsPerSecond);
     }
 
     @Override public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond, MotorClosedLoopRequest request) {
+        if (!configurationStatus().ready()) { stop(); return; }
         Route r = route;
         r.handle.setVelocityTargetRotationsPerSecond(r.direction * rotationsPerSecond, directed(request, r.direction));
     }

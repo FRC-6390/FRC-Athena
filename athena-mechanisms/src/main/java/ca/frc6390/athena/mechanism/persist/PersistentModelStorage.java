@@ -27,6 +27,7 @@ import java.util.Set;
  * available from {@link #keys(String)} so the boot-time cleanup keeps these entries.</p>
  */
 public final class PersistentModelStorage implements ModelStorage {
+    private static final System.Logger LOGGER = System.getLogger(PersistentModelStorage.class.getName());
     private static final String MODEL = "/model";
     private static final String KINDS = "/model.kinds";
     private static final String MOTION = "/model.motion";
@@ -100,29 +101,43 @@ public final class PersistentModelStorage implements ModelStorage {
         Optional<Object> flat = store.get(key + HISTORY);
         Optional<Object> reasons = store.get(key + HISTORY_REASONS);
         Optional<Object> motion = store.get(key + HISTORY_MOTION);
-        if (flat.isEmpty() || reasons.isEmpty() || motion.isEmpty()
-                || !(flat.get() instanceof double[] values) || !(reasons.get() instanceof String text)) {
+        if (flat.isEmpty() && reasons.isEmpty() && motion.isEmpty()) {
             return List.of();
         }
-        MotionKind kind = parseKind(String.valueOf(motion.get()));
+        if (flat.isEmpty() || reasons.isEmpty() || motion.isEmpty()
+                || !(flat.get() instanceof double[] values) || !(reasons.get() instanceof String text)) {
+            rejected(key + HISTORY, "missing or invalid history metadata");
+            return List.of();
+        }
+        MotionKind kind = parseKind(motion.get());
+        if (kind == null) {
+            rejected(key + HISTORY_MOTION, "unknown motion kind");
+            return List.of();
+        }
         String[] reasonList = text.split("\n", -1);
         List<ModelHistory.Snapshot> snapshots = new ArrayList<>();
         int at = 0;
         for (String reason : reasonList) {
-            if (at + 2 > values.length) {
+            if (values.length - at < 2) {
+                rejected(key + HISTORY, "truncated snapshot header");
                 break;
             }
             double timestamp = values[at];
-            int length = (int) values[at + 1];
+            double storedLength = values[at + 1];
             at += 2;
-            if (length < 0 || at + length > values.length) {
+            if (storedLength < 0.0 || storedLength > values.length - at
+                    || storedLength != Math.rint(storedLength)) {
+                rejected(key + HISTORY, "invalid snapshot length");
                 break;
             }
+            int length = (int) storedLength;
             double[] vector = Arrays.copyOfRange(values, at, at + length);
             at += length;
             MechanismModel model = ModelCodec.decode(vector, kind, List.of());
             if (model != null) {
                 snapshots.add(new ModelHistory.Snapshot(timestamp, reason, model));
+            } else {
+                rejected(key + HISTORY, "invalid snapshot model");
             }
         }
         return List.copyOf(snapshots);
@@ -138,11 +153,26 @@ public final class PersistentModelStorage implements ModelStorage {
     private Optional<MechanismModel> readModel(String vectorKey, String kindsKey, String motionKey) {
         Optional<Object> vector = store.get(vectorKey);
         Optional<Object> motion = store.get(motionKey);
-        if (vector.isEmpty() || motion.isEmpty() || !(vector.get() instanceof double[] values)) {
+        Optional<Object> kinds = store.get(kindsKey);
+        if (vector.isEmpty() && motion.isEmpty() && kinds.isEmpty()) {
             return Optional.empty();
         }
-        List<String> kinds = parseKinds(store.get(kindsKey).map(String::valueOf).orElse(""));
-        return Optional.ofNullable(ModelCodec.decode(values, parseKind(String.valueOf(motion.get())), kinds));
+        if (vector.isEmpty() || motion.isEmpty() || !(vector.get() instanceof double[] values)) {
+            rejected(vectorKey, "missing or invalid model metadata");
+            return Optional.empty();
+        }
+        MotionKind kind = parseKind(motion.get());
+        if (kind == null) {
+            rejected(motionKey, "unknown motion kind");
+            return Optional.empty();
+        }
+        if (kinds.isPresent() && !(kinds.get() instanceof String)) {
+            rejected(kindsKey, "invalid motor kind metadata");
+            return Optional.empty();
+        }
+        MechanismModel model = ModelCodec.decode(values, kind, parseKinds(kinds.map(String.class::cast).orElse("")));
+        if (model == null) rejected(vectorKey, "invalid model vector");
+        return Optional.ofNullable(model);
     }
 
     private static List<String> parseKinds(String text) {
@@ -153,7 +183,18 @@ public final class PersistentModelStorage implements ModelStorage {
         return List.copyOf(kinds);
     }
 
-    private static MotionKind parseKind(String name) {
-        return MotionKind.valueOf(name);
+    private static MotionKind parseKind(Object value) {
+        if (!(value instanceof String name)) return null;
+        try {
+            return MotionKind.valueOf(name);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
+    }
+
+    private static void rejected(String key, String reason) {
+        LOGGER.log(System.Logger.Level.WARNING,
+                "Ignoring persisted characterization data at {0}: {1}. Code defaults are kept for rejected models.",
+                key, reason);
     }
 }

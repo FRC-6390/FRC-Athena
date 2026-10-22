@@ -9,11 +9,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -23,15 +20,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * ARCP server for the robot. The protocol is implemented in Rust ({@code arcp-server}); this class
  * only marshals the robot's data across JNI and dispatches client requests to the robot.
  *
- * <p>All methods are called from the robot thread. Clients connect over TCP and UDP on their own
- * threads inside the native server, so nothing here runs on those threads, except that
- * {@link #publishCycle} hands the cycle to a single publisher thread: the native cycle publish writes the
+ * <p>Robot publication methods and the replay encoder admit operations through this synchronized facade.
+ * Clients connect over TCP and UDP on native threads. A single publisher thread performs ordered JNI work: the native cycle publish writes the
  * realtime frames to the sockets, which would otherwise hold the robot thread for every connected client. Cycles
- * are still delivered in order. The queue holds a few cycles; when it is full the robot thread waits, as it
- * always did, so nothing is dropped. Dictionary, marker and replay publishes wait for queued cycles first.</p>
+ * are delivered in order. When the bounded queue fills, the newest pending cycle absorbs the latest signal
+ * values instead of delaying the robot; intermediate telemetry samples may be coalesced. Dictionary, marker and
+ * replay publishes share the same bounded ordered mailbox and never wait for queued cycles.</p>
  *
- * <p>Call {@link #serviceRequests()} once per robot cycle so queued writes, actions and backfill
- * requests are answered. A request left unanswered for the native reply timeout is rejected by the
+ * <p>Call {@link #serviceRequests()} once per robot cycle so queued writes and actions are answered and
+ * history requests are handed to the bounded backfill worker. A request left unanswered for the native reply timeout is rejected by the
  * server.</p>
  */
 public final class NativeArcpServer implements ArcpSink, AutoCloseable {
@@ -78,7 +75,9 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         }
     }
 
-    private static final int MAX_BACKFILL_BYTES = 1 << 20;
+    // The wire body also includes kind, request id, reply status, data tag, and record-list length.
+    private static final int MAX_BACKFILL_BYTES = (1 << 20) - 64;
+    private static final long BACKFILL_QUEUE_DEADLINE_NANOS = TimeUnit.MILLISECONDS.toNanos(200);
 
     private final WriteHandler writeHandler;
     private final ActionHandler actionHandler;
@@ -100,33 +99,28 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
 
     private long handle;
 
-    /** Cycles handed to the publisher thread that have not been sent yet; a full queue blocks the robot thread. */
-    private static final int PUBLISH_QUEUE_CAPACITY = 8;
-    private final ThreadPoolExecutor publisher = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
-            new ArrayBlockingQueue<>(PUBLISH_QUEUE_CAPACITY), NativeArcpServer::publisherThread,
-            (task, executor) -> {
-                if (executor.isShutdown()) {
-                    throw new RejectedExecutionException("ARCP publisher is shut down");
-                }
-                try {
-                    executor.getQueue().put(task);
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    throw new RejectedExecutionException("interrupted while waiting for ARCP publish", interrupted);
-                }
+    /** Bounded ordered publication; adjacent cycle deltas coalesce without crossing protocol operations. */
+    private final CyclePublisher publisher = new CyclePublisher(ArcpNative::publishCycle);
+    /** At most one history response is materialized, plus two lightweight waiting request descriptors. */
+    private final ThreadPoolExecutor backfills = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(2), runnable -> {
+                Thread thread = new Thread(runnable, "athena-arcp-backfill");
+                thread.setDaemon(true);
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
             });
-    /** Direct buffers the publisher thread has finished with, reused for the next cycle. */
-    private final Queue<ByteBuffer> freeCycleBuffers = new ConcurrentLinkedQueue<>();
-    /** First failure of a background publish, rethrown on the robot thread at its next call. */
-    private final AtomicReference<RuntimeException> publishFailure = new AtomicReference<>();
+    private final ArcpMarshal.Out backfillOut = new ArcpMarshal.Out(); // Owned only by the backfill worker.
+    private final AtomicReference<RuntimeException> backfillFailure = new AtomicReference<>();
     /** Session count seen by the last direct status call; read while cycles are still queued. */
     private volatile long lastSessions;
-
-    private static Thread publisherThread(Runnable task) {
-        Thread thread = new Thread(task, "athena-arcp-publisher");
-        thread.setDaemon(true);
-        return thread;
-    }
+    private volatile ArcpStatus cachedStatus = ArcpStatus.STOPPED;
+    private final java.util.concurrent.atomic.AtomicBoolean statusPending = new java.util.concurrent.atomic.AtomicBoolean();
+    private long lastStatusRequest;
+    private volatile long lastServiceNanos;
+    private volatile long maxCallbackNanos;
+    private volatile long rejectedCallbacks;
+    private static final long REQUEST_BUDGET_NANOS = 1_000_000;
+    private static final int MAX_REQUEST_BUFFER_BYTES = 2 * 1024 * 1024;
 
     /** Starts the server with NT4 mirroring disabled and no categories. */
     public NativeArcpServer(Config config, WriteHandler writes, ActionHandler actions) {
@@ -190,9 +184,9 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         Objects.requireNonNull(entries, "entries");
         Objects.requireNonNull(schemas, "schemas");
         long h = requireOpen();
-        awaitQueuedCycles();
         dictionaryOut.dictionary(entries, schemas);
-        ArcpNative.publishDictionary(h, dictionaryOut.buffer(), dictionaryOut.length());
+        publisher.execute(dictionaryOut.buffer(), dictionaryOut.length(),
+                (bytes, length) -> ArcpNative.publishDictionary(h, bytes, length));
 
         dictionary.clear();
         writable.clear();
@@ -210,17 +204,8 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     public synchronized void publishCycle(long cycleTimestampMicros, ArcpCycle cycle) {
         Objects.requireNonNull(cycle, "cycle");
         long h = requireOpen();
-        rethrowPublishFailure();
         cycleOut.cycle(cycle);
-        int length = cycleOut.length();
-        ByteBuffer copy = takeCycleBuffer(length);
-        copy.put(0, cycleOut.buffer(), 0, length);
-        try {
-            publisher.execute(() -> publishNative(h, cycleTimestampMicros, copy, length));
-        } catch (RejectedExecutionException rejected) {
-            recycleCycleBuffer(copy);
-            throw rejected;
-        }
+        publisher.publish(h, cycleTimestampMicros, cycleOut.buffer(), cycleOut.length());
         if (nt4 != Nt4Bridge.DISABLED) {
             for (int i = 0, n = cycle.size(); i < n; i++) {
                 ArcpDictEntry entry = dictionary.get(cycle.signalId(i));
@@ -234,8 +219,9 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     @Override
     public synchronized void marker(long timestampMicros, int kind, String message, long signalId) {
         long h = requireOpen();
-        awaitQueuedCycles();
-        ArcpNative.marker(h, timestampMicros, kind, signalId, message == null ? "" : message);
+        String text = message == null ? "" : message;
+        publisher.execute(() -> ArcpNative.marker(h, timestampMicros, kind, signalId, text),
+                Math.addExact(64, Math.multiplyExact(text.length(), 2)));
     }
 
     @Override
@@ -244,10 +230,10 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
             return;
         }
         long h = requireOpen();
-        awaitQueuedCycles();
         recordsOut.reset();
         recordsOut.bytes(records, 0, length);
-        ArcpNative.publishRecords(h, recordsOut.buffer(), recordsOut.length());
+        publisher.execute(recordsOut.buffer(), recordsOut.length(),
+                (bytes, size) -> ArcpNative.publishRecords(h, bytes, size));
     }
 
     @Override
@@ -256,15 +242,21 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
     }
 
     /**
-     * Drains client writes, actions and backfill requests, asks the robot, and sends the answers back.
-     * Call once per robot cycle. Costs one JNI call when nothing is queued.
+     * Services at most eight client requests, with a 1 ms admission budget between callbacks, on the robot thread and dispatches history requests to a bounded worker.
+     * Backfill materialization and reply copying never run on this thread. Costs one JNI call when idle.
      */
     @Override
     public synchronized void serviceRequests() {
+        long serviceStart = System.nanoTime();
+        long deadline = serviceStart + REQUEST_BUDGET_NANOS;
         long h = requireOpen();
+        scheduleStatus();
+        RuntimeException failedBackfill = backfillFailure.getAndSet(null);
+        if (failedBackfill != null) throw failedBackfill;
         int n = ArcpNative.poll(h, requestBuffer, requestBuffer.capacity());
         if (n < 0) {
-            requestBuffer = ByteBuffer.allocateDirect(Math.max(-n, requestBuffer.capacity() * 2))
+            if (-n > MAX_REQUEST_BUFFER_BYTES) throw new IllegalStateException("ARCP request exceeds buffer limit");
+            requestBuffer = ByteBuffer.allocateDirect(Math.min(MAX_REQUEST_BUFFER_BYTES, Math.max(-n, requestBuffer.capacity() * 2)))
                     .order(ByteOrder.LITTLE_ENDIAN);
             n = ArcpNative.poll(h, requestBuffer, requestBuffer.capacity());
             if (n < 0) {
@@ -281,60 +273,119 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         }
         replyOut.reset();
         replyOut.u32(0);
+        int immediateReplies = 0;
+        int dispatched = 0;
         for (int i = 0; i < count; i++) {
             long id = in.u64();
             int op = in.u8();
             long signalId = in.u64();
+            if (op == ArcpMarshal.OP_BACKFILL) {
+                long last = (Long) in.value();
+                String rejected = queueBackfill(h, id, signalId, last);
+                if (rejected == null) continue;
+                replyOut.u64(id);
+                replyOut.u8(op);
+                backfillError(replyOut, rejected);
+                immediateReplies++;
+                continue;
+            }
             replyOut.u64(id);
             replyOut.u8(op);
             if (op == ArcpMarshal.OP_WRITE) {
                 Object value = in.value();
-                WriteResult result = decideWrite(signalId, value);
+                long before = System.nanoTime();
+                WriteResult result;
+                if (dispatched > 0 && before >= deadline) {
+                    rejectedCallbacks++;
+                    result = WriteResult.reject("robot request service budget exhausted", held(signalId, value));
+                } else {
+                    result = decideWrite(signalId, value);
+                    dispatched++;
+                    maxCallbackNanos = Math.max(maxCallbackNanos, System.nanoTime() - before);
+                }
                 replyOut.u8(result.accepted() ? 1 : 0);
                 replyOut.string(result.reason());
                 replyOut.value(result.actualValue());
-            } else if (op == ArcpMarshal.OP_BACKFILL) {
-                Object last = in.value();
-                answerBackfill(signalId, (Long) last);
             } else {
-                WriteResult result = decideAction(signalId, op == ArcpMarshal.OP_ACTION_RUN);
+                long before = System.nanoTime();
+                WriteResult result;
+                if (dispatched > 0 && before >= deadline) {
+                    rejectedCallbacks++;
+                    result = WriteResult.reject("robot request service budget exhausted", Boolean.FALSE);
+                } else {
+                    result = decideAction(signalId, op == ArcpMarshal.OP_ACTION_RUN);
+                    dispatched++;
+                    maxCallbackNanos = Math.max(maxCallbackNanos, System.nanoTime() - before);
+                }
                 replyOut.u8(result.accepted() ? 1 : 0);
                 replyOut.string(result.reason());
             }
+            immediateReplies++;
         }
-        replyOut.patchU32(0, count);
-        ArcpNative.reply(h, replyOut.buffer(), replyOut.length());
+        if (immediateReplies > 0) {
+            replyOut.patchU32(0, immediateReplies);
+            ArcpNative.reply(h, replyOut.buffer(), replyOut.length());
+        }
+        lastServiceNanos = System.nanoTime() - serviceStart;
     }
 
-    private void answerBackfill(long from, long to) {
-        if (backfill == null) {
-            replyOut.u8(0);
-            replyOut.string("no replay buffer");
-            replyOut.u32(0);
-            return;
+    /** Returns a rejection reason, or null after a request was accepted by the bounded worker. */
+    private String queueBackfill(long handle, long id, long from, long to) {
+        ArcpBackfill source = backfill;
+        if (source == null) return "no replay buffer";
+        if (from < 0 || to < from) return "invalid replay sequence range";
+        long submitted = System.nanoTime();
+        try {
+            backfills.execute(() -> answerBackfill(handle, id, source, from, to, submitted));
+            return null;
+        } catch (RejectedExecutionException rejected) {
+            return "replay backfill busy: request queue full or closed";
         }
-        List<byte[]> groups = backfill.records(from, to);
-        int total = 0;
-        List<byte[]> bounded = new ArrayList<>(groups.size());
-        for (byte[] group : groups) {
-            if (total + group.length > MAX_BACKFILL_BYTES) {
-                break;
+    }
+
+    /** Runs entirely on the worker; no robot-thread marshal buffers or hardware suppliers are used here. */
+    private void answerBackfill(long handle, long id, ArcpBackfill source, long from, long to, long submitted) {
+        backfillOut.reset();
+        backfillOut.u32(1);
+        backfillOut.u64(id);
+        backfillOut.u8(ArcpMarshal.OP_BACKFILL);
+        try {
+            if (System.nanoTime() - submitted >= BACKFILL_QUEUE_DEADLINE_NANOS) {
+                backfillError(backfillOut, "replay backfill expired while queued");
+            } else {
+                // The built-in history provider selects before copying. Validate custom providers too, and
+                // account for every group prefix before growing the response buffer or copying its bytes.
+                List<byte[]> groups = ArcpBackfill.bounded(source.records(from, to, MAX_BACKFILL_BYTES),
+                        MAX_BACKFILL_BYTES);
+                int payload = 0;
+                for (byte[] group : groups) payload += varintSize(group.length) + group.length;
+                backfillOut.u8(1);
+                backfillOut.string("");
+                backfillOut.u32(payload);
+                for (byte[] group : groups) {
+                    backfillOut.varint(group.length);
+                    backfillOut.bytes(group, 0, group.length);
+                }
             }
-            bounded.add(group);
-            total += group.length;
+        } catch (RuntimeException failure) {
+            // Keep the request id/op, replacing any partial success payload with an explicit rejection.
+            backfillOut.reset();
+            backfillOut.u32(1);
+            backfillOut.u64(id);
+            backfillOut.u8(ArcpMarshal.OP_BACKFILL);
+            backfillError(backfillOut, "replay backfill failed: " + failure.getMessage());
         }
-        replyOut.u8(1);
-        replyOut.string("");
-        // The payload is "varint length, group bytes" repeated; Rust forwards it unchanged.
-        int payload = 0;
-        for (byte[] group : bounded) {
-            payload += varintSize(group.length) + group.length;
+        try {
+            ArcpNative.reply(handle, backfillOut.buffer(), backfillOut.length());
+        } catch (RuntimeException failure) {
+            backfillFailure.compareAndSet(null, new IllegalStateException("ARCP backfill reply failed", failure));
         }
-        replyOut.u32(payload);
-        for (byte[] group : bounded) {
-            replyOut.varint(group.length);
-            replyOut.bytes(group, 0, group.length);
-        }
+    }
+
+    private static void backfillError(ArcpMarshal.Out out, String reason) {
+        out.u8(0);
+        out.string(reason.length() <= 512 ? reason : reason.substring(0, 512));
+        out.u32(0);
     }
 
     private static int varintSize(long value) {
@@ -376,111 +427,72 @@ public final class NativeArcpServer implements ArcpSink, AutoCloseable {
         return last != null ? last : requested;
     }
 
-    private void publishNative(long h, long timestampMicros, ByteBuffer cycle, int length) {
-        try {
-            ArcpNative.publishCycle(h, timestampMicros, cycle, length);
-        } catch (RuntimeException failure) {
-            publishFailure.compareAndSet(null, failure);
-        } finally {
-            recycleCycleBuffer(cycle);
-        }
-    }
-
-    private void rethrowPublishFailure() {
-        RuntimeException failure = publishFailure.getAndSet(null);
-        if (failure != null) {
-            throw failure;
-        }
-    }
-
-    /** A direct buffer of at least {@code length} bytes, reused from the publisher thread when possible. */
-    private ByteBuffer takeCycleBuffer(int length) {
-        ByteBuffer buffer = freeCycleBuffers.poll();
-        if (buffer == null || buffer.capacity() < length) {
-            buffer = ByteBuffer.allocateDirect(Math.max(length, ArcpMarshal.INITIAL_CAPACITY))
-                    .order(ByteOrder.LITTLE_ENDIAN);
-        }
-        buffer.clear();
-        return buffer;
-    }
-
-    private void recycleCycleBuffer(ByteBuffer buffer) {
-        // Enough buffers for the queue, the one being published and the one being filled.
-        if (freeCycleBuffers.size() < PUBLISH_QUEUE_CAPACITY + 2) {
-            freeCycleBuffers.add(buffer);
-        }
-    }
-
-    /** Waits until every cycle handed to the publisher thread has been sent. */
-    private void awaitQueuedCycles() {
-        rethrowPublishFailure();
-        if (publisher.getQueue().isEmpty() && publisher.getActiveCount() == 0) {
-            return;
-        }
-        try {
-            publisher.submit(() -> { }).get();
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("interrupted while waiting for ARCP publish", interrupted);
-        } catch (ExecutionException | RejectedExecutionException failure) {
-            throw new IllegalStateException("ARCP publish failed", failure);
-        }
-        rethrowPublishFailure();
-    }
-
     /**
-     * True while at least one client session is connected. Reads the native status directly when no cycle is queued;
-     * while cycles are queued the status lock may be held by the publisher, so the last count it saw is used.
+     * True when the most recent background status sample contained a connected client session.
+     * This never reads native state synchronously on the caller.
      */
-    public boolean hasSessions() {
-        if (handle == 0) {
-            return false;
-        }
-        if (publisher.getQueue().isEmpty() && publisher.getActiveCount() == 0) {
-            synchronized (this) {
-                if (handle != 0) {
-                    lastSessions = ArcpNative.status(handle)[0];
-                }
-            }
-        }
-        return lastSessions > 0;
-    }
+    public boolean hasSessions() { return status().sessions() > 0; }
 
+    /** Cached background sample; never competes for native publication/state locks on the robot thread. */
     @Override
     public synchronized ArcpStatus status() {
-        if (handle == 0) {
-            return ArcpStatus.STOPPED;
-        }
-        long[] s = ArcpNative.status(handle);
-        String throttled = ArcpNative.throttled(handle);
-        List<String> lines = new ArrayList<>();
-        if (throttled != null) {
-            for (String line : throttled.split("\n")) {
-                if (!line.isBlank()) {
-                    lines.add(line);
-                }
-            }
-        }
-        return new ArcpStatus(s[0], s[1], s[2], lines);
+        if (handle == 0) return ArcpStatus.STOPPED;
+        scheduleStatus();
+        return cachedStatus;
     }
 
-    /** Stops accepting clients and frees the native server. Safe to call twice. */
-    @Override
-    public synchronized void close() {
-        if (handle != 0) {
-            publisher.shutdown();
-            boolean drained;
+    private void scheduleStatus() {
+        long now = System.nanoTime();
+        if (now - lastStatusRequest < 100_000_000 || !statusPending.compareAndSet(false, true)) return;
+        long h = handle;
+        boolean accepted = publisher.tryExecute(() -> {
             try {
-                drained = publisher.awaitTermination(5, TimeUnit.SECONDS);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                drained = false;
-            }
-            // A publish still inside the native server must not race the destroy: keep the handle in that case.
-            if (drained) {
-                ArcpNative.destroy(handle);
-            }
+                long[] s = ArcpNative.status(h);
+                String throttled = ArcpNative.throttled(h);
+                List<String> lines = new ArrayList<>();
+                if (throttled != null) for (String line : throttled.split("\n")) {
+                    if (!line.isBlank()) lines.add(line);
+                }
+                lastSessions = s[0];
+                cachedStatus = new ArcpStatus(s[0], s[1], s[2], lines);
+            } finally { statusPending.set(false); }
+        });
+        if (accepted) lastStatusRequest = now;
+        else statusPending.set(false);
+    }
+
+    /** Explicit status for an overloaded or failed ordered publisher. */
+    public String publicationFailure() { return publisher.failureMessage(); }
+    /** Last non-idle service duration; arbitrary user callbacks remain non-preemptible. */
+    public long lastServiceNanos() { return lastServiceNanos; }
+    public long maxCallbackNanos() { return maxCallbackNanos; }
+    public long rejectedCallbacks() { return rejectedCallbacks; }
+
+    /** Stops accepting work and frees the native server after its workers finish. Safe to call twice. */
+    @Override
+    public void close() {
+        long closingHandle;
+        synchronized (this) {
+            if (handle == 0) return;
+            closingHandle = handle;
             handle = 0;
+            backfills.shutdown();
+        }
+        // A worker may briefly need the recorder monitor while a lifecycle marker calls back into this
+        // server. Never hold the server monitor while joining that worker.
+        boolean backfillsDrained;
+        try {
+            backfillsDrained = backfills.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            backfillsDrained = false;
+        }
+        boolean drained = publisher.close();
+        // A publish or backfill still using the native server must not race its destruction.
+        if (drained && backfillsDrained) ArcpNative.destroy(closingHandle);
+        if (!backfillsDrained) {
+            backfills.shutdownNow();
+            throw new IllegalStateException("ARCP backfill worker did not stop; native server retained safely.");
         }
     }
 

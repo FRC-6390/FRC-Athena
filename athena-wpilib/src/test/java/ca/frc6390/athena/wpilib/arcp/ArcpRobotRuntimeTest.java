@@ -206,6 +206,16 @@ class ArcpRobotRuntimeTest {
 
         ArcpTestClient.Reply status = client.fileDownload("status/status.txt");
         assertTrue(text(status).contains("replay.streaming=false"), text(status));
+        assertTrue(text(status).contains("arcp.lastServiceNanos="), text(status));
+        assertTrue(text(status).contains("arcp.maxCallbackNanos="), text(status));
+        assertTrue(text(status).contains("arcp.rejectedCallbacks="), text(status));
+        assertTrue(text(status).contains("arcp.publicationFailure="), text(status));
+        assertTrue(text(status).contains("replay.droppedCycles="), text(status));
+        assertTrue(text(status).contains("replay.rejectedCommands="), text(status));
+        assertTrue(text(status).contains("replay.failedCommands="), text(status));
+        assertTrue(text(status).contains("replay.lastFailure="), text(status));
+        assertTrue(text(status).contains("runtime.failureReportsDropped="), text(status));
+        assertTrue(text(status).contains("runtime.failureReportingError="), text(status));
 
         ArcpTestClient.Reply deleted = client.fileDelete("replays/match-1.athrp");
         assertEquals(ArcpTestClient.STATUS_OK, deleted.status(), deleted.reason());

@@ -10,6 +10,8 @@ import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.hardware.units.MotionKind;
 import ca.frc6390.athena.mechanism.core.Controls;
+import ca.frc6390.athena.mechanism.core.Mechanism;
+import ca.frc6390.athena.mechanism.core.MechanismScheduler;
 import ca.frc6390.athena.mechanism.model.Characterization;
 import ca.frc6390.athena.mechanism.model.FrictionTable;
 import ca.frc6390.athena.mechanism.model.MechanismModel;
@@ -97,5 +99,162 @@ class ModelPersistenceTest {
         assertTrue(new PersistentModelStorage(reopened).loadHistory(KEY).stream()
                 .anyMatch(snapshot -> snapshot.reason().equals("match")));
         assertFalse(stored.equals(characterization.model()));
+    }
+
+    @Test
+    void unknownStoredMotionKindsKeepCodeDefaultsDuringMechanismRegistration() {
+        PersistentStore store = PersistentStore.open(directory);
+        String key = "persistedTurret/characterization";
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel model = MechanismModel.empty(MotionKind.ROTARY);
+        storage.save(key, model);
+        storage.saveRunning(key, model);
+        storage.saveHistory(key, List.of(new ModelHistory.Snapshot(1.0, "match", model)));
+        store.put(key + "/model.motion", "OLD_ROTARY_KIND");
+        store.put(key + "/running.motion", "OLD_ROTARY_KIND");
+        store.put(key + "/history.motion", "OLD_ROTARY_KIND");
+        assertTrue(store.flush());
+
+        PersistentStore reopened = PersistentStore.open(directory);
+        assertEquals(0, reopened.skippedLines(), "the store syntax is valid; the model metadata is not");
+        PersistedTurret turret = new PersistedTurret();
+        MechanismModel defaults = turret.characterization.model();
+        MechanismScheduler.create().persistentStore(reopened, null).register(turret);
+
+        assertEquals(defaults, turret.characterization.model());
+        assertEquals(defaults, turret.characterization.baseline());
+        assertEquals(defaults, turret.characterization.runningEstimate());
+        assertTrue(turret.characterization.history().snapshots().isEmpty());
+        assertEquals(key, turret.characterization.storageKey());
+        assertEquals("OLD_ROTARY_KIND", reopened.get(key + "/model.motion").orElseThrow(),
+                "a rejected read does not destroy the original data");
+    }
+
+    @Test
+    void malformedActiveModelDoesNotPreventValidRunningEstimateAndHistoryLoads() {
+        PersistentStore store = PersistentStore.open(directory);
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel model = MechanismModel.empty(MotionKind.ROTARY);
+        storage.save(KEY, model);
+        storage.saveRunning(KEY, model);
+        ModelHistory.Snapshot snapshot = new ModelHistory.Snapshot(1.0, "match", model);
+        storage.saveHistory(KEY, List.of(snapshot));
+        double[] vector = ModelCodec.encode(model);
+        vector[12] = 0.0;
+        store.put(KEY + "/model", vector);
+
+        assertTrue(storage.load(KEY).isEmpty());
+        assertEquals(model, storage.loadRunning(KEY).orElseThrow());
+        assertEquals(List.of(snapshot), storage.loadHistory(KEY));
+    }
+
+    @Test
+    void storedMotionKindMustMatchTheCurrentControlDeclaration() {
+        PersistentStore store = PersistentStore.open(directory);
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel incompatible = MechanismModel.empty(MotionKind.LINEAR);
+        storage.save(KEY, incompatible);
+        storage.saveRunning(KEY, incompatible);
+        storage.saveHistory(KEY, List.of(new ModelHistory.Snapshot(1.0, "old linear declaration", incompatible)));
+
+        Characterization characterization = Characterization.of(Controls.position(MOTOR, Units.Degrees).feedback(ENCODER))
+                .defaults(MechanismModel.empty(MotionKind.ROTARY).withMotors(0.02, 0.1, 1, List.of("k"), 5.0));
+        MechanismModel defaults = characterization.model();
+        characterization.persistAs(storage, KEY);
+
+        assertEquals(defaults, characterization.model());
+        assertEquals(defaults, characterization.baseline());
+        assertEquals(defaults, characterization.runningEstimate());
+        assertTrue(characterization.history().snapshots().isEmpty());
+    }
+
+    @Test
+    void malformedCountsAndGearRatiosAreRejectedWithoutTruncationOrOverflow() {
+        PersistentStore store = PersistentStore.open(directory);
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel model = MechanismModel.empty(MotionKind.LINEAR);
+        storage.save(KEY, model);
+        int[] fields = {11, 14, 16};
+        double[] invalidCounts = {-1.0, 0.5, (double) Integer.MAX_VALUE + 1.0, Double.MAX_VALUE};
+        for (int field : fields) {
+            for (double count : invalidCounts) {
+                double[] vector = ModelCodec.encode(model);
+                vector[field] = count;
+                store.put(KEY + "/model", vector);
+                assertTrue(storage.load(KEY).isEmpty(), "field " + field + " count " + count);
+            }
+        }
+        for (double gear : new double[] {0.0, -1.0}) {
+            double[] vector = ModelCodec.encode(model);
+            vector[12] = gear;
+            store.put(KEY + "/model", vector);
+            assertTrue(storage.load(KEY).isEmpty(), "gear " + gear);
+        }
+        for (double mask : new double[] {-1.0, 0.5, 4.0}) {
+            double[] vector = ModelCodec.encode(model);
+            vector[15] = mask;
+            store.put(KEY + "/model", vector);
+            assertTrue(storage.load(KEY).isEmpty(), "mask " + mask);
+        }
+    }
+
+    @Test
+    void missingOrIncorrectMetadataTypesAreRejected() {
+        PersistentStore store = PersistentStore.open(directory);
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel model = MechanismModel.empty(MotionKind.ROTARY);
+        storage.save(KEY, model);
+        store.remove(KEY + "/model.motion");
+        assertTrue(storage.load(KEY).isEmpty());
+        store.put(KEY + "/model.motion", true);
+        assertTrue(storage.load(KEY).isEmpty());
+        store.put(KEY + "/model.motion", "ROTARY");
+        store.put(KEY + "/model.kinds", 5L);
+        assertTrue(storage.load(KEY).isEmpty());
+        store.put(KEY + "/model.kinds", "");
+        store.put(KEY + "/model", "invalid vector type");
+        assertTrue(storage.load(KEY).isEmpty());
+
+        store.put(KEY + "/history", new double[] {1.0, 17.0});
+        store.put(KEY + "/history.reasons", 5L);
+        store.put(KEY + "/history.motion", "ROTARY");
+        assertTrue(storage.loadHistory(KEY).isEmpty());
+    }
+
+    @Test
+    void malformedHistoryLengthsAndModelsKeepValidSnapshots() {
+        PersistentStore store = PersistentStore.open(directory);
+        PersistentModelStorage storage = new PersistentModelStorage(store);
+        MechanismModel model = MechanismModel.empty(MotionKind.ROTARY);
+        ModelHistory.Snapshot snapshot = new ModelHistory.Snapshot(1.0, "valid", model);
+        storage.saveHistory(KEY, List.of(snapshot));
+        double[] valid = (double[]) store.get(KEY + "/history").orElseThrow();
+
+        for (double length : new double[] {-1.0, 0.5, Integer.MAX_VALUE, Double.MAX_VALUE}) {
+            double[] combined = java.util.Arrays.copyOf(valid, valid.length + 2);
+            combined[valid.length] = 2.0;
+            combined[valid.length + 1] = length;
+            store.put(KEY + "/history", combined);
+            store.put(KEY + "/history.reasons", "valid\ninvalid");
+            assertEquals(List.of(snapshot), storage.loadHistory(KEY), "length " + length);
+        }
+        double[] combined = new double[valid.length * 3];
+        System.arraycopy(valid, 0, combined, 0, valid.length);
+        System.arraycopy(valid, 0, combined, valid.length, valid.length);
+        System.arraycopy(valid, 0, combined, valid.length * 2, valid.length);
+        combined[valid.length + 2 + 12] = -1.0; // Invalid middle model: gear ratio.
+        store.put(KEY + "/history", combined);
+        store.put(KEY + "/history.reasons", "valid\ninvalid\nvalid");
+        assertEquals(List.of(snapshot, snapshot), storage.loadHistory(KEY));
+
+        store.put(KEY + "/history", new double[] {1.0});
+        store.put(KEY + "/history.reasons", "truncated");
+        assertTrue(storage.loadHistory(KEY).isEmpty());
+    }
+
+    static final class PersistedTurret implements Mechanism {
+        public final Characterization characterization = Characterization.of(
+                Controls.position(MOTOR, Units.Degrees).feedback(ENCODER))
+                .defaults(MechanismModel.empty(MotionKind.ROTARY).withMotors(0.02, 0.1, 1, List.of("k"), 5.0));
     }
 }

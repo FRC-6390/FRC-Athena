@@ -1,11 +1,16 @@
 package ca.frc6390.athena.wpilib.telemetry;
 
+import static edu.wpi.first.units.Units.Seconds;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.hardware.power.PowerSnapshot;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 
 class PowerTelemetryPublisherTest {
@@ -71,5 +76,82 @@ class PowerTelemetryPublisherTest {
         } finally {
             instance.close();
         }
+    }
+
+    @Test
+    void newMotorChannelsAreSpreadAcrossPublishesWhileExistingValuesStayCurrent() {
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        try (PowerTelemetryPublisher publisher = new PowerTelemetryPublisher(instance).bindBudget(1)) {
+            publisher.publish(motors(12.4, 20.0), 0.0);
+            assertEquals(20.0, instance.getEntry(motorDemand("one")).getDouble(-1.0));
+            assertFalse(instance.getTopic(motorDemand("two")).exists());
+            assertFalse(instance.getTopic(motorDemand("three")).exists());
+
+            publisher.publish(motors(12.0, 30.0), 0.02);
+            assertEquals(30.0, instance.getEntry(motorDemand("one")).getDouble(-1.0));
+            assertEquals(30.0, instance.getEntry(motorDemand("two")).getDouble(-1.0));
+            assertFalse(instance.getTopic(motorDemand("three")).exists());
+
+            publisher.publish(motors(11.5, 40.0), 0.04);
+            for (String name : List.of("one", "two", "three")) {
+                assertEquals(40.0, instance.getEntry(motorDemand(name)).getDouble(-1.0));
+            }
+            assertEquals(11.5, instance.getEntry(VOLTS).getDouble(-1.0));
+        } finally {
+            instance.close();
+        }
+    }
+
+    @Test
+    void slowBusOrMotorBindingDefersOtherEntriesWithoutStarvingThem() {
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        AtomicLong clock = new AtomicLong();
+        try (PowerTelemetryPublisher publisher = new PowerTelemetryPublisher(
+                instance, () -> clock.getAndAdd(1_000_000L)).bindTimeBudget(Seconds.of(0.001))) {
+            publisher.publish(motors(12.4, 20.0), 0.0);
+            assertEquals(12.4, instance.getEntry(VOLTS).getDouble(-1.0));
+            assertFalse(instance.getTopic(motorDemand("one")).exists(),
+                    "expensive first bus binding must not also create every motor's entries");
+
+            publisher.publish(motors(12.2, 30.0), 0.02);
+            assertEquals(30.0, instance.getEntry(motorDemand("one")).getDouble(-1.0));
+            assertFalse(instance.getTopic(motorDemand("two")).exists());
+            publisher.publish(motors(12.0, 40.0), 0.04);
+            publisher.publish(motors(11.8, 50.0), 0.06);
+            for (String name : List.of("one", "two", "three")) {
+                assertEquals(50.0, instance.getEntry(motorDemand(name)).getDouble(-1.0));
+            }
+        } finally {
+            instance.close();
+        }
+    }
+
+    @Test
+    void diagnosticPeriodAvoidsSamplingUntilDueAndAcceptsClockReset() {
+        NetworkTableInstance instance = NetworkTableInstance.create();
+        AtomicInteger samples = new AtomicInteger();
+        Supplier<PowerSnapshot> source = () -> snapshot(12.0, samples.incrementAndGet(), "Declared");
+        try (PowerTelemetryPublisher publisher = new PowerTelemetryPublisher(instance).readOnlyPeriod(Seconds.of(0.1))) {
+            publisher.publish(source, 1.0);
+            for (int i = 1; i <= 4; i++) publisher.publish(source, 1.0 + 0.02 * i);
+            assertEquals(1, samples.get(), "do not build a per-motor snapshot for diagnostics between publishes");
+            publisher.publish(source, 1.1);
+            assertEquals(2, samples.get());
+            assertEquals(2.0, instance.getEntry(DEMAND).getDouble(-1.0));
+            publisher.publish(source, 0.0);
+            assertEquals(3, samples.get(), "a reset simulation clock must not freeze diagnostics");
+        } finally {
+            instance.close();
+        }
+    }
+
+    private static String motorDemand(String name) {
+        return PowerTelemetryPublisher.ROOT + "/Motors/" + name + "/Demand";
+    }
+
+    private static PowerSnapshot motors(double busVolts, double demand) {
+        return new PowerSnapshot(busVolts, 12.6, 0.02, 7.0, 11.9, 280.0, demand * 3.0, false,
+                List.of("one", "two", "three").stream().map(name -> new PowerSnapshot.Motor(
+                        name, demand, 60.0, 1.0, 30.0, 1.0, 60.0, "Declared")).toList());
     }
 }

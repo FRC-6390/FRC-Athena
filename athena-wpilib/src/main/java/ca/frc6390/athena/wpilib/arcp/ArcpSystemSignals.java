@@ -28,10 +28,12 @@ import java.util.function.Supplier;
  *   <li>{@code athena/robot/matchTime}: f64, seconds left in the current period, -1 when none is running;</li>
  *   <li>{@code athena/robot/alliance}: string, {@code Red}, {@code Blue}, or empty when unknown;</li>
  *   <li>{@code athena/power/battery/voltage}: f64, volts;</li>
- *   <li>{@code athena/power/bus/demandAmps}: f64, total requested current from the power pass;</li>
+ *   <li>{@code athena/power/bus/demandAmps}: f64, positive battery-side supply load from the latest electrical
+ *       samples, excluding regeneration; this is not a forecast of the next controller command;</li>
  *   <li>{@code athena/power/bus/shedding}: bool, true while the power budget sheds current.</li>
- *   <li>{@code athena/power/<motor>/current}: f64, amps: the motor's estimated current draw;</li>
- *   <li>{@code athena/power/<motor>/capAmps}: f64, amps: the planner's cap on the motor, 0 when it is not capped.</li>
+ *   <li>{@code athena/power/<motor>/current}: f64, winding (stator) amps, estimated when telemetry is unavailable;</li>
+ *   <li>{@code athena/power/<motor>/capAmps}: f64, winding amps: the planner's cap. The legacy wire field uses
+ *       0 for an uncapped motor as well as for an active zero-current cap; the full power snapshot distinguishes them.</li>
  *   <li>{@code athena/vision/<camera>/State}: string, OK, REJECTED, RECOVERING, UNSYNCED, STALE or NO_TARGETS;</li>
  *   <li>{@code athena/vision/<camera>/Reason}: string, short text naming the rejection, empty when OK;</li>
  *   <li>{@code athena/vision/<camera>/AcceptedPerSecond}, {@code RejectedPerSecond}: f64, frames per second;</li>
@@ -377,7 +379,7 @@ final class ArcpSystemSignals {
                     cycle.setNumber(channel.currentId, current);
                     channel.lastCurrent = current;
                 }
-                // The planner cap is +infinity when the motor is not capped; 0 means "no cap" on the wire.
+                // Preserve the legacy zero sentinel for an uncapped motor; an active zero cap also appears as zero.
                 double cap = Double.isFinite(motor.capAmps()) ? motor.capAmps() : 0.0;
                 if (cap != channel.lastCap) {
                     cycle.setNumber(channel.capId, cap);

@@ -18,6 +18,9 @@ public interface MotorHandle {
      */
     MotorDevice device();
 
+    /** Cached readiness of required configuration; synchronous backends are ready immediately. */
+    default ConfigurationStatus configurationStatus() { return ConfigurationStatus.READY; }
+
     /**
      * Activates runtime configuration after the graph creates and caches the handle.
      */
@@ -38,8 +41,21 @@ public interface MotorHandle {
     }
 
     /**
+     * Returns whether the active controller enforces supply-current limits in battery amps natively.
+     * Controllers with only a winding-current limit return false so Athena applies a software limit.
+     * Wrappers must follow their active output route, including after motor-group promotion. This is a
+     * cached capability query and must not contact the controller. Custom backends default to software
+     * enforcement until they explicitly provide this guarantee.
+     */
+    default boolean enforcesSupplyCurrentLimit() {
+        return false;
+    }
+
+    /**
      * Applies a temporary motor configuration without changing the immutable declaration or
-     * persisting it across robot-program restarts.
+     * persisting it across robot-program restarts. Implementations must enqueue potentially blocking
+     * vendor work and expose its acknowledgement through {@link #configurationStatus()}; this method
+     * runs on robot/telemetry threads. Drive output must remain gated while required work is pending.
      */
     default void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         throw new UnsupportedOperationException(
@@ -68,6 +84,29 @@ public interface MotorHandle {
 
     /** Returns the latest motor stator current. */
     default double statorCurrentAmps() { return supplyCurrentAmps(); }
+
+    /**
+     * Multiplier from a requested voltage to the voltage in this handle's integrated-velocity measurement frame.
+     * Ordinary controller handles use their controller's phased feedback frame and return one. Wrappers that
+     * reverse or derate commands must include that transformation here, without changing telemetry signs.
+     *
+     * @return signed voltage multiplier; zero when the wrapper suppresses voltage output
+     */
+    default double voltageCommandScale() { return 1.0; }
+
+    /**
+     * Voltage multiplier from a native followed leader's measurement frame to this follower's measurement
+     * frame. Controller-phased feedback stays aligned with its applied output, including opposition, so the
+     * default is one. Backends exposing raw shaft feedback must report the actual native follow direction.
+     * Read only cached state; this method runs during host power clamping and must not query the bus.
+     */
+    default double hardwareFollowerVoltageScale() { return 1.0; }
+
+    /**
+     * Physical command destination of this handle, read from cached routing state. Command wrappers delegate
+     * this so mirroring can deduplicate writes and retain only actual motors for later neutralization.
+     */
+    default MotorHandle commandTarget() { return this; }
 
     /**
      * Configures this controller to follow another runtime motor controller.

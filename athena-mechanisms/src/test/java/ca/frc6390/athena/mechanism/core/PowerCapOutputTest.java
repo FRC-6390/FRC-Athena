@@ -36,6 +36,7 @@ class PowerCapOutputTest {
 
         @Override public MotorDevice device() { return device; }
         @Override public boolean supportsRuntimeConfiguration() { return true; }
+        @Override public boolean enforcesSupplyCurrentLimit() { return true; } // CTRE-like fixture
         @Override public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) { writes.add(configuration); }
         @Override public double appliedVoltage() { return volts; }
         @Override public void setVoltage(double value) { volts = value; }

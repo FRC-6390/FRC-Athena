@@ -28,13 +28,19 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
 
     MotorHandle backendHandle() { return delegate; }
 
+    @Override public MotorHandle commandTarget() { return delegate.commandTarget(); }
+
     double direction() { return direction; }
 
     void scale(double scale) { this.scale = scale; }
 
     @Override public MotorDevice device() { return device; }
+    @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+        return delegate.configurationStatus();
+    }
 
     @Override public boolean supportsRuntimeConfiguration() { return delegate.supportsRuntimeConfiguration(); }
+    @Override public boolean enforcesSupplyCurrentLimit() { return delegate.enforcesSupplyCurrentLimit(); }
 
     @Override public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         Objects.requireNonNull(configuration, "configuration");
@@ -50,19 +56,20 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     @Override public double appliedVoltage() { return delegate.appliedVoltage(); }
     @Override public double supplyCurrentAmps() { return delegate.supplyCurrentAmps(); }
     @Override public double statorCurrentAmps() { return delegate.statorCurrentAmps(); }
+    @Override public double voltageCommandScale() { return direction * scale * delegate.voltageCommandScale(); }
     @Override public void setPercentOutput(double percent) { delegate.setPercentOutput(direction * scale * percent); }
     @Override public void setVoltage(double volts) { delegate.setVoltage(direction * scale * volts); }
     @Override public void setPositionTargetRotations(double rotations) {
         delegate.setPositionTargetRotations(direction * rotations);
     }
     @Override public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
-        delegate.setPositionTargetRotations(direction * rotations, request);
+        delegate.setPositionTargetRotations(direction * rotations, directed(request));
     }
     @Override public void setVelocityTargetRotationsPerSecond(double velocity) {
         delegate.setVelocityTargetRotationsPerSecond(direction * velocity);
     }
     @Override public void setVelocityTargetRotationsPerSecond(double velocity, MotorClosedLoopRequest request) {
-        delegate.setVelocityTargetRotationsPerSecond(direction * velocity, request);
+        delegate.setVelocityTargetRotationsPerSecond(direction * velocity, directed(request));
     }
     @Override public MotorControlCapabilities controlCapabilities() { return delegate.controlCapabilities(); }
     @Override public void stop() { delegate.stop(); }
@@ -81,6 +88,13 @@ final class SoftwareFollowerMotorHandle implements MotorHandle, AutoCloseable {
     @Override public double absolutePositionRotations() { return delegate.absolutePositionRotations(); }
     @Override public double absoluteVelocityRotationsPerSecond() {
         return delegate.absoluteVelocityRotationsPerSecond();
+    }
+
+    private MotorClosedLoopRequest directed(MotorClosedLoopRequest request) {
+        if (request == null || direction > 0.0 || request.arbitraryFeedforwardVolts() == 0.0) return request;
+        // Like failover, the output derate applies only to direct voltage/percent commands. Offloaded loops
+        // keep their gains/targets; their additive voltage must still follow the target's direction.
+        return new MotorClosedLoopRequest(request.route(), request.config(), -request.arbitraryFeedforwardVolts());
     }
 
     @Override

@@ -37,9 +37,9 @@ class MotorFailoverIntegrationTest {
     void deadLeaderPromotesTheLowestIdFollowerAndRepointsTheOthers() {
         Harness harness = harness(failover -> failover.promoteLeader().dropFailedFollowers());
         harness.cycle();
-        assertEquals(6.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
-        assertEquals(6.0, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
-        assertEquals(-6.0, harness.motor(harness.shooter.invertedFollower).commandValue(), 1.0e-9);
+        assertEquals(3.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
+        assertEquals(3.0, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
+        assertEquals(-3.0, harness.motor(harness.shooter.invertedFollower).commandValue(), 1.0e-9);
 
         harness.motor(harness.shooter.leader).connected(false);
         harness.cycle();
@@ -48,9 +48,9 @@ class MotorFailoverIntegrationTest {
         SimMotorHandle invertedFollower = harness.motor(harness.shooter.invertedFollower);
         assertNull(promoted.followedLeader());
         assertEquals(SimMotorHandle.CommandKind.VOLTAGE, promoted.commandKind());
-        assertEquals(6.0, promoted.commandValue(), 1.0e-9);
+        assertEquals(3.0, promoted.commandValue(), 1.0e-9);
         assertSame(promoted, invertedFollower.followedLeader());
-        assertEquals(-6.0, invertedFollower.commandValue(), 1.0e-9);
+        assertEquals(-3.0, invertedFollower.commandValue(), 1.0e-9);
         assertEquals(harness.shooter.follower, harness.shooter.failover.leader());
         assertEquals(2, harness.shooter.failover.group().orElseThrow().aliveCount());
         assertEquals(List.of(MotorGroupEvent.Kind.LEADER_PROMOTED), harness.kinds());
@@ -58,8 +58,8 @@ class MotorFailoverIntegrationTest {
         assertEquals(harness.shooter.follower, harness.events.get(0).leader());
 
         harness.cycle();
-        assertEquals(6.0, promoted.commandValue(), 1.0e-9);
-        assertEquals(-6.0, invertedFollower.commandValue(), 1.0e-9);
+        assertEquals(3.0, promoted.commandValue(), 1.0e-9);
+        assertEquals(-3.0, invertedFollower.commandValue(), 1.0e-9);
     }
 
     @Test
@@ -73,9 +73,9 @@ class MotorFailoverIntegrationTest {
         SimMotorHandle promoted = harness.motor(harness.shooter.invertedFollower);
         SimMotorHandle follower = harness.motor(harness.shooter.follower);
         assertNull(promoted.followedLeader());
-        assertEquals(-6.0, promoted.commandValue(), 1.0e-9);
+        assertEquals(-3.0, promoted.commandValue(), 1.0e-9);
         assertSame(promoted, follower.followedLeader());
-        assertEquals(6.0, follower.commandValue(), 1.0e-9);
+        assertEquals(3.0, follower.commandValue(), 1.0e-9);
     }
 
     @Test
@@ -121,8 +121,8 @@ class MotorFailoverIntegrationTest {
         harness.motor(harness.shooter.invertedFollower).connected(false);
         harness.cycle();
 
-        assertEquals(3.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
-        assertEquals(3.0, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
+        assertEquals(1.5, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
+        assertEquals(1.5, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
         assertEquals(0.0, harness.motor(harness.shooter.invertedFollower).commandValue(), 1.0e-9);
         assertTrue(harness.shooter.failover.group().orElseThrow().degraded());
         assertFalse(harness.shooter.failover.alive(harness.shooter.invertedFollower));
@@ -134,8 +134,8 @@ class MotorFailoverIntegrationTest {
         harness.cycle();
         harness.cycle();
 
-        assertEquals(6.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
-        assertEquals(-6.0, harness.motor(harness.shooter.invertedFollower).commandValue(), 1.0e-9);
+        assertEquals(3.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
+        assertEquals(-3.0, harness.motor(harness.shooter.invertedFollower).commandValue(), 1.0e-9);
         assertSame(harness.motor(harness.shooter.leader), harness.motor(harness.shooter.invertedFollower).followedLeader());
         assertFalse(harness.shooter.failover.group().orElseThrow().degraded());
         assertEquals(List.of(MotorGroupEvent.Kind.FOLLOWER_DROPPED, MotorGroupEvent.Kind.MOTOR_RECOVERED),
@@ -157,8 +157,8 @@ class MotorFailoverIntegrationTest {
         SimMotorHandle promoted = harness.motor(harness.shooter.follower);
         assertEquals(harness.shooter.follower, harness.shooter.failover.leader());
         assertSame(promoted, harness.motor(harness.shooter.leader).followedLeader());
-        assertEquals(6.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
-        assertEquals(6.0, promoted.commandValue(), 1.0e-9);
+        assertEquals(3.0, harness.motor(harness.shooter.leader).commandValue(), 1.0e-9);
+        assertEquals(3.0, promoted.commandValue(), 1.0e-9);
     }
 
     @Test
@@ -209,7 +209,7 @@ class MotorFailoverIntegrationTest {
         harness.cycle();
 
         assertEquals(harness.shooter.follower, harness.shooter.failover.leader());
-        assertEquals(6.0, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
+        assertEquals(3.0, harness.motor(harness.shooter.follower).commandValue(), 1.0e-9);
     }
 
     @Test
@@ -279,7 +279,7 @@ class MotorFailoverIntegrationTest {
         private final MotorDevice invertedFollower =
                 MotorDevice.of(MotorKinds.KRAKEN_X60, 33).follow(leader).inverted();
         private final MotorFailover failover;
-        private final Action spin = leader.voltage(Volts.of(6.0));
+        private final Action spin = leader.voltage(Volts.of(3.0));
 
         private Shooter(BiFunction<Shooter, MotorFailover, MotorFailover> policy) {
             failover = policy.apply(this, MotorFailover.of(leader));

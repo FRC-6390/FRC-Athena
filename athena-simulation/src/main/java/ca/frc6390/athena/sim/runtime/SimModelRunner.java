@@ -31,7 +31,9 @@ import java.util.Set;
  *   <li>zero output: a motor whose neutral mode is {@code BRAKE} shorts its windings (electrical braking
  *       through the back EMF); {@code COAST} leaves them open so only friction slows it.</li>
  * </ul>
- * <p>A declared current limit clamps the motor current. Integration uses fixed 1 ms substeps, reduced when
+ * <p>A declared winding/stator limit clamps motor current. Supply limits are enforced by Athena's host
+ * power pass; battery amps are not interchangeable with winding amps at partial PWM duty.
+ * Integration uses fixed 1 ms substeps, reduced when
  * the axis is stiff, so the result is deterministic and stable at the robot's 20 ms period.</p>
  */
 final class SimModelRunner implements SimPhysicsEngine {
@@ -197,8 +199,7 @@ final class SimModelRunner implements SimPhysicsEngine {
         DcMotorModel model = DcMotorModel.of(motor.kind().motorKind());
         SimMotorHandle runtime = session.motor(motor);
         MotorCommand command = command(motor, session);
-        int limit = positiveMin(runtime.runtimeConfiguration().statorCurrentLimitAmps(),
-                runtime.runtimeConfiguration().supplyCurrentLimitAmps());
+        int limit = runtime.runtimeConfiguration().statorCurrentLimitAmps();
         boolean brake = runtime.runtimeConfiguration().neutralMode() == MotorNeutralMode.BRAKE;
         if (command == null || isZeroOutput(command)) {
             return new MotorDrive(model, brake ? MotorDrive.Mode.SHORT : MotorDrive.Mode.OPEN, 0.0, limit, null);
@@ -248,13 +249,6 @@ final class SimModelRunner implements SimPhysicsEngine {
             case PERCENT, VOLTAGE -> command.value() == 0.0;
             case POSITION, VELOCITY -> false;
         };
-    }
-
-    private static int positiveMin(int first, int second) {
-        if (first <= 0) {
-            return Math.max(0, second);
-        }
-        return second <= 0 ? first : Math.min(first, second);
     }
 
     private static double clamp(double value, double minimum, double maximum) {

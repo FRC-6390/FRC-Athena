@@ -44,6 +44,33 @@ public final class PowerBudget {
     }
 
     /**
+     * Converts a battery-side allocation to a conservative winding-current limit at the measured speed.
+     * The worst motoring direction consumes {@code R I^2 + |backEmf| I} watts; the other direction
+     * consumes less or regenerates. Solving that quadratic avoids dividing by PWM duty near zero.
+     * This bounds electrical power at the supplied bus voltage, not mechanical power or controller losses.
+     *
+     * @param supplyAmps non-negative battery current allocation; infinity leaves the motor uncapped
+     * @param busVolts positive bus voltage
+     * @param backEmfVolts signed motor back-EMF
+     * @param resistanceOhms positive winding resistance
+     * @return winding amps; zero for a zero allocation or unusable electrical inputs
+     */
+    public static double windingAmpsForSupply(
+            double supplyAmps, double busVolts, double backEmfVolts, double resistanceOhms) {
+        if (supplyAmps == Double.POSITIVE_INFINITY) return Double.POSITIVE_INFINITY;
+        if (!(supplyAmps > 0.0) || !Double.isFinite(busVolts) || !(busVolts > 0.0)
+                || !Double.isFinite(backEmfVolts) || !Double.isFinite(resistanceOhms)
+                || !(resistanceOhms > 0.0)) return 0.0;
+        double power = busVolts * supplyAmps;
+        if (power == 0.0) return 0.0;
+        if (Double.isInfinite(power)) return Double.POSITIVE_INFINITY;
+        double emf = Math.abs(backEmfVolts);
+        double root = Math.hypot(emf, 2.0 * Math.sqrt(resistanceOhms) * Math.sqrt(power));
+        // This form avoids cancellation when the back-EMF is large relative to the allowed winding drop.
+        return power / (0.5 * root + 0.5 * emf);
+    }
+
+    /**
      * Water-fills {@code budget} across demands with weights.
      *
      * @param demand non-negative demands, length at least {@code count}

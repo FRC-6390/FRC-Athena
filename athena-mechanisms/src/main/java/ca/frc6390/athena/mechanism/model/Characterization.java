@@ -90,6 +90,7 @@ public final class Characterization implements TelemetrySource {
     private static final int PAYLOAD_CAPACITY = 500;
     private static final int HISTORY_CAPACITY = 32;
     private static final double MIN_COS_SPREAD = 0.1;
+    private static final System.Logger LOGGER = System.getLogger(Characterization.class.getName());
 
     /**
      * Payload estimate with its confidence.
@@ -131,8 +132,12 @@ public final class Characterization implements TelemetrySource {
         RecursiveLeastSquares running;
         final ModelHistory history = new ModelHistory(HISTORY_CAPACITY);
         String excitation = "not learning";
-        SysIdLog export;
-        boolean exportResolved;
+        volatile SysIdLog export;
+        volatile boolean exportResolved;
+        long modelRevision;
+        long fitGeneration;
+        volatile String fitStatus = "idle";
+        java.util.concurrent.Executor fitExecutor = ModelBackground.FITS;
     }
 
     private final ControlBinding<?> control;
@@ -222,7 +227,7 @@ public final class Characterization implements TelemetrySource {
         map.put("FrictionSweep", Actions.then(quasistaticForward, quasistaticReverse));
         map.put("Backlash", Actions.then(quasistaticForward, quasistaticReverse));
         map.put("Latency", dynamicForward);
-        map.put("FitModel", Actions.run(this::doFitModel));
+        map.put("FitModel", asyncFitAction());
         map.put("AdoptRunningEstimate", Actions.run(this::doAdoptRunningEstimate));
         map.put("Rebaseline", Actions.run(this::doRebaseline));
         return map;
@@ -292,6 +297,7 @@ public final class Characterization implements TelemetrySource {
     public Characterization gravity(Gravity gravity) {
         Objects.requireNonNull(gravity, "gravity");
         state.gravity = gravity;
+        state.modelRevision++;
         state.running = newRunning(gravity);
         state.gate.reset();
         return this;
@@ -366,7 +372,8 @@ public final class Characterization implements TelemetrySource {
      * Keeps the active model, the continuous-learning estimate and the snapshot history in {@code storage} under
      * {@code key} (the characterization's field path). Restores whatever is stored there now: the active model
      * becomes the active model and drift baseline, the stored estimate seeds the running estimate, and the history is
-     * reloaded. From then on fits, adopts, rebaselines and history snapshots are written through.
+     * reloaded. Stored models with a different motion kind from this control are ignored, preserving the code defaults.
+     * From then on fits, adopts, rebaselines and history snapshots are written through.
      *
      * @param storage destination, such as a persistent store
      * @param key stable key, for example {@code "turret/angle"}
@@ -379,10 +386,21 @@ public final class Characterization implements TelemetrySource {
         }
         state.storage = storage;
         state.storageKey = key;
-        storage.load(key).ifPresent(this::defaults);
-        storage.loadRunning(key).ifPresent(this::reseedRunning);
-        storage.loadHistory(key).forEach(state.history::add);
+        storage.load(key).filter(model -> compatibleStoredModel(model, key + "/model")).ifPresent(this::defaults);
+        storage.loadRunning(key).filter(model -> compatibleStoredModel(model, key + "/running"))
+                .ifPresent(this::reseedRunning);
+        storage.loadHistory(key).stream()
+                .filter(snapshot -> compatibleStoredModel(snapshot.model(), key + "/history"))
+                .forEach(state.history::add);
         return this;
+    }
+
+    private boolean compatibleStoredModel(MechanismModel model, String key) {
+        if (model.motionKind() == control.motionKind()) return true;
+        LOGGER.log(System.Logger.Level.WARNING,
+                "Ignoring persisted characterization data at {0}: motion kind {1} does not match control {2}.",
+                key, model.motionKind(), control.motionKind());
+        return false;
     }
 
     /** Sets the monotonic clock used for sample times and debounce. Tests inject their own. */
@@ -395,6 +413,7 @@ public final class Characterization implements TelemetrySource {
     public Characterization defaults(MechanismModel model) {
         Objects.requireNonNull(model, "model");
         state.active = model;
+        state.modelRevision++;
         state.baseline = model;
         reseedRunning(model);
         return this;
@@ -534,13 +553,17 @@ public final class Characterization implements TelemetrySource {
      * when there is not enough data.
      */
     public MechanismModel fitRuns() {
-        List<CharacterizationSample> runs = List.copyOf(state.runs);
+        List<CharacterizationSample> runs;
+        synchronized (runLog) { runs = List.copyOf(state.runs); }
+        return fitRuns(runs, List.copyOf(state.holds), state.gravity, state.active, fitMetadata());
+    }
+
+    private MechanismModel fitRuns(List<CharacterizationSample> runs, List<CharacterizationSample> holds,
+                                   Gravity gravity, MechanismModel active, FitMetadata metadata) {
         if (runs.size() < MIN_RUN_SAMPLES) {
             throw new IllegalStateException("Run the characterization tests before fitting (have "
                     + runs.size() + " samples, need " + MIN_RUN_SAMPLES + ").");
         }
-        MotionKind kind = control.motionKind();
-        Gravity gravity = state.gravity;
         double deadband = Identification.DEFAULT_VELOCITY_DEADBAND;
         FeedforwardFit fit = Identification.fitFeedforward(runs, gravity, deadband);
         double staticVolts = Identification.staticFriction(runs, gravity, fit, STATIC_BREAKAWAY_SPEED)
@@ -548,40 +571,39 @@ public final class Characterization implements TelemetrySource {
         FrictionTable table = Identification.frictionTable(runs, gravity, fit, deadband, FRICTION_BINS);
         double backlash = Identification.backlash(runs, deadband).orElse(Double.NaN);
         double latency = Identification.latency(runs, LATENCY_SPEED).orElse(Double.NaN);
-        Payload payload = payload();
+        Payload payload = payload(holds, gravity, active);
         double payloadDelta = payload.confident() ? payload.deltaKG() : 0.0;
 
-        double torque = 0.0;
-        double resistance = 0.0;
-        List<String> kinds = new ArrayList<>();
-        for (MotorDevice motor : control.motors()) {
-            kinds.add(motorKey(motor));
-        }
+        return new MechanismModel(metadata.kind(), staticVolts, fit.kineticStaticVolts(), fit.kV(), fit.kA(), fit.kG(),
+                fit.gravityOffsetRadians(), table, backlash, latency, payloadDelta, metadata.torque(), metadata.resistance(),
+                metadata.kinds().size(), metadata.kinds(), metadata.gearing(), fit.standardErrors(), fit.rSquared(), fit.samples());
+    }
+
+    private record FitMetadata(MotionKind kind, List<String> kinds, double torque, double resistance, double gearing) { }
+
+    private FitMetadata fitMetadata() {
+        List<String> kinds = control.motors().stream().map(Characterization::motorKey).toList();
         MotorDevice output = control.output();
-        if (output != null) {
-            MotorConstants constants = MotorConstants.forKind(output.kind()).orElse(null);
-            if (constants != null) {
-                torque = constants.raw().torqueConstantNmPerAmp();
-                resistance = constants.resistance().in(Units.Ohms);
-            }
-        }
-        return new MechanismModel(kind, staticVolts, fit.kineticStaticVolts(), fit.kV(), fit.kA(), fit.kG(),
-                fit.gravityOffsetRadians(), table, backlash, latency, payloadDelta, torque, resistance,
-                kinds.size(), kinds, settings.gearRatio(), fit.standardErrors(), fit.rSquared(), fit.samples());
+        MotorConstants constants = output == null ? null : MotorConstants.forKind(output.kind()).orElse(null);
+        return new FitMetadata(control.motionKind(), kinds,
+                constants == null ? 0 : constants.raw().torqueConstantNmPerAmp(),
+                constants == null ? 0 : constants.resistance().in(Units.Ohms), settings.gearRatio());
     }
 
     /** Estimate of the external payload from holding samples, with confidence. */
     public Payload payload() {
-        List<CharacterizationSample> holds = List.copyOf(state.holds);
-        if (holds.size() < MIN_PAYLOAD_SAMPLES || state.gravity == Gravity.NONE) {
+        return payload(List.copyOf(state.holds), state.gravity, state.active);
+    }
+
+    private static Payload payload(List<CharacterizationSample> holds, Gravity gravity, MechanismModel base) {
+        if (holds.size() < MIN_PAYLOAD_SAMPLES || gravity == Gravity.NONE) {
             return new Payload(0.0, Double.NaN, holds.size(), false);
         }
-        MechanismModel base = state.active;
         FeedforwardFit baseline = new FeedforwardFit(base.kineticFrictionVolts(), base.kV(), base.kA(),
                 base.kG(), base.gravityOffsetRadians(), Map.of(), 0.0, 0.0, 0);
-        Identification.PayloadEstimate estimate = Identification.payload(holds, state.gravity, baseline,
+        Identification.PayloadEstimate estimate = Identification.payload(holds, gravity, baseline,
                 base.staticFrictionVolts());
-        boolean spread = state.gravity != Gravity.COSINE || cosineSpread(holds) >= MIN_COS_SPREAD;
+        boolean spread = gravity != Gravity.COSINE || cosineSpread(holds) >= MIN_COS_SPREAD;
         boolean significant = Double.isFinite(estimate.standardError()) && estimate.standardError() > 0.0
                 && Math.abs(estimate.deltaKG()) > 2.0 * estimate.standardError();
         boolean confident = spread && significant;
@@ -717,6 +739,9 @@ public final class Characterization implements TelemetrySource {
         values.put("runningSamples", TelemetryValue.number(() -> state.running.updates()));
         values.put("excitation", TelemetryValue.string(() -> state.excitation));
         values.put("testSamples", TelemetryValue.number(() -> state.runs.size()));
+        values.put("fitStatus", TelemetryValue.string(this::fitStatus));
+        values.put("exportDroppedSamples", TelemetryValue.number(this::exportDroppedSamples));
+        values.put("exportFailure", TelemetryValue.string(this::exportFailure));
         return values;
     }
 
@@ -737,21 +762,100 @@ public final class Characterization implements TelemetrySource {
         state.storage.saveHistory(state.storageKey, state.history.snapshots());
     }
 
-    private void doFitModel() {
-        MechanismModel fitted = fitRuns();
-        state.active = fitted;
-        state.baseline = fitted;
-        reseedRunning(fitted);
-        persist();
+    /** Last asynchronous fit state or explicit failure. */
+    public String fitStatus() { return state.fitStatus; }
+    public long exportDroppedSamples() { return runLog.asyncExport.dropped(); }
+    public String exportFailure() { return runLog.asyncExport.failure(); }
+    /** Explicit tool/test/shutdown wait; never call from a robot lifecycle or periodic callback. */
+    public boolean awaitExport(java.time.Duration timeout) throws InterruptedException {
+        return runLog.asyncExport.awaitIdle(timeout);
+    }
+
+    // Package-private deterministic executor injection; production declarations share the bounded worker.
+    Characterization fitExecutor(java.util.concurrent.Executor executor) {
+        state.fitExecutor = Objects.requireNonNull(executor); return this;
+    }
+
+    private record FitResult(MechanismModel model, Throwable failure) { }
+    private static final class FitRequest {
+        final long generation;
+        final long revision;
+        final java.util.concurrent.atomic.AtomicReference<FitResult> result = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.FutureTask<Void> task;
+        boolean done;
+        FitRequest(long generation, long revision) { this.generation = generation; this.revision = revision; }
+    }
+
+    private Action asyncFitAction() {
+        FitRequest[] current = {null};
+        return Actions.lifecycle("FitModel").requires(control)
+                .onStart(() -> {
+                    FitRequest request = new FitRequest(++state.fitGeneration, state.modelRevision);
+                    current[0] = request;
+                    List<CharacterizationSample> runs;
+                    synchronized (runLog) { runs = List.copyOf(state.runs); }
+                    List<CharacterizationSample> holds = List.copyOf(state.holds);
+                    Gravity gravity = state.gravity;
+                    MechanismModel active = state.active;
+                    FitMetadata metadata = fitMetadata();
+                    request.task = new java.util.concurrent.FutureTask<>(() -> {
+                        try { request.result.set(new FitResult(fitRuns(runs, holds, gravity, active, metadata), null)); }
+                        catch (Throwable failure) { request.result.set(new FitResult(null, failure)); }
+                        return null;
+                    });
+                    state.fitStatus = "queued";
+                    try {
+                        ModelBackground.FITS.purge();
+                        state.fitExecutor.execute(request.task);
+                    } catch (java.util.concurrent.RejectedExecutionException rejected) {
+                        request.result.set(new FitResult(null, new IllegalStateException("Model fit worker queue full", rejected)));
+                    }
+                })
+                .execute(() -> {
+                    FitRequest request = current[0];
+                    if (request == null || request.done) return;
+                    FitResult result = request.result.get();
+                    if (result == null) return;
+                    request.done = true;
+                    if (request.generation != state.fitGeneration) return;
+                    if (request.revision != state.modelRevision) {
+                        state.fitStatus = "discarded: model changed while fitting";
+                    } else if (result.failure() != null) {
+                        state.fitStatus = "failed: " + result.failure().getMessage();
+                    } else {
+                        state.active = result.model();
+                        state.baseline = result.model();
+                        state.modelRevision++;
+                        reseedRunning(result.model());
+                        persist();
+                        state.fitStatus = "fitted " + result.model().sampleCount() + " samples";
+                    }
+                })
+                .until(() -> current[0] != null && current[0].done)
+                .onEnd(interrupted -> {
+                    FitRequest request = current[0];
+                    if (request == null) return;
+                    if (interrupted) {
+                        request.task.cancel(false);
+                        ModelBackground.FITS.remove(request.task);
+                        if (request.generation == state.fitGeneration) {
+                            state.fitGeneration++;
+                            state.fitStatus = "cancelled";
+                        }
+                    }
+                    current[0] = null;
+                }).build();
     }
 
     private void doAdoptRunningEstimate() {
+        state.modelRevision++;
         state.active = runningEstimate();
         reseedRunning(state.active);
         persist();
     }
 
     private void doRebaseline() {
+        state.modelRevision++;
         state.baseline = state.active;
         snapshot("rebaseline");
     }
@@ -825,10 +929,12 @@ public final class Characterization implements TelemetrySource {
     private static final class RunLog implements SysIdLog {
         private final ControlBinding<?> control;
         private final State owner;
+        private final AsyncSysIdLog asyncExport;
 
         RunLog(ControlBinding<?> control, State owner) {
             this.control = control;
             this.owner = owner;
+            this.asyncExport = new AsyncSysIdLog(this::exportLog);
         }
 
         /** Resolves the export log on first use: the explicit one, else the WPILib log provider when one is installed. */
@@ -843,10 +949,7 @@ public final class Characterization implements TelemetrySource {
 
         @Override
         public synchronized void record(SysIdSample sample) {
-            SysIdLog export = exportLog();
-            if (export != null) {
-                export.record(sample);
-            }
+            asyncExport.record(sample);
             double now = owner.clock.getAsDouble();
             CharacterizationSample raw = new CharacterizationSample(sample.state(), now,
                     sample.appliedVoltage(), sample.position(), sample.velocity(), 0.0, sample.currentAmps());
@@ -872,9 +975,7 @@ public final class Characterization implements TelemetrySource {
         @Override
         public synchronized void end() {
             owner.previousRun = null;
-            if (owner.export != null) {
-                owner.export.end();
-            }
+            asyncExport.end();
         }
     }
 }

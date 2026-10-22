@@ -29,6 +29,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -42,10 +49,21 @@ public final class ChoreoPathProvider implements PathProvider {
     private final Function<SwerveSample, Action> followSample;
     private final SwervePathFollower follower;
     private final BooleanSupplier mirrorForAlliance;
-    private final Map<String, Optional<Trajectory<? extends TrajectorySample<?>>>> trajectoryCache =
+    private final Map<String, CompletableFuture<Optional<Trajectory<? extends TrajectorySample<?>>>>> trajectoryCache =
             new ConcurrentHashMap<>();
+    private final Map<PreviewKey, CompletableFuture<PreparedPath>> prepared = new ConcurrentHashMap<>();
+    private final ThreadPoolExecutor loader = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(800), runnable -> {
+                Thread thread = new Thread(runnable, "athena-choreo-loader");
+                thread.setDaemon(true);
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
+            });
+    private final AtomicLong revision = new AtomicLong();
     private final NativeRuntime runtime = new NativeRuntime();
     private volatile List<String> pathNameCache;
+    private volatile CompletableFuture<List<String>> namesLoading;
+    private volatile boolean closed;
 
     /** Loader-only provider. Configure {@link #swerve} before executing paths. */
     public ChoreoPathProvider() {
@@ -94,19 +112,89 @@ public final class ChoreoPathProvider implements PathProvider {
     }
 
     @Override public String source() { return KEY; }
+    /** Explicit blocking loader for setup/tools. Robot execution and previews only inspect prepared results. */
     public Optional<Trajectory<? extends TrajectorySample<?>>> trajectory(String pathName) {
-        return trajectoryCache.computeIfAbsent(normalize(pathName), client::loadTrajectory);
+        return loading(pathName).join();
     }
 
-    public List<String> pathNames() {
+    private CompletableFuture<Optional<Trajectory<? extends TrajectorySample<?>>>> loading(String pathName) {
+        return trajectoryCache.computeIfAbsent(normalize(pathName), name -> {
+            if (trajectoryCache.size() >= 256) throw new IllegalStateException("Too many prepared Choreo trajectories.");
+            return submit(() -> client.loadTrajectory(name));
+        });
+    }
+
+    private <T> CompletableFuture<T> submit(Supplier<T> work) {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        if (closed) {
+            result.completeExceptionally(new IllegalStateException("Choreo provider closed."));
+            return result;
+        }
+        try {
+            loader.execute(() -> {
+                try { result.complete(work.get()); }
+                catch (Throwable failure) { result.completeExceptionally(failure); }
+                finally { revision.incrementAndGet(); }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException full) {
+            result.completeExceptionally(new IllegalStateException("Choreo preparation queue full or closed.", full));
+            revision.incrementAndGet();
+        }
+        return result;
+    }
+
+    public synchronized List<String> pathNames() {
         List<String> names = pathNameCache;
-        if (names == null) { names = client.trajectoryNames(); pathNameCache = names; }
-        return names;
+        if (names == null && namesLoading == null) {
+            namesLoading = submit(() -> List.copyOf(client.trajectoryNames()));
+        }
+        if (names == null && namesLoading.isDone()) pathNameCache = names = namesLoading.join();
+        return names == null ? List.of() : names;
     }
 
     public List<String> markerNames(String pathName) {
-        return trajectory(pathName).map(value -> value.events().stream()
+        CompletableFuture<Optional<Trajectory<? extends TrajectorySample<?>>>> value = loading(pathName);
+        return (value.isDone() ? value.join() : Optional.<Trajectory<? extends TrajectorySample<?>>>empty())
+                .map(trajectory -> trajectory.events().stream()
                 .map(marker -> marker.event).distinct().toList()).orElseGet(List::of);
+    }
+
+    @Override public void prepare(PathAction path) {
+        preparation(path, mirrorForAlliance.getAsBoolean());
+    }
+
+    private CompletableFuture<PreparedPath> preparation(PathAction path, boolean mirrored) {
+        CompletableFuture<Optional<Trajectory<? extends TrajectorySample<?>>>> loaded = loading(path.name());
+        return prepared.computeIfAbsent(new PreviewKey(path, mirrored), key -> {
+            if (prepared.size() >= 512) throw new IllegalStateException("Too many prepared Choreo previews.");
+            return submit(() -> {
+                Trajectory<? extends TrajectorySample<?>> selected = selected(path, loaded.join());
+                return new PreparedPath(selected, mirrored, buildPreview(path, selected, mirrored));
+            });
+        });
+    }
+
+    /** Explicit off-loop setup/test fence. It never runs from a path or preview callback. */
+    public boolean awaitPrepared(Duration timeout) throws InterruptedException {
+        long end = System.nanoTime() + timeout.toNanos();
+        List<CompletableFuture<?>> pending = new java.util.ArrayList<>(trajectoryCache.values());
+        pending.addAll(prepared.values());
+        if (namesLoading != null) pending.add(namesLoading);
+        for (CompletableFuture<?> future : pending) {
+            try { future.get(Math.max(0, end - System.nanoTime()), TimeUnit.NANOSECONDS); }
+            catch (java.util.concurrent.TimeoutException timedOut) { return false; }
+            catch (java.util.concurrent.ExecutionException failed) { throw new CompletionException(failed.getCause()); }
+        }
+        return true;
+    }
+
+    @Override public void close() {
+        closed = true;
+        java.util.concurrent.CancellationException closed = new java.util.concurrent.CancellationException("Choreo provider closed.");
+        trajectoryCache.values().forEach(value -> value.completeExceptionally(closed));
+        prepared.values().forEach(value -> value.completeExceptionally(closed));
+        if (namesLoading != null) namesLoading.completeExceptionally(closed);
+        loader.shutdownNow();
     }
 
     @Override public PathRuntime runtime() {
@@ -117,8 +205,13 @@ public final class ChoreoPathProvider implements PathProvider {
     @Override public Optional<PathPreview> preview(PathAction path) {
         Objects.requireNonNull(path, "path");
         if (!KEY.equals(path.source())) return Optional.empty();
-        Trajectory<? extends TrajectorySample<?>> value = selected(path);
-        if (mirrorForAlliance.getAsBoolean()) value = value.flipped();
+        CompletableFuture<PreparedPath> result = preparation(path, mirrorForAlliance.getAsBoolean());
+        return result.isDone() ? Optional.of(result.join().preview()) : Optional.empty();
+    }
+
+    private PathPreview buildPreview(PathAction path,
+            Trajectory<? extends TrajectorySample<?>> value, boolean mirrored) {
+        if (mirrored) value = value.flipped();
         Trajectory<? extends TrajectorySample<?>> previewTrajectory = value;
         List<PathPreview.Pose> poses = Arrays.stream(previewTrajectory.getPoses())
                 .map(pose -> new PathPreview.Pose(
@@ -136,10 +229,10 @@ public final class ChoreoPathProvider implements PathProvider {
                         .orElse(null))
                 .filter(Objects::nonNull)
                 .toList();
-        return Optional.of(new PathPreview(path.key(), poses, events));
+        return new PathPreview(path.key(), poses, events);
     }
 
-    @Override public long previewRevision() { return mirrorForAlliance.getAsBoolean() ? 1L : 0L; }
+    @Override public long previewRevision() { return 2L * revision.get() + (mirrorForAlliance.getAsBoolean() ? 1L : 0L); }
 
     private void requireExecutionConfiguration() {
         if (follower == null && (pose == null || resetPose == null || followSample == null)) {
@@ -147,13 +240,18 @@ public final class ChoreoPathProvider implements PathProvider {
         }
     }
 
-    private Trajectory<? extends TrajectorySample<?>> selected(PathAction path) {
-        Trajectory<? extends TrajectorySample<?>> loaded = trajectory(path.name())
+    private Trajectory<? extends TrajectorySample<?>> selected(PathAction path,
+            Optional<Trajectory<? extends TrajectorySample<?>>> loadedValue) {
+        Trajectory<? extends TrajectorySample<?>> loaded = loadedValue
                 .orElseThrow(() -> new IllegalArgumentException("Missing Choreo trajectory '" + path.name() + "'."));
         if (path.splitIndex() < 0) return loaded;
         return loaded.getSplit(path.splitIndex()).orElseThrow(() -> new IllegalArgumentException(
                 "Missing split " + path.splitIndex() + " in Choreo trajectory '" + path.name() + "'."));
     }
+
+    private record PreviewKey(PathAction path, boolean mirrored) { }
+    private record PreparedPath(Trajectory<? extends TrajectorySample<?>> trajectory,
+                                boolean mirrored, PathPreview preview) { }
 
     private static String normalize(String name) {
         return name == null || name.isBlank() ? "default" : name.trim();
@@ -186,20 +284,36 @@ public final class ChoreoPathProvider implements PathProvider {
                         + "' is already running in another action; the same PathAction cannot run twice"
                         + " concurrently. Cancel the other action first or use a separate path.");
             }
-            Trajectory<? extends TrajectorySample<?>> trajectory = selected(path);
-            boolean mirrored = mirrorForAlliance.getAsBoolean();
-            ActivePath state = new ActivePath(trajectory, mirrored);
+            ActivePath state = new ActivePath(preparation(path, mirrorForAlliance.getAsBoolean()));
             active.put(path, state);
+            try {
+                startWhenPrepared(path, state, context);
+            } catch (RuntimeException | Error failure) {
+                active.remove(path);
+                throw failure;
+            }
+        }
+
+        private boolean startWhenPrepared(PathAction path, ActivePath state,
+                ca.frc6390.athena.mechanism.core.MechanismContext context) {
+            if (state.trajectory != null) return true;
+            if (!state.preparation.isDone()) return false;
+            PreparedPath ready = state.preparation.join();
+            state.trajectory = ready.trajectory();
+            state.mirrored = ready.mirrored();
+            state.startedAt = context.timeInStateSeconds();
             if (follower != null) follower.reset();
-            if (path.resetsOdometry()) trajectory.getInitialPose(mirrored)
+            if (path.resetsOdometry()) state.trajectory.getInitialPose(state.mirrored)
                     .map(ChoreoPathProvider.this::resetAction)
                     .ifPresent(action -> state.activeMarkers.put("@resetOdometry", action));
+            return true;
         }
 
         @Override public void execute(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
             ActivePath state = requireActive(path);
+            if (!startWhenPrepared(path, state, context)) return;
             if (path.onlyResetsPose()) return;
-            double time = Math.max(0.0, context.timeInStateSeconds());
+            double time = Math.max(0.0, context.timeInStateSeconds() - state.startedAt);
             state.trajectory.sampleAt(time, state.mirrored).ifPresent(sample -> {
                 if (!(sample instanceof SwerveSample swerve))
                     throw new IllegalStateException("Choreo path '" + path.name() + "' is not a swerve trajectory.");
@@ -235,6 +349,7 @@ public final class ChoreoPathProvider implements PathProvider {
         @Override public java.util.Collection<String> pendingMarkers(PathAction path) {
             ActivePath state = active.get(path);
             if (state == null) return null;
+            if (state.trajectory == null) return null;
             Set<String> pending = new java.util.LinkedHashSet<>();
             for (var marker : state.trajectory.events()) {
                 if (!state.triggeredMarkers.contains(marker)) pending.add(marker.event);
@@ -254,6 +369,7 @@ public final class ChoreoPathProvider implements PathProvider {
 
         @Override public boolean isFinished(PathAction path, ca.frc6390.athena.mechanism.core.MechanismContext context) {
             ActivePath state = requireActive(path);
+            if (state.trajectory == null) return false;
             if (path.onlyResetsPose()) {
                 if (!state.finalSampleEvaluated) {
                     state.finalSampleEvaluated = true;
@@ -261,7 +377,7 @@ public final class ChoreoPathProvider implements PathProvider {
                 }
                 return true;
             }
-            if (context.timeInStateSeconds() < state.trajectory.getTotalTime()) return false;
+            if (context.timeInStateSeconds() - state.startedAt < state.trajectory.getTotalTime()) return false;
             if (!state.finalSampleEvaluated) {
                 state.finalSampleEvaluated = true;
                 return false;
@@ -295,8 +411,10 @@ public final class ChoreoPathProvider implements PathProvider {
     }
 
     private static final class ActivePath {
-        private final Trajectory<? extends TrajectorySample<?>> trajectory;
-        private final boolean mirrored;
+        private final CompletableFuture<PreparedPath> preparation;
+        private Trajectory<? extends TrajectorySample<?>> trajectory;
+        private boolean mirrored;
+        private double startedAt;
         private final Set<Object> triggeredMarkers = new HashSet<>();
         private final Map<String, Action> activeMarkers = new java.util.LinkedHashMap<>();
         private Action output;
@@ -304,8 +422,8 @@ public final class ChoreoPathProvider implements PathProvider {
         private double sampleDtSeconds;
         private boolean followPending;
         private boolean finalSampleEvaluated;
-        private ActivePath(Trajectory<? extends TrajectorySample<?>> trajectory, boolean mirrored) {
-            this.trajectory = trajectory; this.mirrored = mirrored;
+        private ActivePath(CompletableFuture<PreparedPath> preparation) {
+            this.preparation = preparation;
         }
     }
 }

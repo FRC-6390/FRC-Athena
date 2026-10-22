@@ -73,6 +73,9 @@ public final class RobotRuntime implements AutoCloseable {
     private final MechanismScheduler mechanisms;
     private final List<AutoChooser> autoChoosers = new ArrayList<>();
     private final List<PathProvider> pathProviders = new ArrayList<>();
+    private final List<StartupPath> startupPaths = new ArrayList<>();
+    private final Set<PathAction> startupPathIdentities = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private volatile boolean executionStarted;
     private List<AutoPreview> cachedAutoPreviews = List.of();
     private long cachedAutoPreviewRevision = Long.MIN_VALUE;
     private final List<VisionGraph> visionGraphs = new ArrayList<>();
@@ -127,11 +130,14 @@ public final class RobotRuntime implements AutoCloseable {
      * @return robot runtime
      */
     public static RobotRuntime create() {
-        return using(HardwareGraph.discovered());
+        return using(HardwareGraph.discovered().asynchronousBindings());
     }
 
     /**
      * Creates a robot runtime using an explicit hardware graph.
+     * The graph's initial setup policy is preserved; select {@code asynchronousBindings()} on it
+     * before registration when vendor construction must run in the background. Late declarations
+     * always use background preparation after the first real-hardware periodic cycle starts.
      *
      * @param hardwareGraph hardware graph
      * @return robot runtime
@@ -148,7 +154,7 @@ public final class RobotRuntime implements AutoCloseable {
      */
     public static RobotRuntime simulated(SimulationSession simulationSession) {
         SimulationSession safeSession = simulationSession == null ? SimulationSession.create() : simulationSession;
-        return new RobotRuntime(safeSession.hardwareGraph(), safeSession);
+        return new RobotRuntime(safeSession.hardwareGraph(), safeSession).powerBusVoltage(safeSession::busVoltageVolts);
     }
 
     /**
@@ -159,6 +165,16 @@ public final class RobotRuntime implements AutoCloseable {
     public HardwareGraph hardwareGraph() {
         ensureOpen();
         return hardwareGraph;
+    }
+
+    /** Reports dropped by the optional bounded failure destination, without doing any I/O. */
+    public long failureReportsDropped() {
+        return failureReporter instanceof AsyncRuntimeFailureReporter async ? async.droppedReports() : 0;
+    }
+
+    /** Last background failure-reporting error, or empty when no error has been observed. */
+    public String failureReportingError() {
+        return failureReporter instanceof AsyncRuntimeFailureReporter async ? async.lastFailure() : "";
     }
 
     /** Selects where recoverable runtime failures are reported. */
@@ -538,24 +554,55 @@ public final class RobotRuntime implements AutoCloseable {
             throw new IllegalStateException("Multiple path providers own '" + path.key() + "'.");
         }
         PathProvider provider = owners.get(0);
+        provider.prepare(path);
+        if (!executionStarted && startupPathIdentities.add(path)) startupPaths.add(new StartupPath(path, provider));
         PathRuntime runtime = provider.runtime();
         return simulationSession == null ? runtime : simulationPathRuntime(provider, runtime);
     }
 
+    /**
+     * Finishes setup-only path preparation after robot-init hooks configure their providers and before the first
+     * periodic cycle. AthenaRobot calls this automatically; headless runtimes must call it explicitly or preload
+     * their provider's paths during setup. Runtime registration itself never performs synchronous path loading.
+     *
+     * @return this runtime
+     */
+    public RobotRuntime preparePathsForStartup() {
+        ensureOpen();
+        if (executionStarted) throw new IllegalStateException("Path startup preparation must precede periodic execution.");
+        for (int index = 0; index < startupPaths.size(); index++) {
+            StartupPath startup = startupPaths.get(index);
+            startup.provider().prepareForStartup(startup.path());
+        }
+        return this;
+    }
+
+    private record StartupPath(PathAction path, PathProvider provider) { }
+
     private PathRuntime simulationPathRuntime(PathProvider provider, PathRuntime delegate) {
         return new PathRuntime() {
+            private boolean resetPending;
+
+            private void resetSimulationWhenPrepared(PathAction path) {
+                if (!resetPending) return;
+                provider.preview(path).flatMap(preview -> preview.poses().stream().findFirst())
+                        .ifPresent(pose -> {
+                            simulationSession.resetPose(new PoseSnapshot(
+                                    pose.x().in(Meters), pose.y().in(Meters), pose.heading().in(Radians)));
+                            resetPending = false;
+                        });
+            }
+
             @Override
             public void initialize(PathAction path, MechanismContext context) {
-                if (path.resetsOdometry()) {
-                    provider.preview(path).flatMap(preview -> preview.poses().stream().findFirst())
-                            .ifPresent(pose -> simulationSession.resetPose(new PoseSnapshot(
-                                    pose.x().in(Meters), pose.y().in(Meters), pose.heading().in(Radians))));
-                }
+                resetPending = path.resetsOdometry();
+                resetSimulationWhenPrepared(path);
                 delegate.initialize(path, context);
             }
 
             @Override
             public void execute(PathAction path, MechanismContext context) {
+                resetSimulationWhenPrepared(path);
                 delegate.execute(path, context);
             }
 
@@ -705,7 +752,9 @@ public final class RobotRuntime implements AutoCloseable {
     /** Returns the hierarchical mechanism-owned telemetry and live-tuning contract. */
     /**
      * Sets the battery voltage source for the power pass (for example {@code RobotController::getBatteryVoltage}).
-     * Without a finite reading the power budget is inactive.
+     * Without a finite reading the global battery budget is inactive; software-enforced supply
+     * limits still use conservative electrical bounds. Simulation-backed runtimes default to their
+     * session's nominal bus, and this method can replace it with a battery model or injected reading.
      *
      * @param busVoltage battery voltage supplier
      * @return this runtime
@@ -831,6 +880,7 @@ public final class RobotRuntime implements AutoCloseable {
      */
     public List<ResolvedOutput> simulationPeriodic(double nowSeconds, double dtSeconds) {
         ensureOpen();
+        executionStarted = true;
         publishSimulationStep(nowSeconds, dtSeconds, true, false);
         updateCycleSnapshot(
                 new MechanismContext(nowSeconds, 0.0, dtSeconds, true, false, true),
@@ -851,10 +901,12 @@ public final class RobotRuntime implements AutoCloseable {
      */
     public List<ResolvedOutput> periodic(MechanismContext mechanismContext, EventContext eventContext) {
         ensureOpen();
+        if (simulationSession == null) hardwareGraph.asynchronousBindings();
         MechanismContext safeMechanismContext = mechanismContext == null
                 ? MechanismContext.empty()
                 : mechanismContext;
         EventContext safeEventContext = eventContext == null ? EventContext.empty() : eventContext;
+        if (safeEventContext.phase() == LifecyclePhase.PERIODIC) executionStarted = true;
         workers.runDue(safeMechanismContext.nowSeconds());
         RuntimeInputSnapshot driverInputs = captureInputs();
         hardwareGraph.refreshInputs();
@@ -891,7 +943,9 @@ public final class RobotRuntime implements AutoCloseable {
             boolean autonomous,
             boolean simulation) {
         ensureOpen();
+        if (simulationSession == null) hardwareGraph.asynchronousBindings();
         MechanismContext mechanismContext = new MechanismContext(nowSeconds, 0.0, dtSeconds, enabled, autonomous, simulation);
+        executionStarted = true;
         workers.runDue(nowSeconds);
         RuntimeInputSnapshot driverInputs = captureInputs();
         hardwareGraph.refreshInputs();
@@ -1231,6 +1285,10 @@ public final class RobotRuntime implements AutoCloseable {
         } catch (RuntimeException exception) {
             failure = appendFailure(failure, exception);
         }
+        for (PathProvider provider : pathProviders) {
+            try { provider.close(); }
+            catch (RuntimeException exception) { failure = appendFailure(failure, exception); }
+        }
         try {
             hardwareGraph.close();
         } catch (RuntimeException exception) {
@@ -1239,6 +1297,15 @@ public final class RobotRuntime implements AutoCloseable {
         if (replayRecorder != null) {
             closeReplayEvents();
             replayRecorder.close();
+            try {
+                if (!replayRecorder.awaitStopped(java.time.Duration.ofSeconds(5))
+                        || !replayRecorder.awaitFlushed(java.time.Duration.ofSeconds(5))) {
+                    failure = appendFailure(failure, new IllegalStateException("Replay shutdown did not drain"));
+                }
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                failure = appendFailure(failure, new IllegalStateException("Replay shutdown interrupted", interrupted));
+            }
             ReplayMarkers.activate(null);
             if (RuntimeMarkers.current() instanceof ReplayRuntimeMarkers markers
                     && markers.recorder() == replayRecorder) {

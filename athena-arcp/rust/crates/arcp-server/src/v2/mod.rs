@@ -13,6 +13,7 @@
 mod conn;
 mod files;
 mod state;
+mod transport;
 
 use std::io;
 use std::net::{SocketAddr, TcpListener, UdpSocket};
@@ -147,6 +148,8 @@ impl ArcpServerV2 {
         let control_addr = listener.local_addr()?;
         let udp = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], config.realtime_port)))?;
         let realtime_addr = udp.local_addr()?;
+        // Realtime telemetry must drop a datagram rather than wait for socket send capacity.
+        udp.set_nonblocking(true)?;
         let keyframe_micros = config.keyframe_interval.as_micros().min(u128::from(u64::MAX)) as u64;
         let inner = Arc::new(Inner {
             state: Mutex::new(State::new(config.bandwidth_budget_bytes_per_sec, config.mtu, keyframe_micros)),

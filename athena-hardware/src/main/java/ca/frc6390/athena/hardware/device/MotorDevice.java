@@ -322,8 +322,11 @@ public record MotorDevice(
     /**
      * Sets the controller supply-side current limit. CTRE TalonFX-family controllers
      * enforce this directly. REV SPARK controllers have no supply-current limiter, so
-     * Athena conservatively includes this value when selecting the smart phase-current
-     * limit. It overrides {@link #currentLimit(Current)}; a vendor option overrides this value.
+     * Athena enforces an explicit supply limit through its electrical power clamp instead of
+     * substituting an equal phase-current limit. Unknown motor models use a supply-feedback estimate.
+     * This clamp applies to host voltage/percent outputs; automatic device-loop offload stays on the
+     * host while a finite power cap needs voltage enforcement.
+     * It overrides the portable supply limit on CTRE; the portable REV phase limit remains independent.
      * A value of zero leaves the explicit supply limit unset.
      *
      * @param current non-negative supply current limit
@@ -337,8 +340,8 @@ public record MotorDevice(
     /**
      * Sets the motor stator-side current limit. This limits current through the motor
      * windings and therefore limits produced torque. CTRE TalonFX-family controllers
-     * enforce it directly; REV maps it to the smart phase-current limit. When both
-     * supply and stator limits are declared for REV, Athena uses the lower value. A
+     * enforce it directly; REV maps it to the smart phase-current limit, combined with any
+     * portable REV phase limit. An explicit supply limit remains independent. A
      * vendor option overrides this mapping. A value of zero disables the stator limit.
      *
      * @param current non-negative stator current limit
@@ -365,19 +368,19 @@ public record MotorDevice(
 
     private MotorCurrentLimits deriveCurrentLimits() {
         Current supply = supplyCurrentLimit.in(Units.Amps) > 0 ? supplyCurrentLimit : currentLimit;
-        double supplyAmps = supply.in(Units.Amps);
         double statorAmps = statorCurrentLimit.in(Units.Amps);
         MotorControllerKind controller = kind.controllerKind();
         String controllerKey = controller == null ? kind.key() : controller.key();
         if (controllerKey.startsWith("rev:spark-")) {
-            Current smartLimit = supplyAmps <= 0
+            double portableAmps = currentLimit.in(Units.Amps);
+            Current smartLimit = portableAmps <= 0
                     ? statorCurrentLimit
                     : statorAmps <= 0
-                            ? supply
-                            : supplyAmps <= statorAmps ? supply : statorCurrentLimit;
+                            ? currentLimit
+                            : portableAmps <= statorAmps ? currentLimit : statorCurrentLimit;
             // A SPARK Smart Current Limit regulates motor phase current, so expose
-            // the mapped limit in Athena's stator domain for telemetry and stalls.
-            return new MotorCurrentLimits(NO_LIMIT, smartLimit);
+            // the portable limit in the stator domain. Explicit supply is software enforced.
+            return new MotorCurrentLimits(supplyCurrentLimit, smartLimit);
         }
         return new MotorCurrentLimits(supply, statorCurrentLimit);
     }

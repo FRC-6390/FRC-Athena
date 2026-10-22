@@ -43,11 +43,13 @@ final class OutputApplier {
     private final Map<ControlBinding<?>, ControlRuntimeState> controlRuntimes = new IdentityHashMap<>();
     /** The values of {@link #controlRuntimes} in creation order, iterated without allocating entries. */
     private final List<ControlRuntimeState> controlStates = new ArrayList<>();
-    /** Reused motor and limit lists of {@link #softwareFollowerLimits} and {@link #limitOpenLoop}. */
+    /** Reused motor and limit lists of {@link #followerLimits} and {@link #limitOpenLoop}. */
     private final List<MotorDevice> followerDevicesScratch = new ArrayList<>();
     private double[] followerAmpsScratch = new double[4];
+    private MotorHandle[] followerHandlesScratch = new MotorHandle[4];
     private final List<MotorDevice> openLoopMotorsScratch = new ArrayList<>();
     private double[] openLoopLimitsScratch = new double[4];
+    private MotorHandle[] openLoopHandlesScratch = new MotorHandle[4];
     /** Power pass of the mechanism; its per-motor caps join the effort clamp. Null before the first cycle. */
     private PowerRuntime electricalPass;
     private final Set<ControlBinding<?>> controlsAppliedThisCycle =
@@ -71,6 +73,13 @@ final class OutputApplier {
     private String guardEdge = "";
     private Enum<?> activeStage;
     private boolean applyingHold;
+    /** Stable command slots survive the robot-wide prepare/allocate/commit boundary without recalculating loops. */
+    private final List<PreparedOutput> preparedPool = new ArrayList<>();
+    private int preparedCount;
+    private boolean preparing;
+    private boolean committingPrepared;
+    private boolean preparedPowerValidated;
+    private final List<Runnable> deferredReleases = new ArrayList<>();
 
     private OutputApplier(ActionContext context, RuntimeOverrides overrides) {
         this.context = Objects.requireNonNull(context, "context");
@@ -135,9 +144,157 @@ final class OutputApplier {
             recorded.holdable = (output.output() instanceof Output.Position
                     || output.output() instanceof Output.Velocity)
                     && !(applied.output() instanceof Output.Neutral);
-            recorded.lastVolts = applied.output() instanceof Output.Voltage volts ? volts.volts() : Double.NaN;
             if (!applyingHold) {
                 recorded.holdGoal = Double.NaN;
+            }
+        }
+        if (preparing) {
+            PreparedOutput prepared;
+            if (preparedCount == preparedPool.size()) {
+                prepared = new PreparedOutput();
+                preparedPool.add(prepared);
+            } else {
+                prepared = preparedPool.get(preparedCount);
+            }
+            prepared.output = output;
+            prepared.context = safeContext;
+            prepared.valid = true;
+            prepared.applied.copyFrom(applied);
+            registerCommand(prepared);
+            preparedCount++;
+            return;
+        }
+        commit(output, applied, safeContext);
+    }
+
+    /** Starts a cycle whose hardware writes wait until every mechanism has contributed its demand. */
+    void beginPreparation() {
+        beginCycle();
+        preparedCount = 0;
+        deferredReleases.clear();
+        preparing = true;
+        preparedPowerValidated = false;
+    }
+
+    /** Validates allocated directions for every output before any mechanism commits motor commands. */
+    void validatePreparedPower() {
+        if (preparedPowerValidated) return;
+        for (int index = 0; index < preparedCount; index++) {
+            PreparedOutput prepared = preparedPool.get(index);
+            if (!prepared.valid) continue;
+            AppliedOutput applied = prepared.applied;
+            Output finalOutput = applied.output();
+            if (electricalPass != null) {
+                if (electricalPass.commandSuppressed(prepared)) {
+                    finalOutput = Outputs.neutral();
+                    applied.blocked = true;
+                } else if (Double.isFinite(prepared.candidateVolts)) {
+                    double planned = electricalPass.plannedVoltage(prepared, prepared.candidateVolts);
+                    finalOutput = planned == prepared.candidateVolts ? applied.output() : Outputs.voltage(planned);
+                    ControlBinding<?> control = prepared.output.request().control();
+                    if (control != null && !sameOutput(finalOutput, applied.output())) {
+                        Output guarded = guardFinalOutput(control, finalOutput, prepared.context,
+                                applied.measuredPosition, applied.measuredVelocity);
+                        if (guarded instanceof Output.Neutral && !(finalOutput instanceof Output.Neutral)) {
+                            electricalPass.suppressCommandGroup(prepared, "Guard rejected allocated output");
+                            applied.blocked = true;
+                        }
+                        finalOutput = guarded;
+                    }
+                }
+            }
+            prepared.plannedOutput = finalOutput;
+        }
+        preparedPowerValidated = true;
+    }
+
+    /** Applies cached controller results exactly once, after the robot-wide allocation is complete. */
+    void commitPrepared() {
+        validatePreparedPower();
+        preparing = false;
+        committingPrepared = true;
+        appliedHandles.clear();
+        try {
+            for (int index = 0; index < deferredReleases.size(); index++) deferredReleases.get(index).run();
+            for (int index = 0; index < preparedCount; index++) {
+                PreparedOutput prepared = preparedPool.get(index);
+                if (!prepared.valid) continue;
+                AppliedOutput applied = prepared.applied;
+                Output finalOutput = prepared.plannedOutput;
+                if (electricalPass != null && electricalPass.commandSuppressed(prepared)) {
+                    // A guard in a later mechanism can invalidate a group whose outputs were validated earlier.
+                    finalOutput = Outputs.neutral();
+                    applied.blocked = true;
+                }
+                applied.saturated |= !sameOutput(applied.output(), finalOutput);
+                applied.output = finalOutput;
+                commit(prepared.output, applied, prepared.context);
+            }
+        } finally {
+            preparedCount = 0;
+            deferredReleases.clear();
+            committingPrepared = false;
+        }
+    }
+
+    private void registerCommand(PreparedOutput prepared) {
+        prepared.candidateVolts = scalarVolts(prepared.applied.output());
+        OutputRequest request = prepared.output.request();
+        if (electricalPass == null) return;
+        if (!Double.isFinite(prepared.candidateVolts)) {
+            ControlBinding<?> control = request.control();
+            boolean actionLimit = prepared.output.output() instanceof EffortCarrier carrier
+                    && Double.isFinite(carrier.effort().limitValue());
+            if (control != null && !control.motors().isEmpty()
+                    && (prepared.applied.output() instanceof Output.Position
+                            || prepared.applied.output() instanceof Output.Velocity)
+                    && (actionLimit || requiresHostPowerClamp(control))) {
+                throw new IllegalStateException("Power-limited control for "
+                        + control.output().defaultName()
+                        + " requires a host PID/feedforward voltage loop; a device target cannot enforce its power allocation.");
+            }
+        }
+        prepared.motors.clear();
+        double actionLimit = prepared.output.output() instanceof EffortCarrier carrier
+                ? carrier.effort().limitValue() : Double.POSITIVE_INFINITY;
+        List<MotorDevice> roots = request.motors();
+        ControlRuntimeState state = request.control() == null ? null : controlRuntimes(request.control());
+        for (int index = 0; index < roots.size(); index++) {
+            MotorDevice motor = roots.get(index);
+            prepared.add(motor, context.motor(motor), state == null ? actionLimit : state.effort.activeLimitAmps(index));
+            List<? extends ActionContext.MotorFollower> followers = context.followerConstraints(motor);
+            for (int followerIndex = 0; followerIndex < followers.size(); followerIndex++) {
+                ActionContext.MotorFollower follower = followers.get(followerIndex);
+                prepared.add(follower.device(), follower.handle(), actionLimit);
+            }
+        }
+        if (!prepared.motors.isEmpty()) {
+            try {
+                electricalPass.registerCommand(prepared, prepared.motors, prepared.handles,
+                        prepared.candidateVolts, prepared.localAmps);
+            } catch (RuntimeException exception) {
+                electricalPass.discardCommand(prepared);
+                prepared.valid = false;
+                throw exception;
+            }
+        }
+    }
+
+    private static double scalarVolts(Output output) {
+        return output instanceof Output.Voltage voltage ? voltage.volts()
+                : output instanceof Output.Percent percent ? percent.percent() * EffortUnits.NOMINAL_VOLTS
+                : Double.NaN;
+    }
+
+    private void commit(ResolvedOutput output, AppliedOutput applied, MechanismContext safeContext) {
+        ControlBinding<?> appliedControl = output.request().control();
+        if (appliedControl != null) {
+            ControlRuntimeState state = controlRuntimes(appliedControl);
+            state.lastVolts = applied.output() instanceof Output.Voltage volts ? volts.volts() : Double.NaN;
+            state.effort.appliedVolts(scalarVolts(applied.output()));
+            if (applied.notificationState != null) {
+                notifyApplied(applied.notificationState, applied.notificationContext,
+                        applied.notificationRequested, applied.output());
             }
         }
         if (output.request().control() != null) {
@@ -150,7 +307,7 @@ final class OutputApplier {
                 applySink(control.sink(), applied.output());
             }
         }
-        appliedHandles.clear();
+        if (!committingPrepared) appliedHandles.clear();
         ControlBinding<?> control = output.request().control();
         if (control != null) {
             List<MotorDevice> motors = control.motors();
@@ -176,10 +333,17 @@ final class OutputApplier {
             MotorHandle handle,
             AppliedOutput applied,
             Set<MotorHandle> appliedHandles) {
-        if (!appliedHandles.add(handle)) {
+        applyMotorAndSoftwareFollowers(motor, handle, applied, appliedHandles, true);
+    }
+
+    private void applyMotorAndSoftwareFollowers(MotorDevice motor, MotorHandle handle, AppliedOutput applied,
+            Set<MotorHandle> appliedHandles, boolean mirrorFollowers) {
+        MotorHandle target = handle.commandTarget();
+        if (!appliedHandles.add(target)) {
             return;
         }
-        drivenMotors.add(handle);
+        if (committingPrepared && electricalPass != null && !electricalPass.claimCommandTarget(target)) return;
+        drivenMotors.add(target);
         if (neutralOverrides.remove(motor)) {
             try {
                 handle.applyRuntimeConfiguration(MotorRuntimeConfig.declared(motor));
@@ -202,14 +366,21 @@ final class OutputApplier {
         if (captureTrace) {
             appliedMotorCommands.put(motor, new AppliedMotorCommand(mode(applied.output()), value(applied.output())));
         }
-        List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(motor);
+        if (!mirrorFollowers) return;
+        List<? extends ActionContext.MotorFollower> followers = context.followerConstraints(motor);
         for (int index = 0; index < followers.size(); index++) {
-            ActionContext.SoftwareMotorFollower follower = followers.get(index);
-            applyMotorAndSoftwareFollowers(follower.device(), follower.handle(), applied, appliedHandles);
+            ActionContext.MotorFollower follower = followers.get(index);
+            if (follower.softwareCommand()) {
+                applyMotorAndSoftwareFollowers(follower.device(), follower.handle(), applied, appliedHandles, false);
+            }
         }
     }
 
     void stopAll() {
+        preparing = false;
+        for (int index = 0; index < preparedCount; index++) discard(preparedPool.get(index));
+        preparedCount = 0;
+        deferredReleases.clear();
         drivenMotors.forEach(motor -> {
             try {
                 motor.stop();
@@ -244,6 +415,10 @@ final class OutputApplier {
      * keeps its previous command, and lets its control state reset at the end of the cycle.
      */
     void abandon(OutputRequest request) {
+        for (int index = 0; index < preparedCount; index++) {
+            PreparedOutput prepared = preparedPool.get(index);
+            if (prepared.output.request() == request) discard(prepared);
+        }
         ControlBinding<?> control = request.control();
         if (control != null) {
             controlsAppliedThisCycle.remove(control);
@@ -263,6 +438,11 @@ final class OutputApplier {
             }
             motor.recordCommand(MotorCommandSnapshot.neutral());
         }
+    }
+
+    private void discard(PreparedOutput prepared) {
+        prepared.valid = false;
+        if (electricalPass != null) electricalPass.discardCommand(prepared);
     }
 
     /**
@@ -373,7 +553,7 @@ final class OutputApplier {
                 // output, and the reference restarts from measured feedback. Loop state always restarts.
                 softRelease(control, state);
                 if (control.sink() != null && !activeSinks.contains(control.sink())) {
-                    control.sink().release();
+                    releaseSink(control.sink());
                 }
                 if (state.lastRelease.neutralMode() != null) {
                     overrideNeutralMode(control, state.lastRelease.neutralMode());
@@ -381,7 +561,7 @@ final class OutputApplier {
             } else if (!applied && state.active) {
                 resetFromCurrentFeedback(control, state);
                 if (control.sink() != null && !activeSinks.contains(control.sink())) {
-                    control.sink().release();
+                    releaseSink(control.sink());
                 }
                 if (state.lastRelease.neutralMode() != null) {
                     overrideNeutralMode(control, state.lastRelease.neutralMode());
@@ -472,6 +652,10 @@ final class OutputApplier {
      * next time one of these motors is commanded. Backends without runtime configuration keep their mode.
      */
     private void overrideNeutralMode(ControlBinding<?> control, MotorNeutralMode mode) {
+        if (preparing) {
+            deferredReleases.add(() -> overrideNeutralMode(control, mode));
+            return;
+        }
         for (MotorDevice motor : control.motors()) {
             MotorHandle handle = context.motor(motor);
             if (!handle.supportsRuntimeConfiguration()) continue;
@@ -488,6 +672,11 @@ final class OutputApplier {
                 context.hardwareFailure(motor, exception);
             }
         }
+    }
+
+    private void releaseSink(ca.frc6390.athena.runtime.control.ControlSink sink) {
+        if (preparing) deferredReleases.add(sink::release);
+        else sink.release();
     }
 
     private static Release releaseFor(ControlBinding<?> control, MotionPolicy policy) {
@@ -582,10 +771,13 @@ final class OutputApplier {
             state.lastRequestType = requestType;
             state.hasLastRequest = true;
         }
-        AppliedOutput offloaded = resolveDeviceControl(control, staged.output(), loopContext, state);
+        // Staging produces plain targets, so inspect the original Action before its effort metadata is lost.
+        boolean actionNeedsClamp = output.output() instanceof EffortCarrier carrier
+                && Double.isFinite(carrier.effort().limitValue());
+        AppliedOutput offloaded = actionNeedsClamp ? null
+                : resolveDeviceControl(control, staged.output(), loopContext, state);
         if (offloaded != null) {
-            // The device loop is not clamped, so an active power cap is reported as not applied.
-            state.unappliedCapAmps = deviceUnappliedCapAmps(control);
+            // Offload is used only while no active power cap requires the host voltage clamp.
             return offloaded.withTrace(
                     output.output(), transformed, staged, position, velocity, staged.constrained(), false, false);
         }
@@ -628,7 +820,6 @@ final class OutputApplier {
         Output saturated = saturate(control, constrainedOutput);
         // EFFORT HOOK (B5/B6): current-limit voltage clamp and load responses. See the effort package.
         saturated = limitEffort(state, output.output(), saturated, mechanismContext.dtSeconds(), position, velocity);
-        notifyApplied(state, loopContext, resolved, saturated);
         Output guarded = guardFinalOutput(
                 control,
                 saturated,
@@ -639,6 +830,7 @@ final class OutputApplier {
             resetControlState(state, guarded, mechanismContext, position, 0.0);
         }
         return appliedOutput.set(guarded, ControlRoute.OPEN_LOOP, null)
+                .notifyOnCommit(state, loopContext, resolved)
                 .withTrace(
                         output.output(),
                         transformed,
@@ -1064,8 +1256,8 @@ final class OutputApplier {
     /**
      * EFFORT HOOK (B5/B6). Advances the binding's effort state once per applied cycle and clamps a
      * voltage (or percent, at nominal bus voltage) to the current the motors may draw. The per-motor limit is
-     * the smallest of the binding ceiling, the Action effort and the power/thermal cap. Software followers
-     * receive the same command, so their caps join the same intersection.
+     * the smallest of the binding ceiling, the Action effort and the power/thermal cap. Every follower's
+     * current window joins the intersection in the shared command frame.
      */
     private Output limitEffort(ControlRuntimeState state, Output requested, Output candidate, double dtSeconds,
             double position, double velocity) {
@@ -1079,18 +1271,20 @@ final class OutputApplier {
         double volts = candidate instanceof Output.Voltage voltage ? voltage.volts()
                 : candidate instanceof Output.Percent percent ? percent.percent() * EffortUnits.NOMINAL_VOLTS
                 : Double.NaN;
-        state.effort.advance(actionLimit, state.powerCaps, dtSeconds, volts, position, velocity);
+        boolean planned = preparing && electricalPass != null;
+        state.effort.advance(actionLimit, planned ? null : state.powerCaps, dtSeconds, volts, position, velocity);
         if (Double.isNaN(volts)) {
             return candidate;
         }
-        Limits followers = softwareFollowerLimits(leaders, actionLimit);
-        double limited = state.effort.clampVolts(context, volts, followers.motors(), followers.amps());
+        if (planned) return candidate;
+        Limits followers = followerLimits(leaders, actionLimit);
+        double limited = state.effort.clampVolts(context, volts, followers.motors(), followers.amps(), followers.handles());
         return limited == volts ? candidate : Outputs.voltage(limited);
     }
 
     /**
      * EFFORT HOOK (B6) for open-loop motor outputs, which have no binding. A percent or voltage command to one
-     * motor is clamped with the motor's power cap and its software followers' caps, as a binding's command is.
+     * motor is clamped with the motor's power cap and every follower's cap, as a binding's command is.
      */
     private Output limitOpenLoop(OutputRequest request, Output output) {
         MotorDevice motor = request.motor();
@@ -1105,21 +1299,25 @@ final class OutputApplier {
         if (!Double.isFinite(volts)) {
             return output;
         }
+        if (preparing && electricalPass != null) return output;
         List<MotorDevice> motors = openLoopMotorsScratch;
         motors.clear();
         motors.add(motor);
-        int followerCount = addSoftwareFollowerLimits(motor, actionLimit, 0);
+        int followerCount = addFollowerLimits(motor, actionLimit, 0);
         if (openLoopLimitsScratch.length < followerCount + 1) {
             openLoopLimitsScratch = new double[Math.max(followerCount + 1, openLoopLimitsScratch.length * 2)];
+            openLoopHandlesScratch = new MotorHandle[openLoopLimitsScratch.length];
         }
         double[] limits = openLoopLimitsScratch;
         limits[0] = Math.min(actionLimit, powerCapAmps(motor));
+        openLoopHandlesScratch[0] = context.motor(motor);
         for (int index = 0; index < followerCount; index++) {
             motors.add(followerDevicesScratch.get(index));
             limits[index + 1] = followerAmpsScratch[index];
+            openLoopHandlesScratch[index + 1] = followerHandlesScratch[index];
         }
         try {
-            double limited = EffortRuntime.clampToLimits(context, volts, motors, limits);
+            double limited = EffortRuntime.clampToLimits(context, volts, motors, limits, openLoopHandlesScratch);
             return limited == volts ? output : Outputs.voltage(limited);
         } finally {
             motors.clear();
@@ -1128,34 +1326,36 @@ final class OutputApplier {
     }
 
     /**
-     * Returns the per-motor limits of the software followers of the given leaders. A software follower receives its
-     * leader's command, so it is limited by its own power cap and by the Action limit.
+     * Returns the per-motor limits of every follower sharing the leaders' command, including native followers.
+     * Each constraint uses that motor's power cap and the Action limit in its actual feedback frame.
      */
-    private Limits softwareFollowerLimits(List<MotorDevice> leaders, double actionLimit) {
+    private Limits followerLimits(List<MotorDevice> leaders, double actionLimit) {
         int count = 0;
         for (int leader = 0; leader < leaders.size(); leader++) {
-            count = addSoftwareFollowerLimits(leaders.get(leader), actionLimit, count);
+            count = addFollowerLimits(leaders.get(leader), actionLimit, count);
         }
         if (count == 0) {
             return Limits.NONE;
         }
-        return new Limits(followerDevicesScratch, followerAmpsScratch);
+        return new Limits(followerDevicesScratch, followerAmpsScratch, followerHandlesScratch);
     }
 
     /**
-     * Appends the software followers of {@code leader} and their limits to the follower scratch lists,
+     * Appends the follower constraints of {@code leader} and their limits to the follower scratch lists,
      * starting at {@code count}, and returns the new count. The scratch is valid until the next call
      * with a zero count.
      */
-    private int addSoftwareFollowerLimits(MotorDevice leader, double actionLimit, int count) {
+    private int addFollowerLimits(MotorDevice leader, double actionLimit, int count) {
         if (count == 0) followerDevicesScratch.clear();
-        List<ActionContext.SoftwareMotorFollower> followers = context.softwareFollowers(leader);
+        List<? extends ActionContext.MotorFollower> followers = context.followerConstraints(leader);
         for (int index = 0; index < followers.size(); index++) {
             MotorDevice follower = followers.get(index).device();
             if (followerAmpsScratch.length == count) {
                 followerAmpsScratch = java.util.Arrays.copyOf(followerAmpsScratch, count * 2);
+                followerHandlesScratch = java.util.Arrays.copyOf(followerHandlesScratch, count * 2);
             }
             followerDevicesScratch.add(follower);
+            followerHandlesScratch[count] = followers.get(index).handle();
             followerAmpsScratch[count++] = Math.min(actionLimit, powerCapAmps(follower));
         }
         return count;
@@ -1165,28 +1365,18 @@ final class OutputApplier {
      * Per-motor current limits of a set of motors that share one command. {@code amps} may be longer than
      * {@code motors}; only the first {@code motors.size()} entries apply.
      */
-    private record Limits(List<MotorDevice> motors, double[] amps) {
-        static final Limits NONE = new Limits(List.of(), new double[0]);
+    private record Limits(List<MotorDevice> motors, double[] amps, MotorHandle[] handles) {
+        static final Limits NONE = new Limits(List.of(), new double[0], new MotorHandle[0]);
     }
 
     /**
-     * Returns the power cap of a device-offloaded binding that is not applied, in whole amps, or -1 when none.
-     * Used by State/Reason. Device closed loops are not clamped, so only the cap (already below the declared limit)
-     * is reported.
+     * Legacy State/Reason diagnostic. Automatic offload now falls back to host voltage control whenever
+     * a power cap is active, so a successfully applied binding has no unapplied device-loop cap.
      */
     int deviceLoopUnappliedCapAmps(ControlBinding<?> control) {
         if (control == null) return -1;
         ControlRuntimeState state = controlRuntimes.get(control);
         return state == null ? -1 : state.unappliedCapAmps;
-    }
-
-    private int deviceUnappliedCapAmps(ControlBinding<?> control) {
-        double min = Double.POSITIVE_INFINITY;
-        List<MotorDevice> motors = control.motors();
-        for (int index = 0; index < motors.size(); index++) {
-            min = Math.min(min, powerCapAmps(motors.get(index)));
-        }
-        return Double.isFinite(min) ? (int) Math.max(1L, Math.round(min)) : -1;
     }
 
     /** Power/thermal cap of a motor from this cycle's power pass, infinite when uncapped or unknown. */
@@ -1321,6 +1511,9 @@ final class OutputApplier {
         if (!(request instanceof Output.Position || request instanceof Output.Velocity) || control.output() == null) {
             return null;
         }
+        // Offload is an optimization: the already-bound PID/feedforward runtimes must calculate voltage here
+        // whenever the electrical pass needs to clamp it. A device target would bypass that voltage clamp.
+        if (requiresHostPowerClamp(control)) return null;
         if (!control.constraints().isEmpty() || effectiveProfile(control) != null
                 || control.planner() != null) {
             return null;
@@ -1383,6 +1576,22 @@ final class OutputApplier {
                 request,
                 route,
                 closedLoopRequest);
+    }
+
+    private boolean requiresHostPowerClamp(ControlBinding<?> control) {
+        List<MotorDevice> motors = control.motors();
+        for (int index = 0; index < motors.size(); index++) {
+            MotorDevice motor = motors.get(index);
+            if (preparing && electricalPass != null && electricalPass.requiresHostClamp(motor)) return true;
+            if (Double.isFinite(powerCapAmps(motor))) return true;
+            List<? extends ActionContext.MotorFollower> followers = context.followerConstraints(motor);
+            for (int follower = 0; follower < followers.size(); follower++) {
+                if (preparing && electricalPass != null
+                        && electricalPass.requiresHostClamp(followers.get(follower).device())) return true;
+                if (Double.isFinite(powerCapAmps(followers.get(follower).device()))) return true;
+            }
+        }
+        return false;
     }
 
     private static void apply(MotorHandle motor, AppliedOutput applied) {
@@ -1701,12 +1910,42 @@ final class OutputApplier {
         private boolean constrained;
         private boolean blocked;
         private boolean saturated;
+        private ControlRuntimeState notificationState;
+        private ControlLoopContext notificationContext;
+        private Output notificationRequested;
 
         private AppliedOutput set(Output output, ControlRoute route, MotorClosedLoopRequest closedLoopRequest) {
             this.output = output;
             this.route = route;
             this.closedLoopRequest = closedLoopRequest;
+            notificationState = null;
+            notificationContext = null;
+            notificationRequested = null;
             return this;
+        }
+
+        private AppliedOutput notifyOnCommit(ControlRuntimeState state, ControlLoopContext context, Output requested) {
+            notificationState = state;
+            notificationContext = context;
+            notificationRequested = requested;
+            return this;
+        }
+
+        private void copyFrom(AppliedOutput source) {
+            output = source.output;
+            route = source.route;
+            closedLoopRequest = source.closedLoopRequest;
+            requested = source.requested;
+            transformed = source.transformed;
+            staged = source.staged;
+            measuredPosition = source.measuredPosition;
+            measuredVelocity = source.measuredVelocity;
+            constrained = source.constrained;
+            blocked = source.blocked;
+            saturated = source.saturated;
+            notificationState = source.notificationState;
+            notificationContext = source.notificationContext;
+            notificationRequested = source.notificationRequested;
         }
 
         private AppliedOutput withoutTrace() {
@@ -1793,6 +2032,35 @@ final class OutputApplier {
 
         private MotorClosedLoopRequest closedLoopRequest() {
             return closedLoopRequest;
+        }
+    }
+
+    private static final class PreparedOutput {
+        final AppliedOutput applied = new AppliedOutput();
+        final List<MotorDevice> motors = new ArrayList<>();
+        MotorHandle[] handles = new MotorHandle[4];
+        double[] localAmps = new double[4];
+        ResolvedOutput output;
+        MechanismContext context;
+        double candidateVolts;
+        boolean valid;
+        Output plannedOutput;
+
+        void add(MotorDevice motor, MotorHandle handle, double amps) {
+            for (int index = 0; index < motors.size(); index++) {
+                if (motors.get(index) == motor) {
+                    localAmps[index] = Math.min(localAmps[index], amps);
+                    return;
+                }
+            }
+            int index = motors.size();
+            if (index == handles.length) {
+                handles = java.util.Arrays.copyOf(handles, index * 2);
+                localAmps = java.util.Arrays.copyOf(localAmps, index * 2);
+            }
+            motors.add(motor);
+            handles[index] = handle;
+            localAmps[index] = amps;
         }
     }
 

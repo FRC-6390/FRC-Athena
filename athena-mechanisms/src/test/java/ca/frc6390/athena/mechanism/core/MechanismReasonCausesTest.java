@@ -86,7 +86,7 @@ class MechanismReasonCausesTest {
         motor.appliedVolts = 12.0;
         motor.supplyAmps = 364.0;
         PowerRobot robot = new PowerRobot();
-        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot);
+        MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(robot).busVoltage(() -> 12.5);
 
         scheduler.request(robot.drive);
         scheduler.teleopPeriodic(0.0, 0.02);

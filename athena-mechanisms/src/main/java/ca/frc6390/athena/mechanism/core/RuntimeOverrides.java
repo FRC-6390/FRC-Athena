@@ -29,6 +29,7 @@ final class RuntimeOverrides {
     private final Set<ControlBinding<?>> controlProfileOverrides = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<MotorDevice, MotorRuntimeConfig> motorConfigs = new IdentityHashMap<>();
     private final Map<MotorDevice, String> motorStatus = new IdentityHashMap<>();
+    private final Set<MotorDevice> failedMotorConfigs = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<Object, String> setupStatus = new IdentityHashMap<>();
     private final Map<EncoderDevice, Double> requestedEncoderPositions = new IdentityHashMap<>();
     private final Map<ImuDevice, Double> requestedImuYaw = new IdentityHashMap<>();
@@ -121,7 +122,16 @@ final class RuntimeOverrides {
         catch (RuntimeException exception) { return false; }
     }
 
-    String motorStatus(MotorDevice motor) { return motorStatus.getOrDefault(motor, "Declared"); }
+    String motorStatus(MotorDevice motor) {
+        try {
+            var status = actionContext.motor(motor).configurationStatus();
+            if (status.failed()) return "Error: " + status.error();
+            if (!status.ready()) return "Pending configuration";
+        } catch (RuntimeException exception) {
+            return "Error: " + exception.getMessage();
+        }
+        return motorStatus.getOrDefault(motor, "Declared");
+    }
 
     boolean supportsEncoderPosition(EncoderDevice encoder) {
         try { return actionContext.encoder(encoder).supportsPositionSetting(); }
@@ -167,7 +177,27 @@ final class RuntimeOverrides {
         catch (RuntimeException exception) { return 0.0; }
     }
 
-    String setupStatus(Object device) { return setupStatus.getOrDefault(device, "Ready"); }
+    String setupStatus(Object device) {
+        if (device instanceof EncoderDevice encoder) {
+            try {
+                var status = actionContext.encoder(encoder).configurationStatus();
+                if (status.failed()) return "Error: " + status.error();
+                if (!status.ready()) return "Pending configuration";
+            } catch (RuntimeException exception) {
+                return "Error: " + exception.getMessage();
+            }
+        }
+        if (device instanceof ImuDevice imu) {
+            try {
+                var status = actionContext.imu(imu).configurationStatus();
+                if (status.failed()) return "Error: " + status.error();
+                if (!status.ready()) return "Pending configuration";
+            } catch (RuntimeException exception) {
+                return "Error: " + exception.getMessage();
+            }
+        }
+        return setupStatus.getOrDefault(device, "Ready");
+    }
 
     void neutralMode(MotorDevice motor, String value) {
         update(motor, new MotorRuntimeConfig(MotorNeutralMode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT)),
@@ -200,7 +230,9 @@ final class RuntimeOverrides {
     }
 
     private void update(MotorDevice motor, MotorRuntimeConfig config) {
-        if (config.equals(config(motor))) return;
+        // Keep the requested value after a CAN failure, but let an explicit repeat retry it.
+        if (config.equals(config(motor)) && !failedMotorConfigs.contains(motor)
+                && !actionContext.motor(motor).configurationStatus().failed()) return;
         motorConfigs.put(motor, config);
         apply(motor, config);
     }
@@ -213,8 +245,10 @@ final class RuntimeOverrides {
                 return;
             }
             handle.applyRuntimeConfiguration(config);
+            failedMotorConfigs.remove(motor);
             motorStatus.put(motor, "Applied");
         } catch (RuntimeException exception) {
+            failedMotorConfigs.add(motor);
             motorStatus.put(motor, "Error: " + exception.getMessage());
         }
     }

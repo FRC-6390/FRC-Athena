@@ -33,6 +33,30 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class RevBackendTest {
+    private static ca.frc6390.athena.hardware.backend.ConfigurationStatus configuration(Object handle) {
+        return handle instanceof ca.frc6390.athena.hardware.backend.MotorHandle motor
+                ? motor.configurationStatus()
+                : ((ca.frc6390.athena.hardware.backend.EncoderHandle) handle).configurationStatus();
+    }
+
+    private static void awaitConfiguration(Object handle) {
+        awaitCondition(() -> !configuration(handle).pending());
+        assertTrue(configuration(handle).ready(), () -> configuration(handle).error());
+    }
+
+    private static void awaitFailure(Object handle) {
+        awaitCondition(() -> configuration(handle).failed());
+    }
+
+    private static void awaitCondition(java.util.function.BooleanSupplier condition) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            try { Thread.sleep(1); }
+            catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new AssertionError(exception); }
+        }
+        assertTrue(condition.getAsBoolean(), "background configuration completed");
+    }
+
     @Test
     void repeatedOpenLoopCommandsSkipTheVendorCall() {
         RecordingSparkController controller = new RecordingSparkController();
@@ -64,6 +88,8 @@ class RevBackendTest {
         MotorRuntimeConfig runtime = new MotorRuntimeConfig(MotorNeutralMode.BRAKE, true, 31, 42);
 
         handle.applyRuntimeConfiguration(runtime);
+
+        awaitConfiguration(handle);
 
         assertTrue(handle.supportsRuntimeConfiguration());
         assertEquals(MotorNeutralMode.COAST, handle.device().neutralMode());
@@ -131,20 +157,25 @@ class RevBackendTest {
     }
 
     @Test
-    void failedActivationReleasesTheSparkSoTheBindRetryDoesNotLeakHandles() {
+    void failedActivationRetainsOneGatedSparkForRetryAndReleasesItOnClose() {
         RecordingSparkController controller = new RecordingSparkController();
         controller.configureResult = false;
         RevMotorHandle handle = new RevMotorHandle(MotorDevice.of(MotorKinds.NEO, 1), null, controller);
 
-        assertThrows(IllegalStateException.class, handle::activate);
-        assertTrue(controller.closed);
+        handle.activate();
+        awaitFailure(handle);
+        assertFalse(controller.closed);
+        handle.close();
+        awaitCondition(() -> controller.closed);
 
         RecordingSparkController throwing = new RecordingSparkController();
         throwing.configureFailure = new IllegalStateException("Invalid parameter");
         RevMotorHandle rejected = new RevMotorHandle(MotorDevice.of(MotorKinds.NEO, 2), null, throwing);
-        IllegalStateException failure = assertThrows(IllegalStateException.class, rejected::activate);
-        assertTrue(failure.getMessage().contains("Invalid parameter"));
-        assertTrue(throwing.closed);
+        rejected.activate();
+        awaitFailure(rejected);
+        assertTrue(rejected.configurationStatus().error().contains("Invalid parameter"));
+        rejected.close();
+        awaitCondition(() -> throwing.closed);
     }
 
     @Test
@@ -157,7 +188,10 @@ class RevBackendTest {
                 MotorDevice.of(MotorKinds.NEO, 2).follow(leaderDevice), null, followerController);
 
         follower.activate();
+
+        awaitConfiguration(follower);
         follower.follow(leader, false);
+        awaitConfiguration(follower);
 
         assertEquals(0, followerController.configureCalls);
         assertEquals(1, followerController.followLeaderId);
@@ -305,7 +339,10 @@ class RevBackendTest {
         assertEquals(0, controller.configureCalls);
 
         handle.activate();
+
+        awaitConfiguration(handle);
         handle.activate();
+        awaitConfiguration(handle);
 
         assertEquals(1, controller.configureCalls);
         assertEquals(options, controller.options);
@@ -313,8 +350,8 @@ class RevBackendTest {
     }
 
     @Test
-    void ctreOrientedCurrentLimitsMapConservativelyToRevSmartCurrentLimit() {
-        assertEquals(35, RevMotorHandle.effectiveSmartCurrentLimit(
+    void explicitSupplyIsIndependentOfRevPhaseCurrentLimit() {
+        assertEquals(RevMotorHandle.DEFAULT_NEO_CURRENT_LIMIT_AMPS, RevMotorHandle.effectiveSmartCurrentLimit(
                 MotorDevice.of(MotorKinds.NEO, 1).supplyCurrentLimit(Units.Amps.of(35)),
                 new RevMotorOptions()));
         assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(
@@ -329,6 +366,24 @@ class RevBackendTest {
         assertEquals(55, RevMotorHandle.effectiveSmartCurrentLimit(
                 MotorDevice.of(MotorKinds.NEO, 5).supplyCurrentLimit(Units.Amps.of(35)).statorCurrentLimit(Units.Amps.of(30)),
                 new RevMotorOptions().smartCurrentLimit(Amps.of(55))));
+        assertEquals(60, RevMotorHandle.effectiveSmartCurrentLimit(
+                MotorDevice.of(MotorKinds.NEO, 6).supplyCurrentLimit(Amps.of(10)).statorCurrentLimit(Amps.of(60)),
+                new RevMotorOptions()));
+    }
+
+    @Test
+    void activationAndRuntimeConfigurePhaseOnlyWhileSupplyIsSoftwareEnforced() throws Exception {
+        MotorDevice motor = MotorDevice.of(MotorKinds.NEO, 7)
+                .supplyCurrentLimit(Amps.of(10)).statorCurrentLimit(Amps.of(60));
+        Map<Integer, Object> activation = parameters(RevMotorHandle.activationConfig(motor, new RevMotorOptions(), false));
+        Map<Integer, Object> runtime = parameters(RevMotorHandle.runtimeConfig(
+                new MotorRuntimeConfig(MotorNeutralMode.BRAKE, false, 10, 60), true, false));
+        assertEquals(60, activation.get(SparkParameters.kSmartCurrentStallLimit.value));
+        assertEquals(60, runtime.get(SparkParameters.kSmartCurrentStallLimit.value));
+        Map<Integer, Object> supplyOnly = parameters(RevMotorHandle.runtimeConfig(
+                new MotorRuntimeConfig(MotorNeutralMode.BRAKE, false, 10, 0), true, false));
+        assertEquals(RevMotorHandle.DEFAULT_NEO_CURRENT_LIMIT_AMPS,
+                supplyOnly.get(SparkParameters.kSmartCurrentStallLimit.value));
     }
 
     @Test
@@ -341,6 +396,8 @@ class RevBackendTest {
                 MotorDevice.of(MotorKinds.NEO, 2), null, followerController);
 
         follower.follow(leader, true);
+
+        awaitConfiguration(follower);
 
         assertEquals(1, followerController.followLeaderId);
         assertTrue(followerController.followInverted);
@@ -365,7 +422,10 @@ class RevBackendTest {
                     followerDevice, null, followerControllers[index]);
 
             follower.activate();
+
+            awaitConfiguration(follower);
             follower.follow(leader, false);
+            awaitConfiguration(follower);
         }
 
         for (RecordingSparkController controller : followerControllers) {
@@ -394,6 +454,7 @@ class RevBackendTest {
                 new RevMotorOptions(),
                 controller);
         handle.enableAbsoluteEncoder();
+        awaitConfiguration(handle);
 
         controller.position = 1.0;
         controller.velocity = 2.0;
@@ -436,6 +497,8 @@ class RevBackendTest {
 
         handle.setIntegratedPositionRotations(5.0);
 
+        awaitConfiguration(handle);
+
         assertEquals(5.0, controller.position, 1.0e-9);
         assertEquals(5.0, handle.integratedPositionRotations(), 1.0e-9);
     }
@@ -451,13 +514,15 @@ class RevBackendTest {
         assertEquals(0, controller.absoluteVelocityReads);
 
         handle.enableAbsoluteEncoder();
+
+        awaitConfiguration(handle);
         handle.refreshInputs();
         assertEquals(1, controller.enableAbsoluteEncoderCalls);
         assertEquals(1, controller.absolutePositionReads);
         assertEquals(1, controller.absoluteVelocityReads);
 
         handle.close();
-        assertTrue(controller.closed);
+        awaitCondition(() -> controller.closed);
     }
 
     @Test
@@ -511,7 +576,79 @@ class RevBackendTest {
         assertFalse(fatal.temperature);
     }
 
-    private static final class RecordingSparkController implements RevMotorHandle.SparkController {
+    @Test
+    void promotionAndRejoinWaitForTheOrderedFollowerConfigurationWithoutHoldingTheGraph() throws Exception {
+        var promotionEntered = new java.util.concurrent.CountDownLatch(1);
+        var promotionRelease = new java.util.concurrent.CountDownLatch(1);
+        var rejoinEntered = new java.util.concurrent.CountDownLatch(1);
+        var rejoinRelease = new java.util.concurrent.CountDownLatch(1);
+        RecordingSparkController original = new RecordingSparkController() {
+            @Override public boolean follow(MotorDevice device, RevMotorOptions options, int id, boolean inverted) {
+                rejoinEntered.countDown();
+                waitFor(rejoinRelease);
+                return super.follow(device, options, id, inverted);
+            }
+        };
+        RecordingSparkController promoted = new RecordingSparkController() {
+            @Override public boolean stopFollowing(MotorDevice device, RevMotorOptions options) {
+                promotionEntered.countDown();
+                waitFor(promotionRelease);
+                return true;
+            }
+        };
+        MotorDevice leader = MotorDevice.of(MotorKinds.NEO, 92);
+        MotorDevice follower = MotorDevice.of(MotorKinds.NEO, 93).follow(leader);
+        var backend = new ca.frc6390.athena.hardware.backend.MotorBackend() {
+            @Override public boolean supports(MotorKind kind) { return true; }
+            @Override public boolean supportsHardwareFollowing(MotorDevice a, MotorDevice b) { return true; }
+            @Override public ca.frc6390.athena.hardware.backend.MotorHandle create(MotorDevice device) {
+                return new RevMotorHandle(device, null, device.id() == leader.id() ? original : promoted);
+            }
+        };
+        try (var graph = ca.frc6390.athena.hardware.runtime.HardwareGraph.using(
+                ca.frc6390.athena.hardware.backend.BackendRegistry.of(backend))) {
+            var group = graph.motorGroup(new ca.frc6390.athena.hardware.runtime.MotorGroupPolicy(
+                    leader, java.util.List.of(follower), true, true, 1, 1.0, 1.0, true, 1));
+            var route = graph.motor(leader);
+            var followerHandle = graph.motor(follower);
+            awaitConfiguration(followerHandle);
+            awaitConfiguration(route);
+            graph.refreshInputs();
+            original.fatalFault = true;
+            graph.refreshInputs();
+            assertTrue(promotionEntered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(follower, group.leader());
+            assertFalse(route.configurationStatus().ready());
+            int before = promoted.setVoltageCalls;
+            route.setVoltage(6.0);
+            assertEquals(before, promoted.setVoltageCalls, "pending stop-following cannot accept drive output");
+            assertEquals(route, graph.motor(leader), "lookups remain available while the driver is blocked");
+            promotionRelease.countDown();
+            awaitConfiguration(route);
+            route.setVoltage(6.0);
+            assertEquals(6.0, promoted.lastVolts);
+
+            original.fatalFault = false;
+            graph.refreshInputs();
+            assertTrue(rejoinEntered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse(route.configurationStatus().ready(), "the group waits until rejoin routing is applied");
+            rejoinRelease.countDown();
+            awaitConfiguration(route);
+            assertEquals(follower.id(), original.followLeaderId);
+            route.setVoltage(8.0);
+            assertEquals(8.0, promoted.lastVolts);
+        } finally {
+            promotionRelease.countDown();
+            rejoinRelease.countDown();
+        }
+    }
+
+    private static void waitFor(java.util.concurrent.CountDownLatch latch) {
+        try { latch.await(); }
+        catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException(exception); }
+    }
+
+    private static class RecordingSparkController implements RevMotorHandle.SparkController {
         private int configureCalls;
         private boolean configureResult = true;
         private RuntimeException configureFailure;

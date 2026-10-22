@@ -7,6 +7,8 @@ import ca.frc6390.athena.hardware.backend.MotorClosedLoopConfig;
 import ca.frc6390.athena.hardware.backend.MotorClosedLoopRequest;
 import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.ConfigurationQueue;
+import ca.frc6390.athena.hardware.backend.ConfigurationStatus;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.backend.OpenLoopCommandFilter;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -46,10 +48,11 @@ import java.util.Objects;
 /**
  * CTRE TalonFX-family motor handle backed by Phoenix 6.
  */
-public final class CtreMotorHandle implements MotorHandle {
+public final class CtreMotorHandle implements MotorHandle, AutoCloseable {
     private final MotorDevice device;
     private final CtreMotorOptions options;
     private final TalonController controller;
+    private final ConfigurationQueue configuration;
     private boolean activated;
     private boolean inputsFresh;
     private final OpenLoopCommandFilter openLoop = new OpenLoopCommandFilter();
@@ -59,7 +62,6 @@ public final class CtreMotorHandle implements MotorHandle {
     private double supplyCurrentAmps;
     private double statorCurrentAmps;
     private boolean fatalFault;
-    private MotorClosedLoopConfig appliedClosedLoopConfig;
     private boolean focDisabledAfterLicenseFault;
 
     /**
@@ -79,6 +81,7 @@ public final class CtreMotorHandle implements MotorHandle {
         this.device = Objects.requireNonNull(device, "device");
         this.options = options == null ? new CtreMotorOptions() : options;
         this.controller = Objects.requireNonNull(controller, "controller");
+        this.configuration = new ConfigurationQueue(device.defaultName(), this::stop);
     }
 
     @Override
@@ -92,9 +95,20 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     @Override
+    public boolean enforcesSupplyCurrentLimit() {
+        return true;
+    }
+
+    @Override public ConfigurationStatus configurationStatus() { return configuration.status(); }
+
+    @Override
     public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         Objects.requireNonNull(configuration, "configuration");
         openLoop.invalidate();
+        this.configuration.request(ConfigurationQueue.Key.RUNTIME, configuration, () -> applyConfigurationNow(configuration));
+    }
+
+    private void applyConfigurationNow(MotorRuntimeConfig configuration) {
         if (!controller.configureOutput(
                 configuration.neutralMode() == MotorNeutralMode.BRAKE,
                 device.follower() == null && configuration.inverted())) {
@@ -126,6 +140,12 @@ public final class CtreMotorHandle implements MotorHandle {
     public void activate() {
         openLoop.invalidate();
         if (!activated) {
+            activated = true;
+            configuration.request(ConfigurationQueue.Key.ACTIVATION, device, this::activateNow);
+        }
+    }
+
+    private void activateNow() {
             if (!controller.configureOutput(
                     device.neutralMode() == MotorNeutralMode.BRAKE,
                     device.follower() == null && device.isInverted())) {
@@ -145,12 +165,13 @@ public final class CtreMotorHandle implements MotorHandle {
                     wholeAmps(options.torqueCurrentLimit()))) {
                 throw new IllegalStateException("Failed to configure current limits for " + device.defaultName());
             }
-            activated = true;
-        }
     }
 
     @Override
     public void refreshInputs() {
+        configuration.retryFailed();
+        if (configuration.status().failed()) throw new IllegalStateException(configuration.status().error());
+        if (!configuration.status().ready()) return;
         // The connection check reads the frame timestamps of this batch, so refresh first.
         controller.refreshSignals();
         if (!controller.isConnected()) {
@@ -172,7 +193,7 @@ public final class CtreMotorHandle implements MotorHandle {
      */
     @Override
     public boolean faulted() {
-        return fatalFault;
+        return fatalFault || configuration.status().failed();
     }
 
     @Override
@@ -193,7 +214,8 @@ public final class CtreMotorHandle implements MotorHandle {
                     + "'. Phoenix followers must share the leader's bus; move the devices to one bus or use"
                     + " software following.");
         }
-        controller.follow(ctreLeader.device.id(), inverted);
+        configuration.request(ConfigurationQueue.Key.FOLLOW, new FollowConfig(ctreLeader.device.id(), inverted),
+                () -> controller.follow(ctreLeader.device.id(), inverted));
     }
 
     static String normalizedBus(String canbus) {
@@ -201,7 +223,14 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     @Override
+    public void stopFollowing() {
+        openLoop.invalidate();
+        configuration.request(ConfigurationQueue.Key.FOLLOW, "independent", controller::stop);
+    }
+
+    @Override
     public void setPercentOutput(double percent) {
+        if (!configuration.status().ready()) return;
         double safe = clamp(percent);
         if (!openLoop.percent(safe)) return;
         try {
@@ -214,6 +243,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void setVoltage(double volts) {
+        if (!configuration.status().ready()) return;
         double safe = finiteOrZero(volts);
         if (!openLoop.voltage(safe)) return;
         try {
@@ -226,6 +256,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void setPositionTargetRotations(double rotations) {
+        if (!configuration.status().ready()) return;
         openLoop.invalidate();
         controller.setPositionTarget(finiteOrZero(rotations));
     }
@@ -234,7 +265,7 @@ public final class CtreMotorHandle implements MotorHandle {
     public void setPositionTargetRotations(double rotations, MotorClosedLoopRequest request) {
         openLoop.invalidate();
         MotorClosedLoopRequest safeRequest = safeRequest(request);
-        applyClosedLoopConfig(safeRequest.config());
+        if (!applyClosedLoopConfig(safeRequest.config())) return;
         FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
         boolean focRequested = enableFoc(focPolicy);
         boolean licenseFault = controller.setPositionTarget(
@@ -259,6 +290,7 @@ public final class CtreMotorHandle implements MotorHandle {
 
     @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+        if (!configuration.status().ready()) return;
         openLoop.invalidate();
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
     }
@@ -269,7 +301,7 @@ public final class CtreMotorHandle implements MotorHandle {
             MotorClosedLoopRequest request) {
         openLoop.invalidate();
         MotorClosedLoopRequest safeRequest = safeRequest(request);
-        applyClosedLoopConfig(safeRequest.config());
+        if (!applyClosedLoopConfig(safeRequest.config())) return;
         FocPolicy focPolicy = effectiveFocPolicy(safeRequest.config());
         boolean focRequested = enableFoc(focPolicy);
         boolean licenseFault = controller.setVelocityTarget(
@@ -331,9 +363,11 @@ public final class CtreMotorHandle implements MotorHandle {
     @Override
     public void setIntegratedPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
-        controller.setSensorPosition(safeRotations);
-        positionRotations = safeRotations;
-        inputsFresh = true;
+        configuration.request(ConfigurationQueue.Key.POSITION, safeRotations, () -> {
+            controller.setSensorPosition(safeRotations);
+            positionRotations = safeRotations;
+            inputsFresh = true;
+        });
     }
 
     @Override
@@ -351,15 +385,17 @@ public final class CtreMotorHandle implements MotorHandle {
         return request == null ? MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty()) : request;
     }
 
-    private void applyClosedLoopConfig(MotorClosedLoopConfig config) {
-        if (config.equals(appliedClosedLoopConfig)) {
-            return;
-        }
-        if (!controller.configureSlot(config)) {
-            throw new IllegalStateException("Failed to configure closed-loop slot for " + device.defaultName());
-        }
-        appliedClosedLoopConfig = config;
+    private boolean applyClosedLoopConfig(MotorClosedLoopConfig config) {
+        return configuration.request(ConfigurationQueue.Key.SLOT, config, () -> {
+            if (!controller.configureSlot(config)) {
+                throw new IllegalStateException("Failed to configure closed-loop slot for " + device.defaultName());
+            }
+        });
     }
+
+    @Override public void close() { configuration.close(controller::close); }
+
+    private record FollowConfig(int leaderId, boolean inverted) { }
 
     private FocPolicy effectiveFocPolicy(MotorClosedLoopConfig config) {
         return options.focPolicy() == FocPolicy.DISABLED ? config.focPolicy() : options.focPolicy();
@@ -379,6 +415,7 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     interface TalonController {
+        default void close() { }
         default boolean isConnected() { return true; }
 
         void setPercent(double percent);
@@ -444,6 +481,7 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     private static final class PhoenixTalonController implements TalonController {
+        @Override public void close() { talon.close(); }
         private final TalonFX talon;
         private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
         private final VoltageOut voltage = new VoltageOut(0.0);
@@ -492,9 +530,8 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void setSensorPosition(double rotations) {
-            if (talon.setPosition(rotations).isOK()) {
-                pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
-            }
+            requireOk(talon.setPosition(rotations), "encoder position");
+            pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
         }
 
         @Override
@@ -584,6 +621,7 @@ public final class CtreMotorHandle implements MotorHandle {
     }
 
     private static final class PhoenixTalonFxsController implements TalonController {
+        @Override public void close() { talon.close(); }
         private final TalonFXS talon;
         private final MotorArrangementValue arrangement;
         private final DutyCycleOut dutyCycle = new DutyCycleOut(0.0);
@@ -652,9 +690,8 @@ public final class CtreMotorHandle implements MotorHandle {
 
         @Override
         public void setSensorPosition(double rotations) {
-            if (talon.setPosition(rotations).isOK()) {
-                pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
-            }
+            requireOk(talon.setPosition(rotations), "encoder position");
+            pendingPosition.set(rotations, Utils.getCurrentTimeSeconds());
         }
 
         @Override

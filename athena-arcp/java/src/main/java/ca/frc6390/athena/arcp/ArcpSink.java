@@ -3,7 +3,8 @@ package ca.frc6390.athena.arcp;
 import java.util.List;
 
 /**
- * Robot-side ARCP publisher. The runtime calls it from the robot thread once per cycle.
+ * Robot-side ARCP publisher. The runtime publishes telemetry from the robot thread; the replay encoder
+ * publishes replay records/backfill attachment from its ordered worker. Implementations must support both.
  * {@link NativeArcpServer} implements it on top of the Rust server; {@link #NONE} does nothing
  * when ARCP is not enabled.
  */

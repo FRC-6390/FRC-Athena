@@ -72,17 +72,158 @@ class CharacterizationTest {
     }
 
     @Test
-    void fitActionMakesTheModelActiveAndBaseline() {
+    void fitActionMakesTheModelActiveAndBaseline() throws Exception {
         Simulated sim = new Simulated();
         sim.run(sim.mechanism.quasistaticForward, 10.0);
         sim.run(sim.mechanism.quasistaticReverse, 10.0);
         sim.run(sim.mechanism.dynamicForward, 3.0);
 
-        sim.run(sim.mechanism.fitModel, 0.1);
+        sim.scheduler.request(sim.mechanism.fitModel);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        do {
+            sim.clock[0] += DT;
+            sim.scheduler.teleopPeriodic(sim.clock[0], DT);
+            Thread.sleep(1); // Explicit asynchronous completion wait in the test, never in the action.
+            assertTrue(System.nanoTime() < deadline, characterizationStatus(sim));
+        } while (sim.scheduler.isRunning(sim.mechanism.fitModel));
 
         assertEquals(PLANT_KV, sim.mechanism.characterization.model().kV(), 0.1);
         assertEquals(sim.mechanism.characterization.model(), sim.mechanism.characterization.baseline());
         assertFalse(sim.mechanism.characterization.drift().alert());
+    }
+
+    private static String characterizationStatus(Simulated sim) {
+        return sim.mechanism.characterization.fitStatus();
+    }
+
+    @Test
+    void heldFitExecutorDoesNotBlockRobotAndStaleOrInterruptedFitsCannotPublish() {
+        Simulated sim = new Simulated();
+        sim.run(sim.mechanism.quasistaticForward, 10);
+        sim.run(sim.mechanism.quasistaticReverse, 10);
+        sim.run(sim.mechanism.dynamicForward, 3);
+        Characterization characterization = sim.mechanism.characterization;
+        List<Runnable> queued = new ArrayList<>();
+        characterization.fitExecutor(queued::add);
+        var fit = (ca.frc6390.athena.mechanism.core.LifecycleAction) characterization.fitModel();
+        assertTrue(fit.requirements().contains(characterization.control()));
+        MechanismModel original = characterization.model();
+        long before = System.nanoTime();
+        fit.onStart().run();
+        for (int cycle = 0; cycle < 100; cycle++) fit.onExecute().run();
+        assertTrue(System.nanoTime() - before < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100));
+        assertEquals(original, characterization.model());
+        assertFalse(fit.isFinished().getAsBoolean());
+        MechanismModel replacement = linearModel(.9, 8, .7);
+        characterization.defaults(replacement);
+        queued.remove(0).run();
+        fit.onExecute().run();
+        assertTrue(fit.isFinished().getAsBoolean());
+        assertEquals(replacement, characterization.model());
+        assertTrue(characterization.fitStatus().contains("discarded"));
+        fit.onEnd().accept(false);
+
+        fit.onStart().run();
+        fit.onEnd().accept(true);
+        queued.remove(0).run();
+        fit.onExecute().run();
+        assertEquals(replacement, characterization.model());
+        assertEquals("cancelled", characterization.fitStatus());
+    }
+
+    @Test
+    void rejectedFitAdmissionIsVisibleAndLeavesExistingModelActive() {
+        Characterization characterization = Characterization.of(rawControl()).fitExecutor(task -> {
+            throw new java.util.concurrent.RejectedExecutionException("test busy");
+        });
+        var fit = (ca.frc6390.athena.mechanism.core.LifecycleAction) characterization.fitModel();
+        var original = characterization.model();
+        fit.onStart().run(); fit.onExecute().run();
+        assertTrue(fit.isFinished().getAsBoolean());
+        assertEquals(original, characterization.model());
+        assertTrue(characterization.fitStatus().contains("queue full"));
+        fit.onEnd().accept(false);
+    }
+
+    @Test
+    void blockedExportProviderCannotHoldRobotRunLogAndSamplesEndsRemainOrdered() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var ended = new java.util.concurrent.CountDownLatch(1);
+        List<Double> recorded = java.util.Collections.synchronizedList(new ArrayList<>());
+        java.util.concurrent.atomic.AtomicReference<String> thread = new java.util.concurrent.atomic.AtomicReference<>();
+        var export = new AsyncSysIdLog(() -> new ca.frc6390.athena.mechanism.sysid.SysIdLog() {
+            @Override public void record(ca.frc6390.athena.mechanism.sysid.SysIdSample sample) {
+                thread.set(Thread.currentThread().getName());
+                if (sample.position() == 0) {
+                    entered.countDown();
+                    try { release.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+                    catch (InterruptedException interrupted) { throw new IllegalStateException(interrupted); }
+                }
+                recorded.add(sample.position());
+            }
+            @Override public void end() { ended.countDown(); }
+        });
+        export.record(exportSample(0));
+        assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+        try {
+            long before = System.nanoTime();
+            for (int i = 1; i <= 400; i++) export.record(exportSample(i));
+            export.end();
+            assertTrue(System.nanoTime() - before < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100));
+            assertTrue(export.dropped() > 0);
+            assertTrue(export.pending() <= AsyncSysIdLog.SAMPLE_CAPACITY + 1);
+        } finally { release.countDown(); }
+        assertTrue(ended.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals("athena-sysid-export", thread.get());
+        assertEquals(0.0, recorded.get(0));
+        assertEquals(400.0, recorded.get(recorded.size() - 1));
+        for (int i = 1; i < recorded.size(); i++) assertTrue(recorded.get(i) > recorded.get(i - 1));
+        assertEquals("", export.failure());
+    }
+
+    @Test
+    void blockedRealExportDoesNotHoldCharacterizationRunLogDuringPeriodic() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        Simulated sim = new Simulated();
+        Characterization characterization = sim.mechanism.characterization.exportTo(
+                new ca.frc6390.athena.mechanism.sysid.SysIdLog() {
+                    @Override public void end() { }
+                    @Override public void record(ca.frc6390.athena.mechanism.sysid.SysIdSample sample) {
+                        entered.countDown();
+                        try { release.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+                        catch (InterruptedException interrupted) { throw new IllegalStateException(interrupted); }
+                    }
+                });
+        sim.scheduler.request(sim.mechanism.dynamicForward);
+        sim.clock[0] = .02;
+        sim.scheduler.teleopPeriodic(.02, DT);
+        assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+        try {
+            long before = System.nanoTime();
+            for (int cycle = 2; cycle < 102; cycle++) {
+                sim.clock[0] = cycle * DT;
+                sim.scheduler.teleopPeriodic(sim.clock[0], DT);
+            }
+            assertTrue(System.nanoTime() - before < java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(100));
+            assertTrue(characterization.samples().size() > 0, "run data advances while external export is blocked");
+        } finally { release.countDown(); sim.scheduler.cancelAll(); }
+        assertTrue(characterization.awaitExport(java.time.Duration.ofSeconds(5)));
+    }
+
+    @Test
+    void exportProviderFailuresAreVisibleAndDoNotEscapeOnRobotAdmission() {
+        List<Runnable> queued = new ArrayList<>();
+        AsyncSysIdLog export = new AsyncSysIdLog(() -> { throw new UnsatisfiedLinkError("JNI unavailable"); }, queued::add);
+        export.record(exportSample(1));
+        assertEquals("", export.failure());
+        queued.remove(0).run();
+        assertTrue(export.failure().contains("JNI unavailable"));
+    }
+
+    private static ca.frc6390.athena.mechanism.sysid.SysIdSample exportSample(int index) {
+        return new ca.frc6390.athena.mechanism.sysid.SysIdSample(SysIdState.DYNAMIC_FORWARD, true, 1, index, 1, 1);
     }
 
     @Test

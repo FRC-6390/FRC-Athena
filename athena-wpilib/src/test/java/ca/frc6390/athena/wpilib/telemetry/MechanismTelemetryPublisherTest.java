@@ -22,6 +22,7 @@ import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 class MechanismTelemetryPublisherTest {
@@ -305,6 +306,36 @@ class MechanismTelemetryPublisherTest {
             assertEquals(0.2, spread.getEntry(topics.get(0)).getDouble(-1), 1e-9);
         } finally {
             spread.close();
+        }
+    }
+
+    @Test
+    void bindingTimeBudgetKeepsMakingProgressWithoutDelayingBoundWritableControls() {
+        DashboardMechanism mechanism = new DashboardMechanism();
+        try (RobotRuntime runtime = RobotRuntime.simulated(SimulationSession.create()).register(mechanism)) {
+            var schema = runtime.mechanismTelemetrySchema();
+            NetworkTableInstance instance = NetworkTableInstance.create();
+            // Each binding consumes the entire budget even on a fast test computer.
+            AtomicLong wallClock = new AtomicLong();
+            try (MechanismTelemetryPublisher publisher = new MechanismTelemetryPublisher(
+                    instance, () -> wallClock.getAndAdd(1_000_000L)).bindTimeBudget(Seconds.of(0.001))) {
+                String output = "/Athena/Mechanisms/dashboardMechanism/Values/outputPercent";
+                publisher.publish(schema, 0.0);
+                assertFalse(instance.getTopic(output).exists(), "the entire schema must not bind in the first cycle");
+                int calls = 1;
+                while (!instance.getTopic(output).exists() && calls < 200) {
+                    publisher.publish(schema, calls++ * 0.02);
+                }
+                assertTrue(calls > 1 && calls < 200, "a slow binding must not prevent eventual progress");
+                instance.getEntry(output).setDouble(0.65);
+                publisher.publish(schema, calls++ * 0.02);
+                assertEquals(0.65, mechanism.outputPercent, 1e-9,
+                        "already-bound writable controls are serviced while other entries are still binding");
+                for (; calls < 200; calls++) publisher.publish(schema, calls * 0.02);
+                assertTrue(instance.getTopic("/Athena/Mechanisms/dashboardMechanism/Actions/run/Complete").exists());
+            } finally {
+                instance.close();
+            }
         }
     }
 

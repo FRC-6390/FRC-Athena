@@ -3,6 +3,7 @@ package ca.frc6390.athena.hardware.power;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import edu.wpi.first.units.Units;
@@ -44,6 +45,37 @@ class PowerProfileTest {
         assertEquals(2.0, copy.share(), 1e-9);
         assertNull(copy.sag());
         assertNotNull(original);
+        assertNotSame(original, copy);
+    }
+
+    @Test
+    void copyRetainsElectricalSettingsButHasIndependentStartupMembership() {
+        PowerProfile original = PowerProfile.of().sustained(Units.Amps.of(40))
+                .burst(Units.Amps.of(60), Units.Seconds.of(0.5))
+                .rampLimit(Units.Amps.of(10), Units.Seconds.of(0.1))
+                .share(3.0).onSag(Sag.shed(0.5).below(Units.Volts.of(8)))
+                .startTogether("swerve");
+        PowerProfile copy = original.copy();
+        assertNotSame(original, copy);
+        assertEquals(40.0, copy.sustainedAmps());
+        assertEquals(60.0, copy.burstAmps());
+        assertEquals(0.5, copy.burstSeconds());
+        assertEquals(100.0, copy.rampAmpsPerSecond());
+        assertEquals(3.0, copy.share());
+        assertEquals(original.sag(), copy.sag());
+        assertNull(copy.startupGroup());
+        assertEquals("swerve", original.startupGroup());
+        copy.sustained(Units.Amps.of(20)).startTogether("intake");
+        assertEquals(40.0, original.sustainedAmps());
+        assertEquals("swerve", original.startupGroup());
+    }
+
+    @Test
+    void startupKeyCanBeRemovedButCannotBeBlank() {
+        PowerProfile profile = PowerProfile.of().startTogether("drive");
+        assertThrows(IllegalArgumentException.class, () -> profile.startTogether("  "));
+        profile.startTogether(null);
+        assertNull(profile.startupGroup());
     }
 
     @Test

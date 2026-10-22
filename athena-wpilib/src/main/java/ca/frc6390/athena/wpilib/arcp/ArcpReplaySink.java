@@ -11,7 +11,8 @@ import java.util.Objects;
  * marker records in the shared ARCP v2 record format), forwarded unchanged to sessions that opted in with
  * {@code ReplaySubscribe}. Backfill for sequence gaps is answered from the replay recorder's buffer.
  *
- * <p>Runs on the robot thread and does not block.</p>
+ * <p>Live publish methods run on the ordered replay encoder worker. Backfill is selected and copied on the server's bounded
+ * history worker, using the requested byte limit before the recorder copies any history.</p>
  */
 final class ArcpReplaySink implements ReplayStreamSink {
     private final ArcpSink sink;
@@ -42,6 +43,11 @@ final class ArcpReplaySink implements ReplayStreamSink {
             @Override
             public List<byte[]> records(long fromSequence, long toSequence) {
                 return backfill.records(fromSequence, toSequence);
+            }
+
+            @Override
+            public List<byte[]> records(long fromSequence, long toSequence, int maxBytes) {
+                return backfill.records(fromSequence, toSequence, maxBytes);
             }
         });
     }

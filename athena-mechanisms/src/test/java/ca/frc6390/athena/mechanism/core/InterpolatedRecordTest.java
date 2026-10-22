@@ -74,6 +74,7 @@ class InterpolatedRecordTest {
         assertEquals(3, first.curve.size());
         assertEquals(1, markers.size());
         scheduler.robotPeriodic(0.02, 0.02);
+        assertTrue(store.flush(), "explicit off-loop durability before reopening");
         assertEquals(1, PersistentStore.open(directory).keys().size());
 
         CurveMechanism second = new CurveMechanism();

@@ -4,9 +4,11 @@ import static edu.wpi.first.units.Units.Seconds;
 
 import edu.wpi.first.units.Units;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.mechanism.core.Action;
 import ca.frc6390.athena.mechanism.core.Actions;
 import ca.frc6390.athena.mechanism.core.Events;
@@ -34,14 +36,14 @@ class MotorStallIntegrationTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(intake);
 
         runtime.teleopPeriodic(0.00, 0.02);
-        assertEquals(0.8, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        assertLimitedDrive(simulation, intake.roller, 0.8);
 
         simulation.motor(intake.roller).locked(true);
         runtime.teleopPeriodic(0.02, 0.02);
         runtime.teleopPeriodic(0.04, 0.02);
         runtime.teleopPeriodic(0.06, 0.02);
         runtime.teleopPeriodic(0.08, 0.02);
-        assertEquals(-0.6, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        assertLimitedDrive(simulation, intake.roller, -0.6);
 
         simulation.motor(intake.roller).locked(false);
         runtime.teleopPeriodic(0.18, 0.10);
@@ -49,7 +51,20 @@ class MotorStallIntegrationTest {
         runtime.teleopPeriodic(0.26, 0.02);
         runtime.teleopPeriodic(0.30, 0.04);
         runtime.teleopPeriodic(0.32, 0.02);
-        assertEquals(0.8, simulation.motor(intake.roller).commandValue(), 1.0e-9);
+        assertLimitedDrive(simulation, intake.roller, 0.8);
+    }
+
+    private static void assertLimitedDrive(SimulationSession simulation, MotorDevice motor, double request) {
+        var handle = simulation.motor(motor);
+        double volts = handle.appliedVoltage();
+        assertTrue(request * volts > 0.0, "the held action drives in its requested direction");
+        assertTrue(Math.abs(volts) <= Math.abs(request * simulation.busVoltageVolts()) + 1e-9);
+        var constants = MotorConstants.forKind(motor.kind()).orElseThrow();
+        double backEmf = handle.integratedVelocityRotationsPerSecond() * 2.0 * Math.PI
+                / constants.raw().speedConstantRadPerSecPerVolt();
+        double windingAmps = Math.abs((volts - backEmf) / constants.resistance().in(Units.Ohms));
+        assertTrue(windingAmps <= 50.0 + 1e-8, "host voltage clamp respects the winding limit");
+        assertTrue(Math.abs(volts) * windingAmps / simulation.busVoltageVolts() <= 35.0 + 1e-8);
     }
 
     private static final class JamClearingIntake implements Mechanism {

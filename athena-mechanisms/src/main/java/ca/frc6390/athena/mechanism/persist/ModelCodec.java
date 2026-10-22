@@ -58,8 +58,19 @@ final class ModelCodec {
         if (in == null || in.length < FIXED + 1) {
             return null;
         }
+        for (double value : in) {
+            if (!Double.isFinite(value)) return null;
+        }
+        // These fields are stored as doubles, but represent exact integer counts. Check before casting so
+        // corrupt lengths cannot overflow or silently truncate into a different, apparently valid model.
+        if (!count(in[FIXED], (in.length - FIXED - 1) / 2)
+                || !count(in[11], Integer.MAX_VALUE) || !count(in[14], Integer.MAX_VALUE)
+                || !count(in[15], MASK_BACKLASH_UNKNOWN | MASK_LATENCY_UNKNOWN)
+                || !(in[12] > 0.0)) {
+            return null;
+        }
         int n = (int) in[FIXED];
-        if (n < 0 || in.length != FIXED + 1 + 2 * n) {
+        if (in.length != FIXED + 1 + 2 * n) {
             return null;
         }
         int mask = (int) in[15];
@@ -75,6 +86,10 @@ final class ModelCodec {
         return new MechanismModel(kind, in[0], in[1], in[2], in[3], in[4], in[5],
                 new FrictionTable(positions, volts), backlash, latency, in[8], in[9], in[10],
                 (int) in[11], motorKinds, in[12], none, in[13], (int) in[14]);
+    }
+
+    private static boolean count(double value, int maximum) {
+        return value >= 0.0 && value <= maximum && value == Math.rint(value);
     }
 
     private static double finite(double value) {

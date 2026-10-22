@@ -121,7 +121,10 @@ impl Bridge {
         match rx.recv_timeout(REPLY_TIMEOUT) {
             Ok(answer) => Some(answer),
             Err(_) => {
-                self.lock().waiting.remove(&id);
+                let mut q = self.lock();
+                q.waiting.remove(&id);
+                // Do not execute stale writes/actions/history after their caller has received a timeout.
+                q.pending.retain(|request| request.id != id);
                 None
             }
         }
@@ -145,7 +148,7 @@ impl Bridge {
         let mut q = self.lock();
         let mut body = Vec::new();
         let mut count: u32 = 0;
-        for req in q.pending.iter() {
+        for req in q.pending.iter().take(8) {
             let mut rec = Vec::new();
             put_u64(&mut rec, req.id);
             put_u8(&mut rec, req.op);
@@ -243,7 +246,7 @@ impl RobotHandler for BridgeHandler {
         match self.0.submit(OP_BACKFILL, from, Some(Value::I64(to as i64))) {
             Some(Answer::Backfill(result)) => result,
             Some(_) => Err("internal: wrong answer kind".into()),
-            None => Err("robot did not answer (no robot cycle)".into()),
+            None => Err("replay backfill response timed out".into()),
         }
     }
 
@@ -351,6 +354,24 @@ mod tests {
     }
 
     #[test]
+    fn poll_limits_robot_callback_batch_to_eight() {
+        let bridge = Bridge::new();
+        {
+            let mut queue = bridge.lock();
+            for id in 0..20 {
+                queue.pending.push_back(Request { id, op: OP_WRITE, signal_id: 1,
+                    value: Some(Value::F64(id as f64)) });
+            }
+        }
+        let mut buffer = vec![0u8; 4096];
+        for expected in [8, 8, 4, 0] {
+            let bytes = bridge.poll(&mut buffer);
+            assert!(bytes >= 4);
+            assert_eq!(Reader::new(&buffer[..bytes as usize]).u32().unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn unanswered_write_times_out_with_last_known_value() {
         let bridge = Bridge::new();
         bridge.set_dictionary(&dictionary(true));
@@ -363,6 +384,18 @@ mod tests {
         assert!(!reply.accepted);
         assert!(reply.reason.contains("did not answer"));
         assert_eq!(reply.actual_value, Value::F64(3.0));
+        assert_eq!(bridge.poll(&mut vec![0; 1024]), 4, "stale writes must be removed on timeout");
+    }
+
+    #[test]
+    fn timed_out_backfill_is_explicit_and_is_not_serviced_after_robot_resumes() {
+        let bridge = Bridge::new();
+        let handler = BridgeHandler(Arc::clone(&bridge));
+        let error = handler.backfill(1, 50).unwrap_err();
+        assert!(error.contains("backfill response timed out"), "{error}");
+        let mut buffer = [0u8; 1024];
+        assert_eq!(bridge.poll(&mut buffer), 4, "stale history requests must not survive timeout");
+        assert!(bridge.lock().waiting.is_empty());
     }
 
     #[test]

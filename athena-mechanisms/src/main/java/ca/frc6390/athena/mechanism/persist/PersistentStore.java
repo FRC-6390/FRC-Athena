@@ -34,7 +34,7 @@ import java.util.TreeMap;
  * <p>The store has no dependency on WPILib or the hardware HAL, so it can be used in tests with a
  * temporary directory.</p>
  */
-public final class PersistentStore {
+public final class PersistentStore implements AutoCloseable {
     /** Name of the store file inside the store directory. */
     public static final String FILE_NAME = "athena-store.txt";
     /** Minimum interval between batched flushes, in seconds. */
@@ -52,10 +52,24 @@ public final class PersistentStore {
     private double lastFlushSeconds = Double.NaN;
     private String lastError = "";
     private int skippedLines;
+    private long generation;
+    private final Object writerLock = new Object();
+    private final SnapshotWriter writer;
+    private final java.util.function.LongSupplier nanoTime;
+    private java.util.concurrent.ExecutorService executor;
+    private boolean scheduled;
+    private boolean closed;
+    private long retryAfterNanos;
+    private boolean retryPending;
 
-    private PersistentStore(Path directory) {
+    @FunctionalInterface
+    interface SnapshotWriter { void write(Path target, byte[] bytes) throws IOException; }
+
+    private PersistentStore(Path directory, SnapshotWriter writer, java.util.function.LongSupplier nanoTime) {
         this.directory = directory;
         this.file = directory.resolve(FILE_NAME);
+        this.writer = writer;
+        this.nanoTime = nanoTime;
     }
 
     /**
@@ -67,13 +81,22 @@ public final class PersistentStore {
      * @throws UncheckedIOException when the directory cannot be created or the file cannot be read
      */
     public static PersistentStore open(Path directory) {
+        return open(directory, PersistentStore::writeAtomically);
+    }
+
+    static PersistentStore open(Path directory, SnapshotWriter writer) {
+        return open(directory, writer, System::nanoTime);
+    }
+
+    static PersistentStore open(Path directory, SnapshotWriter writer, java.util.function.LongSupplier nanoTime) {
         Path safeDirectory = Objects.requireNonNull(directory, "directory").toAbsolutePath().normalize();
         try {
             Files.createDirectories(safeDirectory);
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to create persistent store directory " + safeDirectory, exception);
         }
-        PersistentStore store = new PersistentStore(safeDirectory);
+        PersistentStore store = new PersistentStore(safeDirectory, Objects.requireNonNull(writer, "writer"),
+                Objects.requireNonNull(nanoTime, "nanoTime"));
         store.load();
         return store;
     }
@@ -181,10 +204,12 @@ public final class PersistentStore {
 
     /** Removes an entry. Returns true when it existed. */
     public synchronized boolean remove(String key) {
+        requireOpen();
         if (entries.remove(requireKey(key)) == null) {
             return false;
         }
         dirty = true;
+        generation++;
         return true;
     }
 
@@ -196,6 +221,7 @@ public final class PersistentStore {
      * @return number of removed entries
      */
     public synchronized int retainOnly(Set<String> keep) {
+        requireOpen();
         Objects.requireNonNull(keep, "keep");
         int removed = 0;
         for (String key : List.copyOf(entries.keySet())) {
@@ -206,6 +232,7 @@ public final class PersistentStore {
         }
         if (removed > 0) {
             dirty = true;
+            generation++;
         }
         return removed;
     }
@@ -217,56 +244,143 @@ public final class PersistentStore {
      * @param nowSeconds current robot timestamp
      * @return true when a flush was written
      */
-    public synchronized boolean flushIfDue(double nowSeconds) {
-        if (!dirty) {
-            return false;
+    public boolean flushIfDue(double nowSeconds) {
+        synchronized (this) {
+            if (!due(nowSeconds)) return false;
+            lastFlushSeconds = nowSeconds;
         }
-        if (!Double.isNaN(lastFlushSeconds) && nowSeconds - lastFlushSeconds < FLUSH_PERIOD_SECONDS) {
-            return false;
-        }
-        boolean written = flush();
-        lastFlushSeconds = nowSeconds;
-        return written;
+        return flush();
+    }
+
+    /** Queues one coalesced background write when the batching interval permits; never performs disk I/O. */
+    public synchronized boolean requestFlushIfDue(double nowSeconds) {
+        if (!due(nowSeconds)) return false;
+        boolean accepted = requestFlush();
+        if (accepted) lastFlushSeconds = nowSeconds;
+        return accepted;
+    }
+
+    private boolean due(double nowSeconds) {
+        return dirty && (Double.isNaN(lastFlushSeconds) || !Double.isFinite(nowSeconds)
+                || nowSeconds < lastFlushSeconds || nowSeconds - lastFlushSeconds >= FLUSH_PERIOD_SECONDS);
     }
 
     /**
-     * Writes all pending changes now, using a temporary file and an atomic rename.
+     * Queues the latest state for background persistence. Updates made during a write coalesce into its next
+     * snapshot. Failures retain dirty state and are retried by later requests, with a one-second retry backoff.
      *
-     * @return true when nothing is pending or the write succeeded
+     * @return true when a write is queued or already in progress
      */
-    public synchronized boolean flush() {
-        if (!dirty) {
-            return true;
-        }
-        Path temp = directory.resolve(TEMP_NAME);
-        try {
-            byte[] bytes = render().getBytes(StandardCharsets.UTF_8);
-            try (FileChannel channel = FileChannel.open(temp,
-                    StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
-                channel.write(ByteBuffer.wrap(bytes));
-                channel.force(true);
+    public synchronized boolean requestFlush() {
+        if (closed || !dirty || retryPending && nanoTime.getAsLong() - retryAfterNanos < 0L) return false;
+        if (scheduled) return true;
+        if (executor == null) executor = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+            Thread worker = new Thread(runnable, "Athena-PersistentStore");
+            worker.setDaemon(true);
+            return worker;
+        });
+        scheduled = true;
+        executor.execute(this::drain);
+        return true;
+    }
+
+    private void drain() {
+        while (true) {
+            boolean success = flush();
+            synchronized (this) {
+                if (!success && !lastError.isEmpty()) {
+                    retryAfterNanos = nanoTime.getAsLong() + 1_000_000_000L;
+                    retryPending = true;
+                }
+                if (!success || !dirty || closed) {
+                    scheduled = false;
+                    notifyAll();
+                    return;
+                }
             }
-            try {
-                Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException unsupported) {
-                Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-            }
-            dirty = false;
-            lastError = "";
-            return true;
-        } catch (IOException | RuntimeException exception) {
-            lastError = exception.getClass().getSimpleName() + ": " + exception.getMessage();
-            return false;
         }
     }
 
+    /**
+     * Writes a versioned snapshot durably now. Intended for explicit off-loop callers and shutdown; use
+     * {@link #requestFlush()} from periodic code. Rendering, file writes, force and rename never hold the store
+     * monitor, so concurrent reads and mutations remain available even when storage is blocked.
+     *
+     * @return true when nothing is pending or this snapshot was successfully written
+     */
+    public boolean flush() {
+        synchronized (writerLock) {
+            final Map<String, Object> snapshot;
+            final long version;
+            synchronized (this) {
+                if (!dirty) return true;
+                snapshot = new TreeMap<>(entries);
+                version = generation;
+            }
+            try {
+                writer.write(file, renderEntries(snapshot).getBytes(StandardCharsets.UTF_8));
+                synchronized (this) {
+                    if (generation == version) dirty = false;
+                    lastError = "";
+                    retryPending = false;
+                }
+                return true;
+            } catch (IOException | RuntimeException exception) {
+                synchronized (this) {
+                    lastError = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+                }
+                return false;
+            }
+        }
+    }
+
+    static void writeAtomically(Path file, byte[] bytes) throws IOException {
+        Path temp = file.resolveSibling(TEMP_NAME);
+        try (FileChannel channel = FileChannel.open(temp,
+                StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+            writeFully(channel, ByteBuffer.wrap(bytes));
+            channel.force(true);
+        }
+        try {
+            Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    static void writeFully(java.nio.channels.WritableByteChannel channel, ByteBuffer bytes) throws IOException {
+        while (bytes.hasRemaining()) channel.write(bytes);
+    }
+
+    /** Stops accepting background work and durably writes the final state. Call off the robot thread. */
+    @Override
+    public void close() {
+        java.util.concurrent.ExecutorService active;
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            active = executor;
+        }
+        try {
+            if (!flush()) throw new IllegalStateException("Unable to flush persistent store on close: " + lastError());
+        } finally {
+            if (active != null) active.shutdown();
+        }
+    }
+
+    private void requireOpen() {
+        if (closed) throw new IllegalStateException("Persistent store is closed.");
+    }
+
     private boolean set(String key, Object value) {
+        requireOpen();
         Object previous = entries.get(key);
         if (previous != null && sameValue(previous, value)) {
             return false;
         }
         entries.put(key, value);
         dirty = true;
+        generation++;
         return true;
     }
 
@@ -329,10 +443,6 @@ public final class PersistentStore {
             values[index] = finite(Double.parseDouble(tokens[index]));
         }
         return values;
-    }
-
-    private String render() {
-        return renderEntries(entries);
     }
 
     private Object lookup(String key) {

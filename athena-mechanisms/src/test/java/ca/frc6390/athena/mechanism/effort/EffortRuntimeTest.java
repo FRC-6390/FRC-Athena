@@ -3,6 +3,7 @@ package ca.frc6390.athena.mechanism.effort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -36,6 +37,7 @@ class EffortRuntimeTest {
         private final MotorDevice device;
         double rotationsPerSecond;
         double supplyAmps = Double.NaN;
+        double commandScale = 1.0;
 
         FakeMotor(MotorDevice device) {
             this.device = device;
@@ -55,6 +57,8 @@ class EffortRuntimeTest {
         public double supplyCurrentAmps() {
             return supplyAmps;
         }
+
+        @Override public double voltageCommandScale() { return commandScale; }
     }
 
     static final class FakeContext implements ActionContext {
@@ -101,6 +105,19 @@ class EffortRuntimeTest {
     }
 
     @Test
+    void unknownMotorWithZeroCapCannotStartWhenCurrentIsZeroOrMissing() {
+        MotorDevice unknown = MotorDevice.of(MotorKinds.MINION, 91);
+        FakeContext context = new FakeContext();
+        FakeMotor motor = context.motor(unknown, 0.0);
+        for (double measured : new double[] {0.0, Double.NaN, 20.0}) {
+            motor.supplyAmps = measured;
+            for (double requested : new double[] {-12.0, 12.0}) {
+                assertEquals(0.0, EffortRuntime.clampToLimits(context, requested, List.of(unknown), new double[] {0.0}), 0.0);
+            }
+        }
+    }
+
+    @Test
     void stallClampLimitsVoltageToCurrentTimesResistance() {
         EffortRuntime runtime = EffortRuntime.unlimited(List.of(KRAKEN));
         FakeContext context = new FakeContext();
@@ -123,6 +140,48 @@ class EffortRuntimeTest {
         assertEquals(10.0, currentAt(clamped, 40.0, KRAKEN_K), 1e-9);
         double low = runtime.clampVolts(context, -12.0);
         assertEquals(-10.0, currentAt(low, 40.0, KRAKEN_K), 1e-9);
+    }
+
+    @Test
+    void incompatibleMotorIntervalsAreRejectedInsteadOfViolatingBothCurrentLimits() {
+        FakeContext context = new FakeContext();
+        context.motor(KRAKEN, 70.0);
+        context.motor(NEO, -70.0);
+        assertThrows(IllegalStateException.class, () -> EffortRuntime.clampToLimits(
+                context, 12.0, List.of(KRAKEN, NEO), new double[] {1.0, 1.0}));
+    }
+
+    @Test
+    void unknownMotorFeedbackLimitCannotScaleOutsideKnownBackEmfInterval() {
+        MotorDevice unknown = MotorDevice.of(MotorKinds.MINION, 92);
+        FakeContext context = new FakeContext();
+        context.motor(KRAKEN, 40.0);
+        context.motor(unknown, 0.0).supplyAmps = 20.0;
+        double command = EffortRuntime.clampToLimits(context, 12.0,
+                List.of(KRAKEN, unknown), new double[] {10.0, 10.0});
+        assertTrue(Math.abs(currentAt(command, 40.0, KRAKEN_K)) <= 10.0 + 1e-9);
+        assertTrue(Math.abs(command) <= 6.0);
+
+        assertThrows(IllegalStateException.class, () -> EffortRuntime.clampToLimits(context, 12.0,
+                List.of(KRAKEN, unknown), new double[] {10.0, 1.0}),
+                "an incompatible estimated voltage ceiling cannot bypass the known winding-current bound");
+    }
+
+    @Test
+    void voltageBoundsAreMappedThroughDirectionAndDerateBeforeClamping() {
+        for (double direction : new double[] {-1.0, 1.0}) {
+            for (double derate : new double[] {0.5, 1.0}) {
+                FakeContext context = new FakeContext();
+                FakeMotor motor = context.motor(KRAKEN, direction * 50.0);
+                motor.commandScale = direction * derate;
+                double command = EffortRuntime.clampToLimits(context, 12.0 / derate, List.of(KRAKEN), new double[] {40.0});
+                assertEquals(direction * 40.0, currentAt(command * motor.commandScale,
+                        motor.rotationsPerSecond, KRAKEN_K), 1e-8);
+                double braking = EffortRuntime.clampToLimits(context, -12.0 / derate, List.of(KRAKEN), new double[] {40.0});
+                assertEquals(-direction * 40.0, currentAt(braking * motor.commandScale,
+                        motor.rotationsPerSecond, KRAKEN_K), 1e-8);
+            }
+        }
     }
 
     @Test

@@ -9,9 +9,9 @@ import java.util.List;
  * @param openCircuitVolts estimated open-circuit voltage, NaN before the first sample
  * @param batteryOhms estimated (or default) internal resistance
  * @param floorVolts configured floor
- * @param predictedVolts predicted bus voltage at the requested total current
+ * @param predictedVolts predicted bus voltage at the latest non-regenerative supply load
  * @param budgetAmps total current budget at the floor
- * @param demandAmps total requested current
+ * @param demandAmps total battery-side supply load, excluding regeneration
  * @param shedding whether the budget is currently shedding current
  * @param motors per-motor entries
  */
@@ -40,13 +40,14 @@ public record PowerSnapshot(
      * Per-motor state.
      *
      * @param name motor name
-     * @param demandAmps requested current
-     * @param capAmps current cap applied by the planner, {@link Double#POSITIVE_INFINITY} when none
+     * @param demandAmps winding-current magnitude (estimated from supply telemetry for unknown motors)
+     * @param capAmps winding-current cap, {@link Double#POSITIVE_INFINITY} when none; zero is an active cap
      * @param derateFraction thermal derate fraction in effect
      * @param temperatureCelsius fused winding temperature, NaN when unknown
      * @param shareWeight relative share weight
      * @param sustainedAmps declared sustained cap of the profile, zero when none
      * @param status applied status text
+     * @param supplyDemandAmps battery-side supply load, excluding regeneration
      */
     public record Motor(
             String name,
@@ -56,6 +57,13 @@ public record PowerSnapshot(
             double temperatureCelsius,
             double shareWeight,
             double sustainedAmps,
-            String status) {
+            String status,
+            double supplyDemandAmps) {
+        /** Compatibility constructor for telemetry sources that assume unity winding/supply conversion. */
+        public Motor(String name, double demandAmps, double capAmps, double derateFraction,
+                double temperatureCelsius, double shareWeight, double sustainedAmps, String status) {
+            this(name, demandAmps, capAmps, derateFraction, temperatureCelsius, shareWeight,
+                    sustainedAmps, status, demandAmps);
+        }
     }
 }

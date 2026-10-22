@@ -5,11 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -113,5 +122,163 @@ class PersistentStoreTest {
         assertThrows(IllegalArgumentException.class, () -> store.put("a", Double.NaN));
         assertThrows(IllegalArgumentException.class, () -> store.put("a", new double[] {Double.POSITIVE_INFINITY}));
         assertThrows(IllegalArgumentException.class, () -> store.put(" ", 1.0));
+    }
+
+    @Test
+    void blockedSnapshotWriteDoesNotLockReadsMutationsOrClearANewerGeneration() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger writes = new AtomicInteger();
+        PersistentStore store = PersistentStore.open(directory, (file, bytes) -> {
+            if (writes.incrementAndGet() == 1) awaitWrite(entered, release);
+            PersistentStore.writeAtomically(file, bytes);
+        });
+        var thread = Executors.newSingleThreadExecutor();
+        try {
+            store.put("value", 1.0);
+            var first = thread.submit(store::flush);
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(Duration.ofMillis(200), () -> {
+                assertEquals(1.0, store.getDouble("value").orElseThrow());
+                store.put("value", 2.0);
+                assertTrue(store.dirty());
+                assertEquals("", store.lastError());
+            });
+            release.countDown();
+            assertTrue(first.get(2, TimeUnit.SECONDS));
+            assertTrue(store.dirty(), "older completion cannot acknowledge a newer version");
+            assertEquals(1.0, PersistentStore.open(directory).getDouble("value").orElseThrow());
+            assertTrue(store.flush());
+            assertFalse(store.dirty());
+            assertEquals(2.0, PersistentStore.open(directory).getDouble("value").orElseThrow());
+        } finally {
+            release.countDown();
+            thread.shutdownNow();
+            store.close();
+        }
+    }
+
+    @Test
+    void telemetryPruneAndBothPeriodicModesOnlyQueueCoalescedWrites() throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger writes = new AtomicInteger();
+        PersistentStore store = PersistentStore.open(directory, (file, bytes) -> {
+            if (writes.incrementAndGet() == 1) awaitWrite(entered, release);
+            PersistentStore.writeAtomically(file, bytes);
+        });
+        try {
+            store.put("removed", 5.0);
+            AtomicLong version = new AtomicLong();
+            TelemetryPersistence telemetry = new TelemetryPersistence(store, () -> -1.0);
+            telemetry.bindArray("kept", version::get, () -> new double[] {version.get()}, ignored -> { });
+            assertTimeoutPreemptively(Duration.ofMillis(200), () -> assertEquals(1, telemetry.pruneUnbound()));
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(Duration.ofMillis(200), () -> {
+                for (int update = 0; update < 100; update++) {
+                    version.incrementAndGet();
+                    telemetry.periodic(update, LifecycleMode.DISABLED, false);
+                    telemetry.periodic(update + 0.01, LifecycleMode.TELEOP, true);
+                }
+                assertArrayEquals(new double[] {100.0}, (double[]) store.get("kept").orElseThrow());
+            });
+            release.countDown();
+            store.close();
+            assertEquals(2, writes.get(), "one blocked version and the coalesced final version");
+            assertArrayEquals(new double[] {100.0}, (double[]) PersistentStore.open(directory).get("kept").orElseThrow());
+            assertFalse(store.requestFlush());
+            assertThrows(IllegalStateException.class, () -> store.put("late", 1.0));
+        } finally {
+            release.countDown();
+            store.close();
+        }
+    }
+
+    @Test
+    void failedBackgroundWriteRetainsDirtyStateAndExplicitRetryPersistsLatestVersion() throws Exception {
+        CountDownLatch failed = new CountDownLatch(1);
+        AtomicInteger writes = new AtomicInteger();
+        PersistentStore store = PersistentStore.open(directory, (file, bytes) -> {
+            if (writes.incrementAndGet() == 1) {
+                failed.countDown();
+                throw new IOException("blocked storage failure");
+            }
+            PersistentStore.writeAtomically(file, bytes);
+        });
+        try {
+            store.put("value", 1.0);
+            assertTrue(store.requestFlush());
+            assertTrue(failed.await(2, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                while (store.lastError().isEmpty()) Thread.yield();
+            });
+            assertTrue(store.dirty());
+            store.put("value", 2.0);
+            assertTrue(store.flush(), "explicit durable retry bypasses the background backoff");
+            assertFalse(store.dirty());
+            assertEquals("", store.lastError());
+            assertEquals(2.0, PersistentStore.open(directory).getDouble("value").orElseThrow());
+        } finally {
+            store.close();
+        }
+    }
+
+    @Test
+    void failedBackgroundRequestsBackOffThenRetryTheLatestGeneration() throws Exception {
+        AtomicLong clock = new AtomicLong(Long.MIN_VALUE + 5_000_000_000L);
+        AtomicInteger writes = new AtomicInteger();
+        CountDownLatch retried = new CountDownLatch(1);
+        PersistentStore store = PersistentStore.open(directory, (file, bytes) -> {
+            if (writes.incrementAndGet() == 1) throw new IOException("temporary failure");
+            PersistentStore.writeAtomically(file, bytes);
+            retried.countDown();
+        }, clock::get);
+        try {
+            store.put("value", 1.0);
+            assertTrue(store.requestFlush());
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                while (store.lastError().isEmpty() || store.requestFlush()) Thread.yield();
+            });
+            store.put("value", 2.0);
+            assertFalse(store.requestFlush(), "failed storage cannot create a retry storm");
+            clock.addAndGet(1_000_000_000L);
+            assertTrue(store.requestFlush());
+            assertTrue(retried.await(2, TimeUnit.SECONDS));
+            assertEquals(2.0, PersistentStore.open(directory).getDouble("value").orElseThrow());
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                while (store.dirty()) Thread.yield();
+            });
+            assertEquals("", store.lastError());
+            assertEquals(2, writes.get());
+        } finally {
+            store.close();
+        }
+    }
+
+    @Test
+    void partialChannelWritesAreRetriedUntilTheWholeBufferIsWritten() throws Exception {
+        var written = new java.io.ByteArrayOutputStream();
+        var channel = new java.nio.channels.WritableByteChannel() {
+            @Override public int write(java.nio.ByteBuffer source) {
+                int count = Math.min(3, source.remaining());
+                for (int index = 0; index < count; index++) written.write(source.get());
+                return count;
+            }
+            @Override public boolean isOpen() { return true; }
+            @Override public void close() { }
+        };
+        byte[] expected = "all bytes survive a short file-channel write".getBytes(StandardCharsets.UTF_8);
+        PersistentStore.writeFully(channel, java.nio.ByteBuffer.wrap(expected));
+        assertArrayEquals(expected, written.toByteArray());
+    }
+
+    private static void awaitWrite(CountDownLatch entered, CountDownLatch release) throws IOException {
+        entered.countDown();
+        try {
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IOException("test storage gate timed out");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException(exception);
+        }
     }
 }

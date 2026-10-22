@@ -37,8 +37,16 @@ final class ArcpMarshal {
 
     /** Growable little-endian direct buffer for outgoing data. */
     static final class Out {
-        private ByteBuffer buf = ByteBuffer.allocateDirect(INITIAL_CAPACITY).order(ByteOrder.LITTLE_ENDIAN);
+        private ByteBuffer buf;
         private int length;
+
+        Out() {
+            this(ByteBuffer.allocateDirect(INITIAL_CAPACITY));
+        }
+
+        Out(ByteBuffer buffer) {
+            buf = buffer.order(ByteOrder.LITTLE_ENDIAN);
+        }
 
         void reset() {
             length = 0;

@@ -13,10 +13,12 @@ import java.util.function.UnaryOperator;
  *
  * <p>A profile is referenced by {@link ca.frc6390.athena.hardware.device.MotorDevice#power(PowerProfile)}.
  * Changing it (directly, or through an {@link #update(UnaryOperator) update} Action) takes effect on
- * the next runtime cycle. Every motor using a profile shares its settings.</p>
+ * the next runtime cycle. Motors using the exact same profile instance share settings and form one
+ * coupling group: their requested winding torques receive a common reduction, and large starts are
+ * admitted together. Use {@link #copy()} for independent groups with common initial settings.</p>
  *
  * <ul>
- *   <li>{@link #sustained(Current)} – continuous current cap. Zero or unset means no cap.</li>
+ *   <li>{@link #sustained(Current)} – continuous winding (stator) current cap. Zero or unset means no cap.</li>
  *   <li>{@link #burst(Current, Time)} – higher cap allowed for a limited time budget above the
  *       sustained cap; the budget refills at half speed while the motor draws at or below sustained.</li>
  *   <li>{@link #rampLimit(Current, Time)} – maximum increase of the cap per time (decreases are immediate).</li>
@@ -34,6 +36,7 @@ public final class PowerProfile {
     private double rampAmpsPerSecond;
     private double share = 1.0;
     private Sag sag;
+    private String startupGroup;
     private PowerProfile declared;
 
     private PowerProfile() {
@@ -113,6 +116,27 @@ public final class PowerProfile {
         return this;
     }
 
+    /**
+     * Admits this profile's large starts together with other profiles using the same key, without
+     * coupling their torque reductions. Motors sharing this profile already start together.
+     *
+     * <p>A {@link #copy() copy} does not inherit this relationship. Assign it explicitly when the new
+     * independent profile should also join the startup group.</p>
+     *
+     * @param group shared startup key, or {@code null} to remove it
+     * @return this profile
+     */
+    public PowerProfile startTogether(String group) {
+        if (group != null && group.isBlank()) {
+            throw new IllegalArgumentException("Startup group must not be blank.");
+        }
+        startupGroup = group;
+        return this;
+    }
+
+    /** Returns the optional shared startup key; profile identity remains the torque coupling key. */
+    public String startupGroup() { return startupGroup; }
+
     /** Returns the sustained cap, or zero when uncapped. */
     public Current sustainedCurrent() { return Units.Amps.of(sustainedAmps); }
 
@@ -158,7 +182,7 @@ public final class PowerProfile {
         Objects.requireNonNull(change, "change");
         return PowerActions.doOnce(context -> {
             if (declared == null) {
-                declared = copy();
+                declared = snapshot();
             }
             change.apply(this);
         });
@@ -179,13 +203,28 @@ public final class PowerProfile {
         });
     }
 
-    /** Captures the current values as the declared baseline used by {@link #restore()}. */
+    /**
+     * Captures the declared baseline used by {@link #restore()} on the first attachment. Attaching
+     * another motor to an existing shared profile never overwrites that baseline.
+     */
     public void markDeclared() {
-        declared = copy();
+        if (declared == null) {
+            declared = snapshot();
+        }
     }
 
-    /** Returns a detached copy of the current values. */
+    /**
+     * Returns a detached copy of the current electrical settings. It has its own coupling identity,
+     * restore baseline and runtime history. Explicit cross-profile startup membership is not copied.
+     * Reusing the returned copy on several motors couples those motors to each other.
+     */
     public PowerProfile copy() {
+        PowerProfile copy = snapshot();
+        copy.startupGroup = null;
+        return copy;
+    }
+
+    private PowerProfile snapshot() {
         PowerProfile copy = new PowerProfile();
         copy.copyFrom(this);
         return copy;
@@ -200,6 +239,7 @@ public final class PowerProfile {
         rampAmpsPerSecond = other.rampAmpsPerSecond;
         share = other.share;
         sag = other.sag;
+        startupGroup = other.startupGroup;
     }
 
     private static double nonNegativeAmps(Current current, String name) {

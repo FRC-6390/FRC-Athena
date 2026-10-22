@@ -26,6 +26,32 @@ import ca.frc6390.athena.hardware.device.MotorNeutralMode;
 import org.junit.jupiter.api.Test;
 
 class CtreBackendTest {
+    private static ca.frc6390.athena.hardware.backend.ConfigurationStatus configuration(Object handle) {
+        return handle instanceof ca.frc6390.athena.hardware.backend.MotorHandle motor
+                ? motor.configurationStatus()
+                : handle instanceof ca.frc6390.athena.hardware.backend.EncoderHandle encoder
+                        ? encoder.configurationStatus()
+                        : ((ca.frc6390.athena.hardware.backend.ImuHandle) handle).configurationStatus();
+    }
+
+    private static void awaitConfiguration(Object handle) {
+        awaitCondition(() -> !configuration(handle).pending());
+        assertTrue(configuration(handle).ready(), () -> configuration(handle).error());
+    }
+
+    private static void awaitFailure(Object handle) {
+        awaitCondition(() -> configuration(handle).failed());
+    }
+
+    private static void awaitCondition(java.util.function.BooleanSupplier condition) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            try { Thread.sleep(1); }
+            catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new AssertionError(exception); }
+        }
+        assertTrue(condition.getAsBoolean(), "background configuration completed");
+    }
+
     @Test
     void runtimeMotorConfigurationIsAppliedWithoutReplacingTheDeclaration() {
         RecordingTalonController controller = new RecordingTalonController();
@@ -34,7 +60,10 @@ class CtreBackendTest {
 
         handle.applyRuntimeConfiguration(new MotorRuntimeConfig(MotorNeutralMode.BRAKE, true, 32, 57));
 
+        awaitConfiguration(handle);
+
         assertTrue(handle.supportsRuntimeConfiguration());
+        assertTrue(handle.enforcesSupplyCurrentLimit());
         assertEquals(MotorNeutralMode.COAST, handle.device().neutralMode());
         assertTrue(controller.brake);
         assertTrue(controller.inverted);
@@ -98,7 +127,10 @@ class CtreBackendTest {
         assertEquals(0, controller.outputConfigurationCalls);
 
         handle.activate();
+
+        awaitConfiguration(handle);
         handle.activate();
+        awaitConfiguration(handle);
 
         assertEquals(1, controller.outputConfigurationCalls);
         assertTrue(controller.brake);
@@ -114,6 +146,8 @@ class CtreBackendTest {
                 controller);
 
         handle.activate();
+
+        awaitConfiguration(handle);
 
         assertEquals(1, controller.currentLimitConfigurationCalls);
         assertEquals(37, controller.supplyCurrentLimitAmps);
@@ -133,6 +167,8 @@ class CtreBackendTest {
                 controller);
 
         handle.activate();
+
+        awaitConfiguration(handle);
 
         assertEquals(45, controller.supplyCurrentLimitAmps);
         assertEquals(80, controller.statorCurrentLimitAmps);
@@ -155,6 +191,8 @@ class CtreBackendTest {
 
         handle.activate();
 
+        awaitConfiguration(handle);
+
         assertEquals(45, controller.supplyCurrentLimitAmps);
         assertEquals(80, controller.statorCurrentLimitAmps);
         assertEquals(60, controller.torqueCurrentLimitAmps);
@@ -170,6 +208,8 @@ class CtreBackendTest {
                 MotorDevice.of(MotorKinds.KRAKEN_X60, 2), null, followerController);
 
         follower.follow(leader, true);
+
+        awaitConfiguration(follower);
 
         assertEquals(1, followerController.followLeaderId);
         assertTrue(followerController.followInverted);
@@ -200,7 +240,10 @@ class CtreBackendTest {
                 EncoderDevice.of(EncoderKinds.CANCODER, 3), controller, warnings::add);
 
         handle.activate();
+
+        awaitConfiguration(handle);
         handle.activate();
+        awaitConfiguration(handle);
 
         assertEquals(0, controller.baselineCalls);
         assertEquals(1, warnings.size());
@@ -224,7 +267,10 @@ class CtreBackendTest {
                 warnings::add);
 
         handle.activate();
+
+        awaitConfiguration(handle);
         handle.activate();
+        awaitConfiguration(handle);
         assertEquals(1, controller.baselineCalls);
         assertTrue(warnings.isEmpty());
 
@@ -232,8 +278,9 @@ class CtreBackendTest {
         failing.baselineFailure = "CAN frame not received";
         CtreEncoderHandle failingHandle = new CtreEncoderHandle(
                 EncoderDevice.of(EncoderKinds.CANCODER, 4).applyBaselineConfig(), failing);
-        IllegalStateException failure = assertThrows(IllegalStateException.class, failingHandle::activate);
-        assertTrue(failure.getMessage().contains("CAN frame not received"));
+        failingHandle.activate();
+        awaitFailure(failingHandle);
+        assertTrue(failingHandle.configurationStatus().error().contains("CAN frame not received"));
     }
 
     @Test
@@ -264,6 +311,8 @@ class CtreBackendTest {
 
         handle.setIntegratedPositionRotations(6.0);
 
+        awaitConfiguration(handle);
+
         assertEquals(6.0, handle.integratedPositionRotations(), 1.0e-9);
         assertEquals(6.0, controller.sensorPosition, 1.0e-9);
     }
@@ -277,6 +326,12 @@ class CtreBackendTest {
         MotorClosedLoopRequest request = MotorClosedLoopRequest.hybrid(config, 1.5);
 
         handle.setPositionTargetRotations(2.0, request);
+
+        awaitConfiguration(handle);
+
+        handle.setPositionTargetRotations(2.0, request);
+        handle.setPositionTargetRotations(3.0, request);
+        awaitConfiguration(handle);
         handle.setPositionTargetRotations(3.0, request);
 
         assertEquals(1, controller.configureSlotCalls);
@@ -293,12 +348,18 @@ class CtreBackendTest {
         MotorClosedLoopRequest request = MotorClosedLoopRequest.device(new MotorClosedLoopConfig(
                 0, 0.2, 0.01, 0.03, 0.0, 0.1, 0.2, 0.3, 0.4, FocPolicy.DISABLED));
 
-        assertThrows(IllegalStateException.class,
-                () -> handle.setPositionTargetRotations(2.0, request));
+        handle.setPositionTargetRotations(2.0, request);
+        awaitFailure(handle);
         assertEquals(1, controller.configureSlotCalls);
 
         controller.configurationSucceeds = true;
+        try { Thread.sleep(110); }
+        catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new AssertionError(exception); }
         handle.setPositionTargetRotations(2.0, request);
+        awaitConfiguration(handle);
+        handle.setPositionTargetRotations(2.0, request);
+        handle.setPositionTargetRotations(3.0, request);
+        awaitConfiguration(handle);
         handle.setPositionTargetRotations(3.0, request);
 
         assertEquals(2, controller.configureSlotCalls);
@@ -314,6 +375,10 @@ class CtreBackendTest {
                 new CtreMotorOptions().foc(FocPolicy.ENABLE_IF_AVAILABLE),
                 controller);
         MotorClosedLoopRequest request = MotorClosedLoopRequest.device(MotorClosedLoopConfig.empty());
+
+        handle.setVelocityTargetRotationsPerSecond(4.0, request);
+
+        awaitConfiguration(handle);
 
         handle.setVelocityTargetRotationsPerSecond(4.0, request);
 
@@ -337,6 +402,8 @@ class CtreBackendTest {
         assertEquals(1, controller.velocityCalls);
 
         handle.setPositionRotations(4.5);
+
+        awaitConfiguration(handle);
 
         assertEquals(4.5, controller.setPositionRotations, 1.0e-9);
         assertEquals(4.5, handle.positionRotations(), 1.0e-9);
@@ -389,7 +456,79 @@ class CtreBackendTest {
         assertEquals(3, controller.fatalFaultReads);
     }
 
-    private static final class RecordingTalonController implements CtreMotorHandle.TalonController {
+    @Test
+    void blockedSlotAndRuntimeConfigurationAreOrderedAndGateOnlyTheirOwnMotor() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<String> writes = new java.util.ArrayList<>();
+        RecordingTalonController controller = new RecordingTalonController() {
+            @Override public boolean configureSlot(MotorClosedLoopConfig config) {
+                if (config.p() == 0.1) {
+                    entered.countDown();
+                    try { release.await(); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException(exception); }
+                }
+                writes.add("slot:" + config.p());
+                return super.configureSlot(config);
+            }
+            @Override public boolean configureOutput(boolean brake, boolean inverted) {
+                writes.add("runtime");
+                return super.configureOutput(brake, inverted);
+            }
+        };
+        RecordingTalonController healthyController = new RecordingTalonController();
+        try (CtreMotorHandle handle = new CtreMotorHandle(MotorDevice.of(MotorKinds.KRAKEN_X60, 90), null, controller);
+                CtreMotorHandle healthy = new CtreMotorHandle(MotorDevice.of(MotorKinds.KRAKEN_X60, 91), null, healthyController)) {
+            MotorClosedLoopRequest first = MotorClosedLoopRequest.device(new MotorClosedLoopConfig(
+                    0, 0.1, 0, 0, 0, 0, 0, 0, 0, FocPolicy.DISABLED));
+            MotorClosedLoopRequest latest = MotorClosedLoopRequest.device(new MotorClosedLoopConfig(
+                    0, 0.3, 0, 0, 0, 0, 0, 0, 0, FocPolicy.DISABLED));
+            handle.setPositionTargetRotations(1.0, first);
+            assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            handle.applyRuntimeConfiguration(new MotorRuntimeConfig(MotorNeutralMode.BRAKE, true, 20, 40));
+            handle.setPositionTargetRotations(2.0, latest);
+            handle.setVoltage(8.0);
+            assertTrue(Double.isNaN(controller.lastVolts));
+            healthy.setVoltage(6.0);
+            assertEquals(6.0, healthyController.lastVolts);
+            assertFalse(handle.configurationStatus().ready());
+            release.countDown();
+            awaitConfiguration(handle);
+            assertEquals(java.util.List.of("slot:0.1", "runtime", "slot:0.3"), writes);
+            handle.setPositionTargetRotations(2.0, latest);
+            assertEquals(2.0, controller.positionTarget);
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void leavingFollowerModeSupersedesAnInFlightOldFollowBeforeAcknowledgingPromotion() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var currentLeader = new java.util.concurrent.atomic.AtomicInteger(-1);
+        RecordingTalonController controller = new RecordingTalonController() {
+            @Override public void follow(int id, boolean inverted) {
+                entered.countDown();
+                try { release.await(); }
+                catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException(exception); }
+                currentLeader.set(id);
+            }
+            @Override public void stop() { currentLeader.set(-1); }
+        };
+        try (CtreMotorHandle leader = new CtreMotorHandle(MotorDevice.of(MotorKinds.KRAKEN_X60, 94), null,
+                    new RecordingTalonController());
+                CtreMotorHandle follower = new CtreMotorHandle(MotorDevice.of(MotorKinds.KRAKEN_X60, 95), null, controller)) {
+            follower.follow(leader, false);
+            assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            follower.stopFollowing();
+            assertFalse(follower.configurationStatus().ready());
+            release.countDown();
+            awaitConfiguration(follower);
+            assertEquals(-1, currentLeader.get(), "the old follow cannot remain active or retry after promotion");
+        } finally { release.countDown(); }
+    }
+
+    private static class RecordingTalonController implements CtreMotorHandle.TalonController {
+        private double lastVolts = Double.NaN;
         private boolean fatalFault;
         private int fatalFaultReads;
         private int outputConfigurationCalls;
@@ -421,7 +560,7 @@ class CtreBackendTest {
         public void setPercent(double percent) {}
 
         @Override
-        public void setVoltage(double volts) {}
+        public void setVoltage(double volts) { lastVolts = volts; }
 
         @Override
         public void setPositionTarget(double rotations) {}
@@ -548,7 +687,53 @@ class CtreBackendTest {
         }
     }
 
-    private static final class RecordingPigeonController implements CtrePigeon2Handle.Pigeon2Controller {
+    @Test
+    void heldYawMutationKeepsOldSnapshotUnusableAndOrdersLatestResetWithoutBlockingHealthyReads() throws Exception {
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<String> writes = new java.util.ArrayList<>();
+        RecordingPigeonController controller = new RecordingPigeonController() {
+            @Override public boolean setYawDegrees(double degrees) {
+                if (degrees == 90.0) {
+                    entered.countDown();
+                    try { release.await(); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new IllegalStateException(exception); }
+                }
+                writes.add("yaw:" + degrees);
+                return super.setYawDegrees(degrees);
+            }
+            @Override public void reset() { writes.add("reset"); super.reset(); }
+        };
+        try (CtrePigeon2Handle handle = new CtrePigeon2Handle(ImuDevice.of(ImuKinds.PIGEON_2, 96), controller);
+                CtrePigeon2Handle healthy = new CtrePigeon2Handle(ImuDevice.of(ImuKinds.PIGEON_2, 97),
+                        new RecordingPigeonController())) {
+            handle.refreshInputs();
+            assertEquals(12.0, handle.yawDegrees());
+            handle.setYawDegrees(90.0);
+            assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            handle.setYawDegrees(45.0);
+            handle.reset();
+            assertFalse(handle.configurationStatus().ready());
+            assertFalse(handle.isConnected());
+            assertTrue(handle.isCalibrating());
+            assertEquals(12.0, handle.yawDegrees(), "the pre-mutation snapshot is retained until acknowledgement");
+            assertEquals(12.0, healthy.yawDegrees(), "healthy reads do not wait behind another IMU mutation");
+            release.countDown();
+            awaitConfiguration(handle);
+            assertEquals(java.util.List.of("yaw:90.0", "reset"), writes);
+            int sampledYawCalls = controller.yawCalls;
+            assertEquals(0.0, handle.yawDegrees());
+            assertEquals(sampledYawCalls, controller.yawCalls,
+                    "acknowledged yaw is available immediately without a native refresh");
+            assertTrue(handle.isConnected());
+            handle.zeroYaw();
+            awaitConfiguration(handle);
+            assertEquals("yaw:0.0", writes.get(writes.size() - 1));
+        } finally { release.countDown(); }
+    }
+
+    private static class RecordingPigeonController implements CtrePigeon2Handle.Pigeon2Controller {
+        private double yaw = 12.0;
         private int yawCalls;
         private int pitchCalls;
         private int rollCalls;
@@ -556,7 +741,7 @@ class CtreBackendTest {
         @Override
         public double yawDegrees() {
             yawCalls++;
-            return 12.0;
+            return yaw;
         }
 
         @Override
@@ -596,11 +781,12 @@ class CtreBackendTest {
 
         @Override
         public boolean setYawDegrees(double yawDegrees) {
+            yaw = yawDegrees;
             return true;
         }
 
         @Override
-        public void reset() {}
+        public void reset() { yaw = 0.0; }
 
         @Override
         public void close() {}

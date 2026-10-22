@@ -16,6 +16,9 @@ public interface ImuHandle {
      */
     ImuDevice device();
 
+    /** Cached acknowledgement of orientation mutations; synchronous backends are immediately ready. */
+    default ConfigurationStatus configurationStatus() { return ConfigurationStatus.READY; }
+
     /**
      * Activates runtime configuration after the graph creates and caches the handle.
      */

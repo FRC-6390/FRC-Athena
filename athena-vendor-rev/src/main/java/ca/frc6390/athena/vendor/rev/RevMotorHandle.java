@@ -12,6 +12,8 @@ import ca.frc6390.athena.hardware.backend.MotorControlCapabilities;
 import ca.frc6390.athena.api.hardware.MotorControllerKinds;
 import ca.frc6390.athena.api.hardware.MotorTechnology;
 import ca.frc6390.athena.hardware.backend.MotorHandle;
+import ca.frc6390.athena.hardware.backend.ConfigurationQueue;
+import ca.frc6390.athena.hardware.backend.ConfigurationStatus;
 import ca.frc6390.athena.hardware.backend.MotorRuntimeConfig;
 import ca.frc6390.athena.hardware.backend.OpenLoopCommandFilter;
 import ca.frc6390.athena.hardware.device.MotorDevice;
@@ -50,6 +52,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
     private final MotorDevice device;
     private final RevMotorOptions options;
     private final SparkController controller;
+    private final ConfigurationQueue configuration;
     private boolean activated;
     private boolean inputsFresh;
     private final OpenLoopCommandFilter openLoop = new OpenLoopCommandFilter();
@@ -82,6 +85,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         this.device = Objects.requireNonNull(device, "device");
         this.options = options == null ? new RevMotorOptions() : options;
         this.controller = Objects.requireNonNull(controller, "controller");
+        this.configuration = new ConfigurationQueue(device.defaultName(), this::stop);
         integratedEncoderEnabled = isBrushless(device);
     }
 
@@ -95,13 +99,17 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         return true;
     }
 
+    @Override public ConfigurationStatus configurationStatus() { return configuration.status(); }
+
     @Override
     public void applyRuntimeConfiguration(MotorRuntimeConfig configuration) {
         Objects.requireNonNull(configuration, "configuration");
         openLoop.invalidate();
-        if (!controller.configureRuntime(configuration, isBrushless(device))) {
-            throw new IllegalStateException("Failed to configure " + device.defaultName());
-        }
+        this.configuration.request(ConfigurationQueue.Key.RUNTIME, configuration, () -> {
+            if (!controller.configureRuntime(configuration, isBrushless(device))) {
+                throw new IllegalStateException("Failed to configure " + device.defaultName());
+            }
+        });
     }
 
     /**
@@ -125,33 +133,33 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             activated = true;
             return;
         }
-        configureOrRelease(() -> controller.configure(device, options), "configure");
+        configuration.request(ConfigurationQueue.Key.ACTIVATION, device,
+                () -> configureOrRelease(() -> controller.configure(device, options), "configure"));
         activated = true;
     }
 
     /**
-     * Runs one blocking SPARK configuration call. On failure the native SPARK handle is released
-     * before the exception propagates: the hardware graph discards this handle and retries the
-     * binding with a new one, and leaked handles would otherwise accumulate on the CAN ID every
-     * retry.
+     * Runs on the ordered configuration worker. A failure remains attached to this controller for
+     * bounded retry; close releases the native handle after any in-flight call has exited.
      */
     private void configureOrRelease(java.util.function.BooleanSupplier configure, String operation) {
         boolean ok;
         try {
             ok = configure.getAsBoolean();
         } catch (RuntimeException exception) {
-            controller.close();
             throw new IllegalStateException("Failed to " + operation + " " + device.defaultName()
                     + ": " + exception.getMessage(), exception);
         }
         if (!ok) {
-            controller.close();
             throw new IllegalStateException("Failed to " + operation + " " + device.defaultName());
         }
     }
 
     @Override
     public void refreshInputs() {
+        configuration.retryFailed();
+        if (configuration.status().failed()) throw new IllegalStateException(configuration.status().error());
+        if (!configuration.status().ready()) return;
         if (!controller.isConnected()) {
             throw new IllegalStateException("REV motor is disconnected: " + device.defaultName());
         }
@@ -183,22 +191,25 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
             throw new IllegalArgumentException("REV motor " + device.defaultName()
                     + " can only follow another REV motor.");
         }
-        configureOrRelease(
-                () -> controller.follow(device, options, revLeader.device.id(), inverted),
-                "configure follower");
+        configuration.request(ConfigurationQueue.Key.FOLLOW, new FollowConfig(revLeader.device.id(), inverted),
+                () -> configureOrRelease(
+                        () -> controller.follow(device, options, revLeader.device.id(), inverted), "configure follower"));
     }
 
     /** Leaves follower mode uninverted (a SPARK ignores direct commands while it follows). */
     @Override
     public void stopFollowing() {
         openLoop.invalidate();
-        if (!controller.stopFollowing(device.inverted(false), options)) {
-            throw new IllegalStateException("Failed to leave follower mode for " + device.defaultName());
-        }
+        configuration.request(ConfigurationQueue.Key.FOLLOW, "independent", () -> {
+            if (!controller.stopFollowing(device.inverted(false), options)) {
+                throw new IllegalStateException("Failed to leave follower mode for " + device.defaultName());
+            }
+        });
     }
 
     @Override
     public void setPercentOutput(double percent) {
+        if (!configuration.status().ready()) return;
         double safe = clamp(percent);
         if (!openLoop.percent(safe)) return;
         try {
@@ -211,6 +222,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void setVoltage(double volts) {
+        if (!configuration.status().ready()) return;
         double safe = finiteOrZero(volts);
         if (!openLoop.voltage(safe)) return;
         try {
@@ -223,6 +235,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void setPositionTargetRotations(double rotations) {
+        if (!configuration.status().ready()) return;
         openLoop.invalidate();
         controller.setPositionTarget(finiteOrZero(rotations));
     }
@@ -234,6 +247,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void setVelocityTargetRotationsPerSecond(double rotationsPerSecond) {
+        if (!configuration.status().ready()) return;
         openLoop.invalidate();
         controller.setVelocityTarget(finiteOrZero(rotationsPerSecond));
     }
@@ -274,13 +288,15 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
     @Override
     public void setIntegratedPositionRotations(double rotations) {
-        requireIntegratedEncoder();
         double safeRotations = finiteOrZero(rotations);
-        if (!controller.setSensorPosition(safeRotations)) {
-            throw new IllegalStateException("Failed to set position for " + device.defaultName());
-        }
-        positionRotations = safeRotations;
-        inputsFresh = true;
+        configuration.request(ConfigurationQueue.Key.POSITION, safeRotations, () -> {
+            requireIntegratedEncoder();
+            if (!controller.setSensorPosition(safeRotations)) {
+                throw new IllegalStateException("Failed to set position for " + device.defaultName());
+            }
+            positionRotations = safeRotations;
+            inputsFresh = true;
+        });
     }
 
     @Override
@@ -298,11 +314,13 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
                     + " needs RevMotorOptions.primaryEncoderCountsPerRevolution(...) "
                     + "before its attached quadrature encoder can be used.");
         }
-        if (!controller.enableIntegratedEncoder(options)) {
-            throw new IllegalStateException("Failed to configure primary encoder for " + device.defaultName());
-        }
-        integratedEncoderEnabled = true;
-        inputsFresh = false;
+        configuration.request(ConfigurationQueue.Key.INTEGRATED_ENCODER, true, () -> {
+            if (!controller.enableIntegratedEncoder(options)) {
+                throw new IllegalStateException("Failed to configure primary encoder for " + device.defaultName());
+            }
+            integratedEncoderEnabled = true;
+            inputsFresh = false;
+        });
     }
 
     @Override
@@ -310,11 +328,13 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         if (absoluteEncoderEnabled) {
             return;
         }
-        if (!controller.enableAbsoluteEncoder(options)) {
-            throw new IllegalStateException("Failed to configure absolute encoder for " + device.defaultName());
-        }
-        absoluteEncoderEnabled = true;
-        inputsFresh = false;
+        configuration.request(ConfigurationQueue.Key.ABSOLUTE_ENCODER, true, () -> {
+            if (!controller.enableAbsoluteEncoder(options)) {
+                throw new IllegalStateException("Failed to configure absolute encoder for " + device.defaultName());
+            }
+            absoluteEncoderEnabled = true;
+            inputsFresh = false;
+        });
     }
 
     @Override
@@ -351,13 +371,15 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
      */
     @Override
     public boolean faulted() {
-        return fatalFault;
+        return fatalFault || configuration.status().failed();
     }
 
     @Override
     public void close() {
-        controller.close();
+        configuration.close(controller::close);
     }
+
+    private record FollowConfig(int leaderId, boolean inverted) { }
 
     private void ensureInputsFresh() {
         if (!inputsFresh) {
@@ -436,19 +458,9 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
         if (vendorLimit > 0) {
             return vendorLimit;
         }
-        int supplyLimit = (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps)) > 0
-                ? (int) Math.round(device.supplyCurrentLimit().in(edu.wpi.first.units.Units.Amps))
-                : (int) Math.round(device.currentLimit().in(edu.wpi.first.units.Units.Amps));
-        int statorLimit = (int) Math.round(device.statorCurrentLimit().in(edu.wpi.first.units.Units.Amps));
-        if (supplyLimit <= 0) {
-            return statorLimit;
-        }
-        if (statorLimit <= 0) {
-            return supplyLimit;
-        }
-        // REV only exposes a phase-current limiter. The lower requested ceiling is
-        // the conservative mapping when Athena declares both current domains.
-        return Math.min(supplyLimit, statorLimit);
+        // SPARK's limiter regulates phase current. An explicit battery-side limit belongs
+        // to Athena's power pass, not this field; the portable currentLimit still maps to phase.
+        return wholeAmps(device.currentLimits().stator());
     }
 
     /**
@@ -507,6 +519,21 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
                     .outputCurrentPeriodMs(wholeMillis(options.telemetrySignalPeriod()));
         }
         config.disableFollowerMode();
+        return config;
+    }
+
+    static SparkBaseConfig runtimeConfig(MotorRuntimeConfig configuration, boolean brushless, boolean flex) {
+        SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
+        config.idleMode(configuration.neutralMode() == MotorNeutralMode.BRAKE ? IdleMode.kBrake : IdleMode.kCoast);
+        config.inverted(configuration.inverted());
+        int phase = configuration.statorCurrentLimitAmps();
+        if (phase <= 0 && brushless) {
+            phase = flex ? DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS : DEFAULT_NEO_CURRENT_LIMIT_AMPS;
+        }
+        if (phase > 0) {
+            if (brushless) config.smartCurrentLimit(phase);
+            else config.secondaryCurrentLimit(phase);
+        }
         return config;
     }
 
@@ -686,21 +713,7 @@ public final class RevMotorHandle implements MotorHandle, AutoCloseable {
 
         @Override
         public boolean configureRuntime(MotorRuntimeConfig configuration, boolean brushless) {
-            SparkBaseConfig config = flex ? new SparkFlexConfig() : new SparkMaxConfig();
-            config.idleMode(configuration.neutralMode() == MotorNeutralMode.BRAKE
-                    ? IdleMode.kBrake : IdleMode.kCoast);
-            config.inverted(configuration.inverted());
-            int supply = configuration.supplyCurrentLimitAmps();
-            int stator = configuration.statorCurrentLimitAmps();
-            int effective = supply <= 0 ? stator : stator <= 0 ? supply : Math.min(supply, stator);
-            if (effective <= 0 && brushless) {
-                effective = flex ? DEFAULT_NEO_VORTEX_CURRENT_LIMIT_AMPS : DEFAULT_NEO_CURRENT_LIMIT_AMPS;
-            }
-            if (effective > 0) {
-                if (brushless) config.smartCurrentLimit(effective);
-                else config.secondaryCurrentLimit(effective);
-            }
-            return apply(config, false, false);
+            return apply(runtimeConfig(configuration, brushless, flex), false, false);
         }
 
         @Override

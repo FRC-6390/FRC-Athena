@@ -1,10 +1,13 @@
 package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.hardware.backend.ImuHandle;
+import ca.frc6390.athena.hardware.backend.ConfigurationQueue;
+import ca.frc6390.athena.hardware.backend.ConfigurationStatus;
 import ca.frc6390.athena.hardware.device.ImuDevice;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
+import com.ctre.phoenix6.Utils;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import edu.wpi.first.units.measure.Angle;
 import edu.wpi.first.units.measure.AngularVelocity;
@@ -17,7 +20,8 @@ import java.util.Objects;
 public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     private final ImuDevice device;
     private final Pigeon2Controller controller;
-    private boolean inputsFresh;
+    private final ConfigurationQueue configuration;
+    private volatile boolean inputsFresh;
     private double yawDegrees;
     private double pitchDegrees;
     private double rollDegrees;
@@ -41,12 +45,14 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     CtrePigeon2Handle(ImuDevice device, Pigeon2Controller controller) {
         this.device = Objects.requireNonNull(device, "device");
         this.controller = Objects.requireNonNull(controller, "controller");
+        configuration = new ConfigurationQueue(device.defaultName(), () -> { });
     }
 
     @Override
     public ImuDevice device() {
         return device;
     }
+    @Override public ConfigurationStatus configurationStatus() { return configuration.status(); }
 
     @Override
     public double yawDegrees() {
@@ -56,6 +62,9 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
     @Override
     public void refreshInputs() {
+        configuration.retryFailed();
+        if (configuration.status().failed()) throw new IllegalStateException(configuration.status().error());
+        if (!configuration.status().ready()) return;
         // The connection check reads the frame timestamps of this batch, so refresh first.
         controller.refreshSignals();
         if (!controller.isConnected()) {
@@ -132,33 +141,39 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         return linearAccelerationZG;
     }
 
-    @Override public boolean isConnected() { return controller.isConnected(); }
-    @Override public boolean isCalibrating() { return controller.isCalibrating(); }
+    @Override public boolean isConnected() { return configuration.status().ready() && controller.isConnected(); }
+    @Override public boolean isCalibrating() { return !configuration.status().ready() || controller.isCalibrating(); }
     @Override public double lastUpdateSeconds() { return lastUpdateSeconds; }
 
     @Override
     public void setYawDegrees(double yawDegrees) {
-        if (!controller.setYawDegrees(yawDegrees)) {
-            throw new IllegalStateException("Failed to set yaw for " + device.defaultName());
-        }
-        inputsFresh = false;
+        if (!Double.isFinite(yawDegrees)) throw new IllegalArgumentException("Yaw must be finite.");
+        configuration.request(ConfigurationQueue.Key.POSITION, yawDegrees, () -> {
+            if (!controller.setYawDegrees(yawDegrees)) {
+                throw new IllegalStateException("Failed to set yaw for " + device.defaultName());
+            }
+            this.yawDegrees = yawDegrees;
+            inputsFresh = true;
+        });
     }
 
     @Override
     public void zeroYaw() {
-        controller.setYawDegrees(0.0);
-        inputsFresh = false;
+        setYawDegrees(0.0);
     }
 
     @Override
     public void reset() {
-        controller.reset();
-        inputsFresh = false;
+        configuration.request(ConfigurationQueue.Key.POSITION, "reset", () -> {
+            controller.reset();
+            yawDegrees = 0.0;
+            inputsFresh = true;
+        });
     }
 
     @Override
     public void close() {
-        controller.close();
+        configuration.close(controller::close);
     }
 
     private void ensureInputsFresh() {
@@ -202,6 +217,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
     }
 
     private static final class PhoenixPigeon2Controller implements Pigeon2Controller {
+        private final PendingPositionSet pendingYaw = new PendingPositionSet();
         private final Pigeon2 pigeon;
         private final StatusSignal<Angle> yaw;
         private final StatusSignal<Angle> pitch;
@@ -249,7 +265,7 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
         // Phoenix reports these signals in degrees, degrees/second and g, so the raw doubles need no conversion.
         @Override
         public double yawDegrees() {
-            return yaw.getValueAsDouble();
+            return pendingYaw.resolve(yaw.getValueAsDouble(), yaw.getAllTimestamps().getSystemTimestamp().getTime());
         }
 
         @Override
@@ -294,12 +310,14 @@ public final class CtrePigeon2Handle implements ImuHandle, AutoCloseable {
 
         @Override
         public boolean setYawDegrees(double yawDegrees) {
-            return pigeon.setYaw(yawDegrees).isOK();
+            boolean applied = pigeon.setYaw(yawDegrees).isOK();
+            if (applied) pendingYaw.set(yawDegrees, Utils.getCurrentTimeSeconds());
+            return applied;
         }
 
         @Override
         public void reset() {
-            pigeon.reset();
+            if (!setYawDegrees(0.0)) throw new IllegalStateException("Failed to reset Pigeon yaw.");
         }
 
         @Override

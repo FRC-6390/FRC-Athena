@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 /**
  * Publishes Athena's mechanism-scoped telemetry schema to NT4 dashboards.
@@ -49,6 +50,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private static final EnumSet<NetworkTableEvent.Kind> VALUE_EVENTS = EnumSet.of(NetworkTableEvent.Kind.kValueAll);
 
     private final NetworkTableInstance instance;
+    private final LongSupplier nanoTime;
     /** Listener handle to the channel whose entry it watches. */
     private final Map<Integer, ChangeWatcher> watchers = new HashMap<>();
     private NetworkTableListenerPoller poller;
@@ -70,6 +72,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     private final ArrayDeque<PendingBinding> pendingBindings = new ArrayDeque<>();
     /** Most bindings one publish performs. Unlimited unless the robot spreads the first binding over cycles. */
     private int bindBudget = Integer.MAX_VALUE;
+    private long bindTimeBudgetNanos = Long.MAX_VALUE;
 
     /** One value or action waiting to be bound; exactly one of the two is non-null. */
     private record PendingBinding(String path, TelemetryValue value, TelemetryAction action) {
@@ -80,7 +83,12 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
     }
 
     MechanismTelemetryPublisher(NetworkTableInstance instance) {
+        this(instance, System::nanoTime);
+    }
+
+    MechanismTelemetryPublisher(NetworkTableInstance instance, LongSupplier nanoTime) {
         this.instance = Objects.requireNonNull(instance, "instance");
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     }
 
     /** Publishes the latest values and services dashboard action controls. */
@@ -111,6 +119,23 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
             throw new IllegalArgumentException("Telemetry bind budget must be at least 1.");
         }
         bindBudget = bindingsPerPublish;
+        return this;
+    }
+
+    /**
+     * Stops creating dashboard entries when this much wall time has been spent binding in one publish. One binding
+     * always makes progress, and an individual NetworkTables call cannot be interrupted. This complements the count
+     * budget because bindings differ in cost and the roboRIO is slower than a development computer.
+     *
+     * @param budget finite positive binding duration
+     * @return this publisher
+     */
+    public MechanismTelemetryPublisher bindTimeBudget(Time budget) {
+        double seconds = Objects.requireNonNull(budget, "budget").in(Seconds);
+        if (!Double.isFinite(seconds) || seconds <= 0.0) {
+            throw new IllegalArgumentException("Telemetry binding time budget must be finite and positive.");
+        }
+        bindTimeBudgetNanos = Math.max(1L, Math.round(seconds * 1.0e9));
         return this;
     }
 
@@ -196,7 +221,11 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
 
     /** Binds up to {@code budget} queued values and actions, in queue order. */
     private void bindPending(int budget) {
+        if (pendingBindings.isEmpty()) return;
+        long started = bindTimeBudgetNanos == Long.MAX_VALUE ? 0L : nanoTime.getAsLong();
         for (int bound = 0; bound < budget && !pendingBindings.isEmpty(); bound++) {
+            if (bound > 0 && bindTimeBudgetNanos != Long.MAX_VALUE
+                    && nanoTime.getAsLong() - started >= bindTimeBudgetNanos) break;
             PendingBinding next = pendingBindings.poll();
             if (next.action() != null) {
                 bindAction(next.path(), next.action());

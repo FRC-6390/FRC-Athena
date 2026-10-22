@@ -27,9 +27,10 @@ import java.util.function.Supplier;
  * {@code Kv_i} (rad/s per volt) and measured speed {@code omega_i}, a voltage {@code V} drives the
  * current {@code I_i = (V - omega_i / Kv_i) / R_i}. The clamp keeps {@code |I_i| <= limit_i} by bounding
  * {@code V} to {@code [omega_i/Kv_i - limit_i R_i, omega_i/Kv_i + limit_i R_i]}, intersected over the
- * motors. It bounds the voltage the controller is asked to apply, so it works with any controller.
- * When no voltage satisfies every motor, the midpoint of the empty interval is used. The velocity sign is
- * assumed to follow the applied voltage.</p>
+ * motors, after mapping each interval from its handle's measurement frame into the shared command frame.
+ * It bounds the voltage the controller is asked to apply, so it works with any controller.
+ * When no voltage satisfies every motor, the command is rejected so the output path can neutralize it. The velocity sign is
+ * assumed to follow the applied voltage in the handle's measurement frame.</p>
  *
  * <p>The per-motor limit is the smallest of the binding ceiling, the Action effort and the power/thermal cap
  * from the power pass ({@code PowerRuntime}). The output path passes the caps in with
@@ -201,6 +202,16 @@ public final class EffortRuntime implements ControlLoopRuntime {
         return yielded;
     }
 
+    /** Local binding and Action winding limit before the robot-wide power allocation. */
+    public double activeLimitAmps(int index) {
+        return activeAmps[index];
+    }
+
+    /** Records the final command after the robot-wide allocation, without advancing load state again. */
+    public void appliedVolts(double volts) {
+        lastAppliedVolts = volts;
+    }
+
     /**
      * Advances load state and computes the active per-motor limits for this cycle. Call exactly once
      * per applied cycle, before {@link #clampVolts(ActionContext, double)}.
@@ -316,11 +327,27 @@ public final class EffortRuntime implements ControlLoopRuntime {
      */
     public double clampVolts(ActionContext context, double volts, List<MotorDevice> extraMotors,
             double[] extraLimitsAmps) {
+        return clampVolts(context, volts, extraMotors, extraLimitsAmps, null);
+    }
+
+    /**
+     * Clamps with the actual extra command handles. A failover group may replace a software follower's wrapper
+     * while retaining the original handle for device telemetry, so the output path passes the command handles.
+     *
+     * @param context hardware access for the binding motors
+     * @param volts shared commanded voltage
+     * @param extraMotors additional motor declarations
+     * @param extraLimitsAmps their current limits
+     * @param extraHandles their active command handles, or null to resolve through the context
+     * @return clamped voltage in the shared command frame
+     */
+    public double clampVolts(ActionContext context, double volts, List<MotorDevice> extraMotors,
+            double[] extraLimitsAmps, MotorHandle[] extraHandles) {
         if (!anyLimit && extraMotors.isEmpty() || !Double.isFinite(volts)) {
             lastAppliedVolts = volts;
             return volts;
         }
-        double clamped = clampVolts(context, volts, motors, activeAmps, extraMotors, extraLimitsAmps);
+        double clamped = clampVolts(context, volts, motors, activeAmps, null, extraMotors, extraLimitsAmps, extraHandles);
         lastAppliedVolts = clamped;
         return clamped;
     }
@@ -338,20 +365,40 @@ public final class EffortRuntime implements ControlLoopRuntime {
      */
     public static double clampToLimits(ActionContext context, double volts, List<MotorDevice> motors,
             double[] limitsAmps) {
-        return clampVolts(context, volts, motors, limitsAmps, List.of(), NO_LIMITS);
+        return clampToLimits(context, volts, motors, limitsAmps, null);
+    }
+
+    /**
+     * Clamps shared open-loop voltage with explicit command handles; see
+     * {@link #clampVolts(ActionContext, double, List, double[], MotorHandle[])}.
+     *
+     * @param context fallback hardware access
+     * @param volts shared commanded voltage
+     * @param motors motor declarations
+     * @param limitsAmps their current limits
+     * @param handles active command handles, or null to resolve through the context
+     * @return clamped voltage in the shared command frame
+     */
+    public static double clampToLimits(ActionContext context, double volts, List<MotorDevice> motors,
+            double[] limitsAmps, MotorHandle[] handles) {
+        return clampVolts(context, volts, motors, limitsAmps, handles, List.of(), NO_LIMITS, null);
     }
 
     private static double clampVolts(ActionContext context, double volts, List<MotorDevice> motors,
-            double[] limitsAmps, List<MotorDevice> extraMotors, double[] extraLimitsAmps) {
+            double[] limitsAmps, MotorHandle[] handles, List<MotorDevice> extraMotors, double[] extraLimitsAmps,
+            MotorHandle[] extraHandles) {
         if (!Double.isFinite(volts)) {
             return volts;
         }
         Bounds bounds = new Bounds();
         for (int i = 0; i < motors.size(); i++) {
-            bounds.add(context, motors.get(i), limitsAmps[i]);
+            if (!Double.isFinite(limitsAmps[i])) continue;
+            bounds.add(motors.get(i), handles == null ? context.motor(motors.get(i)) : handles[i], limitsAmps[i]);
         }
         for (int i = 0; i < extraMotors.size(); i++) {
-            bounds.add(context, extraMotors.get(i), extraLimitsAmps[i]);
+            if (!Double.isFinite(extraLimitsAmps[i])) continue;
+            bounds.add(extraMotors.get(i),
+                    extraHandles == null ? context.motor(extraMotors.get(i)) : extraHandles[i], extraLimitsAmps[i]);
         }
         return bounds.apply(volts);
     }
@@ -363,20 +410,29 @@ public final class EffortRuntime implements ControlLoopRuntime {
         private double scale = 1.0;
         private boolean enforced;
 
-        void add(ActionContext context, MotorDevice device, double limitAmps) {
+        void add(MotorDevice device, MotorHandle handle, double limitAmps) {
             if (!Double.isFinite(limitAmps)) {
                 return;
             }
-            MotorHandle handle = context.motor(device);
+            double commandScale = handle.voltageCommandScale();
+            // A suppressed command cannot be adjusted by this clamp. Other motors still constrain the command.
+            if (commandScale == 0.0) return;
             EffortUnits.Electrical motor = EffortUnits.electrical(device);
             if (motor != null) {
                 double omega = finiteOrZero(handle.integratedVelocityRotationsPerSecond()) * TWO_PI;
                 double backEmf = omega / motor.speedConstantRadPerSecPerVolt();
                 double span = limitAmps * motor.resistanceOhms();
-                lower = Math.max(lower, backEmf - span);
-                upper = Math.min(upper, backEmf + span);
+                double first = (backEmf - span) / commandScale;
+                double second = (backEmf + span) / commandScale;
+                lower = Math.max(lower, Math.min(first, second));
+                upper = Math.min(upper, Math.max(first, second));
             } else {
                 // No constants: scale the command by the limit over the measured supply current.
+                if (limitAmps <= 0.0) {
+                    scale = 0.0;
+                    enforced = true;
+                    return;
+                }
                 double measured;
                 try {
                     measured = Math.abs(handle.supplyCurrentAmps());
@@ -391,15 +447,19 @@ public final class EffortRuntime implements ControlLoopRuntime {
         }
 
         double apply(double volts) {
-            double clamped = volts;
-            if (enforced && known()) {
-                clamped = lower > upper ? 0.5 * (lower + upper) : Math.min(Math.max(volts, lower), upper);
+            double minimum = lower;
+            double maximum = upper;
+            if (scale < 1.0) {
+                // An estimated unknown-motor ceiling is another voltage constraint. Scaling after
+                // projecting the known-motor interval can move outside it when back-EMF is nonzero.
+                double magnitude = Math.abs(volts) * scale;
+                minimum = Math.max(minimum, -magnitude);
+                maximum = Math.min(maximum, magnitude);
             }
-            return clamped * scale;
-        }
-
-        private boolean known() {
-            return lower != Double.NEGATIVE_INFINITY || upper != Double.POSITIVE_INFINITY;
+            if (minimum > maximum) {
+                throw new IllegalStateException("No shared voltage satisfies the motors' current limits.");
+            }
+            return enforced ? Math.min(Math.max(volts, minimum), maximum) : volts;
         }
     }
 

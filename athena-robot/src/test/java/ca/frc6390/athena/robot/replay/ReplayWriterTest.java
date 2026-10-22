@@ -33,7 +33,7 @@ class ReplayWriterTest {
         ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of(), directory, null);
         recorder.clock(() -> LocalDateTime.of(2026, 4, 1, 10, 0, 0));
         for (int cycle = 1; cycle <= 2000; cycle++) {
-            recorder.record(ReplayRecorderTest.snapshot(cycle, cycle * 0.02, 1.0, true), null, List.of());
+            ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(cycle, cycle * 0.02, 1.0, true), null, List.of());
         }
 
         long start = System.nanoTime();
@@ -93,6 +93,178 @@ class ReplayWriterTest {
     }
 
     @Test
+    void byteBudgetDropsOldestPendingSnapshotAndKeepsCurrentAndNewest() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ReplayWriter writer = new ReplayWriter(RuntimeFailureReporter.stderr(), name -> { }, job -> {
+            if (job.reason().equals("current")) {
+                started.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, 3072);
+        try {
+            assertTrue(writer.submit(sizedJob(directory, "current", 1024)));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            assertTrue(writer.submit(sizedJob(directory, "old", 1024)));
+            assertTrue(writer.submit(sizedJob(directory, "newest", 2048)));
+            assertEquals(3072, writer.retainedBytes());
+            assertEquals(2, writer.pending());
+            assertEquals(1, writer.dropped());
+            assertFalse(writer.submit(sizedJob(directory, "oversized", 4096)));
+            assertEquals(2, writer.dropped());
+            assertEquals(3072, writer.retainedBytes());
+            release.countDown();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+            assertEquals(0, writer.retainedBytes());
+            assertTrue(Files.exists(directory.resolve("current.athrp")));
+            assertTrue(Files.exists(directory.resolve("newest.athrp")));
+            assertFalse(Files.exists(directory.resolve("old.athrp")));
+        } finally {
+            release.countDown();
+            writer.close();
+        }
+    }
+
+    @Test
+    void byteBudgetRejectsNewSnapshotWhenOnlyCurrentWriteUsesTheBudget() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ReplayWriter writer = new ReplayWriter(RuntimeFailureReporter.stderr(), name -> { }, job -> {
+            started.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }, 3072);
+        try {
+            assertTrue(writer.submit(sizedJob(directory, "current", 2048)));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            assertFalse(writer.submit(sizedJob(directory, "refused", 2048)));
+            assertEquals(1, writer.dropped());
+            assertEquals(2048, writer.retainedBytes());
+            release.countDown();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+            assertFalse(Files.exists(directory.resolve("refused.athrp")));
+        } finally {
+            release.countDown();
+            writer.close();
+        }
+    }
+
+    @Test
+    void recorderSharesItsHistoryBudgetWithAnUnfinishedDiskWrite() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        List<String> reports = new java.util.concurrent.CopyOnWriteArrayList<>();
+        RuntimeFailureReporter reporter = new RuntimeFailureReporter() {
+            @Override public void error(String message, Throwable cause) { reports.add(message); }
+            @Override public void warning(String message, Throwable cause) { reports.add(message); }
+        };
+        ReplayWriter writer = new ReplayWriter(reporter, name -> { }, job -> {
+            started.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }, 1536 * 1024);
+        ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of().buffer(512 * 1024), directory, null);
+        java.lang.reflect.Field field = ReplayRecorder.class.getDeclaredField("writer");
+        field.setAccessible(true);
+        field.set(recorder, writer);
+        try {
+            assertTrue(writer.submit(sizedJob(directory, "slow-disk", 384 * 1024)));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            for (int i = 1; i <= 10000; i++) {
+                ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(i, i * 0.02, i * 0.001, true), null, List.of());
+            }
+            recorder.keyframe();
+            assertTrue(recorder.awaitEncoded(Duration.ofSeconds(5))); // Explicit test fence, never a robot hook.
+            java.lang.reflect.Field ringField = ReplayRecorder.class.getDeclaredField("buffer");
+            ringField.setAccessible(true);
+            ReplayBuffer ring = (ReplayBuffer) ringField.get(recorder);
+            assertTrue(recorder.recordingEvictions() > 0);
+            assertTrue(ring.bytes() + recorder.pendingReplayBytes() <= 512 * 1024,
+                    "the ring must subtract the current disk snapshot instead of growing another full history");
+            assertFalse(recorder.backfill(9995, 10000).isEmpty(), "the newest live data stays recoverable");
+            for (int batch = 0; batch < 6; batch++) {
+                for (int i = 10001 + batch * 1000; i <= 11000 + batch * 1000; i++) {
+                    ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(i, i * 0.02, i * 0.001, true), null, List.of());
+                }
+                recorder.flush().orElseThrow();
+                assertTrue(recorder.awaitEncoded(Duration.ofSeconds(5)));
+                assertTrue(ring.bytes() + recorder.pendingReplayBytes() <= 512 * 1024 + 2 * 64 * 1024,
+                        "repeated flush/refill must keep shared bytes bounded, including envelope/newest overhead");
+            }
+            assertTrue(recorder.droppedFlushes() > 0, "pending flush loss must be counted during a stalled write");
+            release.countDown();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+            assertTrue(reports.stream().anyMatch(message -> message.contains("dropped") || message.contains("evicted")),
+                    "memory pressure must be reported rather than silently losing history");
+            try (ReplayReader reader = ReplayReader.open(recorder.lastFile().orElseThrow())) {
+                ReplayReader.Cursor cursor = reader.cursor();
+                long last = -1;
+                while (cursor.next()) if (cursor.isFrame()) last = cursor.sequence();
+                assertEquals(16000, last, "the newest admitted flush still progresses after disk recovery");
+            }
+        } finally {
+            release.countDown();
+            recorder.close();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+        }
+    }
+
+    @Test
+    void rejectedDiskFlushKeepsNewestHistoryAvailableForRetry() throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ReplayWriter writer = new ReplayWriter(RuntimeFailureReporter.stderr(), name -> { }, job -> {
+            if (job.reason().equals("current")) {
+                started.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, 64 * 1024);
+        ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of().buffer(256 * 1024), directory, null);
+        java.lang.reflect.Field field = ReplayRecorder.class.getDeclaredField("writer");
+        field.setAccessible(true);
+        field.set(recorder, writer);
+        try {
+            assertTrue(writer.submit(sizedJob(directory, "current", 64 * 1024)));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            for (int i = 1; i <= 100; i++) {
+                ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(i, i * 0.02, i * 0.001, true), null, List.of());
+            }
+            assertTrue(recorder.flush().isPresent(), "flush reserves a request; disk admission is asynchronous");
+            assertTrue(recorder.awaitEncoded(Duration.ofSeconds(5)));
+            assertEquals(1, recorder.droppedFlushes());
+            assertFalse(recorder.backfill(95, 100).isEmpty(), "refused flush must not discard newest recoverable history");
+            release.countDown();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+            assertTrue(recorder.flush().isPresent());
+            assertTrue(recorder.awaitFlushed(Duration.ofSeconds(5)));
+            try (ReplayReader reader = ReplayReader.open(recorder.lastFile().orElseThrow())) {
+                ReplayReader.Cursor cursor = reader.cursor();
+                long last = -1;
+                while (cursor.next()) if (cursor.isFrame()) last = cursor.sequence();
+                assertEquals(100, last);
+            }
+        } finally {
+            release.countDown();
+            recorder.close();
+            assertTrue(writer.awaitIdle(Duration.ofSeconds(5)));
+        }
+    }
+
+    @Test
     void closedWriterRefusesJobsAndFinishesQueuedWork() throws Exception {
         ReplayWriter writer = new ReplayWriter(RuntimeFailureReporter.stderr(), name -> { });
         assertTrue(writer.submit(job(directory, "late", "late")));
@@ -117,7 +289,7 @@ class ReplayWriterTest {
                         new double[] {0.25, -0.5}, 0b1011L, new int[] {90, -1})),
                 new RuntimeInputSnapshot.DriverStationState(true, true, false, true, true, "blue", 97.5,
                         "2026mrcmp", "QUALIFICATION", 12, "msg"));
-        recorder.record(withInputs(1, inputs), null, List.of());
+        ReplayRecorderTest.record(recorder, withInputs(1, inputs), null, List.of());
         Path file = recorder.flush().orElseThrow();
         assertTrue(recorder.awaitFlushed(Duration.ofSeconds(10)));
 
@@ -153,7 +325,7 @@ class ReplayWriterTest {
         ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of(), directory, null);
         recorder.clock(() -> LocalDateTime.of(2026, 4, 1, 10, 0, 0));
         for (int cycle = 1; cycle <= 6000; cycle++) {
-            recorder.record(ReplayRecorderTest.snapshot(cycle, cycle * 0.02, 1.0, true), null, List.of());
+            ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(cycle, cycle * 0.02, 1.0, true), null, List.of());
         }
         recorder.mark(ReplayMarkers.TELEOP_START, "teleop");
         Path file = ReplayRecorderTest.flushed(recorder);
@@ -186,7 +358,7 @@ class ReplayWriterTest {
     void exportCopiesAReplayFileToAFileOrDirectory() throws Exception {
         ReplayRecorder recorder = new ReplayRecorder(ReplayPolicy.of(), directory, null);
         recorder.clock(() -> LocalDateTime.of(2026, 4, 1, 10, 0, 0));
-        recorder.record(ReplayRecorderTest.snapshot(1, 0.02, 1.0, true), null, List.of());
+        ReplayRecorderTest.record(recorder, ReplayRecorderTest.snapshot(1, 0.02, 1.0, true), null, List.of());
         Path file = ReplayRecorderTest.flushed(recorder);
         String name = file.getFileName().toString();
         ReplayFiles files = ReplayFiles.at(directory);
@@ -215,6 +387,11 @@ class ReplayWriterTest {
 
     private static void assertThrows(org.junit.jupiter.api.function.Executable executable) {
         org.junit.jupiter.api.Assertions.assertThrows(Exception.class, executable);
+    }
+
+    private static ReplayWriter.Job sizedJob(Path directory, String reason, int bytes) {
+        return new ReplayWriter.Job(directory.resolve(reason + ".athrp"), Map.of(), new byte[0],
+                List.of(new byte[bytes]), reason);
     }
 
     private static ReplayWriter.Job job(Path dir, String reason, String name) {

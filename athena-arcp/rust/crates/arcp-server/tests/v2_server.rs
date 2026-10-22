@@ -234,6 +234,15 @@ fn dictionary_is_announced_on_connect_and_on_change() {
 }
 
 #[test]
+fn malformed_request_error_is_sent_before_connection_closes() {
+    let (server, _) = server();
+    let mut client = Client::connect(server.control_addr());
+    client.tcp.write_all(&frame(&[0xff, 1, 0, 0, 0]).unwrap()).unwrap();
+    let (_, response) = client.read_message();
+    assert!(matches!(response, ServerMessage::Reply { status: Status::Error, .. }));
+}
+
+#[test]
 fn schema_request_returns_full_dictionary_with_metadata() {
     let (server, _) = server();
     let mut client = Client::connect(server.control_addr());

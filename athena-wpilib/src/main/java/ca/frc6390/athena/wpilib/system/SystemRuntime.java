@@ -24,7 +24,6 @@ public final class SystemRuntime implements AutoCloseable {
     private volatile boolean tuningComplete;
     private volatile boolean closed;
     private volatile Thread worker;
-    private long nextSampleNanos;
     private long previousSampleNanos;
     private SystemAccess.Memory previousMemory;
     private JvmMetrics previousJvm;
@@ -44,26 +43,54 @@ public final class SystemRuntime implements AutoCloseable {
         this.stateStore = stateStore;
         pressureMonitor = new MemoryPressureMonitor(this.tuning);
         tuningComplete = this.tuning.profile() == SystemTuning.Profile.DISABLED;
-        status = new AtomicReference<>(sample());
-        nextSampleNanos = System.nanoTime() + SAMPLE_PERIOD_NANOS;
+        status = new AtomicReference<>(SystemStatus.pending(this.tuning.profile(), tuningComplete));
     }
 
     /** Starts the one-time tuning or restoration plan without delaying robot initialization. */
     public void start() {
-        if (tuning.profile() == SystemTuning.Profile.DISABLED || !started.compareAndSet(false, true)) return;
-        worker = new Thread(this::applyPlan, "Athena-SystemTuning");
+        if (closed || tuning.profile() == SystemTuning.Profile.DISABLED || !started.compareAndSet(false, true)) return;
+        worker = new Thread(this::monitor, "Athena-SystemMonitor");
         worker.setDaemon(true);
         worker.setPriority(Thread.MIN_PRIORITY);
         worker.start();
     }
 
-    /** Refreshes the status snapshot at most once per second. */
+    /** Ensures monitoring has started. Metrics and OS commands run exclusively on the background worker. */
     public void update() {
-        if (closed || tuning.profile() == SystemTuning.Profile.DISABLED) return;
-        long now = System.nanoTime();
-        if (now < nextSampleNanos) return;
-        nextSampleNanos = now + SAMPLE_PERIOD_NANOS;
-        status.set(sample());
+        start();
+    }
+
+    private void monitor() {
+        if (closed) return;
+        try {
+            applyPlan();
+        } catch (RuntimeException exception) {
+            recordFailure(exception);
+        }
+        while (!closed) {
+            try {
+                Thread.sleep(SAMPLE_PERIOD_NANOS / 1_000_000L);
+            } catch (InterruptedException exception) {
+                if (closed) return;
+            }
+            if (!closed) publishSample();
+        }
+    }
+
+    private void publishSample() {
+        if (closed) return;
+        try {
+            SystemStatus sampled = sample();
+            if (!closed) status.set(sampled);
+        } catch (RuntimeException exception) {
+            recordFailure(exception);
+        }
+    }
+
+    private void recordFailure(RuntimeException exception) {
+        String failure = "System monitoring: " + exception.getClass().getSimpleName() + ": " + exception.getMessage();
+        if (!failures.contains(failure)) failures.add(failure);
+        status.updateAndGet(previous -> previous.withTuning(tuningComplete, applied, failures));
     }
 
     public SystemStatus status() {
@@ -72,6 +99,7 @@ public final class SystemRuntime implements AutoCloseable {
 
     void applyPlan() {
         try {
+            if (closed) return;
             if (tuning.profile() == SystemTuning.Profile.RESTORE_DEFAULTS) {
                 if (!access.realRobot() || !access.linux()) {
                     applied.add("Restore skipped because this is not a real Linux robot target");
@@ -81,6 +109,7 @@ public final class SystemRuntime implements AutoCloseable {
                 return;
             }
             SystemAccess.Memory memory = access.memory();
+            if (closed) return;
             String target = access.target().toLowerCase(Locale.ROOT);
             boolean automaticLowMemory = tuning.profile() == SystemTuning.Profile.AUTOMATIC
                     && access.realRobot() && access.linux() && target.contains("roborio")
@@ -153,7 +182,7 @@ public final class SystemRuntime implements AutoCloseable {
             }
         } finally {
             tuningComplete = true;
-            status.set(sample());
+            publishSample();
         }
     }
 
@@ -196,7 +225,7 @@ public final class SystemRuntime implements AutoCloseable {
         return false;
     }
 
-    private synchronized SystemStatus sample() {
+    private SystemStatus sample() {
         long now = System.nanoTime();
         SystemAccess.Memory memory = access.memory();
         JvmMetrics jvm = JvmMetrics.capture();

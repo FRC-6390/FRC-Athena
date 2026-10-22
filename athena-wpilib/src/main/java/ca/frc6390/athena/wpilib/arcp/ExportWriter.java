@@ -44,7 +44,7 @@ final class ExportWriter implements AutoCloseable {
     }
 
     /**
-     * Queues a file for writing. Returns immediately. After {@link #close} the file is written on the calling thread.
+     * Queues a file for writing. Returns immediately. Writes after {@link #close} are ignored.
      *
      * @param directory target directory
      * @param name file name
@@ -56,7 +56,6 @@ final class ExportWriter implements AutoCloseable {
         Objects.requireNonNull(contents, "contents");
         synchronized (lock) {
             if (closed) {
-                writeNow(directory, name, contents);
                 return;
             }
             pending.put(directory.resolve(name), new Pending(directory, name, contents));
@@ -86,7 +85,7 @@ final class ExportWriter implements AutoCloseable {
         }
     }
 
-    /** Flushes what is queued (bounded wait), then stops the writer. Later writes go straight to disk. */
+    /** Flushes what is queued (bounded wait), then stops accepting writes. */
     @Override
     public void close() {
         synchronized (lock) {

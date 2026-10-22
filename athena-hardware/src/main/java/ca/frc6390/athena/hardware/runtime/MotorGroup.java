@@ -37,6 +37,8 @@ public final class MotorGroup {
         void softwareFollower(ActionContext.SoftwareMotorFollower follower, boolean add);
 
         boolean absoluteEncoderOn(HardwareIdentity motor);
+
+        void constraintsChanged();
     }
 
     private enum Mode { LEADING, HARDWARE, SOFTWARE, DEAD }
@@ -73,7 +75,7 @@ public final class MotorGroup {
     private final MotorGroupPolicy policy;
     private final HardwareIdentity leaderIdentity;
     private final Wiring wiring;
-    private Member[] members = new Member[0];
+    private volatile Member[] members = new Member[0];
     private Member declaredLeader;
     private Member leading;
     private FailoverMotorHandle leaderHandle;
@@ -87,6 +89,7 @@ public final class MotorGroup {
     private volatile String deadNames = "";
     private final List<MotorGroupEvent> events = new ArrayList<>();
     private volatile boolean eventsPending;
+    private List<ActionContext.MotorFollower> followerConstraints = List.of();
 
     MotorGroup(MotorGroupPolicy policy, HardwareIdentity leaderIdentity, Wiring wiring) {
         this.policy = Objects.requireNonNull(policy, "policy");
@@ -149,6 +152,8 @@ public final class MotorGroup {
 
     HardwareIdentity leaderIdentity() { return leaderIdentity; }
 
+    List<ActionContext.MotorFollower> followerConstraints() { return followerConstraints; }
+
     /** Wraps the declared leader's handle; the wrapper is what the graph stores for the leader. */
     synchronized FailoverMotorHandle adoptLeader(MotorHandle handle) {
         if (leaderHandle != null) return leaderHandle;
@@ -161,8 +166,16 @@ public final class MotorGroup {
         declaredLeader = new Member(device, leaderIdentity, handle, sign, sign, Mode.LEADING);
         leading = declaredLeader;
         leaderHandle = new FailoverMotorHandle(handle);
+        leaderHandle.groupReady(this::configurationReady);
         add(declaredLeader);
         return leaderHandle;
+    }
+
+    private boolean configurationReady() {
+        for (Member member : members) {
+            if (member.alive && !member.backend.configurationStatus().ready()) return false;
+        }
+        return true;
     }
 
     /** Adds a follower created by the graph. {@code software} is non-null when Athena mirrors it in software. */
@@ -431,6 +444,30 @@ public final class MotorGroup {
     }
 
     private void publish(int alive) {
+        List<ActionContext.MotorFollower> constraints = new ArrayList<>();
+        for (Member member : members) {
+            if (!member.alive || member == declaredLeader) continue;
+            if (member.mode == Mode.SOFTWARE) {
+                constraints.add(member.software);
+            } else if (member.mode == Mode.LEADING) {
+                constraints.add(FollowerConstraint.of(member.device, member.backend,
+                        leaderHandle::targetVoltageCommandScale));
+            } else if (member.mode == Mode.HARDWARE) {
+                constraints.add(FollowerConstraint.of(member.device, member.backend,
+                        () -> leaderHandle.targetVoltageCommandScale()
+                                * member.backend.hardwareFollowerVoltageScale()));
+            }
+        }
+        // A recovered declared leader can become a follower of the promoted leader. Its original declaration
+        // still owns the binding, but its physical backend needs a constraint in the active command frame.
+        if (declaredLeader != leading && declaredLeader.alive) {
+            Member member = declaredLeader;
+            if (member.mode == Mode.SOFTWARE) constraints.add(member.software);
+            else if (member.mode == Mode.HARDWARE) constraints.add(FollowerConstraint.of(member.device, member.backend,
+                    () -> leaderHandle.targetVoltageCommandScale() * member.backend.hardwareFollowerVoltageScale()));
+        }
+        followerConstraints = List.copyOf(constraints);
+        wiring.constraintsChanged();
         StringBuilder aliveBuilder = new StringBuilder();
         StringBuilder deadBuilder = new StringBuilder();
         for (Member member : members) {

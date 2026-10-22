@@ -36,8 +36,10 @@ class ChoreoPathProviderTest {
         assertTrue(provider.trajectory("Score").isPresent());
         assertEquals(1, client.loads.size());
         assertEquals(List.of("Intake", "Shoot"), provider.markerNames("Score"));
-        var preview = provider.preview(Paths.choreo("Score")
-                .marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral())).orElseThrow();
+        PathAction previewPath = Paths.choreo("Score")
+                .marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral());
+        prepare(provider, previewPath);
+        var preview = provider.preview(previewPath).orElseThrow();
         assertEquals(2, preview.poses().size());
         assertEquals(List.of("Intake", "Shoot"), preview.events().stream().map(event -> event.name()).toList());
         assertThrows(IllegalStateException.class, provider::runtime);
@@ -60,6 +62,7 @@ class ChoreoPathProviderTest {
                 () -> false);
         PathAction path = Paths.choreo("Score").resetOdometry()
                 .marker("Intake", intake).marker("Shoot", shoot);
+        prepare(provider, path);
         PathRuntime runtime = provider.runtime();
 
         runtime.initialize(path, context(0.0));
@@ -92,6 +95,7 @@ class ChoreoPathProviderTest {
                 sample -> { followCalls.incrementAndGet(); return Actions.neutral(); },
                 () -> false);
         PathAction path = Paths.choreo("Score").resetPoseOnly();
+        prepare(provider, path);
         PathRuntime runtime = provider.runtime();
 
         runtime.initialize(path, context(0.0));
@@ -122,6 +126,7 @@ class ChoreoPathProviderTest {
                 () -> false);
         DriveMechanism mechanism = new DriveMechanism(motor);
         PathAction path = Paths.choreo("Score").resetOdometry();
+        prepare(provider, path);
         ca.frc6390.athena.mechanism.core.MechanismScheduler scheduler =
                 ca.frc6390.athena.mechanism.core.MechanismScheduler.create()
                         .register(mechanism)
@@ -142,6 +147,7 @@ class ChoreoPathProviderTest {
         ChoreoPathProvider provider = new ChoreoPathProvider(
                 client, Pose2d::new, pose -> Actions.neutral(), sample -> Actions.neutral(), () -> false);
         PathAction path = Paths.choreo("Score").marker("Intake", Actions.neutral()).marker("Shoot", Actions.neutral());
+        prepare(provider, path);
         PathRuntime runtime = provider.runtime();
 
         runtime.initialize(path, context(0.0));
@@ -162,6 +168,7 @@ class ChoreoPathProviderTest {
         ChoreoPathProvider provider = new ChoreoPathProvider(
                 client, Pose2d::new, pose -> Actions.neutral(), sample -> Actions.neutral(), () -> false);
         PathAction path = Paths.choreo("Score");
+        prepare(provider, path);
         PathRuntime runtime = provider.runtime();
 
         runtime.initialize(path, context(0.0));
@@ -171,6 +178,116 @@ class ChoreoPathProviderTest {
 
         runtime.end(path, context(0.1), true);
         runtime.initialize(path, context(0.2));
+    }
+
+    @Test
+    void heldLoaderDoesNotBlockCallbacksOrConsumePathTime() throws Exception {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        ChoreoPathProvider.ChoreoClient client = new ChoreoPathProvider.ChoreoClient() {
+            @Override public Optional<Trajectory<? extends TrajectorySample<?>>> loadTrajectory(String name) {
+                entered.countDown();
+                try { release.await(); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return Optional.empty(); }
+                return Optional.of(trajectory());
+            }
+            @Override public List<String> trajectoryNames() { return List.of("Score"); }
+        };
+        List<Double> followedTimes = new ArrayList<>();
+        try (ChoreoPathProvider provider = new ChoreoPathProvider(client, Pose2d::new,
+                ignored -> Actions.neutral(), sample -> {
+                    followedTimes.add(sample.getTimestamp()); return Actions.neutral();
+                }, () -> false)) {
+            PathAction path = Paths.choreo("Score");
+            PathRuntime runtime = provider.runtime();
+            runtime.initialize(path, context(0));
+            assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            org.junit.jupiter.api.Assertions.assertTimeout(java.time.Duration.ofMillis(100), () -> {
+                for (int i = 0; i < 100; i++) {
+                    runtime.execute(path, context(5));
+                    assertEquals(null, runtime.output(path, context(5)));
+                    assertFalse(runtime.isFinished(path, context(5)));
+                    assertTrue(provider.preview(path).isEmpty());
+                }
+            });
+            long pendingRevision = provider.previewRevision();
+            release.countDown();
+            assertTrue(provider.awaitPrepared(java.time.Duration.ofSeconds(2)));
+            assertTrue(provider.previewRevision() != pendingRevision);
+            runtime.execute(path, context(5));
+            runtime.output(path, context(5));
+            assertEquals(List.of(0.0), followedTimes, "loading delay must not skip trajectory samples");
+            assertTrue(provider.preview(path).isPresent());
+            assertFalse(runtime.isFinished(path, context(5)));
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    void failedPreparedPathKeepsItsOriginalFailureOnRepeatedInitialization() throws Exception {
+        try (ChoreoPathProvider provider = new ChoreoPathProvider(new FakeClient(Map.of()), Pose2d::new,
+                ignored -> Actions.neutral(), ignored -> Actions.neutral(), () -> false)) {
+            PathAction path = Paths.choreo("Missing");
+            provider.prepare(path);
+            assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> provider.awaitPrepared(java.time.Duration.ofSeconds(2)));
+            var first = assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> provider.runtime().initialize(path, context(0)));
+            var retry = assertThrows(java.util.concurrent.CompletionException.class,
+                    () -> provider.runtime().initialize(path, context(0.02)));
+            assertTrue(first.getCause().getMessage().contains("Missing Choreo trajectory"));
+            assertSame(first.getCause(), retry.getCause(), "no phantom active entry hides the missing-path error");
+        }
+    }
+
+    @Test
+    void throwingInitializationCallbackLeavesNoActivePathEntry() {
+        AtomicInteger callbacks = new AtomicInteger();
+        try (ChoreoPathProvider provider = new ChoreoPathProvider(new FakeClient(Map.of("Score", trajectory())),
+                Pose2d::new, ignored -> {
+                    callbacks.incrementAndGet();
+                    throw new IllegalStateException("reset initialization failed");
+                }, ignored -> Actions.neutral(), () -> false)) {
+            PathAction path = Paths.choreo("Score").resetOdometry();
+            prepare(provider, path);
+            for (int retry = 0; retry < 2; retry++) {
+                var failure = assertThrows(IllegalStateException.class,
+                        () -> provider.runtime().initialize(path, context(0)));
+                assertEquals("reset initialization failed", failure.getMessage());
+            }
+            assertEquals(2, callbacks.get());
+        }
+    }
+
+    @Test
+    void mirroredPreviewMatchesRuntimeAndAllianceChangeDoesNotFlipActivePath() {
+        var mirror = new java.util.concurrent.atomic.AtomicBoolean(true);
+        List<Pose2d> followed = new ArrayList<>();
+        try (ChoreoPathProvider provider = new ChoreoPathProvider(
+                new FakeClient(Map.of("Score", trajectory())), Pose2d::new,
+                pose -> Actions.neutral(), sample -> { followed.add(sample.getPose()); return Actions.neutral(); },
+                mirror::get)) {
+            PathAction path = Paths.choreo("Score");
+            prepare(provider, path);
+            double flippedX = trajectory().sampleAt(0, true).orElseThrow().getPose().getX();
+            assertEquals(flippedX, provider.preview(path).orElseThrow().poses().get(0).x().in(
+                    edu.wpi.first.units.Units.Meters), 1e-9);
+            PathRuntime runtime = provider.runtime();
+            runtime.initialize(path, context(0));
+            mirror.set(false);
+            runtime.execute(path, context(0.5));
+            runtime.output(path, context(0.5));
+            assertEquals(trajectory().sampleAt(0.5, true).orElseThrow().getPose(), followed.get(0));
+            provider.preview(path); // queue the new preview variant
+            prepare(provider, path);
+            assertEquals(0, provider.preview(path).orElseThrow().poses().get(0).x().in(
+                    edu.wpi.first.units.Units.Meters), 1e-9);
+        }
+    }
+
+    private static void prepare(ChoreoPathProvider provider, PathAction path) {
+        provider.prepare(path);
+        try { assertTrue(provider.awaitPrepared(java.time.Duration.ofSeconds(2))); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new AssertionError(interrupted); }
     }
 
     private static final class DriveMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {

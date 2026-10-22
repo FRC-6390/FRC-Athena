@@ -317,7 +317,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     public List<Measurement> latestPoses() {
         ensureConfigured();
         ensurePoseConfigured();
+        poseClient.beginCycle(robotClock.getAsDouble());
         List<PhotonVisionResult> results = client.unreadResults(poseClient);
+        if (client.separatePoseResults()) results = client.completedPoseResults();
         if (results.isEmpty()) {
             return List.of();
         }
@@ -494,8 +496,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
     }
 
     /**
-     * Returns how many decoded frames the background reader dropped because the robot thread had not
-     * drained the queue in time. Always 0 when frames are read synchronously (simulation).
+     * Returns how many decoded frames were dropped by the background reader or replaced in the latest-only
+     * pending pose slot. Always 0 when frames are read synchronously (simulation).
      *
      * @return dropped frame count
      */
@@ -515,12 +517,19 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient);
 
+        default boolean separatePoseResults() { return false; }
+
+        default List<PhotonVisionResult> completedPoseResults() { return List.of(); }
+
         @Override
         void close();
     }
 
     interface PhotonPoseClient {
         Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result);
+
+        /** Captures an immutable solve context on the robot thread; the returned solver runs on the worker. */
+        default PhotonPoseClient snapshot() { return this; }
 
         /**
          * Called once per robot cycle before frames are read, with the robot time of that cycle.
@@ -533,9 +542,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
     /**
      * Reads one PhotonLib camera. Synchronous mode reads on the caller's thread. Background mode runs a daemon
-     * thread that decodes unread results and converts the newest frame's robot-independent part (timing and
-     * targets) into a bounded queue. The caller drains that queue in arrival order and runs the pose solve on
-     * its own thread, because the solve reads robot heading and pose.
+     * reader that decodes the newest frame's timing and targets into a bounded queue. Pose work runs on a separate
+     * worker using robot-thread snapshots, with one active and one latest pending frame. Target refresh never waits
+     * for a solve, and completed poses retain their own frame's timing and target metadata.
      */
     static final class PhotonCameraClient implements PhotonClient {
         /** Decoded frames held for the robot thread; the oldest is dropped when a new one would exceed this. */
@@ -556,6 +565,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final Deque<QueuedFrame> queue = new ArrayDeque<>();
         private final AtomicLong droppedFrames = new AtomicLong();
         private final Thread reader;
+        private final Thread solver;
+        private final Object poseLock = new Object();
+        private PoseJob pendingPose;
+        private final java.util.concurrent.atomic.AtomicReference<QueuedFrame> completedPose =
+                new java.util.concurrent.atomic.AtomicReference<>();
         private volatile boolean closed;
 
         PhotonCameraClient(PhotonCamera camera, boolean background) {
@@ -567,9 +581,14 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             if (background) {
                 reader = new Thread(this::readLoop, "athena-photonvision-reader");
                 reader.setDaemon(true);
+                solver = new Thread(this::solveLoop, "athena-photonvision-solver");
+                solver.setDaemon(true);
+                solver.setPriority(Thread.MIN_PRIORITY);
+                solver.start();
                 reader.start();
             } else {
                 reader = null;
+                solver = null;
             }
         }
 
@@ -594,6 +613,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         @Override
         public List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient) {
+            if (closed) return List.of();
             if (reader == null) {
                 List<PhotonPipelineResult> results = source.unreadResults();
                 if (results.isEmpty()) return List.of();
@@ -601,12 +621,57 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             }
             QueuedFrame frame = drain();
             if (frame == null) return List.of();
-            // The pose solve needs the robot heading and pose, so it runs here on the robot thread.
-            Optional<PhotonVisionPoseEstimate> pose = poseClient == null
-                    ? Optional.empty()
-                    : poseClient.estimate(frame.raw());
-            return List.of(frame.converted().withPose(pose));
+            if (poseClient != null) {
+                PhotonPoseClient captured = poseClient.snapshot();
+                synchronized (poseLock) {
+                    if (!closed) {
+                        if (pendingPose != null) droppedFrames.incrementAndGet();
+                        pendingPose = new PoseJob(frame, captured);
+                        poseLock.notifyAll();
+                    }
+                }
+            }
+            return List.of(frame.converted());
         }
+
+        @Override public boolean separatePoseResults() { return reader != null; }
+
+        @Override
+        public List<PhotonVisionResult> completedPoseResults() {
+            if (closed) return List.of();
+            QueuedFrame completed = completedPose.getAndSet(null);
+            if (completed == null) return List.of();
+            if (completed.failure() != null) throw completed.failure();
+            return List.of(completed.converted());
+        }
+
+        private void solveLoop() {
+            while (!closed) {
+                PoseJob job;
+                synchronized (poseLock) {
+                    while (pendingPose == null && !closed) {
+                        try {
+                            poseLock.wait();
+                        } catch (InterruptedException exception) {
+                            return;
+                        }
+                    }
+                    if (closed) return;
+                    job = pendingPose;
+                    pendingPose = null;
+                }
+                QueuedFrame result;
+                try {
+                    result = new QueuedFrame(job.frame().raw(), job.frame().converted()
+                            .withPose(job.client().estimate(job.frame().raw())), null);
+                } catch (RuntimeException failure) {
+                    result = QueuedFrame.failed(failure);
+                }
+                if (!closed) completedPose.set(result);
+            }
+        }
+
+        private record PoseJob(QueuedFrame frame, PhotonPoseClient client) { }
 
         /** Takes every queued frame in arrival order and returns the newest; rethrows a reader failure first. */
         private QueuedFrame drain() {
@@ -670,10 +735,14 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         @Override
         public void close() {
+            if (closed) return;
             closed = true;
             if (reader != null) {
                 reader.interrupt();
             }
+            if (solver != null) solver.interrupt();
+            synchronized (poseLock) { pendingPose = null; poseLock.notifyAll(); }
+            completedPose.set(null);
             source.close();
         }
 
@@ -705,6 +774,13 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         /** Heading the localization reports to the camera declaration every cycle (NaN before the first). */
         private final java.util.function.DoubleSupplier reportedHeadingRadians;
         private final BooleanSupplier singleTagUsesHeading;
+        private static final int MAX_HEADING_SAMPLES = 256;
+        private final Deque<HeadingSample> headingHistory = new ArrayDeque<>();
+        private SolveContext cycleContext;
+
+        private record HeadingSample(double timestampSeconds, Rotation2d heading) { }
+        private record SolveContext(Transform3d mount, Pose2d reference, boolean headingEnabled,
+                List<HeadingSample> headings) { }
 
         private PhotonPoseEstimatorClient(
                 PhotonPoseEstimator estimator,
@@ -753,36 +829,66 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
          */
         @Override
         public void beginCycle(double robotTimeSeconds) {
-            if (!Double.isFinite(robotTimeSeconds) || !singleTagUsesHeading.getAsBoolean()) {
-                return;
-            }
-            Rotation2d heading = robotHeading();
-            if (heading != null) {
-                estimator.addHeadingData(robotTimeSeconds, heading);
-            }
+            cycleContext = captureContext(robotTimeSeconds);
         }
 
-        private Rotation2d robotHeading() {
-            if (referencePose != null) {
-                Pose2d reference = referencePose.get();
-                if (reference != null) {
-                    return reference.getRotation();
+        private SolveContext captureContext(double robotTimeSeconds) {
+            Pose2d reference = referencePose == null ? null : referencePose.get();
+            boolean headingEnabled = singleTagUsesHeading.getAsBoolean();
+            if (Double.isFinite(robotTimeSeconds) && headingEnabled) {
+                Rotation2d heading = robotHeading(reference);
+                if (heading != null) {
+                    if (!headingHistory.isEmpty() && headingHistory.peekLast().timestampSeconds() > robotTimeSeconds) {
+                        headingHistory.clear();
+                    } else if (!headingHistory.isEmpty()
+                            && headingHistory.peekLast().timestampSeconds() == robotTimeSeconds) {
+                        headingHistory.removeLast();
+                    }
+                    headingHistory.addLast(new HeadingSample(robotTimeSeconds, heading));
+                    // PhotonLib keeps one second of heading samples. Preserve that interval while bounding
+                    // pathological caller rates as well as the pending frame queue.
+                    while (headingHistory.size() > MAX_HEADING_SAMPLES
+                            || headingHistory.peekFirst().timestampSeconds() < robotTimeSeconds - 1.0) {
+                        headingHistory.removeFirst();
+                    }
                 }
             }
+            return new SolveContext(mountPose == null ? null : transform(mountPose.get()), reference,
+                    headingEnabled, List.copyOf(headingHistory));
+        }
+
+        private Rotation2d robotHeading(Pose2d reference) {
+            if (reference != null) return reference.getRotation();
             double reported = reportedHeadingRadians.getAsDouble();
-            if (Double.isFinite(reported)) {
-                return new Rotation2d(reported);
-            }
+            if (Double.isFinite(reported)) return new Rotation2d(reported);
             Supplier<Rotation2d> source = robotHeadingSource;
             return source == null ? null : source.get();
         }
 
         @Override
+        public PhotonPoseClient snapshot() {
+            SolveContext captured = cycleContext == null ? captureContext(Double.NaN) : cycleContext;
+            return result -> estimate(result, captured);
+        }
+
+        @Override
         public Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result) {
-            if (mountPose != null) {
-                estimator.setRobotToCameraTransform(transform(mountPose.get()));
+            // Deterministic synchronous adapters (simulation) still capture and solve on their caller.
+            return estimate(result, captureContext(Double.NaN));
+        }
+
+        private Optional<PhotonVisionPoseEstimate> estimate(PhotonPipelineResult result, SolveContext captured) {
+            if (captured.mount() != null) estimator.setRobotToCameraTransform(captured.mount());
+            List<HeadingSample> headings = captured.headings();
+            if (!headings.isEmpty()) {
+                HeadingSample first = headings.get(0);
+                estimator.resetHeadingData(first.timestampSeconds(), first.heading());
+                for (int index = 1; index < headings.size(); index++) {
+                    HeadingSample sample = headings.get(index);
+                    estimator.addHeadingData(sample.timestampSeconds(), sample.heading());
+                }
             }
-            return estimateWithConfiguredStrategy(result).map(estimate -> toEstimate(
+            return estimateWithConfiguredStrategy(result, captured).map(estimate -> toEstimate(
                     estimate, estimator.getFieldTags(), estimator.getRobotToCameraTransform()));
         }
 
@@ -898,10 +1004,10 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
          * enabled, and falls back to lowest ambiguity while no heading sample exists.
          */
         private Optional<org.photonvision.EstimatedRobotPose> estimateWithConfiguredStrategy(
-                PhotonPipelineResult result) {
+                PhotonPipelineResult result, SolveContext captured) {
             int tagCount = result.getTargets() == null ? 0 : result.getTargets().size();
             PhotonPoseEstimator.PoseStrategy active =
-                    strategyForFrame(strategy, singleTagUsesHeading.getAsBoolean(), tagCount);
+                    strategyForFrame(strategy, captured.headingEnabled(), tagCount);
             if (active == PhotonPoseEstimator.PoseStrategy.PNP_DISTANCE_TRIG_SOLVE) {
                 return estimator.estimatePnpDistanceTrigSolvePose(result)
                         .or(() -> estimator.estimateLowestAmbiguityPose(result));
@@ -909,7 +1015,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             return switch (active) {
                 case LOWEST_AMBIGUITY -> estimator.estimateLowestAmbiguityPose(result);
                 case CLOSEST_TO_CAMERA_HEIGHT -> estimator.estimateClosestToCameraHeightPose(result);
-                case CLOSEST_TO_REFERENCE_POSE -> closestToReference(result);
+                case CLOSEST_TO_REFERENCE_POSE -> closestToReference(result, captured.reference());
                 case AVERAGE_BEST_TARGETS -> estimator.estimateAverageBestTargetsPose(result);
                 case MULTI_TAG_PNP_ON_COPROCESSOR -> multiTagThenSingleTag(
                         estimator.estimateCoprocMultiTagPose(result),
@@ -933,8 +1039,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                     : configured;
         }
 
-        private Optional<org.photonvision.EstimatedRobotPose> closestToReference(PhotonPipelineResult result) {
-            Pose2d reference = referencePose == null ? null : referencePose.get();
+        private Optional<org.photonvision.EstimatedRobotPose> closestToReference(PhotonPipelineResult result, Pose2d reference) {
             if (reference == null) {
                 // Without a current estimate, "closest to the field origin" is meaningless.
                 return estimator.estimateLowestAmbiguityPose(result);
@@ -1131,6 +1236,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final ClockMonitor clockMonitor;
         private final DoubleSupplier robotClock;
         private PhotonVisionResult latest = new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
+        private PhotonVisionResult latestPose = latest;
 
         private PhotonVisionMeasurementBuffer(
                 Object source,
@@ -1152,7 +1258,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         private List<Measurement> poseMeasurements() {
             refresh();
-            return poseMeasurementsFromResult(latest, source);
+            return poseMeasurementsFromResult(latestPose, source);
         }
 
         private void refresh() {
@@ -1168,6 +1274,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             if (!results.isEmpty()) {
                 newFrame = results.get(results.size() - 1);
                 latest = newFrame;
+                if (!client.separatePoseResults()) latestPose = newFrame;
+            }
+            if (client.separatePoseResults()) {
+                List<PhotonVisionResult> poses = client.completedPoseResults();
+                if (!poses.isEmpty()) latestPose = poses.get(poses.size() - 1);
             }
             clockMonitor.refresh(newFrame, robotTimeSeconds);
         }

@@ -167,6 +167,12 @@ public final class SimMotorHandle implements MotorHandle {
     }
 
     @Override
+    public double voltageCommandScale() {
+        // Simulated sensors retain shaft signs; unlike phased controller feedback, they are not inverted.
+        return outputDirection();
+    }
+
+    @Override
     public void setPositionTargetRotations(double rotations) {
         if (!connected) return;
         double safeRotations = finiteOrZero(rotations);
@@ -348,6 +354,9 @@ public final class SimMotorHandle implements MotorHandle {
     private double direction() {
         return followerInverted ? -1.0 : 1.0;
     }
+
+    @Override
+    public double hardwareFollowerVoltageScale() { return direction(); }
 
     private double outputDirection() {
         return runtimeConfiguration.inverted() ? -1.0 : 1.0;

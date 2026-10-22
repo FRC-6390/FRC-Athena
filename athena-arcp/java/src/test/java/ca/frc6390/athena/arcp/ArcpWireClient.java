@@ -44,6 +44,9 @@ final class ArcpWireClient implements AutoCloseable {
     record WriteAnswer(boolean accepted, String reason, Object actualValue) {
     }
 
+    record BackfillAnswer(int status, String reason, byte[] records) {
+    }
+
     record Frame(long timestampMicros, long sequence, Map<Long, Object> values) {
     }
 
@@ -89,6 +92,17 @@ final class ArcpWireClient implements AutoCloseable {
         WireWriter w = new WireWriter();
         w.varint(signalId);
         return send(KIND_ACTION_RUN, w);
+    }
+
+    int sendBackfill(long from, long to) throws IOException {
+        return send(0x60, new WireWriter().u64(from).u64(to));
+    }
+
+    BackfillAnswer awaitBackfill(int requestId) throws IOException {
+        Object message = awaitMessage(requestId);
+        if (message instanceof BackfillAnswer answer) return answer;
+        if (message instanceof Reply answer) return new BackfillAnswer(answer.status(), answer.reason(), new byte[0]);
+        throw new IllegalStateException("expected backfill reply, got " + message);
     }
 
     WriteAnswer awaitWriteReply(int requestId) throws IOException {
@@ -146,8 +160,9 @@ final class ArcpWireClient implements AutoCloseable {
             case KIND_REPLY: {
                 int status = r.u8();
                 String reason = r.string();
-                // Reply data tag 1 is a subscription id. Other data is not used by these tests.
-                long subscriptionId = r.u8() == 1 ? r.u32() : -1;
+                int dataTag = r.u8();
+                if (dataTag == 5) return new BackfillAnswer(status, reason, r.bytes((int) r.varint()));
+                long subscriptionId = dataTag == 1 ? r.u32() : -1;
                 return new Reply(status, reason, subscriptionId);
             }
             case KIND_WRITE_REPLY: {

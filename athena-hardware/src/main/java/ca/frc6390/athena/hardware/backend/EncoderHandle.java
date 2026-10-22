@@ -16,6 +16,9 @@ public interface EncoderHandle {
      */
     EncoderDevice device();
 
+    /** Cached acknowledgement of encoder setup/zeroing. */
+    default ConfigurationStatus configurationStatus() { return ConfigurationStatus.READY; }
+
     /**
      * Activates runtime configuration after the graph creates and caches the handle.
      */

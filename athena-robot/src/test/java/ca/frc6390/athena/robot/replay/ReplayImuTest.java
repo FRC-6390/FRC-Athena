@@ -39,6 +39,8 @@ class ReplayImuTest {
                     new MechanismContext(now, 0.0, DT, true, false, true),
                     new EventContext(now, DT, LifecycleMode.TELEOP, LifecyclePhase.PERIODIC, true, true));
             runtime.simulationPeriodic(now, DT);
+            // This fixture advances two callbacks per synthetic cycle without wall time; model normal encoder progress.
+            assertTrue(runtime.replayRecorder().orElseThrow().awaitEncoded(java.time.Duration.ofSeconds(5)));
         }
         Path file = ReplayRecorderTest.flushed(runtime.replayRecorder().orElseThrow());
 

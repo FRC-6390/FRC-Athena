@@ -75,6 +75,24 @@ import edu.wpi.first.units.Units;
 
 class RobotRuntimeTest {
     @Test
+    void startupPreparationIsForbiddenInsideTheFirstPeriodicCallback() {
+        for (boolean generalEntry : new boolean[] {false, true}) {
+            try (RobotRuntime runtime = RobotRuntime.using(HardwareGraph.using(BackendRegistry.of()))) {
+                AtomicBoolean called = new AtomicBoolean();
+                runtime.workers(RuntimeWorkers.inline(RuntimeWorker.every("first-cycle", Seconds.of(1), () -> {
+                    assertEquals(0L, runtime.cycleSnapshot().sequence(), "the first snapshot has not been published yet");
+                    assertThrows(IllegalStateException.class, runtime::preparePathsForStartup);
+                    called.set(true);
+                })));
+                if (generalEntry) runtime.periodic(new MechanismContext(0, 0, 0.02, true, false, false),
+                        new EventContext(0, 0.02, LifecycleMode.ROBOT, LifecyclePhase.PERIODIC, true, false));
+                else runtime.robotPeriodic(0, 0.02);
+                assertTrue(called.get());
+            }
+        }
+    }
+
+    @Test
     void bindsDeclaredImuReadingsThroughTheRobotRuntime() {
         SimulationSession simulation = SimulationSession.create();
         ImuDevice imu = ImuDevice.of(ImuKinds.PIGEON_2, 30);
@@ -225,6 +243,12 @@ class RobotRuntimeTest {
         CountDownLatch workerStarted = new CountDownLatch(1);
         AtomicInteger workerRuns = new AtomicInteger();
         AtomicInteger commandEnds = new AtomicInteger();
+        AtomicInteger providerCloses = new AtomicInteger();
+        ca.frc6390.athena.auto.PathProvider provider = new ca.frc6390.athena.auto.PathProvider() {
+            @Override public String source() { return "close-test"; }
+            @Override public ca.frc6390.athena.mechanism.core.PathRuntime runtime() { throw new UnsupportedOperationException(); }
+            @Override public void close() { providerCloses.incrementAndGet(); }
+        };
         RobotRuntime runtime = RobotRuntime.using(HardwareGraph.using(BackendRegistry.of(backend)))
                 .register(new MotorMechanism())
                 .workers(RuntimeWorkers.async(
@@ -239,6 +263,9 @@ class RobotRuntimeTest {
                         .build());
         try {
             assertTrue(workerStarted.await(1, TimeUnit.SECONDS));
+            runtime.register(new ca.frc6390.athena.mechanism.core.Mechanism() {
+                @SuppressWarnings("unused") private final ca.frc6390.athena.auto.PathProvider paths = provider;
+            });
             runtime.teleopPeriodic(0.0, 0.02);
 
             runtime.close();
@@ -248,6 +275,7 @@ class RobotRuntimeTest {
 
             assertEquals(runsAfterClose, workerRuns.get());
             assertEquals(1, commandEnds.get());
+            assertEquals(1, providerCloses.get());
             assertEquals(1, backend.leader.closeCalls);
             assertFalse(executor.isShutdown());
             assertThrows(IllegalStateException.class, () -> runtime.request(Actions.neutral()));
@@ -277,7 +305,7 @@ class RobotRuntimeTest {
         runtime.teleopPeriodic(0.02, 0.02);
         runtime.teleopPeriodic(0.04, 0.02);
 
-        assertEquals(12.0, simulation.motor(mechanism.healthyMotor).appliedVoltage(), 1e-9);
+        assertEquals(6.0, simulation.motor(mechanism.healthyMotor).appliedVoltage(), 1e-9);
         assertEquals(0.0, simulation.motor(mechanism.brokenMotor).appliedVoltage(), 1e-9);
         assertEquals(1, errors.size());
         assertTrue(errors.get(0).contains("bad sensor math"));
@@ -290,7 +318,7 @@ class RobotRuntimeTest {
         RobotRuntime runtime = RobotRuntime.simulated(simulation).register(mechanism);
 
         runtime.autoPeriodic(0.02, 0.02);
-        assertEquals(12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals(6.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
         assertEquals("Forward", mechanism.autos.runningName().orElseThrow());
         runtime.disabledPeriodic(0.04, 0.02);
         assertEquals(0.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
@@ -307,7 +335,7 @@ class RobotRuntimeTest {
                 new MechanismContext(0.02, 0.0, 0.02, true, true, true),
                 new EventContext(0.02, 0.02, LifecycleMode.AUTONOMOUS,
                         LifecyclePhase.PERIODIC, true, true));
-        assertEquals(6.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
+        assertEquals(3.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
 
         runtime.periodic(
                 new MechanismContext(0.04, 0.0, 0.02, true, true, true),
@@ -319,7 +347,7 @@ class RobotRuntimeTest {
                 new EventContext(0.06, 0.02, LifecycleMode.TELEOP,
                         LifecyclePhase.INIT, true, true));
 
-        assertEquals(12.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
+        assertEquals(6.0, simulation.motor(mechanism.shooter.motor).appliedVoltage(), 1e-9);
     }
 
     @Test
@@ -332,13 +360,13 @@ class RobotRuntimeTest {
         mechanism.autos.select("Reverse");
         runtime.autoPeriodic(0.04, 0.02);
 
-        assertEquals(12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals(6.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
         assertEquals("Forward", mechanism.autos.runningName().orElseThrow());
         assertEquals("Reverse", mechanism.autos.selectedName());
 
         runtime.disabledPeriodic(0.06, 0.02);
         runtime.autoPeriodic(0.08, 0.02);
-        assertEquals(-12.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
+        assertEquals(-6.0, simulation.motor(mechanism.motor).appliedVoltage(), 1e-9);
         assertEquals("Reverse", mechanism.autos.runningName().orElseThrow());
     }
 
@@ -411,7 +439,7 @@ class RobotRuntimeTest {
         assertEquals(1.0, first.timestampSeconds(), 1.0e-9);
         assertTrue(first.hardware().captured());
         assertEquals("percent", runtime.inspect().motor(mechanism.motor.defaultName()).orElseThrow().commandMode());
-        assertEquals(1.0, runtime.inspect().motor(mechanism.motor.defaultName()).orElseThrow().commandValue(), 1.0e-9);
+        assertEquals(0.5, runtime.inspect().motor(mechanism.motor.defaultName()).orElseThrow().commandValue(), 1.0e-9);
 
         runtime.robotPeriodic(1.02, 0.02);
 
@@ -428,7 +456,7 @@ class RobotRuntimeTest {
                 .register(mechanism);
         runtime.request(mechanism.initial);
         runtime.robotPeriodic(0.0, 0.02);
-        assertEquals(1.0, backend.handle.percent, 1e-9);
+        assertEquals(0.5, backend.handle.percent, 1e-9);
 
         backend.handle.failRefresh = true;
         runtime.robotPeriodic(0.02, 0.02);
@@ -440,7 +468,7 @@ class RobotRuntimeTest {
         runtime.robotPeriodic(0.06, 0.02);
         runtime.robotPeriodic(0.08, 0.02);
 
-        assertEquals(1.0, backend.handle.percent, 1e-9);
+        assertEquals(0.5, backend.handle.percent, 1e-9);
         assertTrue(runtime.hardwareRefreshFailures().isEmpty());
     }
 
@@ -474,8 +502,8 @@ class RobotRuntimeTest {
                         true));
 
         MotorHandle handle = simulation.motor(mechanism.motor);
-        assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
-        assertEquals(1.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(0.25, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(0.5, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -498,7 +526,7 @@ class RobotRuntimeTest {
         MotorHandle handle = simulation.motor(mechanism.motor);
         assertEquals(0.0, handle.integratedPositionRotations(), 1.0e-9);
         runtime.simulationPeriodic(0.5, 0.5);
-        assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(0.25, handle.integratedPositionRotations(), 1.0e-9);
     }
 
     @Test
@@ -512,8 +540,8 @@ class RobotRuntimeTest {
         runtime.simulationPeriodic(0.02, 0.5);
 
         MotorHandle handle = simulation.motor(mechanism.motor);
-        assertEquals(0.5, handle.integratedPositionRotations(), 1.0e-9);
-        assertEquals(1.0, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
+        assertEquals(0.25, handle.integratedPositionRotations(), 1.0e-9);
+        assertEquals(0.5, handle.integratedVelocityRotationsPerSecond(), 1.0e-9);
     }
 
     @Test
@@ -795,7 +823,7 @@ class RobotRuntimeTest {
     private static final class FaultingMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice healthyMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 48);
         private final MotorDevice brokenMotor = MotorDevice.of(MotorKinds.KRAKEN_X60, 49);
-        private final Action healthy = healthyMotor.percent(1.0);
+        private final Action healthy = healthyMotor.percent(0.5);
         private final Action broken = Actions.compute(() -> {
             throw new IllegalStateException("bad sensor math");
         }, brokenMotor);
@@ -804,13 +832,13 @@ class RobotRuntimeTest {
     private static final class MotorMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 42);
         @SuppressWarnings("unused")
-        private final Action initial = motor.percent(1.0);
+        private final Action initial = motor.percent(0.5);
     }
 
     private static final class AutoMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 47);
-        private final Action forward = motor.percent(1.0);
-        private final Action reverse = motor.percent(-1.0);
+        private final Action forward = motor.percent(0.5);
+        private final Action reverse = motor.percent(-0.5);
         private final AutoChooser autos = Autos.chooser("Auto Chooser")
                 .defaultAuto("Forward", forward)
                 .auto("Reverse", reverse);
@@ -843,8 +871,8 @@ class RobotRuntimeTest {
     private static final class PracticeShooter
             implements ca.frc6390.athena.mechanism.core.Mechanism {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 58);
-        private final Action autoShoot = motor.percent(0.5);
-        private final Action shoot = motor.percent(1.0);
+        private final Action autoShoot = motor.percent(0.25);
+        private final Action shoot = motor.percent(0.5);
     }
 
     private static final class PathAutoMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
@@ -995,6 +1023,13 @@ class RobotRuntimeTest {
         public void setPercentOutput(double percent) {
             this.percent = percent;
         }
+
+        @Override public void setVoltage(double volts) { percent = volts / 12.0; }
+        @Override public double integratedPositionRotations() { return 0.0; }
+        @Override public double integratedVelocityRotationsPerSecond() { return 0.0; }
+        @Override public double appliedVoltage() { return percent * 12.0; }
+        @Override public double supplyCurrentAmps() { return 0.0; }
+        @Override public double statorCurrentAmps() { return 0.0; }
     }
 
     private static final class SimulatedMotorMechanism implements ca.frc6390.athena.mechanism.core.Mechanism {
@@ -1010,7 +1045,8 @@ class RobotRuntimeTest {
         private final MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 44);
         private final EncoderDevice encoder = EncoderDevice.of(EncoderKinds.CANCODER, 44);
         @SuppressWarnings("unused")
-        private final ControlBinding<?> velocity = Controls.velocity(motor, Units.Rotations).feedback(encoder);
+        private final ControlBinding<?> velocity = Controls.velocity(motor, Units.Rotations).feedback(encoder)
+                .pid(1.0, 0.0, 0.0);
         private final Action initial = velocity.velocity(Units.RotationsPerSecond.of(5.0));
     }
 

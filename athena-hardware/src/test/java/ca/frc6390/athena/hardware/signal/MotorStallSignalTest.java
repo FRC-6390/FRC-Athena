@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class MotorStallSignalTest {
     @Test
-    void revCurrentLimitsAreExposedAsTheMappedPhaseCurrentLimit() {
+    void revPortableCurrentMapsToPhaseWhileExplicitSupplyRemainsInBatteryAmps() {
         MotorCurrentLimits portable = MotorDevice.of(MotorKinds.NEO, 1)
                 .currentLimit(Units.Amps.of(40))
                 .currentLimits();
@@ -29,7 +29,7 @@ class MotorStallSignalTest {
                 .currentLimits();
 
         assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(40)), portable);
-        assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(50)), both);
+        assertEquals(new MotorCurrentLimits(Units.Amps.of(50), Units.Amps.of(60)), both);
         assertEquals(new MotorCurrentLimits(Units.Amps.of(0), Units.Amps.of(55)), statorOnly);
 
         MotorKind customRev = () -> "rev:spark-max/custom";
@@ -57,6 +57,27 @@ class MotorStallSignalTest {
             assertTrue(stall.instantaneousActive());
             motor.recordCommand(MotorCommandSnapshot.neutral());
             assertFalse(stall.instantaneousActive());
+        } finally {
+            binding.close();
+        }
+    }
+
+    @Test
+    void revStallDetectionUsesTheStatorLimitWhenBothCurrentDomainsAreDeclared() throws Exception {
+        MotorDevice motor = MotorDevice.of(MotorKinds.NEO, 6)
+                .supplyCurrentLimit(Units.Amps.of(10)).statorCurrentLimit(Units.Amps.of(60));
+        FakeMotorHandle handle = new FakeMotorHandle(motor);
+        AutoCloseable binding = motor.bindRuntime(new RuntimeScope("rev-stall-domains"), handle);
+        try {
+            MotorStallSignal stall = motor.stall().atCurrentLimit(0.9);
+            motor.recordCommand(new MotorCommandSnapshot(MotorCommandSnapshot.Mode.VOLTAGE, 8.0));
+            handle.velocity = 0.0;
+            handle.supplyCurrent = 10.0;
+            handle.statorCurrent = 20.0;
+            assertFalse(stall.instantaneousActive(), "supply saturation alone is not stator saturation");
+            handle.supplyCurrent = 2.0;
+            handle.statorCurrent = 55.0;
+            assertTrue(stall.instantaneousActive(), "partial-duty winding saturation uses the 60 A phase limit");
         } finally {
             binding.close();
         }

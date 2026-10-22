@@ -7,6 +7,7 @@ import ca.frc6390.athena.api.hardware.MotorKinds;
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import ca.frc6390.athena.hardware.device.MotorDevice;
+import ca.frc6390.athena.hardware.device.MotorConstants;
 import ca.frc6390.athena.hardware.device.Range;
 import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.core.Action;
@@ -32,7 +33,8 @@ class ConstructorDeclaredPositionActionTest {
         runtime.request(mechanism.trackTarget);
         runtime.teleopPeriodic(0.0, 0.02);
 
-        assertEquals(CommandKind.POSITION, simulation.motor(mechanism.motor).commandKind());
+        assertEquals(CommandKind.VOLTAGE, simulation.motor(mechanism.motor).commandKind(),
+                "the host PID computes voltage so the upcoming output participates in the battery allocation");
         assertEquals(4.0, simulation.motor(mechanism.motor).commandValue(), 1.0e-9);
 
         target.set(7.0);
@@ -55,10 +57,18 @@ class ConstructorDeclaredPositionActionTest {
         assertEquals(CommandKind.VOLTAGE, simulation.motor(mechanism.motor).commandKind());
         assertNotEquals(0.0, simulation.motor(mechanism.motor).commandValue(), 1.0e-9);
 
+        double speedBeforeFinalCycle = 0.0;
         for (int cycle = 2; cycle <= 50; cycle++) {
+            if (cycle == 50) speedBeforeFinalCycle = simulation.motor(mechanism.motor).integratedVelocityRotationsPerSecond();
             runtime.teleopPeriodic(cycle * 0.02, 0.02);
         }
-        assertEquals(12.0, simulation.motor(mechanism.motor).commandValue(), 1.0e-9);
+        MotorConstants constants = MotorConstants.forKind(mechanism.motor.kind()).orElseThrow();
+        double resistance = constants.resistance().in(Units.Ohms);
+        double backEmf = speedBeforeFinalCycle * 2.0 * Math.PI / constants.raw().speedConstantRadPerSecPerVolt();
+        double supplyLimitedVoltage = 0.5 * (backEmf + Math.sqrt(backEmf * backEmf
+                + 4.0 * runtime.powerSnapshot().budgetAmps() * runtime.powerSnapshot().busVolts() * resistance));
+        assertEquals(Math.min(12.0, supplyLimitedVoltage), simulation.motor(mechanism.motor).commandValue(), 1.0e-8,
+                "the profiled PID reaches saturation while respecting the current-cycle battery budget");
     }
 
     @Test

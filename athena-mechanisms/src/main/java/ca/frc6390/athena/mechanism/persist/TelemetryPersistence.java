@@ -21,8 +21,8 @@ import java.util.function.Supplier;
  * <p>The schema builder calls {@link #bind} for every persisted writable value and {@link #bindArray}
  * for persisted recorded data. Binding restores the stored value over the code default. The robot loop
  * calls {@link #periodic} once per cycle: it detects changes made by code or by dashboard writes,
- * writes them to the store, reports each change through {@link RuntimeMarkers}, and flushes the store
- * at most once per second. While disabled, pending changes are flushed at once.</p>
+ * writes them to the store, reports each change through {@link RuntimeMarkers}, and queues a background store write
+ * at most once per second. While disabled, pending changes are queued at once.</p>
  */
 public final class TelemetryPersistence {
     private static final TelemetryPersistence DISABLED = new TelemetryPersistence(null, () -> Double.NaN);
@@ -163,17 +163,17 @@ public final class TelemetryPersistence {
         pruned = true;
         int removed = store.retainOnly(Set.copyOf(boundKeys));
         if (removed > 0) {
-            store.flush();
+            store.requestFlush();
         }
         return removed;
     }
 
     /**
-     * Detects changes to bound values, records them, and flushes the store.
+     * Detects changes to bound values, records them, and queues a background store write.
      *
      * @param nowSeconds robot timestamp
      * @param mode current lifecycle mode, reported with each write
-     * @param enabled true while enabled; pending changes are flushed immediately when disabled
+     * @param enabled true while enabled; pending changes are queued immediately when disabled
      */
     public void periodic(double nowSeconds, LifecycleMode mode, boolean enabled) {
         if (store == null) {
@@ -184,10 +184,10 @@ public final class TelemetryPersistence {
         }
         if (!enabled) {
             if (store.dirty()) {
-                store.flush();
+                store.requestFlush();
             }
         } else {
-            store.flushIfDue(nowSeconds);
+            store.requestFlushIfDue(nowSeconds);
         }
     }
 

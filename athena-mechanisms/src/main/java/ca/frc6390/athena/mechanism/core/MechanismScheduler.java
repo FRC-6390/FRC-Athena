@@ -1385,9 +1385,9 @@ public final class MechanismScheduler {
                 }
             }
             Map<Object, Long> reservations = globalLeaseReservations();
-            // Electrical and thermal caps use this cycle's controller outputs and are applied before any
-            // motor command below.
-            power.cycle(powerMotors, actionContext, resolver.overrides(), safeMechanismContext.nowSeconds());
+            // Sample once, prepare every controller once, allocate the requested electrical load,
+            // then commit. Shared profiles therefore couple the current cycle before any motor write.
+            power.beginCycle(powerMotors, actionContext, resolver.overrides(), safeMechanismContext.nowSeconds());
             Map<ControlBinding<?>, StageCaps> caps = stageCapsByControl();
             Map<ControlBinding<?>, Enum<?>> stageNames = stageNamesByControl(caps);
             for (MechanismRuntime runtime : ordered) {
@@ -1395,12 +1395,32 @@ public final class MechanismScheduler {
                 runtime.electrical(power);
             }
             for (MechanismRuntime runtime : ordered) {
+                if (faulted.contains(runtime)) continue;
+                try {
+                    runtime.prepareCandidates(outputs, reservations);
+                } catch (RuntimeException exception) {
+                    isolate(runtime, "output preparation", exception, faulted);
+                    runtime.neutralizeAfterFault();
+                }
+            }
+            power.planCommands();
+            // Validate every allocated direction before committing any member of a shared profile.
+            for (MechanismRuntime runtime : ordered) {
+                if (faulted.contains(runtime)) continue;
+                try {
+                    runtime.validatePreparedCandidates();
+                } catch (RuntimeException exception) {
+                    isolate(runtime, "allocated output validation", exception, faulted);
+                    runtime.neutralizeAfterFault();
+                }
+            }
+            for (MechanismRuntime runtime : ordered) {
                 Set<MotorDevice> driven;
                 if (faulted.contains(runtime)) {
                     driven = runtime.neutralizeAfterFault();
                 } else {
                     try {
-                        driven = runtime.applyCandidates(outputs, reservations);
+                        driven = runtime.commitPreparedCandidates();
                     } catch (RuntimeException exception) {
                         isolate(runtime, "output", exception, faulted);
                         driven = runtime.neutralizeAfterFault();
@@ -1981,6 +2001,12 @@ public final class MechanismScheduler {
         public List<ActionContext.SoftwareMotorFollower> softwareFollowers(MotorDevice leader) {
             List<ActionContext.SoftwareMotorFollower> registeredFollowers = registered.softwareFollowers(leader);
             return registeredFollowers.isEmpty() ? fallback.softwareFollowers(leader) : registeredFollowers;
+        }
+
+        @Override
+        public List<? extends ActionContext.MotorFollower> followerConstraints(MotorDevice leader) {
+            List<? extends ActionContext.MotorFollower> followers = registered.followerConstraints(leader);
+            return followers.isEmpty() ? fallback.followerConstraints(leader) : followers;
         }
 
         @Override

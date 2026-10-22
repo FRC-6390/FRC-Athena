@@ -31,7 +31,7 @@ public final class MappedActionContext implements ActionContext {
     }
 
     public boolean hasEncoder(EncoderDevice ref) {
-        return encoders.containsKey(ref);
+        return !encoders.isEmpty() && encoders.containsKey(ref);
     }
 
     /**
@@ -46,8 +46,10 @@ public final class MappedActionContext implements ActionContext {
         return this;
     }
 
+    // Overlay contexts commonly leave these maps empty and delegate to the hardware graph.
+    // Avoid hashing an entire follower declaration merely to test an empty registry.
     public boolean hasMotor(MotorDevice ref) {
-        return motors.containsKey(ref);
+        return !motors.isEmpty() && motors.containsKey(ref);
     }
 
     public MappedActionContext imu(ImuDevice ref, ImuHandle imu) {
@@ -56,7 +58,7 @@ public final class MappedActionContext implements ActionContext {
     }
 
     public boolean hasImu(ImuDevice ref) {
-        return imus.containsKey(ref);
+        return !imus.isEmpty() && imus.containsKey(ref);
     }
 
     @Override

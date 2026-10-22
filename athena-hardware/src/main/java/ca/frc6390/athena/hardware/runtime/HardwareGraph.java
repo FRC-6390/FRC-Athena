@@ -25,7 +25,10 @@ import ca.frc6390.athena.hardware.device.MotorDevice;
 import ca.frc6390.athena.api.FailurePolicy;
 
 /**
- * Runtime-owned hardware graph that resolves declarations to cached handles.
+ * Runtime-owned hardware graph that resolves declarations to cached handles. Explicit standalone
+ * graphs prepare initial declarations synchronously, outside the graph monitor, for setup/tooling
+ * compatibility. Call {@link #asynchronousBindings()} before registration to keep vendor construction
+ * off the caller thread. RobotRuntime selects this for real hardware and all late runtime bindings.
  */
 public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final BackendRegistry backends;
@@ -34,6 +37,8 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             new LinkedHashMap<>();
     private final Map<HardwareIdentity, List<ActionContext.SoftwareMotorFollower>> softwareFollowerViews =
             new LinkedHashMap<>();
+    private final Map<HardwareIdentity, FollowerView> followerConstraintViews = new LinkedHashMap<>();
+    private long followerRevision;
     private final Map<HardwareIdentity, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<HardwareIdentity, ImuHandle> imus = new LinkedHashMap<>();
     private final Map<HardwareIdentity, MotorGroup> motorGroups = new LinkedHashMap<>();
@@ -56,6 +61,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private int activeRefreshCycles;
     private boolean refreshCycleInFlight;
     private boolean closed;
+    private boolean asynchronousBindings;
     private long refreshSequence;
     private volatile HardwareCycleSnapshot cycleSnapshot = HardwareCycleSnapshot.empty();
     private final Map<Object, RuntimeException> bindingFailures = new IdentityHashMap<>();
@@ -74,6 +80,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private final Map<Object, Object> placeholders = new IdentityHashMap<>();
     /** Declarations whose background attempt is queued or running, with the identity each one binds. */
     private final Map<Object, HardwareIdentity> pendingBindings = new IdentityHashMap<>();
+    private final java.util.Set<Object> runningBindings = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     /** How many pending declarations bind each identity. */
     private final Map<HardwareIdentity, Integer> pendingIdentities = new HashMap<>();
     private ExecutorService binderExecutor;
@@ -112,15 +119,18 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     @Override
-    public synchronized MotorHandle motor(MotorDevice device) {
+    public MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");
+        HardwareIdentity identity;
+        synchronized (this) {
+        if (closed) throw new IllegalStateException("Hardware graph is closed.");
         // Steady state: the same declaration resolves to the same handle every cycle. The cached entry is only
         // used while no binding failure is recorded for the declaration.
         MotorLookup cached = motorLookups.get(device);
         if (cached != null && cached.epoch() == motorEpoch && !bindingFailures.containsKey(device)) {
             return cached.handle();
         }
-        HardwareIdentity identity = identity(device);
+        identity = identity(device);
         MotorHandle existing = motors.get(identity);
         if (existing != null && existing.device() != device && !existing.device().equals(device)) {
             throw new IllegalStateException("Conflicting motor declarations target " + identity.key()
@@ -138,17 +148,45 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             // on the caller's thread every cycle. The binder retries it; until then the unavailable handle is returned.
             return unavailableMotor(device);
         }
+        if (asynchronousBindings) {
+            if (device.follower() != null) motor(device.follower().leader());
+            submitBinding(device);
+            return unavailableMotor(device);
+        }
+        pendingIdentities.merge(identity, 1, Integer::sum);
+        }
+        PreparedMotor prepared = null;
         try {
-            MotorHandle handle = createMotor(device);
-            motorLookups.put(device, new MotorLookup(handle, motorEpoch));
-            return handle;
+            MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
+            prepared = prepareMotor(device, leader);
+            synchronized (this) {
+                if (closed) throw new IllegalStateException("Hardware graph is closed.");
+                MotorHandle handle = installMotor(device, prepared);
+                motorLookups.put(device, new MotorLookup(handle, motorEpoch));
+                prepared = null;
+                return handle;
+            }
         } catch (RuntimeException exception) {
+            synchronized (this) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
             recordBindingFailure(device, exception);
             return unavailableMotor(device);
+            }
+        } finally {
+            if (prepared != null) closeHandle(prepared.created());
+            synchronized (this) {
+                pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
+                notifyAll();
+            }
         }
+    }
+
+    /** Uses background preparation for new declarations. Existing cached handles remain immediate. */
+    public synchronized HardwareGraph asynchronousBindings() {
+        asynchronousBindings = true;
+        return this;
     }
 
     private MotorHandle unavailableMotor(MotorDevice device) {
@@ -158,7 +196,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         return placeholder;
     }
 
-    /** Synchronous bind used by registration and by loop lookups of a declaration that is not failed. */
+    /** Rebinds an already installed handle; this bookkeeping never performs vendor work. */
     private MotorHandle createMotor(MotorDevice device) {
         HardwareIdentity identity = identity(device);
         MotorHandle existing = motors.get(identity);
@@ -167,8 +205,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             clearFailure(device);
             return existing;
         }
-        MotorHandle leader = device.follower() == null ? null : motor(device.follower().leader());
-        return installMotor(device, prepareMotor(device, leader));
+        throw new IllegalStateException("Motor is not installed: " + identity.key());
     }
 
     /** Vendor work for a motor, with no graph state read or written. The leader handle is passed in. */
@@ -231,9 +268,77 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     @Override
-    public synchronized EncoderHandle encoder(EncoderDevice device) {
+    public synchronized List<ActionContext.MotorFollower> followerConstraints(MotorDevice leader) {
+        HardwareIdentity leaderIdentity = identity(leader);
+        FollowerView cached = followerConstraintViews.get(leaderIdentity);
+        if (cached != null && cached.motorEpoch == motorEpoch && cached.revision == followerRevision) {
+            return cached.followers;
+        }
+        List<ActionContext.MotorFollower> constraints = new ArrayList<>();
+        java.util.Set<HardwareIdentity> visited = new java.util.HashSet<>();
+        visited.add(leaderIdentity);
+        MotorHandle leaderHandle = motors.get(leaderIdentity);
+        if (leaderHandle != null) collectFollowerConstraints(leaderIdentity, leaderHandle, constraints, visited, true);
+        List<ActionContext.MotorFollower> view = List.copyOf(constraints);
+        followerConstraintViews.put(leaderIdentity, new FollowerView(motorEpoch, followerRevision, view));
+        return view;
+    }
+
+    private void collectFollowerConstraints(HardwareIdentity parent, MotorHandle parentFrame,
+            List<ActionContext.MotorFollower> constraints, java.util.Set<HardwareIdentity> visited, boolean root) {
+        MotorGroup group = motorGroups.get(parent);
+        if (group != null) {
+            for (ActionContext.MotorFollower follower : group.followerConstraints()) {
+                HardwareIdentity followerIdentity = identity(follower.device());
+                // The recovered declared leader is also a physical follower; retain its separate backend view.
+                if (followerIdentity.equals(parent) || visited.add(followerIdentity)) constraints.add(follower);
+            }
+            // Group members follow the active leader regardless of their original declaration. Descendants
+            // outside the group still follow their declared parent and inherit that parent's voltage frame.
+            for (ActionContext.MotorFollower follower : group.followerConstraints()) {
+                HardwareIdentity followerIdentity = identity(follower.device());
+                if (!followerIdentity.equals(parent)) {
+                    collectDeclaredFollowers(followerIdentity, follower.handle(), constraints, visited, false);
+                }
+            }
+            return;
+        }
+        collectDeclaredFollowers(parent, parentFrame, constraints, visited, root);
+    }
+
+    private void collectDeclaredFollowers(HardwareIdentity parent, MotorHandle parentFrame,
+            List<ActionContext.MotorFollower> constraints, java.util.Set<HardwareIdentity> visited, boolean root) {
+        for (Map.Entry<HardwareIdentity, MotorHandle> entry : motors.entrySet()) {
+            MotorDevice device = entry.getValue().device();
+            if (device.follower() == null || !identity(device.follower().leader()).equals(parent)
+                    || !visited.add(entry.getKey())) continue;
+            ActionContext.MotorFollower follower = null;
+            for (ActionContext.SoftwareMotorFollower software : softwareFollowers.getOrDefault(parent, List.of())) {
+                if (identity(software.device()).equals(entry.getKey())) {
+                    follower = root ? software : new ActionContext.SoftwareMotorFollower(device,
+                            new ChainedFollowerMotorHandle(software.handle(), parentFrame));
+                    break;
+                }
+            }
+            if (follower == null) {
+                MotorHandle backend = entry.getValue();
+                follower = FollowerConstraint.of(device, backend,
+                        () -> parentFrame.voltageCommandScale() * backend.hardwareFollowerVoltageScale());
+            }
+            constraints.add(follower);
+            collectFollowerConstraints(entry.getKey(), follower.handle(), constraints, visited, false);
+        }
+    }
+
+    private record FollowerView(long motorEpoch, long revision, List<ActionContext.MotorFollower> followers) { }
+
+    @Override
+    public EncoderHandle encoder(EncoderDevice device) {
         Objects.requireNonNull(device, "device");
-        HardwareIdentity identity = identity(device);
+        HardwareIdentity identity;
+        synchronized (this) {
+        if (closed) throw new IllegalStateException("Hardware graph is closed.");
+        identity = identity(device);
         EncoderHandle existing = encoders.get(identity);
         if (existing != null) {
             bindRuntime(device, existing);
@@ -243,14 +348,37 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         if (bindingFailures.containsKey(device) || isIdentityPending(identity)) {
             return unavailableEncoder(device);
         }
+        if (asynchronousBindings) {
+            MotorDevice source = sourceMotorDevice(device);
+            if (source != null) motor(source);
+            submitBinding(device);
+            return unavailableEncoder(device);
+        }
+        pendingIdentities.merge(identity, 1, Integer::sum);
+        }
+        EncoderHandle prepared = null;
         try {
-            return installEncoder(device, prepareEncoder(device, sourceMotor(device)));
+            prepared = prepareEncoder(device, sourceMotor(device));
+            synchronized (this) {
+                if (closed) throw new IllegalStateException("Hardware graph is closed.");
+                EncoderHandle installed = installEncoder(device, prepared);
+                prepared = null;
+                return installed;
+            }
         } catch (RuntimeException exception) {
+            synchronized (this) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
             recordBindingFailure(device, exception);
             return unavailableEncoder(device);
+            }
+        } finally {
+            if (prepared != null) closeHandle(prepared);
+            synchronized (this) {
+                pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
+                notifyAll();
+            }
         }
     }
 
@@ -275,7 +403,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         }
         MotorHandle handle = motors.get(identity(source));
         if (handle == null) {
-            throw new IllegalStateException("Motor " + HardwareIdentity.motor(source).key() + " is not bound yet.");
+            throw new DependencyPending("Motor " + HardwareIdentity.motor(source).key() + " is not bound yet.");
         }
         return handle;
     }
@@ -317,7 +445,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             installed = prepared;
             encoders.put(identity, installed);
         } else if (installed != prepared) {
-            closeHandle(prepared);
+            throw new IllegalStateException("Encoder was concurrently bound: " + identity.key());
         }
         bindRuntime(device, installed);
         clearFailure(device);
@@ -416,9 +544,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * @return runtime IMU
      */
     @Override
-    public synchronized ImuHandle imu(ImuDevice device) {
+    public ImuHandle imu(ImuDevice device) {
         Objects.requireNonNull(device, "device");
-        HardwareIdentity identity = identity(device);
+        HardwareIdentity identity;
+        synchronized (this) {
+        if (closed) throw new IllegalStateException("Hardware graph is closed.");
+        identity = identity(device);
         ImuHandle existing = imus.get(identity);
         if (existing != null) {
             bindRuntime(device, existing);
@@ -428,14 +559,35 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         if (bindingFailures.containsKey(device) || isIdentityPending(identity)) {
             return unavailableImu(device);
         }
+        if (asynchronousBindings) {
+            submitBinding(device);
+            return unavailableImu(device);
+        }
+        pendingIdentities.merge(identity, 1, Integer::sum);
+        }
+        ImuHandle prepared = null;
         try {
-            return installImu(device, prepareImu(device));
+            prepared = prepareImu(device);
+            synchronized (this) {
+                if (closed) throw new IllegalStateException("Hardware graph is closed.");
+                ImuHandle installed = installImu(device, prepared);
+                prepared = null;
+                return installed;
+            }
         } catch (RuntimeException exception) {
+            synchronized (this) {
             if (device.failurePolicy() == FailurePolicy.PANIC) {
                 throw exception;
             }
             recordBindingFailure(device, exception);
             return unavailableImu(device);
+            }
+        } finally {
+            if (prepared != null) closeHandle(prepared);
+            synchronized (this) {
+                pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
+                notifyAll();
+            }
         }
     }
 
@@ -463,7 +615,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             installed = prepared;
             imus.put(identity, installed);
         } else if (installed != prepared) {
-            closeHandle(prepared);
+            throw new IllegalStateException("IMU was concurrently bound: " + identity.key());
         }
         bindRuntime(device, installed);
         clearFailure(device);
@@ -710,7 +862,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private void retryBindings(long nowNanos) {
         if (bindingFailures.isEmpty()) return;
         for (Object declaration : new ArrayList<>(bindingFailures.keySet())) {
-            if (pendingBindings.containsKey(declaration)) continue;
+            if (pendingBindings.containsKey(declaration) || isIdentityPending(identityOf(declaration))) continue;
             RefreshBackoff backoff = bindingRetryBackoffs.get(declaration);
             if (backoff != null && nowNanos < backoff.retryAtNanos()) continue;
             submitBinding(declaration);
@@ -721,16 +873,25 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         HardwareIdentity identity = identityOf(declaration);
         pendingBindings.put(declaration, identity);
         pendingIdentities.merge(identity, 1, Integer::sum);
-        binder().execute(() -> attemptBinding(declaration));
+        try {
+            binder().execute(() -> attemptBinding(declaration));
+        } catch (RuntimeException exception) {
+            pendingBindings.remove(declaration);
+            pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
+            recordBinderFailure(declaration, exception);
+        }
     }
 
     private ExecutorService binder() {
         if (binderExecutor == null) {
-            binderExecutor = Executors.newSingleThreadExecutor(runnable -> {
+            var executor = new java.util.concurrent.ThreadPoolExecutor(4, 4, 10, TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<Runnable>(256), runnable -> {
                 Thread thread = new Thread(runnable, "athena-hardware-binder");
                 thread.setDaemon(true);
                 return thread;
             });
+            executor.allowCoreThreadTimeOut(true);
+            binderExecutor = executor;
         }
         return binderExecutor;
     }
@@ -740,6 +901,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * {@link Error} from a vendor library is recorded as a failure too, so the declaration is not retried every cycle.
      */
     private void attemptBinding(Object declaration) {
+        synchronized (this) { runningBindings.add(declaration); }
         try {
             if (declaration instanceof MotorDevice motor) {
                 attemptMotor(motor);
@@ -756,6 +918,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
         } finally {
             synchronized (this) {
+                runningBindings.remove(declaration);
                 HardwareIdentity identity = pendingBindings.remove(declaration);
                 if (identity != null) {
                     pendingIdentities.computeIfPresent(identity, (key, count) -> count > 1 ? count - 1 : null);
@@ -770,7 +933,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         try {
             MotorHandle leader = null;
             synchronized (this) {
-                if (closed || !bindingFailures.containsKey(device)) return;
+                if (closed || (!bindingFailures.containsKey(device) && !pendingBindings.containsKey(device))) return;
                 if (motors.containsKey(identity(device))) {
                     createMotor(device);
                     return;
@@ -779,7 +942,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                     MotorDevice leaderDevice = device.follower().leader();
                     leader = motors.get(identity(leaderDevice));
                     if (leader == null) {
-                        throw new IllegalStateException(
+                        throw new DependencyPending(
                                 "Motor " + HardwareIdentity.motor(leaderDevice).key() + " is not bound yet.");
                     }
                 }
@@ -791,18 +954,18 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             return;
         }
+        boolean release = true;
         synchronized (this) {
-            if (closed) {
-                closeHandle(prepared.created());
-                return;
-            }
-            try {
-                installMotor(device, prepared);
-            } catch (RuntimeException exception) {
-                closeHandle(prepared.created());
-                recordBinderFailure(device, exception);
+            if (!closed) {
+                try {
+                    installMotor(device, prepared);
+                    release = false;
+                } catch (RuntimeException exception) {
+                    recordBinderFailure(device, exception);
+                }
             }
         }
+        if (release) closeHandle(prepared.created());
     }
 
     private void attemptEncoder(EncoderDevice device) {
@@ -810,7 +973,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         try {
             MotorHandle motor;
             synchronized (this) {
-                if (closed || !bindingFailures.containsKey(device)) return;
+                if (closed || (!bindingFailures.containsKey(device) && !pendingBindings.containsKey(device))) return;
                 EncoderHandle existing = encoders.get(identity(device));
                 if (existing != null) {
                     bindRuntime(device, existing);
@@ -826,25 +989,25 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             return;
         }
+        boolean release = true;
         synchronized (this) {
-            if (closed) {
-                closeHandle(prepared);
-                return;
-            }
-            try {
-                installEncoder(device, prepared);
-            } catch (RuntimeException exception) {
-                closeHandle(prepared);
-                recordBinderFailure(device, exception);
+            if (!closed) {
+                try {
+                    installEncoder(device, prepared);
+                    release = false;
+                } catch (RuntimeException exception) {
+                    recordBinderFailure(device, exception);
+                }
             }
         }
+        if (release) closeHandle(prepared);
     }
 
     private void attemptImu(ImuDevice device) {
         ImuHandle prepared;
         try {
             synchronized (this) {
-                if (closed || !bindingFailures.containsKey(device)) return;
+                if (closed || (!bindingFailures.containsKey(device) && !pendingBindings.containsKey(device))) return;
                 ImuHandle existing = imus.get(identity(device));
                 if (existing != null) {
                     bindRuntime(device, existing);
@@ -859,18 +1022,18 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             }
             return;
         }
+        boolean release = true;
         synchronized (this) {
-            if (closed) {
-                closeHandle(prepared);
-                return;
-            }
-            try {
-                installImu(device, prepared);
-            } catch (RuntimeException exception) {
-                closeHandle(prepared);
-                recordBinderFailure(device, exception);
+            if (!closed) {
+                try {
+                    installImu(device, prepared);
+                    release = false;
+                } catch (RuntimeException exception) {
+                    recordBinderFailure(device, exception);
+                }
             }
         }
+        if (release) closeHandle(prepared);
     }
 
     private HardwareIdentity identityOf(Object declaration) {
@@ -894,8 +1057,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
      * once per backoff step (the binder runs once per step, never once per cycle).
      */
     private void recordBinderFailure(Object declaration, RuntimeException exception) {
+        if (closed) return;
         recordBindingFailure(declaration, exception);
-        operationFailures.put(declaration, exception);
+        if (!(exception instanceof DependencyPending)) operationFailures.put(declaration, exception);
     }
 
     private RefreshBackoff nextBackoff(Object declaration) {
@@ -956,6 +1120,7 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     /** Returns declarations that could not be bound during graph construction. */
     public synchronized List<BindingFailure> bindingFailures() {
         return bindingFailures.entrySet().stream()
+                .filter(entry -> !(entry.getValue() instanceof DependencyPending))
                 .map(entry -> new BindingFailure(entry.getKey(), entry.getValue()))
                 .toList();
     }
@@ -1038,10 +1203,13 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         return Math.min(2_000L, 100L << Math.min(failureCount - 1, 4));
     }
 
+    /** Explicit shutdown; may wait up to one second for binding workers, never from robot periodic. */
     @Override
     public void close() {
         ExecutorService binder;
+        List<Object> releases = new ArrayList<>();
         synchronized (this) {
+            if (closed) return;
             closed = true;
             binder = binderExecutor;
             binderExecutor = null;
@@ -1053,16 +1221,20 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
                     throw new IllegalStateException("Interrupted while waiting for hardware refresh to finish.", exception);
                 }
             }
-            closeAll(runtimeBindings);
+            releases.addAll(runtimeBindings.values());
             runtimeBindings.clear();
             runtimeBindingHandles.clear();
             motorLookups.clear();
             motorEpoch++;
-            closeAll(imus);
-            closeAll(encoders);
-            closeAll(motors);
+            releases.addAll(imus.values());
+            releases.addAll(encoders.values());
+            releases.addAll(motors.values());
+            imus.clear();
+            encoders.clear();
+            motors.clear();
             softwareFollowers.clear();
             softwareFollowerViews.clear();
+            followerConstraintViews.clear();
             motorGroups.clear();
             motorGroupArray = new MotorGroup[0];
             motorIdentities.clear();
@@ -1073,13 +1245,29 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
             refreshFailureSnapshotDirty = false;
             refreshBackoffs.clear();
             bindingRetryBackoffs.clear();
+            bindingFailures.clear();
+            operationFailures.clear();
             placeholders.clear();
             refreshTasks = new RefreshTask[0];
             refreshTaskHandleCount = -1;
             cycleSnapshot = HardwareCycleSnapshot.empty();
         }
+        // Native cleanup must never own the graph monitor. Vendor queues fence in-flight work first.
+        for (Object handle : releases) closeHandle(handle);
         if (binder != null) {
             stopBinder(binder);
+            synchronized (this) {
+                // shutdownNow removes queued lambdas without their finally blocks. Active prepares
+                // retain accounting until they exit; discarded queued descriptors are removed here.
+                var pending = pendingBindings.entrySet().iterator();
+                while (pending.hasNext()) {
+                    var entry = pending.next();
+                    if (runningBindings.contains(entry.getKey())) continue;
+                    pendingIdentities.computeIfPresent(entry.getValue(), (key, count) -> count > 1 ? count - 1 : null);
+                    pending.remove();
+                }
+                notifyAll();
+            }
         }
     }
 
@@ -1145,6 +1333,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record IntegratedEncoderHandle(EncoderDevice device, MotorHandle motor) implements EncoderHandle {
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return motor.configurationStatus();
+        }
         @Override
         public double positionRotations() {
             return motor.integratedPositionRotations();
@@ -1177,6 +1368,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         @Override
         public EncoderDevice device() {
             return delegate.device();
+        }
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return delegate.configurationStatus();
         }
 
         @Override
@@ -1233,6 +1427,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record AbsoluteMotorEncoderHandle(EncoderDevice device, MotorHandle motor) implements EncoderHandle {
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return motor.configurationStatus();
+        }
         @Override
         public double positionRotations() {
             return motor.absolutePositionRotations();
@@ -1346,12 +1543,19 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     private record RefreshBackoff(int failureCount, long retryAtNanos) {
     }
 
+    /** A queued dependency is not a hardware fault; retry with backoff without applying failure policy. */
+    private static final class DependencyPending extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private DependencyPending(String message) { super(message); }
+    }
+
     @FunctionalInterface
     private interface RuntimeBindingFactory {
         AutoCloseable bind();
     }
 
     private final class GroupWiring implements MotorGroup.Wiring {
+        @Override public void constraintsChanged() { followerRevision++; }
         @Override
         public RuntimeException refreshFailure(HardwareIdentity identity) {
             return refreshFailures.isEmpty() ? null : refreshFailures.get(identity);
@@ -1395,6 +1599,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record UnavailableMotorHandle(MotorDevice device) implements MotorHandle {
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return new ca.frc6390.athena.hardware.backend.ConfigurationStatus(1, 0, true, "");
+        }
         @Override public void setPercentOutput(double percent) { }
         @Override public void setVoltage(double volts) { }
         @Override public double appliedVoltage() { return 0.0; }
@@ -1409,6 +1616,9 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record UnavailableEncoderHandle(EncoderDevice device) implements EncoderHandle {
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return new ca.frc6390.athena.hardware.backend.ConfigurationStatus(1, 0, true, "");
+        }
         @Override public double positionRotations() { return 0.0; }
         @Override public double absolutePositionRotations() { return 0.0; }
         @Override public double velocityRotationsPerSecond() { return 0.0; }
@@ -1417,6 +1627,11 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
     }
 
     private record UnavailableImuHandle(ImuDevice device) implements ImuHandle {
+        @Override public ca.frc6390.athena.hardware.backend.ConfigurationStatus configurationStatus() {
+            return new ca.frc6390.athena.hardware.backend.ConfigurationStatus(1, 0, true, "");
+        }
+        @Override public boolean isConnected() { return false; }
+        @Override public boolean isCalibrating() { return true; }
         @Override public double yawDegrees() { return 0.0; }
         @Override public double pitchDegrees() { return 0.0; }
         @Override public double rollDegrees() { return 0.0; }

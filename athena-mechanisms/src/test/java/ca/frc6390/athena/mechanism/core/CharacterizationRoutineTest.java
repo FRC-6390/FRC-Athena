@@ -44,9 +44,11 @@ class CharacterizationRoutineTest {
 
         held[0] = true;
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(mechanism.sysId);
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
 
         scheduler.teleopPeriodic(0.5, 0.02);
+        awaitExport(mechanism.sysId);
         assertEquals(1.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         SysIdSample sample = log.samples.get(log.samples.size() - 1);
         assertEquals(SysIdState.QUASISTATIC_FORWARD, sample.state());
@@ -55,6 +57,7 @@ class CharacterizationRoutineTest {
 
         held[0] = false;
         scheduler.teleopPeriodic(0.52, 0.02);
+        awaitExport(mechanism.sysId);
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(1, log.endCalls);
     }
@@ -73,10 +76,12 @@ class CharacterizationRoutineTest {
 
         scheduler.request(mechanism.test);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
         assertEquals(-6.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(SysIdState.DYNAMIC_REVERSE, log.samples.get(0).state());
 
         scheduler.teleopPeriodic(0.5, 0.02);
+        awaitExport(sysId);
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(1, log.endCalls);
     }
@@ -93,6 +98,7 @@ class CharacterizationRoutineTest {
         scheduler.request(mechanism.test);
         scheduler.request(control.neutral());
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
 
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(0, log.samples.size());
@@ -118,21 +124,26 @@ class CharacterizationRoutineTest {
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
         assertEquals(4.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         scheduler.teleopPeriodic(0.1, 0.02);
+        awaitExport(sysId);
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(1, log.endCalls);
         int samplesAtTimeout = log.samples.size();
 
         scheduler.teleopPeriodic(0.2, 0.02);
+        awaitExport(sysId);
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(samplesAtTimeout, log.samples.size());
         assertEquals(1, log.endCalls);
 
         held[0] = false;
         scheduler.teleopPeriodic(0.22, 0.02);
+        awaitExport(sysId);
         held[0] = true;
         scheduler.teleopPeriodic(0.24, 0.02);
+        awaitExport(sysId);
         assertEquals(4.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(samplesAtTimeout + 1, log.samples.size());
     }
@@ -142,13 +153,13 @@ class CharacterizationRoutineTest {
         RecordingContext hardware = new RecordingContext();
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.velocity(MOTOR, Units.Degrees).followers(FOLLOWER).feedback(ENCODER);
-        TestMechanism mechanism = new TestMechanism(
-                control,
-                control.characterization().maxVoltage(Volts.of(6.0)).exportTo(log).dynamicForward());
+        Characterization sysId = control.characterization().maxVoltage(Volts.of(6.0)).exportTo(log);
+        TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
 
         assertEquals(6.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(6.0, hardware.motor(FOLLOWER).voltage, 1.0e-9);
@@ -161,13 +172,13 @@ class CharacterizationRoutineTest {
         hardware.motor(MOTOR).telemetryUnavailable = true;
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
-        TestMechanism mechanism = new TestMechanism(
-                control,
-                control.characterization().maxVoltage(Volts.of(4.25)).exportTo(log).dynamicForward());
+        Characterization sysId = control.characterization().maxVoltage(Volts.of(4.25)).exportTo(log);
+        TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
 
         SysIdSample sample = log.samples.get(0);
         assertEquals(4.25, sample.appliedVoltage(), 1.0e-9);
@@ -192,9 +203,8 @@ class CharacterizationRoutineTest {
         hardware.encoder.positionRotations = Double.NaN;
         RecordingLog log = new RecordingLog();
         ControlBinding<?> control = Controls.position(MOTOR, Units.Degrees).feedback(ENCODER);
-        TestMechanism mechanism = new TestMechanism(
-                control,
-                control.characterization().exportTo(log).dynamicForward());
+        Characterization sysId = control.characterization().exportTo(log);
+        TestMechanism mechanism = new TestMechanism(control, sysId.dynamicForward());
         MechanismScheduler scheduler = MechanismScheduler.create(hardware).register(mechanism);
 
         scheduler.request(mechanism.test);
@@ -214,10 +224,13 @@ class CharacterizationRoutineTest {
 
         scheduler.request(mechanism.forward);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
         scheduler.cancel(mechanism.forward);
         scheduler.teleopPeriodic(0.02, 0.02);
+        awaitExport(sysId);
         scheduler.request(mechanism.reverse);
         scheduler.teleopPeriodic(0.04, 0.02);
+        awaitExport(sysId);
 
         assertEquals(2, log.samples.size());
         assertEquals(SysIdState.DYNAMIC_FORWARD, log.samples.get(0).state());
@@ -240,11 +253,21 @@ class CharacterizationRoutineTest {
 
         scheduler.request(mechanism.test);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
         assertEquals(4.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         scheduler.teleopPeriodic(0.02, 0.02);
+        awaitExport(sysId);
 
         assertEquals(0.0, hardware.motor(MOTOR).voltage, 1.0e-9);
         assertEquals(1, log.endCalls);
+    }
+
+    private static void awaitExport(Characterization characterization) {
+        try {
+            org.junit.jupiter.api.Assertions.assertTrue(characterization.awaitExport(java.time.Duration.ofSeconds(5)));
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted);
+        }
     }
 
     private static Velocity<VoltageUnit> voltsPerSecond(double rate) {
@@ -271,7 +294,9 @@ class CharacterizationRoutineTest {
 
         scheduler.request(action);
         scheduler.teleopPeriodic(0.0, 0.02);
+        awaitExport(sysId);
         scheduler.teleopPeriodic(elapsedSeconds, 0.02);
+        awaitExport(sysId);
 
         assertEquals(expectedVoltage, hardware.motor(MOTOR).voltage, 1.0e-9);
         SysIdSample sample = log.samples.get(log.samples.size() - 1);

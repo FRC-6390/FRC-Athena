@@ -6,8 +6,17 @@ public interface RuntimeFailureReporter {
 
     void warning(String message, Throwable cause);
 
-    static RuntimeFailureReporter stderr() {
-        return new RuntimeFailureReporter() {
+    /** Queues reports to a bounded worker; custom destinations are synchronous unless wrapped here. */
+    static AsyncRuntimeFailureReporter async(RuntimeFailureReporter destination) {
+        return destination instanceof AsyncRuntimeFailureReporter async ? async
+                : new AsyncRuntimeFailureReporter(destination);
+    }
+
+    static RuntimeFailureReporter stderr() { return async(StandardError.INSTANCE); }
+
+    final class StandardError {
+        private StandardError() { }
+        static final RuntimeFailureReporter INSTANCE = new RuntimeFailureReporter() {
             @Override public void error(String message, Throwable cause) {
                 System.err.println("ERROR: " + message);
                 if (cause != null) cause.printStackTrace(System.err);

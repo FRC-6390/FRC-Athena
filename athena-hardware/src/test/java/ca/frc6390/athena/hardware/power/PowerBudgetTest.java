@@ -23,6 +23,34 @@ class PowerBudgetTest {
     }
 
     @Test
+    void supplyConversionBoundsPowerForBothMotorDirectionsWithoutDividingByDuty() {
+        for (double emf : new double[] {0.0, 0.001, 4.0, -4.0, 15.0, -15.0}) {
+            for (double allocation : new double[] {0.0, 0.000001, 2.0, 50.0}) {
+                double current = PowerBudget.windingAmpsForSupply(allocation, 12.0, emf, 0.03);
+                assertTrue(Double.isFinite(current) && current >= 0.0);
+                double maximumPower = 0.03 * current * current + Math.abs(emf) * current;
+                assertEquals(12.0 * allocation, maximumPower, 1e-8);
+                // The opposite torque direction is either less motoring power or regeneration.
+                assertTrue(0.03 * current * current - Math.abs(emf) * current <= maximumPower);
+            }
+        }
+        assertEquals(Math.sqrt(12.0 * 30.0 / 0.03),
+                PowerBudget.windingAmpsForSupply(30.0, 12.0, 0.0, 0.03), EPS);
+        assertEquals(100.0, PowerBudget.windingAmpsForSupply(100.0, 12.0, 9.0, 0.03), EPS,
+                "at full duty, winding and supply amps agree");
+    }
+
+    @Test
+    void unusableConversionInputsNeverProduceNaNOrTurnZeroIntoNoLimit() {
+        assertEquals(0.0, PowerBudget.windingAmpsForSupply(0.0, 12.0, 4.0, 0.03));
+        assertEquals(0.0, PowerBudget.windingAmpsForSupply(10.0, Double.NaN, 4.0, 0.03));
+        assertEquals(0.0, PowerBudget.windingAmpsForSupply(10.0, 12.0, Double.NaN, 0.03));
+        assertEquals(0.0, PowerBudget.windingAmpsForSupply(10.0, 12.0, 4.0, 0.0));
+        assertEquals(Double.POSITIVE_INFINITY,
+                PowerBudget.windingAmpsForSupply(Double.POSITIVE_INFINITY, 12.0, 4.0, 0.03));
+    }
+
+    @Test
     void waterFillReturnsDemandWhenBudgetIsAmple() {
         double[] alloc = new double[3];
         PowerBudget.waterFill(new double[] {10, 20, 30}, new double[] {1, 1, 1}, 3, 100, alloc);

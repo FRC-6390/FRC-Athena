@@ -1,6 +1,8 @@
 package ca.frc6390.athena.vendor.ctre;
 
 import ca.frc6390.athena.hardware.backend.EncoderHandle;
+import ca.frc6390.athena.hardware.backend.ConfigurationQueue;
+import ca.frc6390.athena.hardware.backend.ConfigurationStatus;
 import ca.frc6390.athena.hardware.device.EncoderDevice;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
@@ -19,7 +21,7 @@ import java.util.function.Consumer;
 /**
  * CTRE CANcoder handle backed by Phoenix 6.
  */
-public final class CtreEncoderHandle implements EncoderHandle {
+public final class CtreEncoderHandle implements EncoderHandle, AutoCloseable {
     /**
      * Discontinuity point Athena expects from the CANcoder (Phoenix factory default): absolute
      * position is reported in [-0.5, 0.5) rotations before Athena applies its software offset.
@@ -30,6 +32,7 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
     private final EncoderDevice device;
     private final CANCoderController controller;
+    private final ConfigurationQueue configuration;
     private final Consumer<String> warnings;
     private boolean activated;
     private boolean inputsFresh;
@@ -54,12 +57,14 @@ public final class CtreEncoderHandle implements EncoderHandle {
         this.device = Objects.requireNonNull(device, "device");
         this.controller = Objects.requireNonNull(controller, "controller");
         this.warnings = Objects.requireNonNull(warnings, "warnings");
+        this.configuration = new ConfigurationQueue(device.defaultName(), () -> { });
     }
 
     @Override
     public EncoderDevice device() {
         return device;
     }
+    @Override public ConfigurationStatus configurationStatus() { return configuration.status(); }
 
     /**
      * Checks (or, when opted in, writes) the CANcoder magnet-sensor configuration.
@@ -77,6 +82,11 @@ public final class CtreEncoderHandle implements EncoderHandle {
         if (activated) {
             return;
         }
+        activated = true;
+        configuration.request(ConfigurationQueue.Key.ACTIVATION, device, this::activateNow);
+    }
+
+    private void activateNow() {
         if (device.baselineConfigApplied()) {
             String failure = controller.configureBaseline();
             if (failure != null) {
@@ -87,7 +97,6 @@ public final class CtreEncoderHandle implements EncoderHandle {
         } else {
             warnIfStoredConfigDiffers();
         }
-        activated = true;
     }
 
     private void warnIfStoredConfigDiffers() {
@@ -145,11 +154,13 @@ public final class CtreEncoderHandle implements EncoderHandle {
     @Override
     public void setPositionRotations(double rotations) {
         double safeRotations = finiteOrZero(rotations);
-        if (!controller.setPositionRotations(safeRotations)) {
-            throw new IllegalStateException("Failed to set position for " + device.defaultName());
-        }
-        positionRotations = safeRotations;
-        inputsFresh = true;
+        configuration.request(ConfigurationQueue.Key.POSITION, safeRotations, () -> {
+            if (!controller.setPositionRotations(safeRotations)) {
+                throw new IllegalStateException("Failed to set position for " + device.defaultName());
+            }
+            positionRotations = safeRotations;
+            inputsFresh = true;
+        });
     }
 
     @Override
@@ -159,6 +170,9 @@ public final class CtreEncoderHandle implements EncoderHandle {
 
     @Override
     public void refreshInputs() {
+        configuration.retryFailed();
+        if (configuration.status().failed()) throw new IllegalStateException(configuration.status().error());
+        if (!configuration.status().ready()) return;
         // The connection check reads the frame timestamps of this batch, so refresh first.
         controller.refreshSignals();
         if (!controller.isConnected()) {
@@ -176,7 +190,10 @@ public final class CtreEncoderHandle implements EncoderHandle {
         }
     }
 
+    @Override public void close() { configuration.close(controller::close); }
+
     interface CANCoderController {
+        default void close() { }
         default boolean isConnected() { return true; }
 
         /**
@@ -208,6 +225,7 @@ public final class CtreEncoderHandle implements EncoderHandle {
     }
 
     private static final class PhoenixCANCoderController implements CANCoderController {
+        @Override public void close() { encoder.close(); }
         private static final int CONFIG_ATTEMPTS = 3;
         private final CANcoder encoder;
         private final StatusSignal<Angle> position;

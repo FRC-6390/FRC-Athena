@@ -1,11 +1,12 @@
 //! Shared server state, per-subscriber pacing and realtime frame building (E1, E2).
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::Write;
-use std::net::{SocketAddr, TcpStream, UdpSocket};
-use std::sync::{Arc, Mutex};
+use std::net::{SocketAddr, UdpSocket};
+use std::sync::Arc;
 
-use arcp_core::v2::control::{encode_server, frame, Rate, ServerMessage};
+use arcp_core::v2::control::{Rate, ServerMessage};
+
+use super::transport::ControlWriter;
 use arcp_core::v2::pattern;
 use arcp_core::v2::record::{DictEntry, Dictionary, Marker, Record, StructSchema, FRAME_FLAG_FRAGMENT, FRAME_FLAG_KEYFRAME, FRAME_VERSION, RECORD_FRAME};
 use arcp_core::v2::{Entry, Value, Writer};
@@ -76,8 +77,8 @@ pub(crate) struct Session {
     pub id: u32,
     pub name: String,
     pub udp: Option<SocketAddr>,
-    /// Shared with the connection thread so replies can be written without the state lock.
-    pub writer: Arc<Mutex<TcpStream>>,
+    /// Ordered outbox shared with the connection thread; enqueue never waits on the socket.
+    pub writer: Arc<ControlWriter>,
     pub subs: Vec<Subscription>,
     pub next_sub_id: u32,
     pub sent: HashMap<u64, Sent>,
@@ -131,7 +132,7 @@ impl State {
         }
     }
 
-    pub fn add_session(&mut self, writer: Arc<Mutex<TcpStream>>) -> u32 {
+    pub fn add_session(&mut self, writer: Arc<ControlWriter>) -> u32 {
         let id = self.next_session_id;
         self.next_session_id += 1;
         self.sessions.push(Session {
@@ -524,12 +525,7 @@ pub(crate) fn send_frames(
     sent
 }
 
-/// Writes one length-prefixed control message. Returns false when the socket is unusable.
-pub(crate) fn send(writer: &Mutex<TcpStream>, request_id: u32, message: &ServerMessage) -> bool {
-    let body = encode_server(request_id, message);
-    let Ok(bytes) = frame(&body) else { return false };
-    match writer.lock() {
-        Ok(mut w) => w.write_all(&bytes).and_then(|()| w.flush()).is_ok(),
-        Err(_) => false,
-    }
+/// Queues a length-prefixed control message without waiting for the socket.
+pub(crate) fn send(writer: &ControlWriter, request_id: u32, message: &ServerMessage) -> bool {
+    writer.send(request_id, message)
 }

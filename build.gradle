@@ -509,6 +509,13 @@ project(':athena-wpilib') {
                 'java.library.path',
                 layout.buildDirectory.dir("wpilib-test-natives/${nativeDirectory}").get().asFile.absolutePath)
     }
+    // Photon estimator integration tests construct the real estimator, which reports its instance through HAL.
+    def photonTestNatives = tasks.named('extractWpilibTestNatives')
+    def photonTestNativePath = layout.buildDirectory.dir("wpilib-test-natives/${nativeDirectory}").get().asFile.absolutePath
+    project(':athena-vendor-photonvision').tasks.named('test') {
+        dependsOn photonTestNatives
+        systemProperty 'java.library.path', photonTestNativePath
+    }
 }
 
 project(':athena-vendor-ctre') {

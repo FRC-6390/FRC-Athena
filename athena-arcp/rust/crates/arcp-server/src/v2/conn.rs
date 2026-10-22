@@ -1,9 +1,8 @@
 //! One TCP control connection: typed requests in, structured replies out (E4, E5, E6).
 
 use std::io::Read;
-use std::net::{Shutdown, TcpStream};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::net::TcpStream;
+use std::sync::Arc;
 
 use arcp_core::v2::control::{
     decode_client, take_frame, ClientMessage, Rate, ReplyData, ServerMessage, Status,
@@ -13,16 +12,12 @@ use arcp_core::v2::pattern;
 
 use super::state::{send, Subscription};
 use super::Inner;
-
-/// Write timeout so a stalled client cannot block publishing forever.
-const WRITE_TIMEOUT: Duration = Duration::from_millis(500);
+use super::transport::ControlWriter;
 
 pub(crate) fn serve(inner: Arc<Inner>, stream: TcpStream) {
-    let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     let _ = stream.set_nodelay(true);
     let Ok(peer) = stream.peer_addr() else { return };
-    let Ok(write_half) = stream.try_clone() else { return };
-    let writer = Arc::new(Mutex::new(write_half));
+    let Ok(writer) = ControlWriter::start(&stream) else { return };
 
     // Register the session and announce the schema before any other traffic.
     let session_id = {
@@ -66,13 +61,13 @@ pub(crate) fn serve(inner: Arc<Inner>, stream: TcpStream) {
         }
     }
 
-    let _ = writer.lock().map(|w| w.shutdown(Shutdown::Both));
     inner.lock().remove_session(session_id);
+    writer.finish();
 }
 
 struct Connection {
     inner: Arc<Inner>,
-    writer: Arc<Mutex<TcpStream>>,
+    writer: Arc<ControlWriter>,
     session_id: u32,
     peer: std::net::SocketAddr,
     hello_done: bool,

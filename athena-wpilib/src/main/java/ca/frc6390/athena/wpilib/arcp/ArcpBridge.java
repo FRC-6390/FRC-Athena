@@ -50,12 +50,10 @@ public final class ArcpBridge implements AutoCloseable {
     private final Path statusDirectory;
     /** Background writer for the tuning and status files; null when the bridge is disabled. */
     private final ExportWriter exports;
+    private final RobotRuntime runtime;
     private double lastExportSeconds = Double.NaN;
-    /**
-     * The file store of the replay directory, looked up once: resolving it parses the mount table, which is far more
-     * expensive than the free-space query on the store itself.
-     */
-    private java.nio.file.FileStore replayStore;
+    /** Mount lookup and free-space queries run exclusively on this worker. */
+    private final DiskSpaceMonitor diskSpace;
     private String lastFailure = "";
     /** Contents of the last status.txt written, so an unchanged status costs no file write. */
     private String lastStatusText = "";
@@ -64,7 +62,7 @@ public final class ArcpBridge implements AutoCloseable {
     private boolean closed;
 
     private ArcpBridge(NativeArcpServer server, ArcpSignals signals, ArcpTuning tuning, ReplayRecorder recorder,
-            Supplier<Map<String, Object>> codeDefaults, Path statusDirectory, ExportWriter exports) {
+            Supplier<Map<String, Object>> codeDefaults, Path statusDirectory, ExportWriter exports, RobotRuntime runtime) {
         this.server = server;
         this.signals = signals;
         this.tuning = tuning;
@@ -72,6 +70,8 @@ public final class ArcpBridge implements AutoCloseable {
         this.codeDefaults = codeDefaults;
         this.statusDirectory = statusDirectory;
         this.exports = exports;
+        this.runtime = runtime;
+        diskSpace = recorder == null || exports == null ? null : new DiskSpaceMonitor(recorder.directory());
     }
 
     /**
@@ -159,7 +159,7 @@ public final class ArcpBridge implements AutoCloseable {
         ExportWriter writer = new ExportWriter();
         ArcpTuning tuning = new ArcpTuning(ArcpTuning.readDeployed(deployed), tuningExports, writer);
         ArcpBridge bridge = new ArcpBridge(server, signals, tuning, recorder,
-                () -> runtime.telemetryPersistence().codeDefaults(), statusDirectory, writer);
+                () -> runtime.telemetryPersistence().codeDefaults(), statusDirectory, writer, runtime);
         try {
             server.publishDictionary(signals.dictionary(), List.of());
         } catch (RuntimeException failure) {
@@ -249,7 +249,7 @@ public final class ArcpBridge implements AutoCloseable {
     }
 
     private static ArcpBridge disabled() {
-        return new ArcpBridge(null, null, null, null, Map::of, null, null);
+        return new ArcpBridge(null, null, null, null, Map::of, null, null, null);
     }
 
     /** TCP control port of the running server, or -1 when disabled. */
@@ -337,6 +337,14 @@ public final class ArcpBridge implements AutoCloseable {
             text.append("arcp.bytesLastWindow=").append(status.bytesLastWindow()).append('\n');
             text.append("arcp.throttled=").append(status.throttled().size()).append('\n');
             text.append("arcp.signals=").append(signals.valueCount()).append('\n');
+            text.append("arcp.publicationFailure=").append(Objects.toString(server.publicationFailure(), "")
+                    .replace('\n', ' ')).append('\n');
+            text.append("arcp.lastServiceNanos=").append(server.lastServiceNanos()).append('\n');
+            text.append("arcp.maxCallbackNanos=").append(server.maxCallbackNanos()).append('\n');
+            text.append("arcp.rejectedCallbacks=").append(server.rejectedCallbacks()).append('\n');
+            text.append("runtime.failureReportsDropped=").append(runtime.failureReportsDropped()).append('\n');
+            text.append("runtime.failureReportingError=").append(Objects.toString(runtime.failureReportingError(), "")
+                    .replace('\n', ' ')).append('\n');
             if (recorder != null) {
                 var policy = recorder.policy();
                 var retention = policy.retention();
@@ -344,20 +352,21 @@ public final class ArcpBridge implements AutoCloseable {
                 text.append("replay.bufferBytes=").append(policy.bufferBytes()).append('\n');
                 text.append("replay.pendingFlushes=").append(recorder.pendingFlushes()).append('\n');
                 text.append("replay.droppedFlushes=").append(recorder.droppedFlushes()).append('\n');
+                text.append("replay.pendingBytes=").append(recorder.pendingReplayBytes()).append('\n');
+                text.append("replay.recordingEvictions=").append(recorder.recordingEvictions()).append('\n');
+                text.append("replay.droppedCycles=").append(recorder.droppedCycles()).append('\n');
+                text.append("replay.rejectedCommands=").append(recorder.rejectedCommands()).append('\n');
+                text.append("replay.failedCommands=").append(recorder.failedCommands()).append('\n');
+                text.append("replay.lastFailure=").append(Objects.toString(recorder.lastFailure(), "")
+                        .replace('\n', ' ')).append('\n');
                 text.append("retention.maxTotalBytes=").append(retention.maxTotalBytes()).append('\n');
                 text.append("retention.maxFiles=").append(retention.maxFiles()).append('\n');
                 text.append("retention.minimumFreeDiskBytes=").append(retention.minimumFreeDiskBytes()).append('\n');
                 text.append("retention.keepsMatchesOverPractice=")
                         .append(retention.keepsMatchesOverPractice()).append('\n');
-                try {
-                    if (replayStore == null) {
-                        replayStore = Files.getFileStore(recorder.directory());
-                    }
-                    text.append("disk.usableBytes=").append(replayStore.getUsableSpace()).append('\n');
-                } catch (java.io.IOException | RuntimeException unavailable) {
-                    replayStore = null;
-                    text.append("disk.usableBytes=unknown\n");
-                }
+                diskSpace.request();
+                long usableBytes = diskSpace.usableBytes();
+                text.append("disk.usableBytes=").append(usableBytes < 0 ? "unknown" : Long.toString(usableBytes)).append('\n');
             }
             String statusText = text.toString();
             if (!statusText.equals(lastStatusText)) {
@@ -395,6 +404,7 @@ public final class ArcpBridge implements AutoCloseable {
             return;
         }
         closed = true;
+        if (diskSpace != null) diskSpace.close();
         if (exports != null) {
             exports.close();
         }

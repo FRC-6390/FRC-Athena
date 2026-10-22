@@ -209,8 +209,8 @@ class MechanismTelemetryTest {
         assertTrue(Double.isFinite(schema.values().get(control + "Reference").number()));
         assertTrue(Double.isFinite(schema.values().get(control + "ReferenceVelocity").number()));
         assertTrue(Double.isFinite(schema.values().get(control + "Error").number()));
-        assertTrue(Double.isNaN(schema.values().get(control + "Output").number()),
-                "a velocity loop on the motor controller has no software volts to report");
+        assertEquals(5.0, schema.values().get(control + "Output").number(), 1e-9,
+                "the host PID reports its voltage after the current-cycle power allocation");
 
         runtime.request(mechanism.volts);
         runtime.robotPeriodic(0.02, 0.02);

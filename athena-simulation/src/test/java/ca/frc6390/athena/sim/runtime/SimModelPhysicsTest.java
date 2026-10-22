@@ -82,6 +82,32 @@ class SimModelPhysicsTest {
                         + " coast=" + coastRate);
     }
 
+    @Test
+    void supplyAmpsAreNotAnEqualWindingTorqueLimitAtPartialDuty() {
+        MotorDevice unlimited = MotorDevice.of(MotorKinds.NEO, 70).currentLimit(Units.Amps.of(0));
+        MotorDevice supply = MotorDevice.of(MotorKinds.NEO, 71).currentLimit(Units.Amps.of(0))
+                .supplyCurrentLimit(Units.Amps.of(5));
+        MotorDevice phase = MotorDevice.of(MotorKinds.NEO, 72).currentLimit(Units.Amps.of(0))
+                .supplyCurrentLimit(Units.Amps.of(5)).statorCurrentLimit(Units.Amps.of(5));
+
+        // At 1 V/12 V duty, the stationary NEO draws about 9 A winding but less than 1 A
+        // from the battery. The host power pass owns supply enforcement; this physics runner
+        // must not silently replace its 5 A supply allowance with only 5 A of winding torque.
+        double unlimitedSpeed = speedAfterLowDutyStep(unlimited);
+        assertEquals(unlimitedSpeed, speedAfterLowDutyStep(supply), 1e-12);
+        assertTrue(speedAfterLowDutyStep(phase) < 0.75 * unlimitedSpeed,
+                "a separately declared 5 A phase limit still limits simulated torque");
+    }
+
+    private static double speedAfterLowDutyStep(MotorDevice motor) {
+        motor.encoder();
+        SimulationSession session = SimulationSession.create().model("current-domain-axis", SimModel.motor(motor)
+                .momentOfInertia(Units.KilogramSquareMeters.of(1.0)));
+        session.motor(motor).setVoltage(1.0);
+        session.step(Units.Seconds.of(0.02));
+        return session.motor(motor).integratedVelocityRotationsPerSecond();
+    }
+
     /** Decay rate (1/s) of a released 100:1, 0.5 kg m^2 axis, from the speed ratio after 50 ms. */
     private static double decayRate(boolean brake) {
         MotorDevice motor = brake

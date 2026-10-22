@@ -3,10 +3,15 @@ package ca.frc6390.athena.wpilib.system;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class SystemRuntimeTest {
@@ -74,9 +79,8 @@ class SystemRuntimeTest {
         FakeAccess access = new FakeAccess(256 * MIB, 7 * MIB);
         access.failSysctl = true;
         SystemRuntime runtime = new SystemRuntime(SystemTuning.automatic(), access);
-        assertEquals(MemoryPressure.CRITICAL, runtime.status().pressure());
-
         runtime.applyPlan();
+        assertEquals(MemoryPressure.CRITICAL, runtime.status().pressure());
         assertFalse(runtime.status().tuningVerified());
         assertEquals(3, runtime.status().failures().size());
         assertTrue(runtime.status().failures().get(0).contains("permission denied"));
@@ -106,6 +110,51 @@ class SystemRuntimeTest {
         assertTrue(lowMemory.escalationSamples() < automatic.escalationSamples());
     }
 
+    @Test
+    void constructorUpdateStatusAndCloseNeverWaitForBlockedSystemMetrics() throws Exception {
+        FakeAccess access = new FakeAccess(256 * MIB, 80 * MIB);
+        access.metricEntered = new CountDownLatch(1);
+        access.metricRelease = new CountDownLatch(1);
+        SystemRuntime runtime = new SystemRuntime(SystemTuning.automatic(), access);
+        try {
+            assertEquals(0, access.metricCalls.get(), "constructor performs no OS reads");
+            assertEquals("Unknown", runtime.status().target());
+            assertEquals(-1L, runtime.status().availableMemoryBytes());
+            runtime.start();
+            assertTrue(access.metricEntered.await(2, TimeUnit.SECONDS));
+            assertTimeoutPreemptively(Duration.ofMillis(200), () -> {
+                for (int cycle = 0; cycle < 1_000; cycle++) {
+                    runtime.update();
+                    assertEquals(-1L, runtime.status().availableMemoryBytes());
+                }
+                runtime.close();
+            });
+            assertEquals(1, access.metricCalls.get(), "one monitor worker owns the blocked call");
+            assertTrue(access.metricThread.startsWith("Athena-SystemMonitor"));
+        } finally {
+            access.metricRelease.countDown();
+            runtime.close();
+        }
+    }
+
+    @Test
+    void workerPublishesTuningOnceAndKeepsEarlierSnapshotsImmutable() throws Exception {
+        FakeAccess access = new FakeAccess(256 * MIB, 80 * MIB);
+        try (SystemRuntime runtime = new SystemRuntime(SystemTuning.automatic(), access)) {
+            SystemStatus pending = runtime.status();
+            runtime.start();
+            for (int cycle = 0; cycle < 100; cycle++) runtime.update();
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                while (!runtime.status().tuningComplete()) Thread.yield();
+            });
+            assertTrue(runtime.status().tuningVerified());
+            assertEquals(1, access.calls.stream().filter("vm.overcommit_memory=1"::equals).count());
+            assertEquals(80 * MIB, runtime.status().availableMemoryBytes());
+            assertFalse(pending.tuningComplete());
+            assertEquals(-1L, pending.availableMemoryBytes());
+        }
+    }
+
     private static final class FakeAccess implements SystemAccess {
         private final List<String> calls = new ArrayList<>();
         private Memory memory;
@@ -115,6 +164,10 @@ class SystemRuntimeTest {
         private boolean failSysctl;
         private boolean failSwap;
         private String target = "Test roboRIO";
+        private CountDownLatch metricEntered;
+        private CountDownLatch metricRelease;
+        private final AtomicInteger metricCalls = new AtomicInteger();
+        private volatile String metricThread = "";
 
         private FakeAccess(long total, long available) {
             memory = new Memory(total, available, 70 * MIB, 0, 0);
@@ -123,7 +176,19 @@ class SystemRuntimeTest {
         @Override public boolean realRobot() { return true; }
         @Override public boolean linux() { return true; }
         @Override public String target() { return target; }
-        @Override public Memory memory() { return memory; }
+        @Override public Memory memory() {
+            metricCalls.incrementAndGet();
+            metricThread = Thread.currentThread().getName();
+            if (metricEntered != null) {
+                metricEntered.countDown();
+                try {
+                    metricRelease.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return memory;
+        }
         @Override public String swapKind() { return zram ? "ZRAM" : "NONE"; }
         @Override public String readSysctl(String key) {
             if (key.endsWith("swappiness")) return "60";

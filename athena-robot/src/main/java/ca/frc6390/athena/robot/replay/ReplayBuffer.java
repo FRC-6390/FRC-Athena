@@ -33,9 +33,15 @@ final class ReplayBuffer {
     }
 
     void add(Segment segment) {
+        add(segment, maxBytes);
+    }
+
+    /** A slow disk writer shares the history budget with this ring; always retain the newest segment. */
+    void add(Segment segment, long availableBytes) {
         segments.addLast(segment);
         bytes += segment.records().length;
-        while (bytes > maxBytes && segments.size() > 1) {
+        long limit = Math.min(maxBytes, Math.max(0, availableBytes));
+        while (bytes > limit && segments.size() > 1) {
             bytes -= segments.removeFirst().records().length;
             evicted++;
         }
@@ -49,15 +55,47 @@ final class ReplayBuffer {
         return List.copyOf(drained);
     }
 
-    /** Returns copies of the segments that overlap the sequence range, oldest first. */
-    List<byte[]> backfill(long fromSequence, long toSequence) {
-        List<byte[]> groups = new ArrayList<>();
+    /** Selected immutable segment references; byte accounting includes each group's length prefix. */
+    record Selection(List<Segment> segments, int bytes, boolean complete) {
+    }
+
+    Selection select(long fromSequence, long toSequence, int maxBytes) {
+        if (maxBytes < 0) throw new IllegalArgumentException("Backfill byte limit must not be negative.");
+        List<Segment> selected = new ArrayList<>();
+        int used = 0;
         for (Segment segment : segments) {
             if (segment.firstSequence() < 0) continue;
             if (segment.lastSequence() < fromSequence || segment.firstSequence() > toSequence) continue;
-            groups.add(segment.records().clone());
+            long size = encodedSize(segment.records().length);
+            if (size > maxBytes - used) {
+                if (selected.isEmpty()) {
+                    throw new IllegalArgumentException("Replay segment exceeds the backfill response limit.");
+                }
+                return new Selection(List.copyOf(selected), used, false);
+            }
+            selected.add(segment);
+            used += (int) size;
         }
+        return new Selection(List.copyOf(selected), used, true);
+    }
+
+    /** Length-prefixed byte size on the control wire, computed without copying the segment. */
+    static long encodedSize(int length) {
+        int prefix = 1;
+        for (int rest = length; (rest >>>= 7) != 0;) prefix++;
+        return (long) length + prefix;
+    }
+
+    /** Returns bounded copies, oldest first. Selection happens before any segment is cloned. */
+    List<byte[]> backfill(long fromSequence, long toSequence, int maxBytes) {
+        Selection selection = select(fromSequence, toSequence, maxBytes);
+        List<byte[]> groups = new ArrayList<>(selection.segments().size());
+        for (Segment segment : selection.segments()) groups.add(segment.records().clone());
         return List.copyOf(groups);
+    }
+
+    List<byte[]> backfill(long fromSequence, long toSequence) {
+        return backfill(fromSequence, toSequence, ReplayStreamSink.DEFAULT_BACKFILL_BYTES);
     }
 
     boolean isEmpty() {

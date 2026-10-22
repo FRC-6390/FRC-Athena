@@ -2,6 +2,7 @@ package ca.frc6390.athena.wpilib.lifecycle;
 
 import static edu.wpi.first.units.Units.Seconds;
 import ca.frc6390.athena.auto.AutoChooser;
+import ca.frc6390.athena.hardware.power.PowerSnapshot;
 import ca.frc6390.athena.mechanism.core.EventContext;
 import ca.frc6390.athena.mechanism.core.LifecycleMode;
 import ca.frc6390.athena.mechanism.core.LifecyclePhase;
@@ -21,6 +22,7 @@ import ca.frc6390.athena.mechanism.persist.PersistentStore;
 import ca.frc6390.athena.mechanism.persist.TuningLocks;
 import java.nio.file.Path;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTracePublisher;
 import ca.frc6390.athena.wpilib.telemetry.MechanismTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
@@ -59,8 +61,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private SystemRuntime systemRuntime;
     /** Dashboard entries the mechanism telemetry creates per publish; the whole schema is bound in a few cycles. */
     private static final int TELEMETRY_BINDINGS_PER_PUBLISH = 48;
+    /** A count alone does not bound initialization work on a slower roboRIO. */
+    private static final double TELEMETRY_BINDING_BUDGET_SECONDS = 0.001;
     private SystemTelemetryPublisher systemTelemetryPublisher;
     private PowerTelemetryPublisher powerTelemetryPublisher;
+    private Supplier<PowerSnapshot> powerTelemetrySource;
     private LoopTimingPublisher loopTimingPublisher;
     private final List<SendableChooser<String>> dashboardAutoChoosers = new ArrayList<>();
     private final Map<Integer, DigitalInput> digitalInputs = new ConcurrentHashMap<>();
@@ -168,7 +173,8 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         lastSimulationTimestampSeconds = lastTimestampSeconds;
         runtime = createRuntime(RobotBase.isSimulation(), digitalInputs, simulationVisionField);
         runtime.powerBusVoltage(edu.wpi.first.wpilibj.RobotController::getBatteryVoltage);
-        runtime.failureReporter(new ca.frc6390.athena.robot.RuntimeFailureReporter() {
+        runtime.failureReporter(ca.frc6390.athena.robot.RuntimeFailureReporter.async(
+                new ca.frc6390.athena.robot.RuntimeFailureReporter() {
             @Override public void error(String message, Throwable cause) {
                 DriverStation.reportError(message, cause == null ? new StackTraceElement[0] : cause.getStackTrace());
             }
@@ -176,7 +182,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
             @Override public void warning(String message, Throwable cause) {
                 DriverStation.reportWarning(message, cause == null ? new StackTraceElement[0] : cause.getStackTrace());
             }
-        });
+        }));
         ActionRequests.bind(runtime::request);
         runtime.tuningLocks(tuningLocks);
         persistentStore = openPersistentStore();
@@ -193,16 +199,20 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
                         : traceProfile);
         // Creating dashboard entries is slow on the roboRIO: bind the schema a few entries per publish, so the
         // robot's first cycles do not each create hundreds of entries at once.
-        mechanismTelemetryPublisher = new MechanismTelemetryPublisher().bindBudget(TELEMETRY_BINDINGS_PER_PUBLISH);
+        mechanismTelemetryPublisher = new MechanismTelemetryPublisher().bindBudget(TELEMETRY_BINDINGS_PER_PUBLISH)
+                .bindTimeBudget(Seconds.of(TELEMETRY_BINDING_BUDGET_SECONDS));
         autoPreviewPublisher = new AutoPreviewPublisher();
         systemRuntime = SystemRuntime.create(systemTuning, RobotBase.isReal());
         systemTelemetryPublisher = new SystemTelemetryPublisher();
-        powerTelemetryPublisher = new PowerTelemetryPublisher();
+        powerTelemetryPublisher = new PowerTelemetryPublisher().bindBudget(2)
+                .bindTimeBudget(Seconds.of(TELEMETRY_BINDING_BUDGET_SECONDS));
+        powerTelemetrySource = runtime::powerSnapshot;
         loopTimingPublisher = new LoopTimingPublisher();
         systemRuntime.start();
         publishSystemTelemetry();
         publishMechanismTelemetry();
         run(LifecycleMode.ROBOT, LifecyclePhase.INIT, true, simulationActive());
+        runtime.preparePathsForStartup();
         replay.boot();
         publishAutoPreview();
     }
@@ -326,7 +336,7 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     private void publishPowerTelemetry() {
         if (runtime != null && powerTelemetryPublisher != null) {
-            powerTelemetryPublisher.publish(runtime.powerSnapshot());
+            powerTelemetryPublisher.publish(powerTelemetrySource);
         }
     }
 
@@ -359,11 +369,13 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         systemTelemetryPublisher.publish(status);
         if (status.pressure() != telemetryPeriodPressure) {
             // Only on a pressure change: the period is a unit-converted measure, rebuilt on every call.
-            mechanismTelemetryPublisher.readOnlyPeriod(switch (status.pressure()) {
+            var diagnosticPeriod = switch (status.pressure()) {
                 case NORMAL -> Seconds.of(0.10);
                 case WARNING -> Seconds.of(0.50);
                 case CRITICAL -> Seconds.of(1.00);
-            });
+            };
+            mechanismTelemetryPublisher.readOnlyPeriod(diagnosticPeriod);
+            powerTelemetryPublisher.readOnlyPeriod(diagnosticPeriod);
             telemetryPeriodPressure = status.pressure();
         }
         while (reportedSystemFailures < status.failures().size()) {
@@ -482,8 +494,11 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         failure = closeResource(failure, autoPreviewPublisher, "auto preview publisher");
         failure = closeResource(failure, systemTelemetryPublisher, "system telemetry publisher");
         failure = closeResource(failure, powerTelemetryPublisher, "power telemetry publisher");
+        powerTelemetrySource = null;
         failure = closeResource(failure, loopTimingPublisher, "loop timing publisher");
         failure = closeResource(failure, systemRuntime, "system runtime");
+        failure = closeResource(failure, persistentStore, "persistent store");
+        persistentStore = null;
         for (DigitalInput input : digitalInputs.values()) {
             failure = closeResource(failure, input, "digital input");
         }

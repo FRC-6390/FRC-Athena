@@ -41,12 +41,12 @@ class ExportWriterTest {
     }
 
     @Test
-    void writeAfterCloseIsWrittenOnTheCallingThread() throws Exception {
+    void writeAfterCloseNeverFallsBackToCallerDiskIo() {
         ExportWriter writer = new ExportWriter();
         writer.close();
         writer.write(temp, "status.txt", "after close");
 
-        assertEquals("after close", read("status.txt"));
+        assertTrue(!Files.exists(temp.resolve("status.txt")));
     }
 
     private String read(String name) throws Exception {

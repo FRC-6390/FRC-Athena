@@ -33,6 +33,7 @@ class PersistentTelemetryTest {
         scheduler.robotPeriodic(0.0, 0.02);
         String key = keyEndingWith(scheduler.telemetrySchema(), "/Values/speed");
         assertEquals(42.0, store.getDouble(key).orElseThrow());
+        assertTrue(store.flush(), "explicit off-loop durability before reopening");
         assertEquals(42.0, PersistentStore.open(directory).getDouble(key).orElseThrow());
 
         PersistedMechanism second = new PersistedMechanism();
@@ -50,11 +51,13 @@ class PersistentTelemetryTest {
         PersistentStore store = PersistentStore.open(directory);
         store.put("removed/field", 1.0);
         store.flush();
+        PersistentStore reloadedStore = PersistentStore.open(directory);
         MechanismScheduler scheduler = MechanismScheduler.create()
-                .persistentStore(PersistentStore.open(directory), null)
+                .persistentStore(reloadedStore, null)
                 .register(new PersistedMechanism())
                 .bindInMemoryRuntime();
         scheduler.telemetrySchema();
+        assertTrue(reloadedStore.flush(), "schema pruning queues its write");
         assertFalse(PersistentStore.open(directory).get("removed/field").isPresent());
     }
 

@@ -53,6 +53,17 @@ public final class SimulationSession {
     }
 
     /**
+     * Returns the nominal bus voltage used by the simulation's motor and physics models. The
+     * default simulation has a fixed supply; a robot runtime can override its power-bus supplier
+     * when a test provides a separate battery model.
+     *
+     * @return simulated bus voltage in volts
+     */
+    public double busVoltageVolts() {
+        return DcMotorModel.NOMINAL_VOLTAGE;
+    }
+
+    /**
      * Registers a simulation model.
      *
      * @param name model name
