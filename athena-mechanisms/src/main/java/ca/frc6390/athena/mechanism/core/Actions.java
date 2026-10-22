@@ -746,12 +746,17 @@ public final class Actions {
             return this;
         }
 
+        /** Appends a follow-up without changing this sequence, so an action can be reused safely. */
         @Override
         public Sequence then(Action action) {
             Action safeAction = Objects.requireNonNull(action, "action");
-            safeAction = withStartedUntilComplete(safeAction);
-            next = next == null ? safeAction : Actions.then(next, safeAction);
-            return this;
+            Sequence copy = new Sequence();
+            copy.steps.addAll(steps);
+            copy.started.addAll(started);
+            copy.timeoutSeconds = timeoutSeconds;
+            safeAction = copy.withStartedUntilComplete(safeAction);
+            copy.next = next == null ? safeAction : Actions.then(next, safeAction);
+            return copy;
         }
 
         public List<SequenceStep> steps() {
