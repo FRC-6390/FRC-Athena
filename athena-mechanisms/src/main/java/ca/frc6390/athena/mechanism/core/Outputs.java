@@ -4,11 +4,13 @@ package ca.frc6390.athena.mechanism.core;
  * Internal output value factories.
  */
 final class Outputs {
+    private static final Output NEUTRAL = new Neutral();
+
     private Outputs() {
     }
 
     static Output neutral() {
-        return new Neutral();
+        return NEUTRAL;
     }
 
     static Output percent(double percent) {
@@ -25,6 +27,12 @@ final class Outputs {
 
     static Output velocity(double velocity) {
         return new Velocity(velocity);
+    }
+
+    /** True only for Athena's immutable scalar values, whose object can survive a no-op clamp unchanged. */
+    static boolean isValue(Output output) {
+        return output instanceof Percent || output instanceof Voltage || output instanceof Position
+                || output instanceof Velocity;
     }
 
     private record Neutral() implements Output.Neutral {

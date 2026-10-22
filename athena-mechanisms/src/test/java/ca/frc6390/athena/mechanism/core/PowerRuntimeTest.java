@@ -141,6 +141,55 @@ class PowerRuntimeTest {
     }
 
     @Test
+    void independentReadFailuresDoNotSkipOtherInputsOrKeepAReplacedHandle() {
+        MotorDevice device = MotorDevice.of(MotorKinds.KRAKEN_X60, 90);
+        class ReadMotor implements MotorHandle {
+            int failing = -1;
+            final int[] calls = new int[4];
+            double supply = 7.0, stator = 42.0, volts = 6.0;
+            @Override public MotorDevice device() { return device; }
+            double read(int index, double value) {
+                calls[index]++;
+                if (failing == index) throw new IllegalStateException("unavailable telemetry " + index);
+                return value;
+            }
+            @Override public double supplyCurrentAmps() { return read(0, supply); }
+            @Override public double statorCurrentAmps() { return read(1, stator); }
+            @Override public double appliedVoltage() { return read(2, volts); }
+            @Override public double integratedVelocityRotationsPerSecond() { return read(3, 0.0); }
+        }
+        ReadMotor first = new ReadMotor();
+        ReadMotor[] current = {first};
+        ActionContext hardware = new ActionContext() {
+            @Override public MotorHandle motor(MotorDevice ignored) { return current[0]; }
+        };
+        PowerRuntime power = runtime(12.0, PowerPolicy.defaults().estimateBatteryResistance(false));
+        RuntimeOverrides overrides = new RuntimeOverrides();
+        double resistance = MotorConstants.forKind(MotorKinds.KRAKEN_X60)
+                .orElseThrow().resistance().in(Units.Ohms);
+        for (int failing = 0; failing < 4; failing++) {
+            first.failing = failing;
+            power.cycle(List.of(device), hardware, overrides, failing * DT);
+            assertEquals(failing == 1 ? 6.0 / resistance : 42.0,
+                    power.snapshot().motors().get(0).demandAmps(), 1e-9);
+            assertEquals(failing == 0 ? 3.0 / resistance : 7.0,
+                    power.snapshot().motors().get(0).supplyDemandAmps(), 1e-9);
+            for (int calls : first.calls) assertEquals(failing + 1, calls,
+                    "each telemetry getter is read once even when another getter throws");
+        }
+        ReadMotor replacement = new ReadMotor();
+        replacement.supply = 13.0;
+        replacement.stator = 99.0;
+        replacement.volts = 2.0;
+        current[0] = replacement;
+        power.cycle(List.of(device), hardware, overrides, 4.0 * DT);
+        assertEquals(99.0, power.snapshot().motors().get(0).demandAmps());
+        assertEquals(13.0, power.snapshot().motors().get(0).supplyDemandAmps());
+        for (int calls : first.calls) assertEquals(4, calls, "the previous handle is no longer read");
+        for (int calls : replacement.calls) assertEquals(1, calls);
+    }
+
+    @Test
     void userConfigurationChangeReachesTheCapOnTheNextCycle() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 72).currentLimit(Units.Amps.of(60));
         Hardware hardware = new Hardware();

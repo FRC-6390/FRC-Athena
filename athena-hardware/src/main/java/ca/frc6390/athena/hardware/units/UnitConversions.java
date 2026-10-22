@@ -2,6 +2,9 @@ package ca.frc6390.athena.hardware.units;
 
 import edu.wpi.first.units.Unit;
 import edu.wpi.first.units.Units;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -10,7 +13,21 @@ import java.util.Objects;
  * base-unit magnitudes relate, for the primitive hot paths that cannot call {@code in}.
  */
 public final class UnitConversions {
+    // WPILib's derived-unit lookup builds a key even when the unit already exists. These
+    // common immutable position units are used for live typed targets. Keep a fixed identity
+    // table so arbitrary user-created units do not accumulate in another global cache.
+    private static final Map<Unit, Unit> COMMON_RATES = commonRates();
+
     private UnitConversions() {
+    }
+
+    private static Map<Unit, Unit> commonRates() {
+        Map<Unit, Unit> rates = new IdentityHashMap<>();
+        for (Unit unit : new Unit[] { Units.Rotations, Units.Degrees, Units.Radians,
+                Units.Meters, Units.Centimeters, Units.Millimeters, Units.Inches, Units.Feet }) {
+            rates.put(unit, unit.per(Units.Seconds));
+        }
+        return Collections.unmodifiableMap(rates);
     }
 
     /**
@@ -62,6 +79,7 @@ public final class UnitConversions {
      * @return unit per second
      */
     public static Unit perSecond(Unit unit) {
-        return unit.per(Units.Seconds);
+        Unit common = COMMON_RATES.get(unit);
+        return common == null ? unit.per(Units.Seconds) : common;
     }
 }

@@ -68,6 +68,30 @@ class ActionsTest {
     }
 
     @Test
+    void composedActionsIsolateMutableListsAndRejectNullChildren() {
+        Action first = MOTOR.percent(0.2);
+        Action second = MOTOR.percent(0.4);
+        java.util.ArrayList<Action> source = new java.util.ArrayList<>(List.of(first, second));
+        Actions.Parallel parallel = new Actions.Parallel(source);
+        Actions.Race race = new Actions.Race(source);
+        Actions.Deadline deadline = new Actions.Deadline(first, source.subList(1, 2));
+
+        source.set(0, MOTOR.percent(0.8));
+        source.clear();
+
+        assertEquals(List.of(first, second), parallel.Actions());
+        assertEquals(List.of(first, second), race.Actions());
+        assertEquals(List.of(first, second), deadline.Actions());
+        assertThrows(UnsupportedOperationException.class, () -> race.Actions().set(0, second));
+        assertThrows(NullPointerException.class,
+                () -> new Actions.Parallel(java.util.Arrays.asList(first, null)));
+        assertThrows(NullPointerException.class,
+                () -> new Actions.Race(java.util.Arrays.asList(first, null)));
+        assertThrows(NullPointerException.class,
+                () -> new Actions.Deadline(first, java.util.Arrays.asList(second, null)));
+    }
+
+    @Test
     void hooksAcceptDeviceActionsDirectly() {
         HookBinding hook = Events.when(() -> true).active().onStart(MOTOR.encoder().setPosition(1.0));
 

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.Unit;
 import org.junit.jupiter.api.Test;
 
 class UnitConversionsTest {
@@ -37,6 +38,20 @@ class UnitConversionsTest {
         assertEquals(360.0, UnitConversions.factor(Units.Rotations, Units.Degrees), 1e-9);
         assertThrows(IllegalArgumentException.class,
                 () -> UnitConversions.factor(Units.Degrees, Units.Inches));
+    }
+
+    @Test
+    void rateUnitsPreserveScaleAndDimensionForCommonAndDerivedUnits() {
+        Unit custom = Units.derive(Units.Meters).splitInto(7).named("seventh meter").symbol("m/7").make();
+        for (Unit unit : new Unit[] { Units.Rotations, Units.Degrees, Units.Radians,
+                Units.Meters, Units.Centimeters, Units.Millimeters, Units.Inches, Units.Feet,
+                custom, Units.Volts, Units.Seconds }) {
+            Unit expected = unit.per(Units.Seconds);
+            Unit actual = UnitConversions.perSecond(unit);
+            assertTrue(UnitConversions.sameDimension(expected, actual));
+            assertEquals(expected.toBaseUnits(1.0), actual.toBaseUnits(1.0), 1e-12);
+            assertEquals(expected.fromBaseUnits(1.0), actual.fromBaseUnits(1.0), 1e-12);
+        }
     }
 
     @Test

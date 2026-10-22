@@ -19,6 +19,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class PowerCommandPlanTest {
@@ -299,6 +300,123 @@ class PowerCommandPlanTest {
                 assertEquals(expectedCurrent, power.capAmps(device), 1e-9);
                 assertEquals(0.5, power.snapshot().motors().get(0).derateFraction());
             }
+        }
+    }
+
+    @Test
+    void liveFollowerEndpointsAndLimitsMatchIndependentVoltageIntervalAcrossCycles() {
+        Random random = new Random(639022L);
+        MotorDevice root = MotorDevice.of(MotorKinds.KRAKEN_X60, 17);
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 18);
+        Hardware hardware = new Hardware();
+        RuntimeOverrides overrides = overrides(hardware);
+        PowerRuntime power = power();
+        // Both winding caps stay below 200 A. At <=12 V, the two positive loads therefore
+        // fit the nearly 600 A budget, isolating the exact local physical constraints here.
+        power.policy(PowerPolicy.defaults().estimateBatteryResistance(false).floor(Units.Volts.of(0.01)));
+        Object command = new Object();
+        List<MotorDevice> motors = List.of(root, follower);
+        MotorHandle[] handles = {hardware.motor(root), hardware.motor(follower)};
+        double[] local = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
+        for (int cycle = 0; cycle < 400; cycle++) {
+            double lower = Double.NEGATIVE_INFINITY, upper = Double.POSITIVE_INFINITY;
+            for (int index = 0; index < handles.length; index++) {
+                Motor motor = (Motor) handles[index];
+                motor.backEmf = -18.0 + 36.0 * random.nextDouble();
+                motor.commandScale = (random.nextBoolean() ? 1.0 : -1.0)
+                        * (0.5 + random.nextDouble());
+                motor.nativeSupply = random.nextBoolean();
+                double windingLimit = 20.0 + random.nextInt(181);
+                double supplyLimit = 1.0 + random.nextInt(240);
+                overrides.statorLimit(motors.get(index), windingLimit);
+                overrides.supplyLimit(motors.get(index), supplyLimit);
+                double emf = motor.backEmf, scale = motor.commandScale;
+                double a = (emf - windingLimit * RESISTANCE) / scale;
+                double b = (emf + windingLimit * RESISTANCE) / scale;
+                lower = Math.max(lower, Math.min(a, b));
+                upper = Math.min(upper, Math.max(a, b));
+                lower = Math.max(lower, -BUS / Math.abs(scale));
+                upper = Math.min(upper, BUS / Math.abs(scale));
+                double rootDiscriminant = Math.sqrt(emf * emf + 4.0 * supplyLimit * BUS * RESISTANCE);
+                a = 0.5 * (emf - rootDiscriminant) / scale;
+                b = 0.5 * (emf + rootDiscriminant) / scale;
+                lower = Math.max(lower, Math.min(a, b));
+                upper = Math.min(upper, Math.max(a, b));
+            }
+            double candidate = -20.0 + 40.0 * random.nextDouble();
+            double anchor = hardware.motor(root).backEmf / hardware.motor(root).commandScale;
+            double pathLower = Math.max(lower, Math.min(anchor, candidate));
+            double pathUpper = Math.min(upper, Math.max(anchor, candidate));
+            boolean feasible = pathLower <= pathUpper;
+            double expected = candidate >= anchor ? pathUpper : pathLower;
+            power.beginCycle(motors, hardware, overrides, cycle * 0.02);
+            power.registerCommand(command, motors, handles, candidate, local);
+            power.planCommands();
+
+            assertEquals(!feasible, power.commandSuppressed(command), "cycle " + cycle);
+            if (feasible) {
+                assertFalse(power.snapshot().shedding());
+                assertEquals(expected, power.plannedVoltage(command, Double.NaN), 1e-8, "cycle " + cycle);
+            }
+        }
+    }
+
+    @Test
+    void safeRequestedSupplyDoesNotHideFollowerLoadAtTheZeroFactorEndpoint() {
+        MotorDevice root = MotorDevice.of(MotorKinds.KRAKEN_X60, 19).statorCurrentLimit(Units.Amps.of(10));
+        MotorDevice follower = MotorDevice.of(MotorKinds.KRAKEN_X60, 20)
+                .statorCurrentLimit(Units.Amps.of(400)).supplyCurrentLimit(Units.Amps.of(1));
+        Hardware hardware = new Hardware();
+        hardware.motor(root).backEmf = 8.0;
+        PowerRuntime power = power();
+        Object command = new Object();
+        List<MotorDevice> motors = List.of(root, follower);
+        power.beginCycle(motors, hardware, overrides(hardware), 0.0);
+        power.registerCommand(command, motors, new MotorHandle[] {hardware.motor(root), hardware.motor(follower)},
+                0.0, new double[] {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY});
+        power.planCommands();
+
+        assertTrue(power.commandSuppressed(command),
+                "the zero-volt request draws no supply, but root winding cap keeps voltage near 8 V where follower exceeds 1 A");
+    }
+
+    @Test
+    void voltageBoundaryOverspeedAndMissingElectricalFeedbackRetainPhysicalGuards() {
+        MotorDevice device = MotorDevice.of(MotorKinds.KRAKEN_X60, 21)
+                .statorCurrentLimit(Units.Amps.of(10)).supplyCurrentLimit(Units.Amps.of(100));
+        Hardware hardware = new Hardware();
+        Motor motor = hardware.motor(device);
+        RuntimeOverrides overrides = overrides(hardware);
+        PowerRuntime power = power();
+        Object command = new Object();
+        List<MotorDevice> motors = List.of(device);
+        for (int cycle = 0; cycle < 2; cycle++) {
+            motor.backEmf = BUS;
+            power.beginCycle(motors, hardware, overrides, cycle * 0.02);
+            power.registerCommand(command, motors, new MotorHandle[] {motor}, BUS + cycle * 0.0001,
+                    new double[] {Double.POSITIVE_INFINITY});
+            power.planCommands();
+            assertFalse(power.commandSuppressed(command));
+            assertEquals(BUS, power.plannedVoltage(command, Double.NaN), 1e-10,
+                    "an endpoint exactly at the bus is safe; a request just above it must remain capped");
+        }
+        motor.backEmf = 13.0;
+        power.beginCycle(motors, hardware, overrides, 0.04);
+        power.registerCommand(command, motors, new MotorHandle[] {motor}, 0.0,
+                new double[] {Double.POSITIVE_INFINITY});
+        power.planCommands();
+        assertTrue(power.commandSuppressed(command), "overspeed winding interval lies wholly above the bus limit");
+
+        motor.nativeSupply = false;
+        motor.measuredWinding = 50.0;
+        for (double unusableSpeed : new double[] {Double.NaN, Double.POSITIVE_INFINITY}) {
+            motor.backEmf = unusableSpeed;
+            power.beginCycle(motors, hardware, overrides, 0.06);
+            power.registerCommand(command, motors, new MotorHandle[] {motor}, 6.0,
+                    new double[] {Double.POSITIVE_INFINITY});
+            power.planCommands();
+            assertTrue(power.commandSuppressed(command));
+            assertTrue(power.snapshot().motors().get(0).status().contains("Supply limit unavailable"));
         }
     }
 }

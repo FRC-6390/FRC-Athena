@@ -220,8 +220,8 @@ final class PowerRuntime {
             state.declaredSupplyLimit = config.supplyCurrentLimitAmps();
             state.planStatus = "";
             state.outputSuppressed = false;
-            state.derate = state.curve.raw().derateFractionCelsius(motor.raw().fusedTemperatureCelsius());
             state.temperatureCelsius = motor.raw().fusedTemperatureCelsius();
+            state.derate = state.curve.raw().derateFractionCelsius(state.temperatureCelsius);
             double statorLimit = config.statorCurrentLimitAmps() > 0
                     ? config.statorCurrentLimitAmps() : Double.POSITIVE_INFINITY;
             double declaredCap = statorLimit;
@@ -265,7 +265,7 @@ final class PowerRuntime {
                 : Double.isFinite(bus) ? bus + batteryOhms * totalSupply : Double.NaN;
         for (MotorState state : active) {
             ThermalModel model = state.device.thermalModel();
-            if (model == null || steppedThermals.add(model)) state.thermalStep(dt);
+            if (model != null && steppedThermals.add(model)) state.thermalStep(model, dt);
         }
     }
 
@@ -443,18 +443,22 @@ final class PowerRuntime {
                 // The bus limit is a physical feasibility constraint, rather than a post-allocation
                 // clip that would change one wheel's torque ratio independently of its profile group.
                 if (measuredVolts > 0.0 && Double.isFinite(measuredVolts)) {
-                    member.voltageChannel.inputs(null, Math.abs(member.scale * command.candidate), measuredVolts,
-                            0.0, value -> value, 1.0, member.voltageModel);
-                    member.voltageChannel.couplingGroup(group);
-                    member.voltageChannel.accountedLoad(false);
-                    member.voltageChannel.startupParticipant(false);
-                    channels.add(member.voltageChannel);
-                    member.voltageAdded = true;
+                    if (member.needsVoltageConstraint(measuredVolts)) {
+                        member.prepareVoltageConstraint();
+                        member.voltageChannel.inputs(null, Math.abs(member.scale * command.candidate), measuredVolts,
+                                0.0, value -> value, 1.0, member.voltageModel);
+                        member.voltageChannel.couplingGroup(group);
+                        member.voltageChannel.accountedLoad(false);
+                        member.voltageChannel.startupParticipant(false);
+                        channels.add(member.voltageChannel);
+                        member.voltageAdded = true;
+                    }
                 } else if (state.softwareSupplyLimit && state.declaredSupplyLimit > 0.0) {
                     group.groupSuppressed = true;
                     state.planStatus = "Supply limit unavailable";
                 }
-                if (member.known && state.declaredSupplyLimit > 0.0 && measuredVolts > 0.0) {
+                if (member.known && state.declaredSupplyLimit > 0.0 && measuredVolts > 0.0
+                        && member.needsSupplyConstraint(supply)) {
                     member.prepareSupplyConstraint();
                     member.supplyChannel.inputs(null, 0.0, member.supplyRadius, 0.0, value -> value, 1.0,
                             member.supplyModel);
@@ -614,7 +618,23 @@ final class PowerRuntime {
             model = known && state.conversionBusVolts > 0.0
                     ? electricalModel.inputs(currentAtZero, currentSlope, zeroVolts, slopeVolts,
                             state.conversionBusVolts) : this;
-            voltageModel.inputs(zeroVolts, slopeVolts, 0.0, 0.0, 1.0);
+        }
+        boolean needsVoltageConstraint(double busVolts) {
+            // An affine voltage stays between its endpoints for every common factor in [0,1].
+            // Keep this cycle's channel when either endpoint is out of bounds (including overspeed).
+            return !(Math.abs(scale * command.anchor) <= busVolts
+                    && Math.abs(scale * command.candidate) <= busVolts);
+        }
+        void prepareVoltageConstraint() {
+            voltageModel.inputs(scale * command.anchor, scale * command.slope, 0.0, 0.0, 1.0);
+        }
+        boolean needsSupplyConstraint(double requestedSupply) {
+            // For a known motor I=(V-E)/R and V=v0+v1*factor, the quadratic coefficient of
+            // V*I/bus is v1^2/(R*bus)>=0. Its maximum with zero is also convex. If both endpoints
+            // fit, every intermediate factor fits, including the clipped regenerative portion.
+            // Followers can draw at factor zero, so checking only the request would be unsafe.
+            return !(positiveSupply(0.0) <= state.declaredSupplyLimit
+                    && requestedSupply <= state.declaredSupplyLimit);
         }
         @Override public double currentAtZeroAmps() { return currentAtZero; }
         @Override public double currentSlopeAmps() { return currentSlope; }
@@ -761,10 +781,10 @@ final class PowerRuntime {
 
         void readInputs(MotorHandle handle, double bus) {
             updateConstants(handle.commandTarget().device().kind());
-            supplyAmps = read(handle::supplyCurrentAmps);
-            statorAmps = read(handle::statorCurrentAmps);
-            double volts = read(handle::appliedVoltage);
-            double rotationsPerSecond = read(handle::integratedVelocityRotationsPerSecond);
+            supplyAmps = readSupplyCurrent(handle);
+            statorAmps = readStatorCurrent(handle);
+            double volts = readVoltage(handle);
+            double rotationsPerSecond = readVelocity(handle);
             // A measured terminal voltage is a lower bound on its supplying bus. Do not assume
             // the policy floor still exists when bus telemetry is missing during a brownout.
             conversionBusVolts = Double.isFinite(bus) && bus > 0.0 ? bus
@@ -817,9 +837,7 @@ final class PowerRuntime {
                     ? demandAmps * Math.min(1.0, Math.max(0.0, amps) / supplyDemandAmps) : Math.max(0.0, amps);
         }
 
-        void thermalStep(double dt) {
-            ThermalModel model = device.thermalModel();
-            if (model == null) return;
+        void thermalStep(ThermalModel model, double dt) {
             if (handle != null) {
                 OptionalDouble vendor = handle.temperatureCelsius();
                 model.vendorReading(vendor == null || vendor.isEmpty() ? Double.NaN : vendor.getAsDouble());
@@ -828,12 +846,23 @@ final class PowerRuntime {
             temperatureCelsius = model.celsius();
         }
 
-        private static double read(java.util.function.DoubleSupplier reader) {
-            try {
-                return reader.getAsDouble();
-            } catch (RuntimeException exception) {
-                return Double.NaN;
-            }
+        // Direct reads retain the independent failure boundaries without creating four capturing
+        // method-reference objects per motor per cycle. Resolve the live handle on every read.
+        private static double readSupplyCurrent(MotorHandle handle) {
+            try { return handle.supplyCurrentAmps(); }
+            catch (RuntimeException exception) { return Double.NaN; }
+        }
+        private static double readStatorCurrent(MotorHandle handle) {
+            try { return handle.statorCurrentAmps(); }
+            catch (RuntimeException exception) { return Double.NaN; }
+        }
+        private static double readVoltage(MotorHandle handle) {
+            try { return handle.appliedVoltage(); }
+            catch (RuntimeException exception) { return Double.NaN; }
+        }
+        private static double readVelocity(MotorHandle handle) {
+            try { return handle.integratedVelocityRotationsPerSecond(); }
+            catch (RuntimeException exception) { return Double.NaN; }
         }
     }
 }

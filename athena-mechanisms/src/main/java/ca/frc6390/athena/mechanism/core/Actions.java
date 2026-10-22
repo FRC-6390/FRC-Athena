@@ -1830,12 +1830,9 @@ public final class Actions {
     }
 
     private static List<Action> copyStates(List<Action> Actions) {
-        Objects.requireNonNull(Actions, "Actions");
-        List<Action> copy = new ArrayList<>();
-        for (Action action : Actions) {
-            copy.add(Objects.requireNonNull(action, "action"));
-        }
-        return List.copyOf(copy);
+        // List.copyOf already rejects null elements and isolates mutable callers. It can also
+        // retain the immutable List.of used by the varargs factories, without a second copy.
+        return List.copyOf(Objects.requireNonNull(Actions, "Actions"));
     }
 
     private static boolean supportsTolerance(Action action) {
@@ -1877,13 +1874,16 @@ public final class Actions {
         return value;
     }
 
-    private static final class DeadlineActions extends java.util.AbstractList<Action> {
+    private static final class DeadlineActions extends java.util.AbstractList<Action>
+            implements java.util.RandomAccess {
         private final Action primary;
         private final List<Action> others;
+        private final int size;
 
         private DeadlineActions(Action primary, List<Action> others) {
             this.primary = primary;
             this.others = others;
+            this.size = others.size() + 1;
         }
 
         @Override
@@ -1896,7 +1896,7 @@ public final class Actions {
 
         @Override
         public int size() {
-            return others.size() + 1;
+            return size;
         }
     }
 }

@@ -1170,10 +1170,14 @@ final class OutputApplier {
 
     private Output saturate(ControlBinding<?> control, Output output) {
         if (output instanceof Output.Percent percent) {
-            return Outputs.percent(Math.max(-1.0, Math.min(1.0, percent.percent())));
+            double limited = Math.max(-1.0, Math.min(1.0, percent.percent()));
+            return Double.compare(limited, percent.percent()) == 0 && Outputs.isValue(output)
+                    ? output : Outputs.percent(limited);
         }
         if (output instanceof Output.Voltage voltage) {
-            return Outputs.voltage(Math.max(-12.0, Math.min(12.0, voltage.volts())));
+            double limited = Math.max(-12.0, Math.min(12.0, voltage.volts()));
+            return Double.compare(limited, voltage.volts()) == 0 && Outputs.isValue(output)
+                    ? output : Outputs.voltage(limited);
         }
         return output;
     }
@@ -1193,7 +1197,7 @@ final class OutputApplier {
         if (!isScalar(output)) return output;
         double value;
         if (!Constraints.hasStage(control.constraints(), ConstraintStage.OUTPUT)) {
-            // No output constraint: evaluation would allow the value unchanged.
+            if (Outputs.isValue(output)) return output;
             value = value(output);
         } else {
             Double requested = scalarValue(output);
@@ -1205,6 +1209,7 @@ final class OutputApplier {
                 return Outputs.neutral();
             }
             value = result.value();
+            if (Double.compare(value, requested) == 0 && Outputs.isValue(output)) return output;
         }
         if (output instanceof Output.Percent) return Outputs.percent(value);
         if (output instanceof Output.Voltage) return Outputs.voltage(value);
@@ -1266,13 +1271,15 @@ final class OutputApplier {
                 ? carrier.effort().limitValue()
                 : Double.POSITIVE_INFINITY;
         List<MotorDevice> leaders = state.binding.motors();
-        for (int i = 0; i < state.powerCaps.length; i++) {
-            state.powerCaps[i] = powerCapAmps(leaders.get(i));
+        boolean planned = preparing && electricalPass != null;
+        if (!planned) {
+            for (int i = 0; i < state.powerCaps.length; i++) {
+                state.powerCaps[i] = powerCapAmps(leaders.get(i));
+            }
         }
         double volts = candidate instanceof Output.Voltage voltage ? voltage.volts()
                 : candidate instanceof Output.Percent percent ? percent.percent() * EffortUnits.NOMINAL_VOLTS
                 : Double.NaN;
-        boolean planned = preparing && electricalPass != null;
         state.effort.advance(actionLimit, planned ? null : state.powerCaps, dtSeconds, volts, position, velocity);
         if (Double.isNaN(volts)) {
             return candidate;
@@ -1418,7 +1425,17 @@ final class OutputApplier {
     }
 
     private static boolean sameOutput(Output first, Output second) {
-        return mode(first).equals(mode(second)) && Double.compare(value(first), value(second)) == 0;
+        return first == second || outputKind(first) == outputKind(second)
+                && Double.compare(value(first), value(second)) == 0;
+    }
+
+    private static int outputKind(Output output) {
+        if (output instanceof Output.Percent) return 1;
+        if (output instanceof Output.Voltage) return 2;
+        if (output instanceof Output.Position) return 3;
+        if (output instanceof Output.Velocity) return 4;
+        if (output instanceof Output.Fault) return 5;
+        return 0;
     }
 
     private static String mode(Output output) {

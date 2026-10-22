@@ -58,6 +58,50 @@ class OutputPreparationTest {
     }
 
     @Test
+    void unchangedControllerRequestsStillReevaluateLiveOutputConstraintsAndNotifyOnce() {
+        Motor motor = new Motor(222);
+        Loop loop = new Loop(16.0);
+        double[] allowed = {20.0};
+        int[] evaluations = {0};
+        var liveClamp = new ca.frc6390.athena.mechanism.constraint.Constraint<Double>() {
+            @Override
+            public ca.frc6390.athena.mechanism.constraint.ConstraintResult<Double> evaluate(
+                    ca.frc6390.athena.mechanism.constraint.ConstraintContext<Double> context) {
+                evaluations[0]++;
+                return new ca.frc6390.athena.mechanism.constraint.ConstraintResult.Corrected<>(
+                        context.requested(), Math.min(context.requested(), allowed[0]));
+            }
+
+            @Override
+            public ca.frc6390.athena.mechanism.constraint.ConstraintStage stage() {
+                return ca.frc6390.athena.mechanism.constraint.ConstraintStage.OUTPUT;
+            }
+        };
+        ControlBinding<?> control = Controls.velocity(motor.device, Units.Rotations).loop(loop).constraints(liveClamp);
+        OutputApplier applier = OutputApplier.using(new ActionContext() {
+            @Override public MotorHandle motor(MotorDevice ignored) { return motor; }
+        });
+        for (int cycle = 0; cycle < 3; cycle++) {
+            applier.beginPreparation();
+            apply(applier, control);
+            applier.endCycle();
+            applier.commitPrepared();
+            assertEquals(12.0, motor.volts, "nominal voltage saturation still bounds an unchanged request");
+        }
+        allowed[0] = 4.0;
+        applier.beginPreparation();
+        apply(applier, control);
+        applier.endCycle();
+        applier.commitPrepared();
+
+        assertEquals(4.0, motor.volts, "a live constraint change is observed without changing the controller request");
+        assertEquals(4, evaluations[0]);
+        assertEquals(4, loop.calculations);
+        assertEquals(4, loop.notifications);
+        assertEquals(4.0, loop.appliedVolts);
+    }
+
+    @Test
     void deferredRequestsAndRetainedLoopContextsKeepTheirOwnStagingAndFeedback() {
         Motor first = new Motor(220);
         Motor second = new Motor(221);

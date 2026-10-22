@@ -357,6 +357,9 @@ public final class PowerPlanner {
             group.weight += channel.shareWeight();
             group.forwardModel &= channel.demandModel != null;
         }
+        // With staggering disabled every requested start is admitted immediately. Coupling still
+        // uses the full electrical groups above; no separate startup unions or member copies are needed.
+        if (staggerSeconds <= 0.0) return;
         for (Group group : groups) {
             StartGroup start = null;
             for (Channel channel : group.members) {
@@ -701,9 +704,9 @@ public final class PowerPlanner {
                 cap = base * (1.0 - sag.shedFraction());
             }
         }
-        double largeThreshold = largeThreshold(channel);
-        if (channel.startupParticipant && requested >= largeThreshold && !channel.admitted) {
-            cap = Math.min(cap, largeThreshold);
+        if (staggerSeconds > 0.0 && channel.startupParticipant && !channel.admitted) {
+            double largeThreshold = largeThreshold(channel);
+            if (requested >= largeThreshold) cap = Math.min(cap, largeThreshold);
         }
         if (profile != null && profile.rampAmpsPerSecond() > 0.0
                 && Double.isFinite(channel.lastCapAmps) && cap > channel.lastCapAmps) {
