@@ -13,6 +13,12 @@ import ca.frc6390.athena.sim.hardware.SimEncoderHandle;
 import ca.frc6390.athena.sim.hardware.SimMotorHandle;
 import ca.frc6390.athena.sim.runtime.SimPhysicsEngine;
 import ca.frc6390.athena.sim.runtime.SimulationSession;
+import edu.wpi.first.math.Matrix;
+import edu.wpi.first.math.Num;
+import edu.wpi.first.math.numbers.N1;
+import edu.wpi.first.math.numbers.N2;
+import edu.wpi.first.math.system.Discretization;
+import edu.wpi.first.math.system.LinearSystem;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.math.util.Units;
@@ -21,7 +27,6 @@ import edu.wpi.first.wpilibj.simulation.DCMotorSim;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
 import edu.wpi.first.wpilibj.simulation.FlywheelSim;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
@@ -99,28 +104,26 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
     }
 
     private static double commandVoltage(SimModel model, SimulationSession session, double position) {
-        List<MotorCommand> commands = new ArrayList<>();
-        for (MotorDevice motor : model.motors()) {
-            MotorCommand command = command(motor, session);
-            if (command != null) {
-                commands.add(command);
-            }
-        }
-        if (commands.isEmpty()) {
-            return 0.0;
-        }
-
         double volts = 0.0;
-        for (MotorCommand command : commands) {
+        double velocity = Double.NaN;
+        int count = 0;
+        List<MotorDevice> motors = model.motors();
+        for (int index = 0; index < motors.size(); index++) {
+            MotorCommand command = command(motors.get(index), session);
+            if (command == null) continue;
+            if (command.kind() == SimMotorHandle.CommandKind.VELOCITY && Double.isNaN(velocity)) {
+                velocity = averageVelocity(model, session);
+            }
             volts += switch (command.kind()) {
                 case NEUTRAL -> 0.0;
                 case PERCENT -> command.value() * 12.0;
                 case VOLTAGE -> command.value();
                 case POSITION -> (command.value() - position) * 12.0;
-                case VELOCITY -> (command.value() - averageVelocity(model, session)) * 6.0;
+                case VELOCITY -> (command.value() - velocity) * 6.0;
             };
+            count++;
         }
-        return clamp(volts / commands.size(), -12.0, 12.0);
+        return count == 0 ? 0.0 : clamp(volts / count, -12.0, 12.0);
     }
 
     private static MotorCommand command(MotorDevice motor, SimulationSession session) {
@@ -212,32 +215,47 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         return model.limits();
     }
 
-    private static void publish(
-            SimModel model,
-            SimulationSession session,
-            double mechanismPositionRotations,
-            double mechanismVelocityRotationsPerSecond) {
-        double motorPositionRotations = mechanismPositionRotations * gearing(model);
-        double motorVelocityRotationsPerSecond = mechanismVelocityRotationsPerSecond * gearing(model);
-        for (MotorDevice motor : model.motors()) {
-            session.motor(motor).state(motorPositionRotations, motorVelocityRotationsPerSecond);
+    /** Resolves immutable declaration relationships once, rather than rebuilding sets and streams per tick. */
+    private static final class Publication {
+        private final List<MotorDevice> motors;
+        private final List<EncoderDevice> encoders;
+        private final boolean[] integratedEncoders;
+        private final List<SimLimit> limits;
+        private final double gearing;
+
+        private Publication(SimModel model) {
+            motors = model.motors();
+            encoders = linkedEncoders(model);
+            integratedEncoders = new boolean[encoders.size()];
+            Set<EncoderDevice> integrated = new LinkedHashSet<>();
+            for (MotorDevice motor : motors) integrated.add(motor.encoder());
+            for (int index = 0; index < encoders.size(); index++) {
+                integratedEncoders[index] = integrated.contains(encoders.get(index));
+            }
+            limits = limits(model);
+            gearing = gearing(model);
         }
-        for (EncoderDevice encoderDevice : linkedEncoders(model)) {
-            boolean motorIntegrated = model.motors().stream()
-                    .anyMatch(motor -> motor.encoder().equals(encoderDevice));
-            SimEncoderHandle encoder = session.encoder(encoderDevice);
-            double position = motorIntegrated ? motorPositionRotations : mechanismPositionRotations;
-            double velocity = motorIntegrated
-                    ? motorVelocityRotationsPerSecond
-                    : mechanismVelocityRotationsPerSecond;
-            encoder.positionRotations(position)
-                    .absolutePositionRotations(position)
-                    .velocityRotationsPerSecond(velocity);
-        }
-        for (SimLimit limit : limits(model)) {
-            SimDigitalInputHandle input = session.digitalInput(limit.sensor());
-            boolean active = Math.abs(mechanismPositionRotations - limit.position()) <= limit.tolerance();
-            input.raw(limit.sensor().isInverted() ? !active : active);
+
+        private void publish(SimulationSession session, double position, double velocity) {
+            double motorPosition = position * gearing;
+            double motorVelocity = velocity * gearing;
+            for (int index = 0; index < motors.size(); index++) {
+                session.motor(motors.get(index)).state(motorPosition, motorVelocity);
+            }
+            for (int index = 0; index < encoders.size(); index++) {
+                boolean integrated = integratedEncoders[index];
+                SimEncoderHandle encoder = session.encoder(encoders.get(index));
+                double encoderPosition = integrated ? motorPosition : position;
+                encoder.positionRotations(encoderPosition)
+                        .absolutePositionRotations(encoderPosition)
+                        .velocityRotationsPerSecond(integrated ? motorVelocity : velocity);
+            }
+            for (int index = 0; index < limits.size(); index++) {
+                SimLimit limit = limits.get(index);
+                SimDigitalInputHandle input = session.digitalInput(limit.sensor());
+                boolean active = Math.abs(position - limit.position()) <= limit.tolerance();
+                input.raw(limit.sensor().isInverted() ? !active : active);
+            }
         }
     }
 
@@ -256,57 +274,70 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         return Math.max(minimum, Math.min(maximum, value));
     }
 
-    private interface ModelAdapter {
-        double step(SimModel model, SimulationSession session, double seconds);
+    private abstract static class ModelAdapter {
+        private final Publication publication;
+
+        private ModelAdapter(SimModel model) {
+            publication = new Publication(model);
+        }
+
+        protected final void publish(SimulationSession session, double position, double velocity) {
+            publication.publish(session, position, velocity);
+        }
+
+        abstract double step(SimModel model, SimulationSession session, double seconds);
     }
 
-    private static final class MotorAdapter implements ModelAdapter {
+    private static final class MotorAdapter extends ModelAdapter {
         private final DCMotorSim sim;
 
         private MotorAdapter(SimModel model) {
+            super(model);
             DCMotor gearbox = gearbox(model);
             double gearing = gearing(model);
-            sim = new DCMotorSim(
+            sim = new CachedMotorSim(
                     LinearSystemId.createDCMotorSystem(gearbox, momentOfInertia(model), gearing),
                     gearbox);
         }
 
         @Override
         public double step(SimModel model, SimulationSession session, double seconds) {
-            sim.setInput(commandVoltage(model, session, sim.getAngularPositionRotations()));
+            sim.setInput(0, commandVoltage(model, session, sim.getAngularPositionRotations()));
             sim.update(seconds);
-            publish(model, session, sim.getAngularPositionRotations(), sim.getAngularVelocityRPM() / 60.0);
+            publish(session, sim.getAngularPositionRotations(), sim.getAngularVelocityRPM() / 60.0);
             return sim.getCurrentDrawAmps();
         }
     }
 
-    private static final class FlywheelAdapter implements ModelAdapter {
+    private static final class FlywheelAdapter extends ModelAdapter {
         private final FlywheelSim sim;
         private double positionRotations;
 
         private FlywheelAdapter(SimModel model) {
+            super(model);
             DCMotor gearbox = gearbox(model);
             double gearing = gearing(model);
-            sim = new FlywheelSim(
+            sim = new CachedFlywheelSim(
                     LinearSystemId.createFlywheelSystem(gearbox, momentOfInertia(model), gearing),
                     gearbox);
         }
 
         @Override
         public double step(SimModel model, SimulationSession session, double seconds) {
-            sim.setInput(commandVoltage(model, session, positionRotations));
+            sim.setInput(0, commandVoltage(model, session, positionRotations));
             sim.update(seconds);
             double velocity = sim.getAngularVelocityRPM() / 60.0;
             positionRotations += velocity * seconds;
-            publish(model, session, positionRotations, velocity);
+            publish(session, positionRotations, velocity);
             return sim.getCurrentDrawAmps();
         }
     }
 
-    private static final class ArmAdapter implements ModelAdapter {
+    private static final class ArmAdapter extends ModelAdapter {
         private final SingleJointedArmSim sim;
 
         private ArmAdapter(SimModel model) {
+            super(model);
             Range range = range(model, Range.of(edu.wpi.first.units.Units.Rotations.of(-0.5), edu.wpi.first.units.Units.Rotations.of(0.5)));
             DCMotor gearbox = gearbox(model);
             sim = new SingleJointedArmSim(
@@ -323,17 +354,18 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         @Override
         public double step(SimModel model, SimulationSession session, double seconds) {
             double position = radiansToRotations(sim.getAngleRads());
-            sim.setInput(commandVoltage(model, session, position));
+            sim.setInput(0, commandVoltage(model, session, position));
             sim.update(seconds);
-            publish(model, session, radiansToRotations(sim.getAngleRads()), radiansToRotations(sim.getVelocityRadPerSec()));
+            publish(session, radiansToRotations(sim.getAngleRads()), radiansToRotations(sim.getVelocityRadPerSec()));
             return sim.getCurrentDrawAmps();
         }
     }
 
-    private static final class ElevatorAdapter implements ModelAdapter {
+    private static final class ElevatorAdapter extends ModelAdapter {
         private final ElevatorSim sim;
 
         private ElevatorAdapter(SimModel model) {
+            super(model);
             Range range = range(model, Range.of(edu.wpi.first.units.Units.Meters.of(0.0), edu.wpi.first.units.Units.Meters.of(1.0)));
             sim = new ElevatorSim(
                     gearbox(model),
@@ -348,9 +380,9 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
 
         @Override
         public double step(SimModel model, SimulationSession session, double seconds) {
-            sim.setInput(commandVoltage(model, session, sim.getPositionMeters()));
+            sim.setInput(0, commandVoltage(model, session, sim.getPositionMeters()));
             sim.update(seconds);
-            publish(model, session, sim.getPositionMeters(), sim.getVelocityMetersPerSecond());
+            publish(session, sim.getPositionMeters(), sim.getVelocityMetersPerSecond());
             return sim.getCurrentDrawAmps();
         }
     }
@@ -361,7 +393,7 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
      * force (linear) through the motor constants, so the inertia equals the one the characterization derives
      * from kA. Steps are split into fixed substeps so the stick-slip transitions stay stable.
      */
-    private static final class PlantAdapter implements ModelAdapter {
+    private static final class PlantAdapter extends ModelAdapter {
         private static final double MAX_SUBSTEP_SECONDS = 0.001;
         private static final double MAX_VOLTAGE = 12.0;
 
@@ -376,6 +408,7 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         private double velocity;
 
         private PlantAdapter(SimModel model, SimPlant plant) {
+            super(model);
             this.plant = plant;
             double torquePerVolt = plant.outputPerVolt();
             if (plant.rotary()) {
@@ -405,7 +438,7 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
                 advance(volts, substep);
             }
             double currentDraw = Math.abs(volts - plant.kVVoltsPerUnitPerSecond() * velocity) / resistanceTotalOhms;
-            publish(model, session, position, velocity);
+            publish(session, position, velocity);
             return currentDraw;
         }
 
@@ -448,6 +481,76 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             return plant.rotary()
                     ? plant.gravityVolts() * Math.cos(2.0 * Math.PI * position + plant.gravityOffsetRadians())
                     : plant.gravityVolts();
+        }
+    }
+
+    /**
+     * The motor and flywheel plants are linear and noiseless. WPILib normally discretizes their unchanged
+     * A/B matrices on every update. Keep the exact discretization for the last timestep and reuse private
+     * state/output storage; a changed timestep always recomputes it, without quantization.
+     */
+    private static final class CachedLinearStep<S extends Num, I extends Num, O extends Num> {
+        private final LinearSystem<S, I, O> plant;
+        private final double[] nextState;
+        private Matrix<S, S> discreteA;
+        private Matrix<S, I> discreteB;
+        private double lastSeconds = Double.NaN;
+
+        private CachedLinearStep(LinearSystem<S, I, O> plant) {
+            this.plant = plant;
+            nextState = new double[plant.getA().getNumRows()];
+        }
+
+        private void update(Matrix<S, N1> state, Matrix<I, N1> input, Matrix<O, N1> output, double seconds) {
+            if (seconds != lastSeconds) {
+                var discretized = Discretization.discretizeAB(plant.getA(), plant.getB(), seconds);
+                discreteA = discretized.getFirst();
+                discreteB = discretized.getSecond();
+                lastSeconds = seconds;
+            }
+            for (int row = 0; row < nextState.length; row++) {
+                double next = 0.0;
+                for (int col = 0; col < nextState.length; col++) next += discreteA.get(row, col) * state.get(col, 0);
+                double driven = 0.0;
+                for (int col = 0; col < input.getNumRows(); col++) driven += discreteB.get(row, col) * input.get(col, 0);
+                nextState[row] = next + driven;
+            }
+            for (int row = 0; row < nextState.length; row++) state.set(row, 0, nextState[row]);
+            for (int row = 0; row < output.getNumRows(); row++) {
+                double observed = 0.0;
+                for (int col = 0; col < nextState.length; col++) observed += plant.getC(row, col) * nextState[col];
+                double direct = 0.0;
+                for (int col = 0; col < input.getNumRows(); col++) direct += plant.getD(row, col) * input.get(col, 0);
+                output.set(row, 0, observed + direct);
+            }
+        }
+    }
+
+    private static final class CachedMotorSim extends DCMotorSim {
+        private final CachedLinearStep<N2, N1, N2> step;
+
+        private CachedMotorSim(LinearSystem<N2, N1, N2> plant, DCMotor gearbox) {
+            super(plant, gearbox);
+            step = new CachedLinearStep<>(plant);
+        }
+
+        @Override
+        public void update(double seconds) {
+            step.update(m_x, m_u, m_y, seconds);
+        }
+    }
+
+    private static final class CachedFlywheelSim extends FlywheelSim {
+        private final CachedLinearStep<N1, N1, N1> step;
+
+        private CachedFlywheelSim(LinearSystem<N1, N1, N1> plant, DCMotor gearbox) {
+            super(plant, gearbox);
+            step = new CachedLinearStep<>(plant);
+        }
+
+        @Override
+        public void update(double seconds) {
+            step.update(m_x, m_u, m_y, seconds);
         }
     }
 

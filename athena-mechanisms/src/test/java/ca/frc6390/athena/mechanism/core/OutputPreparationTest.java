@@ -22,11 +22,14 @@ class OutputPreparationTest {
         int commands;
         double volts;
         double speed;
+        double position;
+        int positionReads;
+        int velocityReads;
         Motor(int id) { device = MotorDevice.of(MotorKinds.KRAKEN_X60, id); }
         Motor(int id, PowerProfile profile) { device = MotorDevice.of(MotorKinds.KRAKEN_X60, id).power(profile); }
         @Override public MotorDevice device() { return device; }
-        @Override public double integratedPositionRotations() { return 0.0; }
-        @Override public double integratedVelocityRotationsPerSecond() { return speed; }
+        @Override public double integratedPositionRotations() { positionReads++; return position; }
+        @Override public double integratedVelocityRotationsPerSecond() { velocityReads++; return speed; }
         @Override public double appliedVoltage() { return volts; }
         @Override public double supplyCurrentAmps() { return 0.0; }
         @Override public double statorCurrentAmps() { return 0.0; }
@@ -52,6 +55,58 @@ class OutputPreparationTest {
                 }
             };
         }
+    }
+
+    @Test
+    void deferredRequestsAndRetainedLoopContextsKeepTheirOwnStagingAndFeedback() {
+        Motor first = new Motor(220);
+        Motor second = new Motor(221);
+        first.position = 2.0;
+        first.speed = 3.0;
+        second.position = 4.0;
+        second.speed = 5.0;
+        var contexts = new java.util.ArrayList<ControlLoopContext>();
+        ControlLoop loop = binding -> new ControlLoopRuntime() {
+            @Override public ControlOutput calculate(ControlLoopContext context) {
+                contexts.add(context);
+                // PID, feedforward, and custom loops may inspect these values repeatedly.
+                assertEquals(context.position(), context.position());
+                assertEquals(context.velocity(), context.velocity());
+                return ControlOutput.voltage(1.0);
+            }
+        };
+        ControlBinding<?> firstControl = Controls.velocity(first.device, Units.Rotations).loop(loop);
+        ControlBinding<?> secondControl = Controls.velocity(second.device, Units.Rotations).loop(loop);
+        OutputApplier applier = OutputApplier.using(new ActionContext() {
+            @Override public MotorHandle motor(MotorDevice motor) { return motor == first.device ? first : second; }
+        });
+        applier.captureTrace(true);
+        applier.beginPreparation();
+        Output firstTarget = Outputs.velocity(11.0);
+        Output secondTarget = Outputs.velocity(22.0);
+        applier.apply(new ResolvedOutput(OutputRequest.of(firstControl, firstTarget), firstTarget));
+        applier.apply(new ResolvedOutput(OutputRequest.of(secondControl, secondTarget), secondTarget));
+        applier.endCycle();
+        first.position = 100.0;
+        first.speed = 200.0;
+        applier.commitPrepared();
+
+        assertEquals(11.0, applier.controlTraces().get(0).goal());
+        assertEquals(22.0, applier.controlTraces().get(1).goal());
+        assertEquals(2.0, contexts.get(0).position());
+        assertEquals(3.0, contexts.get(0).velocity());
+        assertEquals(4.0, contexts.get(1).position());
+        assertEquals(5.0, contexts.get(1).velocity());
+        assertEquals(1, first.positionReads);
+        assertEquals(1, first.velocityReads);
+
+        applier.beginPreparation();
+        apply(applier, firstControl);
+        applier.endCycle();
+        applier.commitPrepared();
+        assertEquals(2.0, contexts.get(0).position(), "a retained callback context is never overwritten by the next cycle");
+        assertEquals(11.0, contexts.get(0).target());
+        assertEquals(100.0, contexts.get(2).position());
     }
 
     @Test

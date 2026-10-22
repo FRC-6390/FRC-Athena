@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Random;
 import org.junit.jupiter.api.Test;
 
 class PowerBudgetTest {
@@ -82,5 +83,47 @@ class PowerBudgetTest {
         double[] alloc = new double[2];
         PowerBudget.waterFill(new double[] {10, 10}, new double[] {1, 1}, 2, 0, alloc);
         assertEquals(0.0, alloc[0] + alloc[1], EPS);
+    }
+
+    @Test
+    void reusableWaterFillMatchesWeightedFairnessAcrossChangingCounts() {
+        Random random = new Random(6390L);
+        int[] order = new int[40];
+        double[] demand = new double[40], weight = new double[40], allocation = new double[40];
+        for (int trial = 0; trial < 200; trial++) {
+            int count = 1 + random.nextInt(order.length);
+            double totalDemand = 0.0;
+            for (int index = 0; index < count; index++) {
+                totalDemand += demand[index] = 200.0 * random.nextDouble();
+                weight[index] = 0.1 + 5.0 * random.nextDouble();
+            }
+            double budget = 1.2 * totalDemand * random.nextDouble();
+            PowerBudget.waterFill(demand, weight, count, budget, allocation, order);
+            double totalAllocation = 0.0, fairLevel = -1.0;
+            for (int index = 0; index < count; index++) {
+                assertTrue(allocation[index] >= 0.0 && allocation[index] <= demand[index] + EPS);
+                totalAllocation += allocation[index];
+                if (allocation[index] < demand[index] - EPS) {
+                    double level = allocation[index] / weight[index];
+                    if (fairLevel >= 0.0) assertEquals(fairLevel, level, EPS);
+                    fairLevel = level;
+                }
+            }
+            assertEquals(Math.min(totalDemand, budget), totalAllocation, 1e-8);
+            for (int index = 0; index < count; index++) {
+                if (fairLevel >= 0.0 && allocation[index] == demand[index])
+                    assertTrue(demand[index] / weight[index] <= fairLevel + EPS);
+            }
+        }
+    }
+
+    @Test
+    void quadraticRootsRemainStableAcrossMagnitudeAndCancellation() {
+        assertEquals((Math.sqrt(5.0) - 1.0) / 2.0,
+                PowerBudget.largerQuadraticRoot(1e308, 1e308, -1e308), EPS);
+        assertEquals(1e-10, PowerBudget.largerQuadraticRoot(1e-300, 1.0, -1e-10), 1e-24);
+        assertEquals(2.0, PowerBudget.largerQuadraticRoot(0.0, 1e-250, -2e-250), EPS);
+        assertEquals(0.5, PowerBudget.largerQuadraticRoot(1.0, -1.0, 0.25), EPS);
+        assertTrue(Double.isNaN(PowerBudget.largerQuadraticRoot(1.0, 0.0, 1.0)));
     }
 }

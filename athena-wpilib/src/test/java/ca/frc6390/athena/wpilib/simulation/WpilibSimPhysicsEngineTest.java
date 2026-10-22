@@ -35,6 +35,56 @@ import edu.wpi.first.units.Units;
 
 class WpilibSimPhysicsEngineTest {
     @Test
+    void cachedLinearPlantsMatchWpilibAcrossVoltageReversalsAndEveryTimestepChange() {
+        double reduction = 5.27;
+        double inertia = 0.015;
+        var gearbox = edu.wpi.first.math.system.plant.DCMotor.getKrakenX60(1);
+        var motorReference = new edu.wpi.first.wpilibj.simulation.DCMotorSim(
+                edu.wpi.first.math.system.plant.LinearSystemId.createDCMotorSystem(gearbox, inertia, reduction),
+                gearbox);
+        var flywheelReference = new edu.wpi.first.wpilibj.simulation.FlywheelSim(
+                edu.wpi.first.math.system.plant.LinearSystemId.createFlywheelSystem(gearbox, inertia, reduction),
+                gearbox);
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 120);
+        MotorDevice flywheel = MotorDevice.of(MotorKinds.KRAKEN_X60, 121);
+        WpilibSimPhysicsEngine motorEngine = new WpilibSimPhysicsEngine();
+        WpilibSimPhysicsEngine flywheelEngine = new WpilibSimPhysicsEngine();
+        SimulationSession motorSession = sessionWith(motorEngine, "motor", SimModel.motor(motor)
+                .gearRatio(GearRatio.reduction(reduction, 1.0))
+                .momentOfInertia(Units.KilogramSquareMeters.of(inertia)));
+        SimulationSession flywheelSession = sessionWith(flywheelEngine, "flywheel", SimModel.flywheel(flywheel)
+                .gearRatio(GearRatio.reduction(reduction, 1.0))
+                .momentOfInertia(Units.KilogramSquareMeters.of(inertia)));
+        double flywheelPosition = 0.0;
+        for (int cycle = 0; cycle < 500; cycle++) {
+            double seconds = cycle < 200 ? 0.02 : cycle < 400 ? 0.007 : cycle % 2 == 0 ? 0.021 : 0.013;
+            double volts = 11.0 * Math.sin(cycle * 0.07);
+            motorSession.motor(motor).setVoltage(volts);
+            flywheelSession.motor(flywheel).setVoltage(volts);
+            motorReference.setInput(0, volts);
+            flywheelReference.setInput(0, volts);
+            motorReference.update(seconds);
+            flywheelReference.update(seconds);
+            flywheelPosition += flywheelReference.getAngularVelocityRPM() / 60.0 * seconds;
+            motorSession.step(Units.Seconds.of(seconds));
+            flywheelSession.step(Units.Seconds.of(seconds));
+
+            assertEquals(motorReference.getAngularPositionRotations() * reduction,
+                    motorSession.motor(motor).integratedPositionRotations(), 1.0e-8, "motor position cycle " + cycle);
+            assertEquals(motorReference.getAngularVelocityRPM() / 60.0 * reduction,
+                    motorSession.motor(motor).integratedVelocityRotationsPerSecond(), 1.0e-8);
+            assertEquals(flywheelPosition * reduction,
+                    flywheelSession.motor(flywheel).integratedPositionRotations(), 1.0e-8);
+            assertEquals(flywheelReference.getAngularVelocityRPM() / 60.0 * reduction,
+                    flywheelSession.motor(flywheel).integratedVelocityRotationsPerSecond(), 1.0e-8);
+            assertEquals(edu.wpi.first.wpilibj.simulation.BatterySim.calculateDefaultBatteryLoadedVoltage(
+                    Math.max(0.0, motorReference.getCurrentDrawAmps())), motorEngine.estimatedBatteryVoltage(), 1.0e-9);
+            assertEquals(edu.wpi.first.wpilibj.simulation.BatterySim.calculateDefaultBatteryLoadedVoltage(
+                    Math.max(0.0, flywheelReference.getCurrentDrawAmps())), flywheelEngine.estimatedBatteryVoltage(), 1.0e-9);
+        }
+    }
+
+    @Test
     void gearedMotorSimulationPublishesRotorUnitsToItsIntegratedEncoder() {
         double reduction = 5.27;
         double wheelDiameterMeters = 0.1016;

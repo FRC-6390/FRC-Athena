@@ -1967,10 +1967,30 @@ public final class MechanismScheduler {
         }
     }
 
-    private record OverlayActionContext(MappedActionContext registered, ActionContext fallback) implements ActionContext {
-        private OverlayActionContext {
-            registered = Objects.requireNonNull(registered, "registered");
-            fallback = Objects.requireNonNull(fallback, "fallback");
+    private static final class OverlayActionContext implements ActionContext {
+        private final MappedActionContext registered;
+        private final ActionContext fallback;
+        private long registeredRevision = Long.MIN_VALUE;
+        private long fallbackRevision = Long.MIN_VALUE;
+        private long bindingRevision;
+
+        private OverlayActionContext(MappedActionContext registered, ActionContext fallback) {
+            this.registered = Objects.requireNonNull(registered, "registered");
+            this.fallback = Objects.requireNonNull(fallback, "fallback");
+        }
+
+        @Override
+        public long bindingRevision() {
+            long nextRegistered = registered.bindingRevision();
+            long nextFallback = fallback.bindingRevision();
+            if (nextRegistered < 0 || nextFallback < 0) return -1L;
+            // Track the pair rather than hashing it: neither binding source may hide a replacement.
+            if (nextRegistered != registeredRevision || nextFallback != fallbackRevision) {
+                registeredRevision = nextRegistered;
+                fallbackRevision = nextFallback;
+                bindingRevision++;
+            }
+            return bindingRevision;
         }
 
         @Override

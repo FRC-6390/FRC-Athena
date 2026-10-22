@@ -29,7 +29,7 @@ final class MechanismRuntime {
     private static final double SETTLE_EPSILON_SECONDS = 1.0e-9;
     private final Mechanism mechanism;
     private final MechanismNode node;
-    private final Object[] readinessDeclarations;
+    private final HardwareReadiness hardwareReadiness;
     private final ActionContext actionContext;
     private final OutputResolver resolver;
     private final OutputApplier applier;
@@ -104,9 +104,9 @@ final class MechanismRuntime {
             Map<PathAction, PathRuntime> pathRuntimes,
             HookRuntime.LeaseController leaseController) {
         this.node = Objects.requireNonNull(node, "node");
-        this.readinessDeclarations = node.declarations().values().toArray();
         this.mechanism = Objects.requireNonNull(node.mechanism(), "mechanism");
         this.actionContext = Objects.requireNonNull(actionContext, "actionContext");
+        this.hardwareReadiness = new HardwareReadiness(actionContext, node.declarations().values());
         this.resolver = Objects.requireNonNull(resolver, "resolver");
         this.applier = OutputApplier.using(actionContext, resolver.overrides());
         this.hookRuntime = new HookRuntime(leaseController, applier::resetControls, applier::encoderPositionSet);
@@ -433,30 +433,7 @@ final class MechanismRuntime {
 
     /** Freeze action clocks and completion tests until feedback and required configuration are acknowledged. */
     private boolean hardwareReady() {
-        for (Object declaration : readinessDeclarations) {
-            try {
-            if (declaration instanceof MotorDevice motor && !actionContext.motor(motor).configurationStatus().ready()) {
-                return false;
-            }
-            if (declaration instanceof ControlBinding<?> control) {
-                List<MotorDevice> motors = control.motors();
-                for (int index = 0; index < motors.size(); index++) {
-                    if (!actionContext.motor(motors.get(index)).configurationStatus().ready()) return false;
-                }
-            }
-            if (declaration instanceof ca.frc6390.athena.hardware.device.EncoderDevice encoder
-                    && !actionContext.encoder(encoder).configurationStatus().ready()) return false;
-            if (declaration instanceof ca.frc6390.athena.hardware.signal.ImuSource source) {
-                for (Object dependency : source.dependencies()) {
-                    if (dependency instanceof ImuDevice imu && !actionContext.imu(imu).configurationStatus().ready()) return false;
-                }
-            }
-            } catch (UnsupportedOperationException unsupported) {
-                // Explicit test/partial contexts can declare unused signals without providing hardware.
-                // Real graphs return a pending placeholder instead, so no binding is treated as ready.
-            }
-        }
-        return true;
+        return hardwareReadiness.ready();
     }
 
     /** Arbitrates the candidates from {@link #evaluateCandidates} and applies the winners. */

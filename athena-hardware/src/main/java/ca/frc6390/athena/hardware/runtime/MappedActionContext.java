@@ -17,6 +17,12 @@ public final class MappedActionContext implements ActionContext {
     private final Map<EncoderDevice, EncoderHandle> encoders = new LinkedHashMap<>();
     private final Map<MotorDevice, MotorHandle> motors = new LinkedHashMap<>();
     private final Map<ImuDevice, ImuHandle> imus = new LinkedHashMap<>();
+    private long bindingRevision;
+
+    @Override
+    public long bindingRevision() {
+        return bindingRevision;
+    }
 
     /**
      * Registers an encoder runtime handle.
@@ -26,7 +32,9 @@ public final class MappedActionContext implements ActionContext {
      * @return this context
      */
     public MappedActionContext encoder(EncoderDevice ref, EncoderHandle encoder) {
-        encoders.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(encoder, "encoder"));
+        Objects.requireNonNull(ref, "ref");
+        Objects.requireNonNull(encoder, "encoder");
+        if (encoders.put(ref, encoder) != encoder) bindingRevision++;
         return this;
     }
 
@@ -42,7 +50,9 @@ public final class MappedActionContext implements ActionContext {
      * @return this context
      */
     public MappedActionContext motor(MotorDevice ref, MotorHandle motor) {
-        motors.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(motor, "motor"));
+        Objects.requireNonNull(ref, "ref");
+        Objects.requireNonNull(motor, "motor");
+        if (motors.put(ref, motor) != motor) bindingRevision++;
         return this;
     }
 
@@ -53,7 +63,9 @@ public final class MappedActionContext implements ActionContext {
     }
 
     public MappedActionContext imu(ImuDevice ref, ImuHandle imu) {
-        imus.put(Objects.requireNonNull(ref, "ref"), Objects.requireNonNull(imu, "imu"));
+        Objects.requireNonNull(ref, "ref");
+        Objects.requireNonNull(imu, "imu");
+        if (imus.put(ref, imu) != imu) bindingRevision++;
         return this;
     }
 

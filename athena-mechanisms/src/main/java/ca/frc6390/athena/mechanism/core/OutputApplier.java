@@ -56,6 +56,8 @@ final class OutputApplier {
             java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final Set<MotorHandle> drivenMotors = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
     private final AppliedOutput appliedOutput = new AppliedOutput();
+    /** Private staging scratch; AppliedOutput copies it before the next request is staged. */
+    private final StagedRequest stagedRequestScratch = new StagedRequest();
     private final List<MechanismTraceSnapshot.Control> controlTraces = new ArrayList<>();
     private final Map<MotorDevice, AppliedMotorCommand> appliedMotorCommands = new IdentityHashMap<>();
     private final Set<MotorHandle> appliedHandles = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
@@ -587,7 +589,8 @@ final class OutputApplier {
                 ? state.lastReference
                 : MotionReference.stationary(state.lastPosition);
         resetLoops(state, new AppliedControlLoopContext(
-                control, Outputs.neutral(), state.lastContext, reference));
+                Outputs.neutral(), state.lastContext, reference,
+                firstFeedbackPosition(control), firstFeedbackVelocity(control)));
         state.hasLastRequest = false;
         state.lastRequestType = null;
         state.lastVolts = Double.NaN;
@@ -759,10 +762,9 @@ final class OutputApplier {
         }
 
         ControlLoopContext loopContext = new AppliedControlLoopContext(
-                control,
                 staged.output(),
                 mechanismContext,
-                staged.reference());
+                staged.reference(), position, velocity);
         if (staged.output() instanceof Output.Position || staged.output() instanceof Output.Velocity) {
             state.lastReference = staged.reference();
         }
@@ -859,10 +861,9 @@ final class OutputApplier {
             }
             MotionReference reference = referenceFor(transformed, position, velocity);
             ControlOutput result = state.runtimes.get(index).calculate(new AppliedControlLoopContext(
-                    control,
                     transformed,
                     mechanismContext,
-                    reference));
+                    reference, position, velocity));
             if (result == null) {
                 continue;
             }
@@ -926,7 +927,7 @@ final class OutputApplier {
                 goal = clampTunedPosition(overrides.tuning(control), goal);
             }
             if (profile == null) {
-                return new StagedRequest(
+                return stagedRequestScratch.set(
                         Outputs.position(goal),
                         MotionReference.stationary(goal),
                         goal,
@@ -950,7 +951,7 @@ final class OutputApplier {
                 state.profileRuntime(profile).reset(boundedPosition, 0.0);
                 reference = MotionReference.stationary(boundedPosition);
             }
-            return new StagedRequest(
+            return stagedRequestScratch.set(
                     Outputs.position(reference.position()),
                     reference,
                     goal,
@@ -997,7 +998,7 @@ final class OutputApplier {
                 referenceAcceleration = dt > 0.0 ? delta / dt : 0.0;
                 state.velocityReference = referenceVelocity;
             }
-            return new StagedRequest(
+            return stagedRequestScratch.set(
                     Outputs.velocity(referenceVelocity),
                     new MotionReference(finiteOrZero(position), referenceVelocity, referenceAcceleration),
                     requestedVelocity,
@@ -1009,7 +1010,7 @@ final class OutputApplier {
                 return null;
             }
             return allowsEdge(control, feedback, Math.signum(target.percent()), mechanismContext)
-                    ? new StagedRequest(
+                    ? stagedRequestScratch.set(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
                             target.percent(),
@@ -1022,14 +1023,14 @@ final class OutputApplier {
                 return null;
             }
             return allowsEdge(control, feedback, Math.signum(target.volts()), mechanismContext)
-                    ? new StagedRequest(
+                    ? stagedRequestScratch.set(
                             request,
                             new MotionReference(finiteOrZero(position), finiteOrZero(velocity), 0.0),
                             target.volts(),
                             false)
                     : null;
         }
-        return new StagedRequest(request, MotionReference.stationary(finiteOrZero(position)), 0.0, false);
+        return stagedRequestScratch.set(request, MotionReference.stationary(finiteOrZero(position)), 0.0, false);
     }
 
     /**
@@ -1486,10 +1487,9 @@ final class OutputApplier {
         double safePosition = finiteOrZero(position);
         double safeVelocity = finiteOrZero(velocity);
         resetLoops(state, new AppliedControlLoopContext(
-                state.binding,
                 request,
                 mechanismContext,
-                new MotionReference(safePosition, safeVelocity, 0.0)));
+                new MotionReference(safePosition, safeVelocity, 0.0), safePosition, safeVelocity));
         state.hasLastRequest = false;
         state.lastRequestType = null;
         state.velocityReference = safeVelocity;
@@ -1734,21 +1734,24 @@ final class OutputApplier {
                 null);
     }
 
-    private final class AppliedControlLoopContext implements ControlLoopContext {
-        private final ControlBinding<?> control;
+    private static final class AppliedControlLoopContext implements ControlLoopContext {
         private final Output request;
         private final MechanismContext mechanismContext;
         private final MotionReference reference;
+        private final double position;
+        private final double velocity;
 
         private AppliedControlLoopContext(
-                ControlBinding<?> control,
                 Output request,
                 MechanismContext mechanismContext,
-                MotionReference reference) {
-            this.control = control;
+                MotionReference reference,
+                double position,
+                double velocity) {
             this.request = request;
             this.mechanismContext = mechanismContext;
             this.reference = reference;
+            this.position = position;
+            this.velocity = velocity;
         }
 
         @Override
@@ -1758,12 +1761,12 @@ final class OutputApplier {
 
         @Override
         public double position() {
-            return firstFeedbackPosition(control);
+            return position;
         }
 
         @Override
         public double velocity() {
-            return firstFeedbackVelocity(control);
+            return velocity;
         }
 
         @Override
@@ -1905,6 +1908,7 @@ final class OutputApplier {
         private Output requested;
         private Output transformed;
         private StagedRequest staged;
+        private final StagedRequest stagedStorage = new StagedRequest();
         private double measuredPosition;
         private double measuredVelocity;
         private boolean constrained;
@@ -1937,7 +1941,7 @@ final class OutputApplier {
             closedLoopRequest = source.closedLoopRequest;
             requested = source.requested;
             transformed = source.transformed;
-            staged = source.staged;
+            staged = source.staged == null ? null : stagedStorage.copyFrom(source.staged);
             measuredPosition = source.measuredPosition;
             measuredVelocity = source.measuredVelocity;
             constrained = source.constrained;
@@ -1971,7 +1975,7 @@ final class OutputApplier {
                 boolean saturated) {
             this.requested = requested;
             this.transformed = transformed;
-            this.staged = staged;
+            this.staged = staged == null ? null : stagedStorage.copyFrom(staged);
             this.measuredPosition = measuredPosition;
             this.measuredVelocity = measuredVelocity;
             this.constrained = constrained;
@@ -2064,11 +2068,29 @@ final class OutputApplier {
         }
     }
 
-    private record StagedRequest(Output output, MotionReference reference, double goal, boolean constrained) {
-        private StagedRequest {
-            Objects.requireNonNull(output, "output");
-            Objects.requireNonNull(reference, "reference");
+    /** Never escapes the applier; immutable references are copied into each deferred output's own slot. */
+    private static final class StagedRequest {
+        private Output output;
+        private MotionReference reference;
+        private double goal;
+        private boolean constrained;
+
+        private StagedRequest set(Output output, MotionReference reference, double goal, boolean constrained) {
+            this.output = Objects.requireNonNull(output, "output");
+            this.reference = Objects.requireNonNull(reference, "reference");
+            this.goal = goal;
+            this.constrained = constrained;
+            return this;
         }
+
+        private StagedRequest copyFrom(StagedRequest source) {
+            return set(source.output, source.reference, source.goal, source.constrained);
+        }
+
+        private Output output() { return output; }
+        private MotionReference reference() { return reference; }
+        private double goal() { return goal; }
+        private boolean constrained() { return constrained; }
     }
 
     record AppliedMotorCommand(String mode, double value) {

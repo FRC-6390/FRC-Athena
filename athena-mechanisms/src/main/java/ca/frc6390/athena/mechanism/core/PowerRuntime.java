@@ -586,7 +586,7 @@ final class PowerRuntime {
         }
     }
 
-    private static final class Member {
+    private static final class Member implements PowerPlanner.ForwardDemand {
         MotorState state;
         MotorHandle handle;
         CommandPlan command;
@@ -594,9 +594,10 @@ final class PowerRuntime {
         boolean eligible, accounted, known, voltageAdded, supplyAdded;
         final PowerPlanner.Channel voltageChannel = new PowerPlanner.Channel();
         final PowerPlanner.Channel supplyChannel = new PowerPlanner.Channel();
-        PowerPlanner.DemandModel model;
-        PowerPlanner.DemandModel voltageModel;
-        PowerPlanner.DemandModel supplyModel;
+        PowerPlanner.ForwardDemand model;
+        final PowerPlanner.ElectricalDemandModel electricalModel = new PowerPlanner.ElectricalDemandModel();
+        final PowerPlanner.ElectricalDemandModel voltageModel = new PowerPlanner.ElectricalDemandModel();
+        final PowerPlanner.ElectricalDemandModel supplyModel = new PowerPlanner.ElectricalDemandModel();
 
         void prepareModel() {
             double zeroVolts = scale * command.anchor;
@@ -610,10 +611,14 @@ final class PowerRuntime {
                 if (!(estimate > 0.0) && Double.isFinite(localCap)) estimate = Math.max(0.0, localCap);
                 currentSlope = Math.copySign(estimate, scale * command.candidate);
             }
-            model = new PowerPlanner.DemandModel(currentAtZero, currentSlope, this::accountedSupply);
-            voltageModel = new PowerPlanner.DemandModel(zeroVolts, slopeVolts, ignored -> 0.0);
+            model = known && state.conversionBusVolts > 0.0
+                    ? electricalModel.inputs(currentAtZero, currentSlope, zeroVolts, slopeVolts,
+                            state.conversionBusVolts) : this;
+            voltageModel.inputs(zeroVolts, slopeVolts, 0.0, 0.0, 1.0);
         }
-        double accountedSupply(double factor) { return accounted ? positiveSupply(factor) : 0.0; }
+        @Override public double currentAtZeroAmps() { return currentAtZero; }
+        @Override public double currentSlopeAmps() { return currentSlope; }
+        @Override public double positiveSupplyAt(double factor) { return positiveSupply(factor); }
         double positiveSupply(double factor) {
             double volts = scale * (command.anchor + factor * command.slope);
             double current = currentAtZero + factor * currentSlope;
@@ -641,10 +646,10 @@ final class PowerRuntime {
             } else if (cc > 0.0) { low = 1.0; high = -1.0; }
             if (low > high) {
                 supplyRadius = 0.0;
-                supplyModel = new PowerPlanner.DemandModel(1.0, 0.0, ignored -> 0.0);
+                supplyModel.inputs(1.0, 0.0, 0.0, 0.0, 1.0);
             } else {
                 supplyRadius = 0.5 * (high - low);
-                supplyModel = new PowerPlanner.DemandModel(-0.5 * (high + low), 1.0, ignored -> 0.0);
+                supplyModel.inputs(-0.5 * (high + low), 1.0, 0.0, 0.0, 1.0);
             }
         }
     }

@@ -31,8 +31,13 @@ public final class AxisSignal implements TelemetrySource {
     private volatile double lastOutput;
     private volatile double lastInput;
     private volatile boolean sampled;
-    private volatile long plotCurveFingerprint = Long.MIN_VALUE;
+    // Arrays stored here are immutable after publication; TelemetryValue copies them at its public boundary.
+    private volatile double[] cachedCurveOutputs;
+    private volatile double[] plottedCurveOutputs;
     private volatile Translation2d[] cachedPlotCurve;
+    private volatile Translation2d[] cachedRawPoint;
+    private volatile Translation2d[] cachedMappedPoint;
+    private volatile Translation2d[] cachedOutputPoint;
 
     AxisSignal(DoubleSupplier source) {
         this(null, "axis", source, Timer::getFPGATimestamp,
@@ -208,7 +213,7 @@ public final class AxisSignal implements TelemetrySource {
         values.put("Config/Inverted", TelemetryValue.constant(inverted));
         values.put("Curve/Type", TelemetryValue.constant(curve.type()));
         values.put("Curve/Input", TelemetryValue.constant(CURVE_INPUTS));
-        values.put("Curve/Output", TelemetryValue.numberArray(this::curveOutputs));
+        values.put("Curve/Output", TelemetryValue.numberArray(this::curveOutputs).periodic());
         values.put("Visualization/Curve", TelemetryValue.points(this::plotCurve).periodic());
         values.put("Visualization/Raw", TelemetryValue.points(this::plotRaw));
         values.put("Visualization/Mapped", TelemetryValue.points(this::plotMapped));
@@ -274,44 +279,56 @@ public final class AxisSignal implements TelemetrySource {
 
     private double[] curveOutputs() {
         double[] inputs = curveInputs();
-        double[] outputs = new double[inputs.length];
+        double[] cached = cachedCurveOutputs;
+        double[] changed = null;
         for (int index = 0; index < inputs.length; index++) {
-            outputs[index] = mapRaw(inputs[index]);
+            double output = mapRaw(inputs[index]);
+            if (changed == null && (cached == null
+                    || Double.doubleToLongBits(output) != Double.doubleToLongBits(cached[index]))) {
+                changed = cached == null ? new double[inputs.length] : cached.clone();
+            }
+            if (changed != null) changed[index] = output;
         }
-        return outputs;
+        if (changed == null) return cached;
+        cachedCurveOutputs = changed;
+        return changed;
     }
 
     private Translation2d[] plotCurve() {
-        double[] inputs = curveInputs();
-        long fingerprint = 1L;
-        for (double input : inputs) {
-            fingerprint = 31L * fingerprint + Double.doubleToLongBits(mapRaw(input));
-        }
+        double[] outputs = curveOutputs();
         Translation2d[] cached = cachedPlotCurve;
-        if (cached != null && fingerprint == plotCurveFingerprint) return cached;
+        if (cached != null && outputs == plottedCurveOutputs) return cached;
 
+        double[] inputs = curveInputs();
         Translation2d[] points = new Translation2d[inputs.length];
         for (int index = 0; index < inputs.length; index++) {
-            points[index] = new Translation2d(inputs[index], mapRaw(inputs[index]));
+            points[index] = new Translation2d(inputs[index], outputs[index]);
         }
         cachedPlotCurve = points;
-        plotCurveFingerprint = fingerprint;
+        plottedCurveOutputs = outputs;
         return points;
     }
 
     private Translation2d[] plotRaw() {
-        return new Translation2d[] {new Translation2d(raw(), 0.0)};
+        return cachedRawPoint = point(cachedRawPoint, raw(), 0.0);
     }
 
     private Translation2d[] plotMapped() {
         double current = raw();
-        return new Translation2d[] {new Translation2d(current, mapRaw(current))};
+        return cachedMappedPoint = point(cachedMappedPoint, current, mapRaw(current));
     }
 
     private Translation2d[] plotOutput() {
         double input = sampled ? lastInput : raw();
         double output = sampled ? lastOutput : mapRaw(input);
-        return new Translation2d[] {new Translation2d(input, output)};
+        return cachedOutputPoint = point(cachedOutputPoint, input, output);
+    }
+
+    private static Translation2d[] point(Translation2d[] previous, double x, double y) {
+        if (previous != null
+                && Double.doubleToLongBits(previous[0].getX()) == Double.doubleToLongBits(x)
+                && Double.doubleToLongBits(previous[0].getY()) == Double.doubleToLongBits(y)) return previous;
+        return new Translation2d[] {new Translation2d(x, y)};
     }
 
     /** The sample inputs of the curve plot, shared and never written; callers only read them. */

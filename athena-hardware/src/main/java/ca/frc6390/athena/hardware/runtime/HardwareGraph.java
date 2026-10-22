@@ -118,6 +118,12 @@ public final class HardwareGraph implements ActionContext, AutoCloseable {
         this.backends = Objects.requireNonNull(backends, "backends");
     }
 
+    /** The graph monitor publishes all motor, encoder and IMU binding replacements together. */
+    @Override
+    public synchronized long bindingRevision() {
+        return motorEpoch;
+    }
+
     @Override
     public MotorHandle motor(MotorDevice device) {
         Objects.requireNonNull(device, "device");

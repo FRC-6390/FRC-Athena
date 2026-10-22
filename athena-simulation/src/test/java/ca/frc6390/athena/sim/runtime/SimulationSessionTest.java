@@ -91,6 +91,30 @@ class SimulationSessionTest {
     }
 
     @Test
+    void physicsLeavesRefreshOnReplacementWithoutMutatingRetainedRegistrationLists() {
+        var registrations = new java.util.ArrayList<java.util.Collection<SimModel>>();
+        SimulationSession session = SimulationSession.create()
+                .physicsEngine((models, runtime, seconds) -> registrations.add(models));
+        MotorDevice first = MotorDevice.of(MotorKinds.KRAKEN_X60, 90);
+        MotorDevice replacement = MotorDevice.of(MotorKinds.KRAKEN_X60, 91);
+        MotorDevice extra = MotorDevice.of(MotorKinds.KRAKEN_X60, 92);
+        SimModel firstModel = SimModel.motor(first);
+        SimModel replacementModel = SimModel.motor(replacement);
+        SimModel extraModel = SimModel.motor(extra);
+        session.model("axis", firstModel);
+        session.step(Units.Seconds.of(0.02));
+        session.step(Units.Seconds.of(0.02));
+        session.model("axis", replacementModel);
+        session.model("extra", extraModel);
+        session.step(Units.Seconds.of(0.02));
+
+        assertEquals(List.of(firstModel), List.copyOf(registrations.get(0)));
+        assertSame(registrations.get(0), registrations.get(1));
+        assertEquals(List.of(replacementModel, extraModel), List.copyOf(registrations.get(2)));
+        assertThrows(UnsupportedOperationException.class, () -> registrations.get(0).clear());
+    }
+
+    @Test
     void nonFiniteTimestepsDoNotReachPhysicsEngine() {
         AtomicInteger calls = new AtomicInteger();
         SimulationSession session = SimulationSession.create()

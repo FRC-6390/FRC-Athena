@@ -13,6 +13,16 @@ import java.util.List;
  */
 public interface ActionContext {
     /**
+     * Revision of declaration-to-handle bindings, or {@code -1} when this context does not publish revisions.
+     * A non-negative value promises that any handle replacement, recovery, failover adoption or close changes
+     * the revision. Consumers may retain resolved handles while it is unchanged, but must still read their
+     * live configuration acknowledgements: configuration can change without replacing a handle.
+     */
+    default long bindingRevision() {
+        return -1L;
+    }
+
+    /**
      * Resolves an encoder declaration to its runtime handle.
      *
      * @param ref encoder declaration
@@ -95,6 +105,7 @@ public interface ActionContext {
      */
     static ActionContext empty() {
         return new ActionContext() {
+            @Override public long bindingRevision() { return 0L; }
         };
     }
 }

@@ -1,6 +1,7 @@
 package ca.frc6390.athena.hardware.power;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -41,6 +42,7 @@ public final class PowerPlanner {
     private double[] demands = new double[0];
     private double[] weights = new double[0];
     private double[] allocations = new double[0];
+    private int[] allocationOrder = new int[0];
     private final Map<Object, Group> groupByIdentity = new IdentityHashMap<>();
     private final List<Group> groups = new ArrayList<>();
     private final List<Group> groupPool = new ArrayList<>();
@@ -69,8 +71,18 @@ public final class PowerPlanner {
      * accepts a scale in [0, 1] and returns the non-negative battery demand at that scale. Its cost
      * must be convex, but need not be monotone: a native follower can draw current at scale zero.
      */
+    public interface ForwardDemand {
+        double currentAtZeroAmps();
+        double currentSlopeAmps();
+        double positiveSupplyAt(double scale);
+
+        default double currentAt(double scale) {
+            return currentAtZeroAmps() + currentSlopeAmps() * scale;
+        }
+    }
+
     public record DemandModel(double currentAtZeroAmps, double currentSlopeAmps,
-            DoubleUnaryOperator positiveSupplyAtScale) {
+            DoubleUnaryOperator positiveSupplyAtScale) implements ForwardDemand {
         public DemandModel {
             if (!Double.isFinite(currentAtZeroAmps) || !Double.isFinite(currentSlopeAmps)) {
                 throw new IllegalArgumentException("Demand-model currents must be finite.");
@@ -78,8 +90,48 @@ public final class PowerPlanner {
             Objects.requireNonNull(positiveSupplyAtScale, "positiveSupplyAtScale");
         }
 
-        public double currentAt(double scale) {
-            return currentAtZeroAmps + currentSlopeAmps * scale;
+        @Override
+        public double positiveSupplyAt(double scale) {
+            return positiveSupplyAtScale.applyAsDouble(scale);
+        }
+    }
+
+    /**
+     * Reusable physical electrical model: {@code max(0, voltage(scale) * current(scale) / bus)}.
+     * Both voltage and winding current are affine in scale. A physical motor has non-negative
+     * quadratic curvature, so the planner can solve its clipped supply cost without callback searches.
+     * Keep one instance per channel and update it before planning; do not mutate it during a plan.
+     */
+    public static final class ElectricalDemandModel implements ForwardDemand {
+        private double currentAtZero, currentSlope, voltageAtZero, voltageSlope;
+        private double busVolts = 1.0;
+        private double quadratic;
+        private boolean analytic = true;
+
+        public ElectricalDemandModel inputs(double currentAtZero, double currentSlope,
+                double voltageAtZero, double voltageSlope, double busVolts) {
+            if (!Double.isFinite(currentAtZero) || !Double.isFinite(currentSlope)
+                    || !Double.isFinite(voltageAtZero) || !Double.isFinite(voltageSlope)
+                    || !Double.isFinite(busVolts) || !(busVolts > 0.0)) {
+                throw new IllegalArgumentException("Electrical-model inputs must be finite and bus voltage positive.");
+            }
+            this.currentAtZero = currentAtZero;
+            this.currentSlope = currentSlope;
+            this.voltageAtZero = voltageAtZero;
+            this.voltageSlope = voltageSlope;
+            this.busVolts = busVolts;
+            quadratic = voltageSlope * (currentSlope / busVolts);
+            analytic = quadratic >= 0.0 && Double.isFinite(quadratic);
+            return this;
+        }
+
+        @Override public double currentAtZeroAmps() { return currentAtZero; }
+        @Override public double currentSlopeAmps() { return currentSlope; }
+        @Override public double positiveSupplyAt(double scale) {
+            // Keep the physical, factored evaluation even on the analytic path. Expanded
+            // coefficients lose precision around a zero crossing or a large follower offset.
+            return Math.max(0.0, (voltageAtZero + voltageSlope * scale)
+                    * ((currentAtZero + currentSlope * scale) / busVolts));
         }
     }
 
@@ -89,7 +141,7 @@ public final class PowerPlanner {
         private double demandAmps;
         private double supplyDemandAmps;
         private DoubleUnaryOperator supplyToWinding;
-        private DemandModel demandModel;
+        private ForwardDemand demandModel;
         private Object couplingGroup;
         private boolean accountedLoad = true;
         private boolean startupParticipant = true;
@@ -159,10 +211,22 @@ public final class PowerPlanner {
          */
         public void inputs(PowerProfile profile, double windingDemandAmps, double declaredWindingCapAmps,
                 double supplyDemandAmps, DoubleUnaryOperator supplyToWinding, double thermalFraction,
-                DemandModel demandModel) {
+                ForwardDemand demandModel) {
             inputs(profile, windingDemandAmps, declaredWindingCapAmps, supplyDemandAmps,
                     supplyToWinding, thermalFraction);
             this.demandModel = Objects.requireNonNull(demandModel, "demandModel");
+            if (!Double.isFinite(demandModel.currentAtZeroAmps())
+                    || !Double.isFinite(demandModel.currentSlopeAmps())) {
+                throw new IllegalArgumentException("Demand-model currents must be finite.");
+            }
+        }
+
+        /** Retains the original callback-model signature for existing compiled callers. */
+        public void inputs(PowerProfile profile, double windingDemandAmps, double declaredWindingCapAmps,
+                double supplyDemandAmps, DoubleUnaryOperator supplyToWinding, double thermalFraction,
+                DemandModel demandModel) {
+            inputs(profile, windingDemandAmps, declaredWindingCapAmps, supplyDemandAmps,
+                    supplyToWinding, thermalFraction, (ForwardDemand) demandModel);
         }
 
         /**
@@ -260,7 +324,7 @@ public final class PowerPlanner {
             double budget = Double.isFinite(bus.openCircuitVolts())
                     ? PowerBudget.budgetAmps(bus.openCircuitVolts(), bus.ohms(), floorVolts)
                     : Double.POSITIVE_INFINITY;
-            PowerBudget.waterFill(demands, weights, count, budget, allocations);
+            PowerBudget.waterFill(demands, weights, count, budget, allocations, allocationOrder);
         }
         for (int i = 0; i < count; i++) {
             applyGroup(groups.get(i), shedding ? allocations[i] : Double.POSITIVE_INFINITY);
@@ -358,15 +422,28 @@ public final class PowerPlanner {
         boolean budgetReduced = false;
         if (group.feasible && budgetActive && group.forwardModel) {
             if (supplyAt(group, factor) > allocation) {
+                prepareElectricalSegments(group);
                 double lower = minimumSupplyScale(group);
+                if (group.electricalSegments > 0 && supplyAt(group, lower) > allocation + 1e-9) {
+                    // Expanded/translated arithmetic must not reject a feasible family solely
+                    // because its minimum is poorly conditioned. Recheck with the callback path.
+                    group.electricalSegments = 0;
+                    lower = minimumSupplyScale(group);
+                }
                 if (supplyAt(group, lower) > allocation + 1e-9) {
                     group.feasible = false;
                 }
-                double upper = factor;
-                for (int iteration = 0; group.feasible && iteration < 64; iteration++) {
-                    double middle = lower + (upper - lower) * 0.5;
-                    if (supplyAt(group, middle) <= allocation) lower = middle;
-                    else upper = middle;
+                if (group.feasible) {
+                    double solved = largestElectricalScale(group, allocation);
+                    if (Double.isFinite(solved)) lower = solved;
+                    else {
+                        double upper = factor;
+                        for (int iteration = 0; iteration < 64; iteration++) {
+                            double middle = lower + (upper - lower) * 0.5;
+                            if (supplyAt(group, middle) <= allocation) lower = middle;
+                            else upper = middle;
+                        }
+                    }
                 }
                 factor = lower;
                 budgetReduced = true;
@@ -384,7 +461,7 @@ public final class PowerPlanner {
         boolean coupled = group.members.size() > 1;
         for (Channel channel : group.members) {
             boolean positiveLoad = channel.accountedLoad && (group.forwardModel
-                    ? channel.demandModel.positiveSupplyAtScale().applyAsDouble(factor) > 0.0
+                    ? channel.demandModel.positiveSupplyAt(factor) > 0.0
                     : channel.supplyDemandAmps > 0.0);
             if (group.forwardModel && group.feasible && factor < 1.0) {
                 // The application layer must use couplingScale rather than treating this magnitude
@@ -429,7 +506,7 @@ public final class PowerPlanner {
         }
         for (Channel channel : group.members) {
             if (!Double.isFinite(channel.capAmps)) continue;
-            DemandModel model = channel.demandModel;
+            ForwardDemand model = channel.demandModel;
             double initial = model.currentAtZeroAmps();
             double slope = model.currentSlopeAmps();
             double cap = channel.capAmps;
@@ -446,6 +523,22 @@ public final class PowerPlanner {
     }
 
     private static double minimumSupplyScale(Group group) {
+        if (group.electricalSegments > 0) {
+            double best = group.lowerFactor;
+            double bestSupply = supplyAt(group, best);
+            for (int index = 0; index < group.electricalSegments; index++) {
+                double lower = group.breakpoints[index], upper = group.breakpoints[index + 1];
+                double a = group.segmentQuadratic[index], b = group.segmentLinear[index];
+                double origin = lower + 0.5 * (upper - lower);
+                double candidate = a > 0.0 ? Math.max(lower, Math.min(upper, origin - 0.5 * (b / a)))
+                        : b < 0.0 ? upper : lower;
+                double supply = supplyAt(group, candidate);
+                if (supply < bestSupply) { best = candidate; bestSupply = supply; }
+                supply = supplyAt(group, upper);
+                if (supply < bestSupply) { best = upper; bestSupply = supply; }
+            }
+            return best;
+        }
         double lower = group.lowerFactor;
         double upper = group.localFactor;
         for (int iteration = 0; iteration < 80; iteration++) {
@@ -465,11 +558,79 @@ public final class PowerPlanner {
         double total = 0.0;
         for (Channel channel : group.members) {
             if (!channel.accountedLoad) continue;
-            double supply = channel.demandModel.positiveSupplyAtScale().applyAsDouble(factor);
+            double supply = channel.demandModel.positiveSupplyAt(factor);
             if (!Double.isFinite(supply)) return Double.POSITIVE_INFINITY;
             total += Math.max(0.0, supply);
         }
         return total;
+    }
+
+    /** Builds the exact convex quadratic pieces between physical voltage/current zero crossings. */
+    private static void prepareElectricalSegments(Group group) {
+        int count = 2;
+        group.ensureElectricalCapacity(2 * group.members.size() + 2);
+        group.breakpoints[0] = group.lowerFactor;
+        group.breakpoints[1] = group.localFactor;
+        for (Channel channel : group.members) {
+            if (!channel.accountedLoad) continue;
+            if (!(channel.demandModel instanceof ElectricalDemandModel model) || !model.analytic) return;
+            double voltageRoot = -model.voltageAtZero / model.voltageSlope;
+            double currentRoot = -model.currentAtZero / model.currentSlope;
+            if (voltageRoot > group.lowerFactor && voltageRoot < group.localFactor)
+                group.breakpoints[count++] = voltageRoot;
+            if (currentRoot > group.lowerFactor && currentRoot < group.localFactor)
+                group.breakpoints[count++] = currentRoot;
+        }
+        Arrays.sort(group.breakpoints, 0, count);
+        int unique = 1;
+        for (int index = 1; index < count; index++) {
+            if (group.breakpoints[index] != group.breakpoints[unique - 1])
+                group.breakpoints[unique++] = group.breakpoints[index];
+        }
+        for (int index = 0; index < unique - 1; index++) {
+            double middle = group.breakpoints[index]
+                    + 0.5 * (group.breakpoints[index + 1] - group.breakpoints[index]);
+            double a = 0.0, b = 0.0, c = 0.0;
+            for (Channel channel : group.members) {
+                if (!channel.accountedLoad) continue;
+                ElectricalDemandModel model = (ElectricalDemandModel) channel.demandModel;
+                if (model.positiveSupplyAt(middle) > 0.0) {
+                    a += model.quadratic;
+                    double voltage = model.voltageAtZero + model.voltageSlope * middle;
+                    double current = model.currentAtZero + model.currentSlope * middle;
+                    // Translate each piece to its midpoint. A large follower offset should not
+                    // subtract huge constant terms to find a tiny feasible interval near a zero.
+                    b += voltage * (model.currentSlope / model.busVolts)
+                            + model.voltageSlope * (current / model.busVolts);
+                    c += model.positiveSupplyAt(middle);
+                }
+            }
+            if (!Double.isFinite(a) || !Double.isFinite(b) || !Double.isFinite(c)) return;
+            group.segmentQuadratic[index] = a;
+            group.segmentLinear[index] = b;
+            group.segmentConstant[index] = c;
+        }
+        group.electricalSegments = unique - 1;
+    }
+
+    /** Returns NaN to request the bounded generic solve if numerical conditioning is poor. */
+    private static double largestElectricalScale(Group group, double allocation) {
+        for (int index = group.electricalSegments - 1; index >= 0; index--) {
+            double lower = group.breakpoints[index], upper = group.breakpoints[index + 1];
+            if (supplyAt(group, upper) <= allocation) return upper;
+            double root = lower + 0.5 * (upper - lower)
+                    + PowerBudget.largerQuadraticRoot(group.segmentQuadratic[index],
+                            group.segmentLinear[index], group.segmentConstant[index] - allocation);
+            if (!Double.isFinite(root) || root < lower || root > upper) continue;
+            // A rounded quadratic root must never grant a command above its actual power budget.
+            for (int correction = 0; correction < 8; correction++) {
+                if (root < lower) return Double.NaN;
+                if (supplyAt(group, root) <= allocation) return root;
+                root = Math.nextDown(root);
+            }
+            return Double.NaN;
+        }
+        return Double.NaN;
     }
 
     private static final class Group {
@@ -481,12 +642,26 @@ public final class PowerPlanner {
         private double lowerFactor;
         private boolean feasible = true;
         private boolean forwardModel = true;
+        private double[] breakpoints = new double[0];
+        private double[] segmentQuadratic = new double[0];
+        private double[] segmentLinear = new double[0];
+        private double[] segmentConstant = new double[0];
+        private int electricalSegments;
+
+        private void ensureElectricalCapacity(int count) {
+            if (breakpoints.length >= count) return;
+            breakpoints = new double[count];
+            segmentQuadratic = new double[count - 1];
+            segmentLinear = new double[count - 1];
+            segmentConstant = new double[count - 1];
+        }
 
         private void reset() {
             members.clear();
             supplyDemand = plannedSupplyDemand = weight = lowerFactor = 0.0;
             localFactor = 1.0;
             feasible = forwardModel = true;
+            electricalSegments = 0;
         }
     }
 
@@ -563,6 +738,7 @@ public final class PowerPlanner {
             demands = new double[count];
             weights = new double[count];
             allocations = new double[count];
+            allocationOrder = new int[count];
         }
     }
 }

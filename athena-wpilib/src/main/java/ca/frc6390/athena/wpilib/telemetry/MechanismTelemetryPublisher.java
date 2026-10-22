@@ -472,7 +472,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                         entry.setDefaultString((String) lastObject);
                     }
                     case NUMBER_ARRAY -> {
-                        lastObject = ((double[]) value.value()).clone();
+                        lastObject = (double[]) value.value();
                         entry.setDefaultDoubleArray((double[]) lastObject);
                     }
                     case POINTS -> throw new IllegalStateException("Points use a struct-array publisher.");
@@ -501,11 +501,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 Translation2d[] points = (Translation2d[]) value.value();
                 if (!published || !(lastObject instanceof Translation2d[] previous)
                         || !Arrays.equals(previous, points)) {
-                    Translation2d[] translated = new Translation2d[points.length];
-                    for (int index = 0; index < points.length; index++) {
-                        translated[index] = new Translation2d(points[index].getX(), points[index].getY());
-                    }
-                    pointsPublisher.set(translated);
+                    // Points are immutable, and TelemetryValue owns the returned array copy.
+                    pointsPublisher.set(points);
                     // TelemetryValue.points returns a fresh copy on every read, so this array is not shared.
                     lastObject = points;
                     published = true;
@@ -557,7 +554,7 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                     if (!published || !(lastObject instanceof double[] previous)
                             || !Arrays.equals(previous, current)) {
                         entry.setDoubleArray(current);
-                        lastObject = current.clone();
+                        lastObject = current;
                         published = true;
                     }
                 }
@@ -666,8 +663,8 @@ public final class MechanismTelemetryPublisher implements AutoCloseable {
                 case NUMBER -> lastNumber = value.number();
                 case BOOLEAN -> lastBoolean = value.bool();
                 case STRING -> lastObject = String.valueOf(value.value());
-                case NUMBER_ARRAY -> lastObject = ((double[]) value.value()).clone();
-                case POINTS -> lastObject = ((Translation2d[]) value.value()).clone();
+                case NUMBER_ARRAY -> lastObject = (double[]) value.value();
+                case POINTS -> lastObject = (Translation2d[]) value.value();
                 case GEOMETRY -> { }
             }
         }

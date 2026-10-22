@@ -18,6 +18,40 @@ import org.junit.jupiter.api.Test;
 
 class AxisSignalTest {
     @Test
+    void cachedCurveTelemetryRetainsOldValuesAndReflectsTuningAtNextRead() {
+        AxisCurves.ExpoCurve curve = AxisCurves.expo(0.0);
+        double[] raw = {0.5};
+        AxisSignal axis = new AxisSignal(() -> raw[0]).curve(curve);
+        var values = axis.telemetry();
+        var outputs = values.get("Curve/Output");
+        var graph = values.get("Visualization/Curve");
+        double[] original = (double[]) outputs.value();
+        Translation2d[] originalGraph = (Translation2d[]) graph.value();
+        assertTrue(outputs.isPeriodic(), "configuration curves use the existing read-only publication cadence");
+        assertEquals(0.5, original[30], 1e-9);
+        double[] modifiedByCaller = (double[]) outputs.value();
+        modifiedByCaller[30] = -99.0;
+        Translation2d[] graphModifiedByCaller = (Translation2d[]) graph.value();
+        graphModifiedByCaller[30] = new Translation2d(-99.0, -99.0);
+        assertEquals(0.5, ((double[]) outputs.value())[30], 1e-9);
+        assertEquals(0.5, ((Translation2d[]) graph.value())[30].getY(), 1e-9);
+
+        values.get("Curve/Config/Expo").set(1.0);
+        assertEquals(0.125, ((double[]) outputs.value())[30], 1e-9);
+        assertEquals(0.125, ((Translation2d[]) graph.value())[30].getY(), 1e-9);
+        assertEquals(0.5, original[30], 1e-9);
+        assertEquals(0.5, originalGraph[30].getY(), 1e-9);
+
+        axis.value();
+        Translation2d[] oldOutput = (Translation2d[]) values.get("Visualization/Output").value();
+        raw[0] = -0.5;
+        axis.value();
+        Translation2d[] newOutput = (Translation2d[]) values.get("Visualization/Output").value();
+        assertEquals(0.125, oldOutput[0].getY(), 1e-9);
+        assertEquals(-0.125, newOutput[0].getY(), 1e-9);
+    }
+
+    @Test
     void buildsAnImmutableAxisPipelineAndExposesItAsASupplier() {
         double[] raw = {0.6};
         AxisSignal rawAxis = new AxisSignal(() -> raw[0]);

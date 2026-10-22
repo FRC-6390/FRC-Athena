@@ -46,6 +46,8 @@ final class SimulationCoordinator implements SimModel.Context {
     private final Map<DigitalInputDevice, SimDigitalInputHandle> digitalInputs = new LinkedHashMap<>();
     private final DigitalInputDevice.RuntimeScope digitalInputScope = DigitalInputDevice.runtimeScope();
     private final Map<String, SimModel> models = new LinkedHashMap<>();
+    /** Rebuilt only when declarations change; physics engines may safely retain the immutable list. */
+    private List<SimModel> physicsLeaves = List.of();
     private final Map<String, List<SimModel.Runtime>> modelRuntimes = new LinkedHashMap<>();
     private final List<VisionSimulation> visionSimulations = new java.util.ArrayList<>();
     private final Set<HardwareIdentity> modeledMotors = new LinkedHashSet<>();
@@ -87,6 +89,9 @@ final class SimulationCoordinator implements SimModel.Context {
         model.encoders().forEach(this::encoder);
         model.digitalInputs().forEach(this::digitalInput);
         modelRuntimes.put(key, model.bind(this));
+        physicsLeaves = models.values().stream()
+                .flatMap(declaration -> declaration.physicsLeaves().stream())
+                .toList();
         return this;
     }
 
@@ -280,9 +285,6 @@ final class SimulationCoordinator implements SimModel.Context {
         if (!Double.isFinite(seconds) || seconds <= 0.0) {
             return;
         }
-        List<SimModel> physicsLeaves = models.values().stream()
-                .flatMap(model -> model.physicsLeaves().stream())
-                .toList();
         physicsEngine.step(physicsLeaves, session, seconds);
         modelRuntimes.values().forEach(runtimes -> runtimes.forEach(runtime -> runtime.step(seconds)));
         motors.forEach((identity, handle) -> {

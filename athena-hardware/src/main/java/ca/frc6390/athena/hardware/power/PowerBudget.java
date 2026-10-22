@@ -81,14 +81,28 @@ public final class PowerBudget {
      * @return the allocation array for chaining
      */
     public static double[] waterFill(double[] demand, double[] weight, int count, double budget, double[] allocation) {
+        return waterFill(demand, weight, count, budget, allocation, new int[count]);
+    }
+
+    /** Water-fill overload with reusable primitive sorting workspace; allocates nothing per call. */
+    public static double[] waterFill(double[] demand, double[] weight, int count, double budget,
+            double[] allocation, int[] order) {
         if (count == 0) {
             return allocation;
         }
-        Integer[] order = new Integer[count];
+        if (order.length < count) throw new IllegalArgumentException("Water-fill workspace is too small.");
         for (int i = 0; i < count; i++) {
-            order[i] = i;
+            // Typical plans contain only a few motor/profile groups. Insertion sort avoids
+            // boxed indices, a comparator closure and TimSort scratch storage on the robot thread.
+            double ratio = demand[i] / weight[i];
+            int position = i;
+            while (position > 0
+                    && Double.compare(demand[order[position - 1]] / weight[order[position - 1]], ratio) > 0) {
+                order[position] = order[position - 1];
+                position--;
+            }
+            order[position] = i;
         }
-        java.util.Arrays.sort(order, (a, b) -> Double.compare(demand[a] / weight[a], demand[b] / weight[b]));
         double remainingBudget = Math.max(0.0, budget);
         double remainingWeight = 0.0;
         for (int i = 0; i < count; i++) {
@@ -110,5 +124,21 @@ public final class PowerBudget {
             }
         }
         return allocation;
+    }
+
+    /** Larger real root of {@code a*x*x + b*x + c = 0}, or NaN when no finite root exists. */
+    static double largerQuadraticRoot(double a, double b, double c) {
+        double magnitude = Math.max(Math.abs(a), Math.max(Math.abs(b), Math.abs(c)));
+        if (!(magnitude > 0.0) || !Double.isFinite(magnitude)) return Double.NaN;
+        a /= magnitude;
+        b /= magnitude;
+        c /= magnitude;
+        if (a == 0.0) return b == 0.0 ? Double.NaN : -c / b;
+        double discriminant = Math.fma(-4.0 * a, c, b * b);
+        if (!(discriminant >= 0.0)) return Double.NaN;
+        double q = -0.5 * (b + Math.copySign(Math.sqrt(discriminant), b));
+        if (q == 0.0) return -b / (2.0 * a);
+        // This form avoids subtracting nearly equal values for the smaller root.
+        return Math.max(q / a, c / q);
     }
 }
