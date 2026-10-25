@@ -519,18 +519,40 @@ class WpilibLocalizationParityTest {
     }
 
     @Test
-    void kalmanReportsItsHeadingToUpstreamCamerasThatSolveWithIt() {
+    void kalmanReportsItsHeadingToUpstreamCamerasOnceTheHeadingIsKnown() {
         ParityRig rig = new ParityRig();
         ca.frc6390.athena.vision.device.PhotonVisionDevice camera =
                 new ca.frc6390.athena.vision.device.PhotonVisionDevice("front");
         rig.visionSource.camera = camera;
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05));
         assertTrue(Double.isNaN(camera.reportedRobotHeading().in(Radians)));
 
-        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, MeasurementStdDevs.of(Meters.of(0.1), Meters.of(0.1), Radians.of(0.05)), camera));
-        rig.stepAthenaOnly(0.02);
+        rig.stepAthenaOnly(0.0, vision(1.0, 0.0, 0.6, 0.0, stdDevs, camera));
+        assertTrue(Double.isNaN(camera.reportedRobotHeading().in(Radians)),
+                "unknown heading: the camera solves heading itself instead of being handed the boot heading");
 
+        rig.stepAthenaOnly(0.02, vision(1.0, 0.0, 0.6, 0.02, stdDevs, camera));
+        assertEquals(0.6, rig.athena.poseSnapshot().headingRadians(), 1.0e-9, "seeded from the camera");
+        rig.stepAthenaOnly(0.04);
         assertEquals(rig.athena.poseSnapshot().headingRadians(), camera.reportedRobotHeading().in(Radians), 1.0e-12);
-        assertTrue(camera.reportedRobotHeading().in(Radians) > 0.0);
+    }
+
+    @Test
+    void camerasSolveTheirOwnHeadingWhileCameraHeadingIsWanted() {
+        boolean[] disabled = {true};
+        ParityRig rig = new ParityRig(kalman -> kalman.visionHeadingWhile(() -> disabled[0]));
+        ca.frc6390.athena.vision.device.PhotonVisionDevice camera =
+                new ca.frc6390.athena.vision.device.PhotonVisionDevice("front");
+        rig.visionSource.camera = camera;
+        rig.reset(new PoseSnapshot(1.0, 0.0, 0.6));
+
+        rig.stepAthenaOnly(0.02);
+        assertTrue(Double.isNaN(camera.reportedRobotHeading().in(Radians)),
+                "disabled: a camera handed the robot heading could never correct it");
+
+        disabled[0] = false;
+        rig.stepAthenaOnly(0.04);
+        assertEquals(0.6, camera.reportedRobotHeading().in(Radians), 1.0e-9, "enabled: the gyro heading constrains");
     }
 
     @Test

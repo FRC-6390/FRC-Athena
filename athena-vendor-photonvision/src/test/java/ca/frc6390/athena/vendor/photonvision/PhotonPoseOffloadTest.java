@@ -137,6 +137,29 @@ class PhotonPoseOffloadTest {
         }
     }
 
+    @Test
+    void cyclesWithoutAReportedHeadingDropTheHeadingHistory() {
+        RecordingEstimator estimator = new RecordingEstimator();
+        double[] reported = {0.25};
+        var client = new PhotonVisionCameraAdapter.PhotonPoseEstimatorClient(estimator,
+                PhotonPoseEstimator.PoseStrategy.CLOSEST_TO_REFERENCE_POSE,
+                null,
+                () -> null,
+                () -> true,
+                () -> reported[0]);
+        client.beginCycle(10.0);
+        reported[0] = Double.NaN;
+        client.beginCycle(10.02);
+        reported[0] = 0.5;
+        client.beginCycle(10.04);
+        client.snapshot().estimate(frame(10.03));
+
+        // Photon's resetHeadingData records its sample through addHeadingData: only 10.04 is left. Keeping the
+        // 10.0 sample from before the cycle without a heading would give [10.0, 10.04].
+        assertEquals(List.of(10.04), List.copyOf(estimator.headingTimes),
+                "a cycle without a trusted heading must not leave older samples for the trig solve");
+    }
+
     private static final class RecordingEstimator extends PhotonPoseEstimator {
         final List<String> mutationThreads = new ArrayList<>();
         final List<Double> headingTimes = new ArrayList<>();

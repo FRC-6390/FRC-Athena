@@ -514,10 +514,12 @@ public final class Localization implements PoseSignal {
         PoseMeasurementSample latest = state.output.latestPose();
         PoseSnapshot pose = latest == null ? null : latest.pose();
         double heading = pose == null ? 0.0 : pose.headingRadians();
-        if (!Double.isFinite(heading)) {
-            return;
-        }
-        Angle reported = Radians.of(heading);
+        // A camera that solves single tags from the robot heading returns that heading, so it can never correct
+        // it. Only constrain cameras with a known heading (reset or seeded), and not while camera heading is
+        // wanted (visionHeadingWhile): then they solve heading themselves. NaN tells them there is none.
+        boolean wanted = tuning.visionHeadingWhile() != null && tuning.visionHeadingWhile().getAsBoolean();
+        boolean known = state.kalman != null && state.kalman.headingSeeded;
+        Angle reported = Double.isFinite(heading) && known && !wanted ? Radians.of(heading) : Radians.of(Double.NaN);
         for (RobotHeadingAware camera : cameras) {
             camera.reportRobotHeading(timestampSeconds, reported);
         }

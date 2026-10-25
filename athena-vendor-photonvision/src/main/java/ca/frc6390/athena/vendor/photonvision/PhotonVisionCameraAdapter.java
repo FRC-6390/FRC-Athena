@@ -837,7 +837,11 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             boolean headingEnabled = singleTagUsesHeading.getAsBoolean();
             if (Double.isFinite(robotTimeSeconds) && headingEnabled) {
                 Rotation2d heading = robotHeading(reference);
-                if (heading != null) {
+                if (heading == null) {
+                    // No trusted heading right now (unknown, or the localization wants camera heading): solve
+                    // single tags without it, and drop older samples so they are not used once it returns.
+                    headingHistory.clear();
+                } else {
                     if (!headingHistory.isEmpty() && headingHistory.peekLast().timestampSeconds() > robotTimeSeconds) {
                         headingHistory.clear();
                     } else if (!headingHistory.isEmpty()
@@ -854,7 +858,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 }
             }
             return new SolveContext(mountPose == null ? null : transform(mountPose.get()), reference,
-                    headingEnabled, List.copyOf(headingHistory));
+                    // Without heading samples the trig solve would fall back on PhotonLib's own stale buffer.
+                    headingEnabled && !headingHistory.isEmpty(), List.copyOf(headingHistory));
         }
 
         private Rotation2d robotHeading(Pose2d reference) {
