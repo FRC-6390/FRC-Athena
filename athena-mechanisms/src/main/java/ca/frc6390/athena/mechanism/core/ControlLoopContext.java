@@ -25,6 +25,14 @@ public interface ControlLoopContext {
         return 0.0;
     }
 
+    /**
+     * The goal the request is moving toward. With a motion constraint {@link #target()} is this cycle's step
+     * along the profile; the goal is where the profile ends. Without one they are the same.
+     */
+    default double goal() {
+        return target();
+    }
+
     default double position() {
         return 0.0;
     }

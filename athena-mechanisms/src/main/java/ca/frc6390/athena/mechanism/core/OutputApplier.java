@@ -764,7 +764,7 @@ final class OutputApplier {
         ControlLoopContext loopContext = new AppliedControlLoopContext(
                 staged.output(),
                 mechanismContext,
-                staged.reference(), position, velocity);
+                staged.reference(), position, velocity, staged.goal());
         if (staged.output() instanceof Output.Position || staged.output() instanceof Output.Velocity) {
             state.lastReference = staged.reference();
         }
@@ -977,6 +977,20 @@ final class OutputApplier {
                 requestedVelocity = result.value();
             }
             double maximumAcceleration = overrides.tuning(control).maxAcceleration();
+            double arriveSeconds = policy == null ? Double.NaN : policy.arriveSeconds();
+            if (Double.isFinite(arriveSeconds)) {
+                if (Double.compare(requestedVelocity, state.arriveGoal) != 0) {
+                    // A new target: the constant acceleration that reaches it in the requested time.
+                    double from = state.velocityReferenceInitialized ? state.velocityReference : finiteOrZero(velocity);
+                    state.arriveAcceleration = Math.abs(requestedVelocity - from) / arriveSeconds;
+                    state.arriveGoal = requestedVelocity;
+                }
+                if (state.arriveAcceleration > 0.0) {
+                    maximumAcceleration = Math.min(maximumAcceleration, state.arriveAcceleration);
+                }
+            } else {
+                state.arriveGoal = Double.NaN;
+            }
             double referenceVelocity = requestedVelocity;
             double referenceAcceleration = 0.0;
             if (retargetFor(control, policy) == Retarget.IMMEDIATE
@@ -1757,6 +1771,7 @@ final class OutputApplier {
         private final MotionReference reference;
         private final double position;
         private final double velocity;
+        private final double goal;
 
         private AppliedControlLoopContext(
                 Output request,
@@ -1764,11 +1779,27 @@ final class OutputApplier {
                 MotionReference reference,
                 double position,
                 double velocity) {
+            this(request, mechanismContext, reference, position, velocity, Double.NaN);
+        }
+
+        private AppliedControlLoopContext(
+                Output request,
+                MechanismContext mechanismContext,
+                MotionReference reference,
+                double position,
+                double velocity,
+                double goal) {
             this.request = request;
             this.mechanismContext = mechanismContext;
             this.reference = reference;
             this.position = position;
             this.velocity = velocity;
+            this.goal = goal;
+        }
+
+        @Override
+        public double goal() {
+            return Double.isFinite(goal) ? goal : target();
         }
 
         @Override
@@ -1846,6 +1877,9 @@ final class OutputApplier {
         private MotionProfile activeProfile;
         private double velocityReference;
         private boolean velocityReferenceInitialized;
+        /** Goal and acceleration of the current arriveWithin ramp; NaN goal when none is active. */
+        private double arriveGoal = Double.NaN;
+        private double arriveAcceleration;
         private boolean hasLastRequest;
         private Class<?> lastRequestType;
         private ControlRoute cachedRequestRoute;

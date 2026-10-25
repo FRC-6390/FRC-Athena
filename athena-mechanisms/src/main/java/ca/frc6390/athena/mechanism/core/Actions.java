@@ -563,7 +563,8 @@ public final class Actions {
         MotionPolicy base = current == null ? MotionPolicy.INHERIT : current;
         return new MotionPolicy(
                 update.retarget() != null ? update.retarget() : base.retarget(),
-                update.release() != null ? update.release() : base.release());
+                update.release() != null ? update.release() : base.release(),
+                !Double.isNaN(update.arriveSeconds()) ? update.arriveSeconds() : base.arriveSeconds());
     }
 
     /**

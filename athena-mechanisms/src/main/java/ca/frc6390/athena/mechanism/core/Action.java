@@ -228,6 +228,22 @@ public interface Action extends DeviceAction {
     }
 
     /**
+     * Reaches a new velocity target in {@code time}, no sooner, for this velocity control action: the speed
+     * reference ramps at the constant acceleration that arrives exactly then (never above the binding's own
+     * acceleration limit). Use it when the speed is only needed at a known moment, such as a flywheel that has to
+     * be ready when the aim settles. For a given change of speed the heat lost in the motor grows with the current
+     * used, so taking the time that is available instead of the fastest possible spin-up costs less battery and
+     * less heat. A new target starts a new ramp from the current reference.
+     *
+     * @param time time to reach each new target, positive
+     * @throws IllegalArgumentException when this action is not a single position or velocity control
+     */
+    default Action arriveWithin(edu.wpi.first.units.measure.Time time) {
+        double seconds = Objects.requireNonNull(time, "time").in(Seconds);
+        return Actions.withMotionPolicy(this, new MotionPolicy(null, null, seconds));
+    }
+
+    /**
      * Sets how a newer request for overlapping resources may replace this running action. Only valid
      * on a root action (the one passed to {@link #request()}). Restrictive policies require a bounded
      * action; see {@link Actions#isBounded(Action)}.

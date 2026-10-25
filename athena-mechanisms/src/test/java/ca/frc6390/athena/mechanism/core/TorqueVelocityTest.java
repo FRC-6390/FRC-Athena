@@ -252,6 +252,80 @@ class TorqueVelocityTest {
         assertTrue(checked > 40, "most cycles are unclamped, checked " + checked);
     }
 
+    /**
+     * From 50 rps down to an idle of 10 rps: coast-down lets the flywheel slow by itself (friction) with no
+     * current, so it spends no energy and puts no heat in the winding braking, then holds the idle as usual.
+     * Without coast-down the loop brakes hard, which costs winding heat.
+     */
+    @Test
+    void coastDownLetsAFlywheelSlowWithoutCurrentThenHoldsTheLowerTarget() {
+        double coastHeat = spinDown(true);
+        double brakeHeat = spinDown(false);
+        assertTrue(coastHeat < brakeHeat * 0.2, "coasting heat " + coastHeat + " J vs braking " + brakeHeat + " J");
+    }
+
+    /** Spins up to TARGET, then asks for 10 rps; returns the winding heat of the spin-down in joules. */
+    private static double spinDown(boolean coast) {
+        Flywheel plant = new Flywheel(1);
+        Rig rig = new Rig(plant, 1, motors -> Controls.velocity(motors.get(0), Units.Rotations)
+                .feedback(position(plant), velocity(plant))
+                .torqueVelocity(TorqueVelocityGains.of(TUNING.kpAmps, TUNING.kiAmps, 0.0)
+                        .inertia(TUNING.kaAmps)
+                        .coastDownBelow(coast ? 0.75 : 0.0)));
+        for (int cycle = 0; cycle < 150; cycle++) rig.cycle();
+        assertEquals(TARGET, plant.rps(), 0.1);
+        rig.runtime.set(rig.control.velocity(Units.RotationsPerSecond.of(10.0)));
+        // Friction such as a real shooter's (bearings, belts), so coasting finishes within the window; the
+        // same load applies with and without coast-down.
+        plant.loadTorque = 0.15;
+        double heat = 0.0;
+        double ohms = K.resistance().in(Units.Ohms);
+        boolean sawCoast = false;
+        for (int cycle = 0; cycle < 1500; cycle++) {
+            rig.cycle();
+            heat += plant.current * plant.current * ohms * DT;
+            if (coast && plant.rps() > 12.0) {
+                assertEquals(0.0, plant.current, 0.5, "no current while coasting at " + plant.rps() + " rps");
+                sawCoast = true;
+            }
+        }
+        if (coast) assertTrue(sawCoast, "the flywheel coasted");
+        assertEquals(10.0, plant.rps(), 0.2, "holds the lower target afterwards");
+        return heat;
+    }
+
+    /**
+     * A spin-up that is only needed in a second: arriveWithin ramps at the constant acceleration that gets there
+     * on time, which costs less winding heat than the fastest possible spin-up.
+     */
+    @Test
+    void arriveWithinReachesTheTargetOnTimeWithLessHeatThanTheFastestSpinUp() {
+        double[] fast = spinUp(false);
+        double[] timed = spinUp(true);
+        assertEquals(TARGET / 2.0, timed[1], TARGET * 0.1, "half way at half the time");
+        assertEquals(TARGET, timed[2], TARGET * 0.03, "arrived after the second");
+        assertTrue(fast[1] > timed[1] + 10.0, "the fastest spin-up is well ahead half way: " + fast[1]);
+        assertTrue(timed[0] < fast[0] * 0.8, "heat " + timed[0] + " J vs " + fast[0] + " J");
+    }
+
+    /** Returns {winding heat over 1.5 s, speed at 0.5 s, speed at 1.1 s}. */
+    private static double[] spinUp(boolean timed) {
+        Flywheel plant = new Flywheel(1);
+        Rig rig = new Rig(plant, 1, motors -> torqueControl(plant, motors, 0.0));
+        rig.runtime.set(timed
+                ? rig.control.velocity(Units.RotationsPerSecond.of(TARGET)).arriveWithin(Units.Seconds.of(1.0))
+                : rig.control.velocity(Units.RotationsPerSecond.of(TARGET)));
+        double ohms = K.resistance().in(Units.Ohms);
+        double heat = 0.0, half = Double.NaN, after = Double.NaN;
+        for (int cycle = 1; cycle <= 75; cycle++) {
+            rig.cycle();
+            heat += plant.current * plant.current * ohms * DT;
+            if (cycle == 25) half = plant.rps();
+            if (cycle == 55) after = plant.rps();
+        }
+        return new double[] {heat, half, after};
+    }
+
     @Test
     void steadyStateHoldsTheTargetWithoutLoad() {
         Flywheel plant = new Flywheel(1);

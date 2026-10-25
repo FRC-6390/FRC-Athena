@@ -20,6 +20,7 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     private volatile double i;
     private volatile double d;
     private volatile double iZone;
+    private volatile double holdDeadband;
     private volatile boolean disabled;
     private final Map<String, TelemetryValue> telemetry = Map.of(
             "p", TelemetryValue.writableNumber(this::p, this::setP),
@@ -29,7 +30,15 @@ public final class PidGains implements ControlLoop, TelemetrySource {
             "disabled", TelemetryValue.writableBoolean(this::isDisabled, value -> disabled = value));
 
     public PidGains(double p, double i, double d, double iZone) {
+        this(p, i, d, iZone, 0.0);
+    }
+
+    private PidGains(double p, double i, double d, double iZone, double holdDeadband) {
         setP(p); setI(i); setD(d); setIZone(iZone);
+        if (!Double.isFinite(holdDeadband) || holdDeadband < 0.0) {
+            throw new IllegalArgumentException("PID hold deadband must be finite and non-negative.");
+        }
+        this.holdDeadband = holdDeadband;
     }
 
     public static PidGains of(double p, double i, double d) { return new PidGains(p, i, d, 0.0); }
@@ -39,7 +48,22 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     public double iZone() { return iZone; }
     public boolean isDisabled() { return disabled; }
 
-    public PidGains iZone(double value) { return new PidGains(p, i, d, value); }
+    public PidGains iZone(double value) { return new PidGains(p, i, d, value, holdDeadband); }
+
+    /**
+     * Returns these gains with a hold deadband, in the control's unit: once a position control has arrived (its
+     * motion reference is no longer moving) and the error is within the band, the proportional and derivative
+     * terms are left out and only the integral term holds. A mechanism parked at its goal then stops dithering
+     * current into corrections smaller than it can meaningfully make, which saves power and heat and quiets
+     * buzzing; feedforward (such as a gravity hold) still applies. Gains with a deadband run in Athena rather than
+     * on the motor controller, which cannot apply it. Use 0 to turn it off (the default).
+     *
+     * @param band error band, non-negative, in the control's unit
+     * @return gains with the hold deadband
+     */
+    public PidGains holdDeadband(double band) { return new PidGains(p, i, d, iZone, band); }
+
+    public double holdDeadband() { return holdDeadband; }
 
     /** Creates independent PID state backed by these live-editable gains. */
     public PidController controller() { return new PidController(this); }
@@ -47,7 +71,9 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     @Override public ControlLoopRuntime bind(ControlLoopBinding binding) {
         return new Runtime(binding.control().continuousRange());
     }
-    @Override public ControlLoopRole role() { return ControlLoopRole.DEVICE_CONFIGURABLE; }
+    @Override public ControlLoopRole role() {
+        return holdDeadband > 0.0 ? ControlLoopRole.SOFTWARE_OUTPUT : ControlLoopRole.DEVICE_CONFIGURABLE;
+    }
 
     @Override
     public Map<String, TelemetryValue> telemetry() {
@@ -71,11 +97,13 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     @Override public boolean equals(Object other) {
         return other instanceof PidGains gains
                 && Double.compare(p, gains.p) == 0 && Double.compare(i, gains.i) == 0
-                && Double.compare(d, gains.d) == 0 && Double.compare(iZone, gains.iZone) == 0;
+                && Double.compare(d, gains.d) == 0 && Double.compare(iZone, gains.iZone) == 0
+                && Double.compare(holdDeadband, gains.holdDeadband) == 0;
     }
-    @Override public int hashCode() { return Objects.hash(p, i, d, iZone); }
+    @Override public int hashCode() { return Objects.hash(p, i, d, iZone, holdDeadband); }
     @Override public String toString() {
-        return "PidGains[p=" + p + ", i=" + i + ", d=" + d + ", iZone=" + iZone + "]";
+        return "PidGains[p=" + p + ", i=" + i + ", d=" + d + ", iZone=" + iZone
+                + (holdDeadband > 0.0 ? ", holdDeadband=" + holdDeadband : "") + "]";
     }
 
     private final class Runtime implements ControlLoopRuntime {
@@ -85,7 +113,11 @@ public final class PidGains implements ControlLoop, TelemetrySource {
         private double seenD = d;
         private double seenIZone = iZone;
 
+        private final double wrapSpan;
+
         private Runtime(ca.frc6390.athena.hardware.device.Range continuousRange) {
+            wrapSpan = continuousRange == null ? Double.NaN
+                    : continuousRange.raw().maximumInUnit() - continuousRange.raw().minimumInUnit();
             PidController configured = PidGains.this.controller()
                     .outputRange(-MAX_OUTPUT_VOLTS, MAX_OUTPUT_VOLTS);
             controller = continuousRange == null
@@ -118,8 +150,23 @@ public final class PidGains implements ControlLoop, TelemetrySource {
             if (!Double.isFinite(measurement) || !Double.isFinite(context.target())) {
                 return ControlOutput.neutral();
             }
+            if (holding(context, measurement)) {
+                // Arrived and within the band: hold with the integral alone, without corrections.
+                return ControlOutput.voltage(controller.integralOutput());
+            }
             return ControlOutput.voltage(controller.calculate(
                     measurement, context.target(), context.dtSeconds()));
+        }
+
+        private boolean holding(ControlLoopContext context, double measurement) {
+            double band = holdDeadband;
+            if (!(band > 0.0) || !(context.request() instanceof Output.Position)) return false;
+            if (Math.abs(context.reference().velocity()) > 1.0e-9) return false;
+            double error = context.target() - measurement;
+            if (Double.isFinite(wrapSpan) && wrapSpan > 0.0) {
+                error -= wrapSpan * Math.floor(error / wrapSpan + 0.5);
+            }
+            return Math.abs(error) <= band;
         }
 
         @Override public ControlLoopTrace trace() {

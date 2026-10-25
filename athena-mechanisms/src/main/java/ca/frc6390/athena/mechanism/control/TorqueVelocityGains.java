@@ -56,6 +56,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
     private volatile double staticAmps;
     private volatile double inertia;
     private volatile double loadTimeConstant;
+    private volatile double coastFraction;
     private volatile boolean disabled;
 
     // Runtime state, written by the runtime every cycle for telemetry.
@@ -92,12 +93,16 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      */
     public TorqueVelocityGains(double p, double i, double d, Current staticCurrent, double inertia,
             Time loadTimeConstant) {
-        this(p, i, d, amps(staticCurrent), inertia, seconds(loadTimeConstant));
+        this(p, i, d, amps(staticCurrent), inertia, seconds(loadTimeConstant), 0.0);
     }
 
     /** Primitive form used internally: static amps and load time constant in seconds. */
     private TorqueVelocityGains(double p, double i, double d, double staticAmps, double inertia,
-            double loadTimeConstantSeconds) {
+            double loadTimeConstantSeconds, double coastFraction) {
+        if (!(coastFraction >= 0.0 && coastFraction < 1.0)) {
+            throw new IllegalArgumentException("Coast-down fraction must be in [0, 1).");
+        }
+        this.coastFraction = coastFraction;
         setP(p);
         setI(i);
         setD(d);
@@ -115,7 +120,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * @return gains
      */
     public static TorqueVelocityGains of(double p, double i, double d) {
-        return new TorqueVelocityGains(p, i, d, 0.0, 0.0, 0.0);
+        return new TorqueVelocityGains(p, i, d, 0.0, 0.0, 0.0, 0.0);
     }
 
     /**
@@ -126,7 +131,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * @return gains with the static term
      */
     public TorqueVelocityGains staticCurrent(Current current) {
-        return new TorqueVelocityGains(p, i, d, amps(current), inertia, loadTimeConstant);
+        return new TorqueVelocityGains(p, i, d, amps(current), inertia, loadTimeConstant, coastFraction);
     }
 
     /**
@@ -137,7 +142,8 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * @return gains with the inertia term
      */
     public TorqueVelocityGains inertia(double ampsPerUnitPerSecondSquared) {
-        return new TorqueVelocityGains(p, i, d, staticAmps, ampsPerUnitPerSecondSquared, loadTimeConstant);
+        return new TorqueVelocityGains(p, i, d, staticAmps, ampsPerUnitPerSecondSquared, loadTimeConstant,
+                coastFraction);
     }
 
     /**
@@ -157,8 +163,28 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
      * @return gains with the load estimate
      */
     public TorqueVelocityGains loadEstimate(Time timeConstant) {
-        return new TorqueVelocityGains(p, i, d, staticAmps, inertia, seconds(timeConstant));
+        return new TorqueVelocityGains(p, i, d, staticAmps, inertia, seconds(timeConstant), coastFraction);
     }
+
+    /**
+     * Returns these gains with coast-down: when the target drops below {@code fraction} of the measured speed
+     * (for example a flywheel going from a shot back to idle, or stopping), the loop lets the mechanism coast
+     * instead of braking it, and takes over again once the speed is within 5% of the target.
+     *
+     * <p>While coasting the loop applies exactly the measured back-EMF voltage, so no current flows: no braking
+     * heat in the winding, no current spike into the battery, and the stored energy is still there when the
+     * target rises again. A small drop (above the fraction) is still controlled actively, so trims to a shot
+     * speed stay quick. Use 0 to turn it off (the default).</p>
+     *
+     * @param fraction ratio of target to measured speed below which the loop coasts, in [0, 1)
+     * @return gains with coast-down
+     */
+    public TorqueVelocityGains coastDownBelow(double fraction) {
+        return new TorqueVelocityGains(p, i, d, staticAmps, inertia, loadTimeConstant, fraction);
+    }
+
+    /** Ratio of target to measured speed below which the loop coasts; zero when coast-down is off. */
+    public double coastDownFraction() { return coastFraction; }
 
     public double p() { return p; }
     public double i() { return i; }
@@ -221,22 +247,48 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
                 && Double.compare(p, gains.p) == 0 && Double.compare(i, gains.i) == 0
                 && Double.compare(d, gains.d) == 0 && Double.compare(staticAmps, gains.staticAmps) == 0
                 && Double.compare(inertia, gains.inertia) == 0
-                && Double.compare(loadTimeConstant, gains.loadTimeConstant) == 0;
+                && Double.compare(loadTimeConstant, gains.loadTimeConstant) == 0
+                && Double.compare(coastFraction, gains.coastFraction) == 0;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(p, i, d, staticAmps, inertia, loadTimeConstant);
+        return Objects.hash(p, i, d, staticAmps, inertia, loadTimeConstant, coastFraction);
     }
 
     @Override
     public String toString() {
         return "TorqueVelocityGains[p=" + p + ", i=" + i + ", d=" + d + ", static=" + staticAmps
-                + ", inertia=" + inertia + ", loadTimeConstant=" + loadTimeConstant + "]";
+                + ", inertia=" + inertia + ", loadTimeConstant=" + loadTimeConstant
+                + ", coastDownBelow=" + coastFraction + "]";
     }
 
     /** Per-binding state: integral, derivative history, load estimate and the last cycle's voltage terms. */
     private final class Runtime implements ControlLoopRuntime {
+        /** Whether coast-down is letting the mechanism slow by itself. */
+        private boolean coasting;
+
+        /**
+         * Starts coasting when the target falls below {@link #coastFraction} of the measured speed in the same
+         * direction (or to zero), and ends it once the speed is within 5% of the target or reverses.
+         */
+        private boolean coasting(double target, double measured) {
+            double fraction = coastFraction;
+            if (!(fraction > 0.0) || measured == 0.0
+                    || (target != 0.0 && Math.signum(target) != Math.signum(measured))) {
+                coasting = false;
+                return false;
+            }
+            double speed = Math.abs(measured);
+            double wanted = Math.abs(target);
+            if (!coasting) {
+                coasting = wanted < fraction * speed;
+            } else if (speed <= wanted * 1.05 || speed <= 1.0e-6) {
+                coasting = false;
+            }
+            return coasting;
+        }
+
         private final MotorDevice[] devices;
         private final MotorConstants[] constants;
         private final ActionContext actions;
@@ -272,6 +324,7 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
 
         @Override
         public void reset(ControlLoopContext context) {
+            coasting = false;
             integral = 0.0;
             previousMeasurement = Double.NaN;
             filteredAcceleration = 0.0;
@@ -339,6 +392,17 @@ public final class TorqueVelocityGains implements ControlLoop, TelemetrySource {
 
             double dt = context.dtSeconds();
             double step = Double.isFinite(dt) && dt > 0.0 ? dt : 0.0;
+            if (coasting(context.goal(), measured)) {
+                // Zero current: the back-EMF voltage exactly. The integral and derivative history pause.
+                double coastVolts = Math.max(-MAX_VOLTS, Math.min(MAX_VOLTS, emf));
+                previousMeasurement = measured;
+                lastNonIntegral = 0.0;
+                lastResistance = resistance;
+                lastEmfVolts = emf;
+                lastUnclampedVolts = coastVolts;
+                publish(target, measured, 0.0, coastVolts, loadCurrent);
+                return new ControlOutput.Voltage(coastVolts);
+            }
             double error = target - measured;
             boolean first = Double.isNaN(previousMeasurement) || step == 0.0;
             double acceleration = first ? 0.0 : (measured - previousMeasurement) / step;

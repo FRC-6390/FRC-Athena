@@ -202,6 +202,19 @@ class SwerveModulesTest {
         assertEquals(0.125, stopped.angleRotations(), 1.0e-9);
     }
 
+    @Test
+    void steerDeadbandHoldsTheCurrentAngleForTinyErrorsOnly() {
+        SwerveModule module = module(64, 65, 66).steerDeadband(edu.wpi.first.units.Units.Degrees.of(0.5));
+
+        SwerveModuleTarget tiny = module.optimizedTarget(new SwerveModuleTarget(2.0, 0.1010), 0.1000);
+        assertEquals(0.1000, tiny.angleRotations(), 1.0e-12, "0.36 deg: stays where it is");
+        assertEquals(2.0 * Math.cos(0.001 * 2.0 * Math.PI), tiny.speedMetersPerSecond(), 1.0e-9,
+                "speed still scaled by the real error");
+
+        SwerveModuleTarget real = module.optimizedTarget(new SwerveModuleTarget(2.0, 0.1100), 0.1000);
+        assertEquals(0.1100, real.angleRotations(), 1.0e-12, "3.6 deg: steers as usual");
+    }
+
     private static ExpectedPreset preset(
             String vendor,
             String name,

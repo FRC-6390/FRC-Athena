@@ -37,6 +37,7 @@ public abstract class SwerveModule implements MechanismTemplate {
     private double driveMaxSpeedMetersPerSecond = Double.NaN;
     private double driveMaxAccelerationMetersPerSecondSquared = Double.NaN;
     private TorqueVelocityGains driveTorque;
+    private double steerDeadbandRotations;
     private PidGains steerPid;
     private double heldAngleRotations = Double.NaN;
 
@@ -91,6 +92,24 @@ public abstract class SwerveModule implements MechanismTemplate {
         }
         driveMaxAccelerationMetersPerSecondSquared = value;
         configureIfReady();
+        return this;
+    }
+
+    /**
+     * Leaves the steering alone while the wheel is within {@code deadband} of its target angle: the module is
+     * commanded to stay where it is, so the steer motor does not pulse current into corrections of a fraction
+     * of a degree (a source of buzzing and wasted power). The wheel speed is still scaled by the actual angle
+     * error. Use zero to turn it off (the default); about half a degree suits most modules.
+     *
+     * @param deadband angle band, non-negative
+     * @return this module
+     */
+    public SwerveModule steerDeadband(edu.wpi.first.units.measure.Angle deadband) {
+        double rotations = Objects.requireNonNull(deadband, "deadband").in(Units.Rotations);
+        if (!Double.isFinite(rotations) || rotations < 0.0) {
+            throw new IllegalArgumentException("Steer deadband must be finite and non-negative.");
+        }
+        steerDeadbandRotations = rotations;
         return this;
     }
 
@@ -168,7 +187,10 @@ public abstract class SwerveModule implements MechanismTemplate {
             speed = -speed;
         }
         speed *= Math.cos(delta * TWO_PI);
-        heldAngleRotations = currentAngleRotations + delta;
+        // Within the deadband, hold the angle the module already has instead of correcting a fraction of a degree.
+        heldAngleRotations = Math.abs(delta) <= steerDeadbandRotations
+                ? currentAngleRotations
+                : currentAngleRotations + delta;
         return new SwerveModuleTarget(speed, heldAngleRotations);
     }
 
