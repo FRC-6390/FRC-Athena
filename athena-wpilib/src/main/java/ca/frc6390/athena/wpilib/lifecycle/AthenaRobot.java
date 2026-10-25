@@ -29,6 +29,7 @@ import ca.frc6390.athena.wpilib.telemetry.AutoPreviewPublisher;
 import ca.frc6390.athena.wpilib.telemetry.LoopTimingPublisher;
 import ca.frc6390.athena.wpilib.telemetry.PowerTelemetryPublisher;
 import ca.frc6390.athena.wpilib.telemetry.SystemTelemetryPublisher;
+import ca.frc6390.athena.wpilib.system.ClassPreloader;
 import ca.frc6390.athena.wpilib.system.MemoryPressure;
 import ca.frc6390.athena.wpilib.system.SystemRuntime;
 import ca.frc6390.athena.wpilib.system.SystemStatus;
@@ -36,6 +37,7 @@ import ca.frc6390.athena.wpilib.system.SystemTuning;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DigitalInput;
+import edu.wpi.first.wpilibj.Threads;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
@@ -63,6 +65,14 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
     private static final int TELEMETRY_BINDINGS_PER_PUBLISH = 48;
     /** A count alone does not bound initialization work on a slower roboRIO. */
     private static final double TELEMETRY_BINDING_BUDGET_SECONDS = 0.001;
+    /**
+     * Real-time priority of the robot thread while a cycle runs. Above every normal thread (JIT compilers,
+     * garbage collector, NetworkTables, Athena's workers) and below the roboRIO's system real-time threads.
+     */
+    private static final int DEFAULT_LOOP_PRIORITY = 15;
+    private int loopPriority = DEFAULT_LOOP_PRIORITY;
+    private boolean preloadClasses = true;
+    private ClassPreloader classPreloader;
     private SystemTelemetryPublisher systemTelemetryPublisher;
     private PowerTelemetryPublisher powerTelemetryPublisher;
     private Supplier<PowerSnapshot> powerTelemetrySource;
@@ -154,6 +164,52 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
         simulationVisionField = Objects.requireNonNull(field, "field");
     }
 
+    /**
+     * Sets the real-time priority the robot thread runs each cycle at (1 to 99), or 0 to leave it a normal
+     * thread. The default is 15. Safe to call from the robot constructor.
+     *
+     * <p>On Linux a normal Java thread priority has no effect, so the JIT compilers, the garbage collector and
+     * every background thread compete with the robot loop on equal terms; on the roboRIO's two cores the JIT
+     * alone keeps a core busy for the first minutes, and cycles stretch unpredictably. With a real-time priority
+     * the cycle runs first and the other threads use the time between cycles. The priority is dropped while the
+     * robot waits for its next cycle, so those threads still run.</p>
+     */
+    public final void realtimeLoopPriority(int priority) {
+        if (priority < 0 || priority > 99) {
+            throw new IllegalArgumentException("Real-time loop priority must be 0 (off) or 1 to 99.");
+        }
+        loopPriority = priority;
+    }
+
+    /**
+     * Whether Athena's classes are loaded on a background thread at boot (default true), so the first enabled
+     * cycle does not load them on the robot thread. Safe to call from the robot constructor.
+     */
+    public final void preloadClasses(boolean enabled) {
+        if (runtime != null) {
+            throw new IllegalStateException("Class preloading must be selected before robotInit.");
+        }
+        preloadClasses = enabled;
+    }
+
+    /** Returns the boot-time class preload, or null when it is off or robotInit has not run. */
+    public final ClassPreloader classPreload() {
+        return classPreloader;
+    }
+
+    @Override
+    protected void loopFunc() {
+        // Threads.setCurrentThreadPriority returns false where real-time priority is unavailable (simulation).
+        boolean boosted = loopPriority > 0 && Threads.setCurrentThreadPriority(true, loopPriority);
+        try {
+            super.loopFunc();
+        } finally {
+            if (boosted) {
+                Threads.setCurrentThreadPriority(false, 0);
+            }
+        }
+    }
+
     /** Returns the latest JVM and roboRIO system-health snapshot. */
     public final SystemStatus systemStatus() {
         if (systemRuntime == null) {
@@ -169,6 +225,13 @@ public abstract class AthenaRobot extends TimedRobot implements Mechanism {
 
     @Override
     public final void robotInit() {
+        if (preloadClasses) {
+            boolean real = RobotBase.isReal();
+            classPreloader = ClassPreloader.start("ca.frc6390.athena.",
+                    name -> !real || !(name.contains(".sim.") || name.contains(".simulation.")
+                            || name.contains(".benchmarks.")),
+                    AthenaRobot.class.getClassLoader());
+        }
         lastTimestampSeconds = timestampSeconds();
         lastSimulationTimestampSeconds = lastTimestampSeconds;
         runtime = createRuntime(RobotBase.isSimulation(), digitalInputs, simulationVisionField);

@@ -11,12 +11,19 @@ final class JvmRecommendations {
         }
     }
 
+    /**
+     * Only the fast C1 JIT compiler. With the default tiered C1 + C2 compilation the C2 compiler keeps a roboRIO
+     * core busy for the first minutes of a boot; C1 alone finishes in seconds, and robot code runs about as fast.
+     */
+    static final String C1_ONLY = "-XX:TieredStopAtLevel=1";
+
     static Recommendation forTarget(boolean realRobot, String target, long totalMemory, long heapMaximum) {
         if (!realRobot) return new Recommendation(List.of(), true);
-        boolean rioOne = target.toLowerCase(java.util.Locale.ROOT).contains("roborio")
-                && totalMemory > 0 && totalMemory <= 512L * MIB;
-        if (!rioOne) return new Recommendation(List.of(), true);
+        boolean rio = target.toLowerCase(java.util.Locale.ROOT).contains("roborio");
+        boolean rioOne = rio && totalMemory > 0 && totalMemory <= 512L * MIB;
+        if (!rioOne) return new Recommendation(rio ? List.of(C1_ONLY) : List.of(), true);
         List<String> arguments = List.of(
+                C1_ONLY,
                 "-Xms16m",
                 "-Xmx96m",
                 "-Xss512k",

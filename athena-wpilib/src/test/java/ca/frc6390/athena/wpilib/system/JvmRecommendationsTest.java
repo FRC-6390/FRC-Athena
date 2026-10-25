@@ -9,10 +9,11 @@ class JvmRecommendationsTest {
     private static final long MIB = 1024L * 1024L;
 
     @Test
-    void recommendsBoundedLowOverheadJvmOnlyForRoborioOneClassTargets() {
+    void recommendsC1OnlyOnRoborioAndABoundedJvmOnRoborioOneClassTargets() {
         JvmRecommendations.Recommendation rioOne = JvmRecommendations.forTarget(
                 true, "NI roboRIO 1.0", 256 * MIB, 256 * MIB);
         assertFalse(rioOne.arguments().isEmpty());
+        assertTrue(rioOne.arguments().contains("-XX:TieredStopAtLevel=1"));
         assertTrue(rioOne.arguments().contains("-Xmx96m"));
         assertTrue(rioOne.arguments().contains("-Xss512k"));
         assertTrue(rioOne.arguments().contains("-XX:MaxDirectMemorySize=24m"));
@@ -22,7 +23,10 @@ class JvmRecommendationsTest {
         assertFalse(rioOne.healthy());
 
         assertTrue(JvmRecommendations.forTarget(
-                true, "NI roboRIO 2.0", 2_048 * MIB, 256 * MIB).arguments().isEmpty());
+                true, "NI roboRIO 2.0", 2_048 * MIB, 256 * MIB).arguments()
+                .equals(java.util.List.of("-XX:TieredStopAtLevel=1")), "C1 only on every roboRIO");
+        assertTrue(JvmRecommendations.forTarget(
+                true, "Linux coprocessor", 2_048 * MIB, 256 * MIB).arguments().isEmpty());
         assertTrue(JvmRecommendations.forTarget(
                 false, "Simulation", 256 * MIB, 256 * MIB).healthy());
     }
