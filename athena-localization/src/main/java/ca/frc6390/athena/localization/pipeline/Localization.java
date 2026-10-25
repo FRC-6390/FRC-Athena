@@ -60,6 +60,7 @@ public final class Localization implements PoseSignal {
     private final MeasurementStdDevs stateStdDevs;
     private final MeasurementStdDevs defaultVisionStdDevs;
     private final BooleanSupplier seedWhileDisabled;
+    private final BooleanSupplier visionHeadingWhile;
     private final State state;
 
     Localization(Strategy strategy) {
@@ -76,6 +77,7 @@ public final class Localization implements PoseSignal {
                 Double.POSITIVE_INFINITY,
                 DEFAULT_STATE_STD_DEVS,
                 DEFAULT_VISION_STD_DEVS,
+                null,
                 null,
                 new State());
     }
@@ -94,6 +96,7 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs stateStdDevs,
             MeasurementStdDevs defaultVisionStdDevs,
             BooleanSupplier seedWhileDisabled,
+            BooleanSupplier visionHeadingWhile,
             State state) {
         this.strategy = Objects.requireNonNull(strategy, "strategy");
         this.inputs = List.copyOf(inputs);
@@ -108,6 +111,7 @@ public final class Localization implements PoseSignal {
         this.stateStdDevs = Objects.requireNonNull(stateStdDevs, "stateStdDevs");
         this.defaultVisionStdDevs = Objects.requireNonNull(defaultVisionStdDevs, "defaultVisionStdDevs");
         this.seedWhileDisabled = seedWhileDisabled;
+        this.visionHeadingWhile = visionHeadingWhile;
         this.state = Objects.requireNonNull(state, "state");
     }
 
@@ -172,7 +176,8 @@ public final class Localization implements PoseSignal {
         }
         return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                count, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled, state);
+                count, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled,
+                visionHeadingWhile, state);
     }
 
     /** Rejects vision whose squared residual divided by measurement variance exceeds this value. */
@@ -213,7 +218,32 @@ public final class Localization implements PoseSignal {
         }
         return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, disabled, new State());
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, disabled,
+                visionHeadingWhile, new State());
+    }
+
+    /**
+     * Uses camera heading only while {@code condition} reads true, for example {@code DriverStation::isDisabled};
+     * the gyro holds heading the rest of the time. Kalman nodes only.
+     *
+     * <p>Camera heading is usually a few degrees off (mount yaw, single-tag solves), and the estimator follows
+     * it within a fraction of a second whatever the std devs, so paths and aiming turn the robot to match a
+     * wrong heading. With this option frames keep correcting translation while the condition is false; their
+     * heading is ignored. Heading is still taken from vision until the estimate has one, from a reset or a
+     * seed, so a robot that is enabled before it ever saw a tag can still find its heading.</p>
+     *
+     * @param condition true while camera heading may correct the estimate
+     * @return configured node
+     */
+    public Localization visionHeadingWhile(BooleanSupplier condition) {
+        Objects.requireNonNull(condition, "condition");
+        if (strategy != Strategy.KALMAN) {
+            throw new IllegalStateException("visionHeadingWhile applies to Kalman localization only.");
+        }
+        return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
+                groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled,
+                condition, new State());
     }
 
     /**
@@ -409,6 +439,7 @@ public final class Localization implements PoseSignal {
             state.kalman = new KalmanEngine(odometry, stateStdDevs, defaultVisionStdDevs);
         }
         boolean seeding = seedWhileDisabled != null && seedWhileDisabled.getAsBoolean();
+        boolean visionHeading = visionHeadingWhile == null || visionHeadingWhile.getAsBoolean();
         PoseSnapshot estimated = state.kalman.update(
                 odometry,
                 vision,
@@ -416,7 +447,8 @@ public final class Localization implements PoseSignal {
                 innovationGate,
                 maxHeadingDisagreementRadians,
                 state.pendingReset,
-                seeding);
+                seeding,
+                visionHeading);
         state.pendingReset = null;
         return List.of(outputMeasurement(
                 estimated,
@@ -627,7 +659,7 @@ public final class Localization implements PoseSignal {
         return new Localization(strategy, nextInputs, nextFilters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
                 minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled,
-                new State());
+                visionHeadingWhile, new State());
     }
 
     private Localization configured(
@@ -641,7 +673,7 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs visionStdDevs) {
         return new Localization(strategy, inputs, filters, name, publish, groupWindow,
                 translationDisagreement, headingDisagreement, minimumSourceCount,
-                gate, processStdDevs, visionStdDevs, seedWhileDisabled, new State());
+                gate, processStdDevs, visionStdDevs, seedWhileDisabled, visionHeadingWhile, new State());
     }
 
     private static PoseSnapshot pose(Measurement measurement) {
@@ -839,6 +871,8 @@ public final class Localization implements PoseSignal {
         private static final double SEED_HEADING_RADIANS = Math.toRadians(10.0);
         /** Minimum robot time between two seeds while disabled. */
         private static final double DISABLED_SEED_PERIOD_SECONDS = 0.25;
+        /** Heading std dev of a frame whose heading is ignored; matches PoseSignal.translationOnly(). */
+        private static final double UNTRUSTED_HEADING_STD_DEV_RADIANS = 1.0e6;
         private final SwerveDriveKinematics kinematics;
         private final MeasurementStdDevs stateStdDevs;
         private final MeasurementStdDevs defaultVisionStdDevs;
@@ -871,7 +905,8 @@ public final class Localization implements PoseSignal {
                 double innovationGate,
                 double maxHeadingResidualRadians,
                 PoseSnapshot reset,
-                boolean seedingWhileDisabled) {
+                boolean seedingWhileDisabled,
+                boolean visionHeading) {
             Rotation2d heading = new Rotation2d(odometry.headingRadians());
             SwerveModulePosition[] positions = positions(odometry);
             currentHeading = heading;
@@ -901,7 +936,8 @@ public final class Localization implements PoseSignal {
                     .map(PoseMeasurementSample.class::cast)
                     .sorted(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
                     .forEach(sample -> addVision(
-                            sample, timestampSeconds, innovationGate, maxHeadingResidualRadians, seedingWhileDisabled));
+                            sample, timestampSeconds, innovationGate, maxHeadingResidualRadians, seedingWhileDisabled,
+                            visionHeading));
             return fromWpilib(estimator.getEstimatedPosition());
         }
 
@@ -910,7 +946,8 @@ public final class Localization implements PoseSignal {
                 double nowSeconds,
                 double innovationGate,
                 double maxHeadingResidualRadians,
-                boolean seedingWhileDisabled) {
+                boolean seedingWhileDisabled,
+                boolean visionHeading) {
             // A frame from the future means the camera clock is not synced to the robot yet (PhotonVision
             // and Limelight both report robot time only after time sync). Ignore it without remembering
             // its timestamp: one such frame would otherwise make every later, correct frame look old and
@@ -924,6 +961,14 @@ public final class Localization implements PoseSignal {
                 return;
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
+            if (!visionHeading && headingSeeded && trustsHeading(sample)) {
+                if (!trustsTranslation(sample)) {
+                    return;
+                }
+                MeasurementStdDevs base = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
+                sample = new TranslationOnlySample(sample, MeasurementStdDevs.of(
+                        base.xMeters(), base.yMeters(), UNTRUSTED_HEADING_STD_DEV_RADIANS));
+            }
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
             if (seed(source, sample, nowSeconds, seedingWhileDisabled)) {
                 return;
@@ -991,6 +1036,19 @@ public final class Localization implements PoseSignal {
                 lastDisabledSeedSeconds = nowSeconds;
             }
             return true;
+        }
+
+        /** A frame whose heading is ignored: the gyro owns heading while camera heading is not wanted. */
+        private record TranslationOnlySample(PoseMeasurementSample delegate, MeasurementStdDevs stdDevs)
+                implements PoseMeasurementSample {
+            @Override public PoseSnapshot pose() { return delegate.pose(); }
+            @Override public RobotVelocity speeds() { return delegate.speeds(); }
+            @Override public double timestampSeconds() { return delegate.timestampSeconds(); }
+            @Override public double latencySeconds() { return delegate.latencySeconds(); }
+            @Override public double ambiguity() { return delegate.ambiguity(); }
+            @Override public int targetCount() { return delegate.targetCount(); }
+            @Override public double averageTargetDistanceMeters() { return delegate.averageTargetDistanceMeters(); }
+            @Override public Object source() { return delegate.source(); }
         }
 
         private static final class SeedCandidate {

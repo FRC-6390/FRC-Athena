@@ -305,6 +305,55 @@ class WpilibLocalizationParityTest {
         assertEquals(6.0, estimate.pose().xMeters(), 1.0e-6, "enabled: no jump, gates and blending apply");
     }
 
+    @Test
+    void visionHeadingWhileLetsTheGyroHoldHeadingButKeepsTranslationCorrections() {
+        ParityRig rig = new ParityRig();
+        java.util.concurrent.atomic.AtomicBoolean disabled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        Localization estimate = Localizations.kalman()
+                .input(rig.odometry, rig.visionStage)
+                .stateStdDevs(0.08, Math.toRadians(8.0))
+                .visionHeadingWhile(disabled::get);
+        rig.setModuleInputs(distances(0.0, 0.0, 0.0, 0.0), angles(0.0, 0.0, 0.0, 0.0));
+        estimate.reset(new PoseSnapshot(3.0, 4.0, Math.PI)).apply(rig.context);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.25, 0.25, Math.toRadians(5.0));
+        double t = 0.02;
+        // Enabled: the camera reads 4 degrees off and 0.5 m away in x for 2 s.
+        for (int i = 0; i < 100; i++, t += 0.02) {
+            rig.visionSource.measurements = List.of(vision(3.5, 4.0, Math.PI + Math.toRadians(4.0), t - 0.01,
+                    multiTag, camera));
+            estimate.refresh(rig.context, t, 0.02);
+        }
+        assertEquals(Math.PI, Math.abs(estimate.pose().headingRadians()), 1.0e-6, "gyro holds heading");
+        assertEquals(3.5, estimate.pose().xMeters(), 0.05, "translation still corrected");
+
+        disabled.set(true);
+        for (int i = 0; i < 50; i++, t += 0.02) {
+            rig.visionSource.measurements = List.of(vision(3.5, 4.0, Math.PI + Math.toRadians(4.0), t - 0.01,
+                    multiTag, camera));
+            estimate.refresh(rig.context, t, 0.02);
+        }
+        assertEquals(4.0, Math.toDegrees(Math.PI - Math.abs(estimate.pose().headingRadians())), 0.5,
+                "camera heading used while the condition holds");
+    }
+
+    @Test
+    void visionHeadingWhileStillSeedsAnUnknownHeading() {
+        ParityRig rig = new ParityRig();
+        Localization estimate = Localizations.kalman()
+                .input(rig.odometry, rig.visionStage)
+                .maxNormalizedVisionResidual(9.0)
+                .visionHeadingWhile(() -> false);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        for (int i = 0; i < 3; i++) {
+            rig.visionSource.measurements = List.of(vision(5.0, 2.0, 2.0, i * 0.02, multiTag, camera));
+            estimate.refresh(rig.context, i * 0.02, 0.02);
+        }
+        assertEquals(2.0, estimate.pose().headingRadians(), 1.0e-6);
+        assertEquals(5.0, estimate.pose().xMeters(), 1.0e-6);
+    }
+
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {
         return new double[] {frontLeft, frontRight, backLeft, backRight};
     }
