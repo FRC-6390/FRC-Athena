@@ -139,17 +139,89 @@ class PowerPlannerTest {
     }
 
     @Test
-    void sagProfileReducesCapWhileBusIsLow() {
+    void sagResponseGrowsAcrossItsBandBelowTheThreshold() {
+        PowerProfile p = PowerProfile.of().onSag(Sag.shed(0.5).below(Units.Volts.of(9)));
+        double[][] cases = {{9.5, Double.POSITIVE_INFINITY}, {8.5, 40.0 * (1.0 - 0.5 * (0.5 / 0.75))}, {8.25, 20.0}, {7.0, 20.0}};
+        for (double[] c : cases) {
+            PowerPlanner planner = new PowerPlanner(policy(6.0));
+            Channel a = new Channel();
+            a.inputs(p, 40.0, INF);
+            planner.plan(new Bus(c[0], 12.5, 0.02), 0.0, DT, List.of(a));
+            assertEquals(c[1], a.capAmps(), 1e-9, "bus " + c[0] + " V");
+        }
+    }
+
+    @Test
+    void sagCutsSlewDownAndRecoverWithoutSnapping() {
         PowerPlanner planner = new PowerPlanner(policy(6.0));
         PowerProfile p = PowerProfile.of().onSag(Sag.shed(0.5).below(Units.Volts.of(9)));
         Channel a = new Channel();
-        a.inputs(p, 40.0, INF);
-        planner.plan(new Bus(8.5, 12.5, 0.02), 0.0, DT, List.of(a));
-        assertEquals(20.0, a.capAmps(), 1e-9);
-        a.inputs(p, 40.0, INF);
-        planner.plan(new Bus(10.0, 12.5, 0.02), DT, DT, List.of(a));
-        assertTrue(Double.isInfinite(a.capAmps()));
+        double now = 0.0;
+        double previous = Double.NaN;
+        for (int i = 0; i < 60; i++, now += DT) {
+            double bus = i < 5 ? 10.0 : i < 30 ? 7.5 : 10.0;
+            a.inputs(p, 40.0, INF);
+            planner.plan(new Bus(bus, 12.5, 0.02), now, DT, List.of(a));
+            double cap = a.capAmps();
+            if (Double.isFinite(previous) && Double.isFinite(cap)) {
+                double change = cap - previous;
+                assertTrue(change >= -PowerPlanner.SOFT_CUT_AMPS_PER_SECOND * DT - 1e-9, "cut too fast at " + i);
+                assertTrue(change <= PowerPlanner.RECOVERY_AMPS_PER_SECOND * DT + 1e-9, "recovered too fast at " + i);
+            }
+            previous = cap;
+        }
+        assertTrue(Double.isInfinite(a.capAmps()), "uncapped again once the bus recovered");
     }
+
+    @Test
+    void atTheFloorASagCutIsImmediate() {
+        PowerPlanner planner = new PowerPlanner(policy(7.5));
+        PowerProfile p = PowerProfile.of().sustained(Units.Amps.of(60)).onSag(Sag.shed(0.5).below(Units.Volts.of(9)));
+        Channel a = new Channel();
+        a.inputs(p, 60.0, INF);
+        planner.plan(new Bus(10.0, 12.5, 0.02), 0.0, DT, List.of(a));
+        assertEquals(60.0, a.capAmps(), 1e-9);
+        // The filter needs time to follow, but the floor allows the cut it asks for at once.
+        for (int i = 1; i <= 10; i++) {
+            a.inputs(p, 60.0, INF);
+            planner.plan(new Bus(7.4, 12.5, 0.02), i * DT, DT, List.of(a));
+        }
+        assertEquals(30.0, a.capAmps(), 1e-9);
+    }
+
+    /**
+     * A load that pulls the bus below its sag threshold. An on/off sag response flips every cycle (cut, the bus
+     * recovers above the threshold, release, sag again); the proportional, slewed response settles.
+     */
+    @Test
+    void sagResponseSettlesInsteadOfOscillatingAgainstTheBattery() {
+        PowerPlanner planner = new PowerPlanner(policy(6.0));
+        PowerProfile p = PowerProfile.of().onSag(Sag.shed(0.5).below(Units.Volts.of(9)));
+        Channel a = new Channel();
+        double ohms = 0.03;
+        double demand = 130.0;
+        double drawn = 0.0;
+        int reversals = 0;
+        double lastChange = 0.0;
+        double previous = Double.NaN;
+        for (int i = 0; i < 150; i++) {
+            double bus = 12.5 - ohms * drawn;
+            a.inputs(p, demand, INF);
+            planner.plan(new Bus(bus, 12.5, ohms), i * DT, DT, List.of(a));
+            drawn = Math.min(demand, a.capAmps());
+            if (i >= 50 && Double.isFinite(previous)) {
+                double change = drawn - previous;
+                if (Math.abs(change) > 0.5 && Math.signum(change) != Math.signum(lastChange) && lastChange != 0.0) {
+                    reversals++;
+                }
+                if (Math.abs(change) > 0.5) lastChange = change;
+            }
+            previous = drawn;
+        }
+        assertTrue(reversals <= 2, "current reversed " + reversals + " times after settling");
+        assertTrue(drawn < demand && drawn > demand * 0.5, "settled at a partial shed: " + drawn);
+    }
+
 
     @Test
     void staggerHoldsSecondLargeStartUntilSpacingPasses() {

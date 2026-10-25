@@ -21,10 +21,11 @@ import java.util.function.UnaryOperator;
  *   <li>{@link #sustained(Current)} – continuous winding (stator) current cap. Zero or unset means no cap.</li>
  *   <li>{@link #burst(Current, Time)} – higher cap allowed for a limited time budget above the
  *       sustained cap; the budget refills at half speed while the motor draws at or below sustained.</li>
- *   <li>{@link #rampLimit(Current, Time)} – maximum increase of the cap per time (decreases are immediate).</li>
+ *   <li>{@link #rampLimit(Current, Time)} – maximum increase of the cap per time. Without it, a cap recovering
+ *       from a sag or budget cut still rises gradually; see {@link PowerPlanner}.</li>
  *   <li>{@link #share(double)} – relative weight when the battery budget is short. The lowest share
  *       (relative to demand) is shed first; see {@link PowerBudget}.</li>
- *   <li>{@link #onSag(Sag)} – extra reduction while the battery sags.</li>
+ *   <li>{@link #onSag(Sag)} – extra reduction while the battery sags, proportional to how far it sags.</li>
  * </ul>
  */
 public final class PowerProfile {
@@ -73,7 +74,7 @@ public final class PowerProfile {
 
     /**
      * Limits how fast the cap may increase: at most {@code step} of additional current per
-     * {@code interval}. Decreases are never ramp limited.
+     * {@code interval}. Decreases are not limited by this rate; sag and budget cuts follow {@link PowerPlanner#SOFT_CUT_AMPS_PER_SECOND}.
      *
      * @param step maximum increase per interval, positive
      * @param interval interval the step applies over, positive

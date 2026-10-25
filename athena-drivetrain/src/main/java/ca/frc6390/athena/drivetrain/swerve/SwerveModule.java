@@ -10,11 +10,15 @@ import ca.frc6390.athena.mechanism.core.MechanismTemplate;
 import ca.frc6390.athena.mechanism.core.MotorSlot;
 import ca.frc6390.athena.mechanism.core.Slots;
 import ca.frc6390.athena.hardware.runtime.RuntimeHardwareAccess;
+import ca.frc6390.athena.mechanism.constraint.Constraints;
 import ca.frc6390.athena.mechanism.control.PidGains;
+import ca.frc6390.athena.mechanism.control.TorqueVelocityGains;
 import ca.frc6390.athena.mechanism.motion.MotionPlanners;
 import java.util.Objects;
 import static edu.wpi.first.units.Units.MetersPerSecond;
+import static edu.wpi.first.units.Units.MetersPerSecondPerSecond;
 import edu.wpi.first.units.Units;
+import edu.wpi.first.units.measure.LinearAcceleration;
 import edu.wpi.first.units.measure.LinearVelocity;
 
 /**
@@ -31,6 +35,8 @@ public abstract class SwerveModule implements MechanismTemplate {
     public ControlBinding<?> driveVelocity;
     public ControlBinding<?> steerPosition;
     private double driveMaxSpeedMetersPerSecond = Double.NaN;
+    private double driveMaxAccelerationMetersPerSecondSquared = Double.NaN;
+    private TorqueVelocityGains driveTorque;
     private PidGains steerPid;
     private double heldAngleRotations = Double.NaN;
 
@@ -49,6 +55,41 @@ public abstract class SwerveModule implements MechanismTemplate {
             throw new IllegalArgumentException("Drive max speed must be positive.");
         }
         driveMaxSpeedMetersPerSecond = maxSpeedMetersPerSecond;
+        configureIfReady();
+        return this;
+    }
+
+    /**
+     * Drives the wheel with software torque control instead of the {@code 12 V / driveMaxSpeed} voltage
+     * feedforward: the wheel-speed error and the reference acceleration become a motor current, turned into a
+     * voltage with the motor model ({@code V = I R + omega / Kv}). This needs no motor license. Force, and so
+     * acceleration, then follows the request at any battery voltage, and the drive stops fighting a voltage step
+     * whenever the target changes. Gains are in amps per m/s (kP) and amps per m/s^2 ({@code inertia}): for one
+     * motor per module, {@code inertia = robot mass / 4 * wheel radius / (gear ratio * kT)}.
+     *
+     * @param gains torque-velocity gains for this module's drive motor
+     * @return this module
+     */
+    public SwerveModule driveTorque(TorqueVelocityGains gains) {
+        driveTorque = Objects.requireNonNull(gains, "gains");
+        configureIfReady();
+        return this;
+    }
+
+    /**
+     * Limits how fast this wheel's speed reference may change, a per-wheel traction limit that also applies to
+     * paths and aiming. With {@link #driveTorque} the limited reference also supplies the acceleration for its
+     * inertia term. Set it near what the wheels can grip (about 1 g on carpet).
+     *
+     * @param maxAcceleration wheel acceleration limit, positive
+     * @return this module
+     */
+    public SwerveModule driveMaxAcceleration(LinearAcceleration maxAcceleration) {
+        double value = Objects.requireNonNull(maxAcceleration, "maxAcceleration").in(MetersPerSecondPerSecond);
+        if (!Double.isFinite(value) || value <= 0.0) {
+            throw new IllegalArgumentException("Drive max acceleration must be positive.");
+        }
+        driveMaxAccelerationMetersPerSecondSquared = value;
         configureIfReady();
         return this;
     }
@@ -74,8 +115,19 @@ public abstract class SwerveModule implements MechanismTemplate {
         steerPosition = Controls.position(steer.get(), Units.Rotations)
                 .feedback(angle.get().absoluteSignal(), angle.get().velocitySignal())
                 .planner(MotionPlanners.boundedAngular(Units.Rotations.of(1.0), Units.Rotations));
-        if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
+        if (driveTorque != null) {
+            driveVelocity = driveVelocity.torqueVelocity(driveTorque);
+        } else if (Double.isFinite(driveMaxSpeedMetersPerSecond)) {
             driveVelocity = driveVelocity.ff(0.0, 12.0 / driveMaxSpeedMetersPerSecond, 0.0);
+        }
+        if (Double.isFinite(driveMaxAccelerationMetersPerSecondSquared)) {
+            // The speed bound only needs to be above anything the drive asks for; the acceleration is the limit.
+            double speedBound = Double.isFinite(driveMaxSpeedMetersPerSecond)
+                    ? driveMaxSpeedMetersPerSecond * 2.0
+                    : 100.0;
+            driveVelocity = driveVelocity.constraints(Constraints.motion(
+                    MetersPerSecond.of(speedBound),
+                    MetersPerSecondPerSecond.of(driveMaxAccelerationMetersPerSecondSquared)));
         }
         if (steerPid != null) {
             steerPosition = steerPosition.pid(steerPid);

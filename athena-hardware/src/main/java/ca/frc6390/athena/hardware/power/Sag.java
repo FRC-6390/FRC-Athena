@@ -5,10 +5,13 @@ import edu.wpi.first.units.measure.Voltage;
 import java.util.Objects;
 
 /**
- * Bus-sag response for a {@link PowerProfile}: while the measured battery voltage is below the
- * threshold, the motor's current cap is reduced by {@code shedFraction} (0.5 halves it).
+ * Bus-sag response for a {@link PowerProfile}: while the filtered battery voltage is below the
+ * threshold, the motor's current cap is reduced by up to {@code shedFraction} (0.5 halves it). The
+ * reduction grows linearly from none at the threshold to the full fraction
+ * {@link PowerPlanner#SAG_BAND_VOLTS} below it, and the cap moves at bounded rates, so the response does not
+ * switch on and off against the battery.
  *
- * @param shedFraction fraction of the cap removed while sagging, in {@code (0, 1]}
+ * @param shedFraction fraction of the cap removed at full sag, in {@code (0, 1]}
  * @param threshold battery voltage below which the response applies
  */
 public record Sag(double shedFraction, Voltage threshold) {

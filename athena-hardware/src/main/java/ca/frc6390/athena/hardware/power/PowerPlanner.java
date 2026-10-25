@@ -17,15 +17,23 @@ import java.util.function.DoubleUnaryOperator;
  * <p>For each cycle, in order:</p>
  * <ol>
  *   <li><b>Profile.</b> Sustained cap; burst allowed while the burst time budget lasts; sag response
- *       applied while the measured bus is below its threshold.</li>
+ *       growing across {@link #SAG_BAND_VOLTS} below its threshold of the filtered bus voltage.</li>
  *   <li><b>Stagger.</b> A group whose demand crosses its large-current threshold is admitted only if
  *       {@code staggerSeconds} have passed since the last admitted start. Otherwise it is held at the
  *       large-current threshold. Shared profiles and explicit startup relationships admit atomically.</li>
- *   <li><b>Ramp.</b> Increases of the cap are limited to the profile ramp rate; decreases are immediate.</li>
+ *   <li><b>Ramp.</b> Increases of the cap are limited to the profile ramp rate. Without one, a cap recovering
+ *       from a cut rises at {@link #RECOVERY_AMPS_PER_SECOND} until it no longer binds the demand. Decreases,
+ *       starting from the demand of an uncapped motor, are limited to {@link #SOFT_CUT_AMPS_PER_SECOND} while the
+ *       bus is above the floor, and immediate at or below it.</li>
  *   <li><b>Budget and coupling.</b> Below the bus floor (with 0.25 V hysteresis), water-fill supply amps
  *       across profile groups using the sum of member shares. Solve one command scale satisfying
  *       every physical member's winding limit and the group's battery allocation.</li>
  * </ol>
+ *
+ * <p>Caps are profiled, not switched: a cap that drops in one cycle cuts torque at once, the bus recovers,
+ * the cap returns, the bus sags again, and the mechanism oscillates (felt as jolts). The filtered voltage, the
+ * proportional sag band and the bounded cut and recovery rates keep caps moving smoothly. Only a bus at the
+ * floor, where the roboRIO is close to browning out, cuts at once.</p>
  */
 public final class PowerPlanner {
     /** Demand above which a motor counts as starting when no sustained cap is declared. */
@@ -34,10 +42,20 @@ public final class PowerPlanner {
     public static final double FLOOR_HYSTERESIS_VOLTS = 0.25;
     /** Fraction of real time that refills the burst budget while the motor draws within sustained. */
     public static final double BURST_REFILL_RATIO = 0.5;
+    /** Below a sag threshold the shed fraction grows linearly to its full value across this many volts. */
+    public static final double SAG_BAND_VOLTS = 0.75;
+    /** Time constant of the bus-voltage filter used by sag responses. */
+    public static final double BUS_FILTER_SECONDS = 0.1;
+    /** Fastest a cap may fall while the bus is above the floor: 12 A per 20 ms cycle. */
+    public static final double SOFT_CUT_AMPS_PER_SECOND = 600.0;
+    /** Fastest a cap may rise on a profile without its own ramp limit. */
+    public static final double RECOVERY_AMPS_PER_SECOND = 300.0;
 
     private final double floorVolts;
     private final double staggerSeconds;
     private boolean shedding;
+    private double filteredBusVolts = Double.NaN;
+    private boolean atFloor;
     private double lastAdmittedStartSeconds = Double.NEGATIVE_INFINITY;
     private double[] demands = new double[0];
     private double[] weights = new double[0];
@@ -152,6 +170,10 @@ public final class PowerPlanner {
         private double declaredCapAmps = Double.POSITIVE_INFINITY;
         private double capAmps = Double.POSITIVE_INFINITY;
         private double lastCapAmps = Double.POSITIVE_INFINITY;
+        /** This cycle's cap from declared, profile, thermal and stagger limits, before sag and budget. */
+        private double staticCapAmps = Double.POSITIVE_INFINITY;
+        /** Whether the last cap was held below its static cap by a sag response or the budget. */
+        private boolean dynamicallyReduced;
         private double burstBucketSeconds = -1.0;
         private boolean admitted;
         private double couplingScale = 1.0;
@@ -251,6 +273,7 @@ public final class PowerPlanner {
             if (profile != next) {
                 burstBucketSeconds = -1.0;
                 lastCapAmps = Double.POSITIVE_INFINITY;
+                dynamicallyReduced = false;
                 admitted = false;
             }
             profile = next;
@@ -297,10 +320,12 @@ public final class PowerPlanner {
      */
     public void plan(Bus bus, double nowSeconds, double dtSeconds, List<Channel> channels) {
         cycle++;
+        filterBus(bus.measuredVolts(), dtSeconds);
+        atFloor = Double.isFinite(bus.measuredVolts()) && bus.measuredVolts() <= floorVolts;
         prepareGroups(channels);
         admitStarts(nowSeconds);
         for (Channel channel : channels) {
-            planChannel(channel, bus, dtSeconds);
+            planChannel(channel, dtSeconds);
         }
         int count = groups.size();
         ensureCapacity(count);
@@ -480,6 +505,7 @@ public final class PowerPlanner {
             channel.supplyBudgetActive = budgetActive && positiveLoad;
             channel.supplyLimited = channel.supplyBudgetActive && budgetReduced;
             channel.lastCapAmps = channel.capAmps;
+            channel.dynamicallyReduced = channel.capAmps < channel.staticCapAmps - 1e-9;
         }
     }
 
@@ -682,13 +708,26 @@ public final class PowerPlanner {
     /** Returns whether the last plan shed current to keep the bus at the floor. */
     public boolean shedding() { return shedding; }
 
+    /** Returns the filtered bus voltage the sag responses use, or NaN before a finite measurement. */
+    public double filteredBusVolts() { return filteredBusVolts; }
+
+    private void filterBus(double measured, double dtSeconds) {
+        if (!Double.isFinite(measured)) return;
+        if (!Double.isFinite(filteredBusVolts)) {
+            filteredBusVolts = measured;
+            return;
+        }
+        double dt = Double.isFinite(dtSeconds) ? Math.max(0.0, dtSeconds) : 0.0;
+        filteredBusVolts += (measured - filteredBusVolts) * dt / (BUS_FILTER_SECONDS + dt);
+    }
+
     private boolean updateShedding(double predicted) {
         if (!Double.isFinite(predicted)) return false;
         if (shedding) return predicted < floorVolts + FLOOR_HYSTERESIS_VOLTS;
         return predicted < floorVolts;
     }
 
-    private void planChannel(Channel channel, Bus bus, double dtSeconds) {
+    private void planChannel(Channel channel, double dtSeconds) {
         PowerProfile profile = channel.profile;
         double requested = channel.demandAmps;
         double cap = channel.declaredCapAmps;
@@ -698,20 +737,45 @@ public final class PowerPlanner {
                 cap = Math.min(cap, sustainedOrBurst(channel, profile, requested, dtSeconds, sustained)
                         * channel.thermalFraction);
             }
+        }
+        // The static cap: declared, profile and thermal limits (and stagger, below), without the sag response.
+        double staticCap = cap;
+        if (profile != null) {
             Sag sag = profile.sag();
-            if (sag != null && Double.isFinite(bus.measuredVolts()) && bus.measuredVolts() < sag.threshold().in(edu.wpi.first.units.Units.Volts)) {
+            double sagVolts = sag == null ? Double.NaN : sag.threshold().in(edu.wpi.first.units.Units.Volts);
+            if (sag != null && Double.isFinite(filteredBusVolts) && filteredBusVolts < sagVolts) {
+                // Proportional, not on/off: a full cut at the threshold lifts the bus above it, the cut ends,
+                // the bus sags again, and the mechanism jolts every cycle.
+                double depth = Math.min(1.0, (sagVolts - filteredBusVolts) / SAG_BAND_VOLTS);
                 double base = Math.min(cap, requested);
-                cap = base * (1.0 - sag.shedFraction());
+                cap = base * (1.0 - sag.shedFraction() * depth);
             }
         }
         if (staggerSeconds > 0.0 && channel.startupParticipant && !channel.admitted) {
             double largeThreshold = largeThreshold(channel);
-            if (requested >= largeThreshold) cap = Math.min(cap, largeThreshold);
+            if (requested >= largeThreshold) {
+                cap = Math.min(cap, largeThreshold);
+                staticCap = Math.min(staticCap, largeThreshold);
+            }
         }
-        if (profile != null && profile.rampAmpsPerSecond() > 0.0
-                && Double.isFinite(channel.lastCapAmps) && cap > channel.lastCapAmps) {
-            cap = Math.min(cap, channel.lastCapAmps + profile.rampAmpsPerSecond() * Math.max(0.0, dtSeconds));
+        staticCap = Math.max(0.0, staticCap);
+        double dt = Double.isFinite(dtSeconds) ? Math.max(0.0, dtSeconds) : 0.0;
+        double last = channel.lastCapAmps;
+        if (profile != null && Double.isFinite(last)) {
+            if (cap > last) {
+                if (profile.rampAmpsPerSecond() > 0.0) {
+                    cap = Math.min(cap, last + profile.rampAmpsPerSecond() * dt);
+                } else if (channel.dynamicallyReduced) {
+                    // Recovery after a sag or budget cut: rise at the default rate until it no longer binds the demand.
+                    double ramped = last + RECOVERY_AMPS_PER_SECOND * dt;
+                    if (ramped < requested) cap = Math.min(cap, ramped);
+                }
+            } else if (cap < last && cap < staticCap && !atFloor) {
+                // A sag cut (not a static limit such as a burst ending) slews down instead of dropping at once.
+                cap = Math.min(staticCap, Math.max(cap, last - SOFT_CUT_AMPS_PER_SECOND * dt));
+            }
         }
+        channel.staticCapAmps = staticCap;
         channel.capAmps = Math.max(0.0, cap);
     }
 

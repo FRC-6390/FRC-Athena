@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
 import ca.frc6390.athena.api.hardware.MotorKinds;
@@ -90,6 +91,30 @@ class SwerveModulesTest {
         module.driveMaxSpeed(MetersPerSecond.of(4.0)).steerPid(1.0, 0.0, 0.0);
 
         assertDoesNotThrow(() -> module.target(new SwerveModuleTarget(1.0, 0.25)));
+    }
+
+    @Test
+    void torqueDriveReplacesTheVoltageFeedforward() {
+        HardwareBus canivore = HardwareBus.can("canivore");
+        SwerveModule module = new SwerveModules.SDS.MK4I.L3();
+        module.drive.fill(canivore.motor(MotorKinds.KRAKEN_X60, 1))
+                .steer.fill(canivore.motor(MotorKinds.FALCON_500, 2))
+                .angle.fill(canivore.encoder(EncoderKinds.CANCODER, 3));
+        module.driveMaxSpeed(MetersPerSecond.of(4.0))
+                .driveTorque(ca.frc6390.athena.mechanism.control.TorqueVelocityGains.of(40.0, 0.0, 0.0)
+                        .staticCurrent(edu.wpi.first.units.Units.Amps.of(2.5))
+                        .inertia(7.5))
+                .driveMaxAcceleration(edu.wpi.first.units.Units.MetersPerSecondPerSecond.of(9.0))
+                .steerPid(14.0, 0.0, 0.1);
+
+        assertTrue(module.driveVelocity.loops().stream()
+                .anyMatch(ca.frc6390.athena.mechanism.control.TorqueVelocityGains.class::isInstance));
+        assertTrue(module.driveVelocity.loops().stream()
+                .noneMatch(ca.frc6390.athena.mechanism.control.FeedforwardGains.class::isInstance),
+                "the motor model replaces the 12 V / max speed feedforward");
+        assertDoesNotThrow(() -> module.target(new SwerveModuleTarget(1.0, 0.25)));
+        assertThrows(IllegalArgumentException.class,
+                () -> module.driveMaxAcceleration(edu.wpi.first.units.Units.MetersPerSecondPerSecond.of(0.0)));
     }
 
     @Test
