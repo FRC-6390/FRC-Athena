@@ -94,7 +94,7 @@ class PhotonVisionCameraAdapterTest {
     }
 
     @Test
-    void poseSignalUsesLatestUnreadEstimatedPose() {
+    void poseSignalReportsEveryUnreadEstimatedPose() {
         PhotonVisionDevice device = Cameras.photonVision("front");
         FakePhotonClient client = new FakePhotonClient(List.of(
                 new PhotonVisionCameraAdapter.PhotonVisionResult(
@@ -119,8 +119,10 @@ class PhotonVisionCameraAdapterTest {
 
         List<Measurement> measurements = adapter.poseSignal().measurements();
 
-        assertEquals(1, measurements.size());
-        PoseMeasurementSample pose = (PoseMeasurementSample) measurements.get(0);
+        // A 120 fps camera delivers several frames per robot cycle; all of them are measurements.
+        assertEquals(2, measurements.size());
+        assertEquals(1.0, ((PoseMeasurementSample) measurements.get(0)).pose().xMeters(), 1.0e-9);
+        PoseMeasurementSample pose = (PoseMeasurementSample) measurements.get(1);
         assertEquals(3.0, pose.pose().xMeters(), 1.0e-9);
         assertEquals(4.0, pose.pose().yMeters(), 1.0e-9);
         assertEquals(0.75, pose.pose().headingRadians(), 1.0e-9);
@@ -166,6 +168,24 @@ class PhotonVisionCameraAdapterTest {
 
         assertThrows(IllegalStateException.class, adapter::latestPoses);
         assertThrows(IllegalStateException.class, adapter::poseSignal);
+    }
+
+    @Test
+    void poseDistanceCountsOnlyTheTagsTheEstimateUsed() {
+        PhotonVisionDevice device = Cameras.photonVision("front");
+        FakePhotonClient client = new FakePhotonClient(List.of(
+                new PhotonVisionCameraAdapter.PhotonVisionResult(
+                        1.0,
+                        0.010,
+                        List.of(new PhotonVisionTarget(1, 0.0, 0.0, 1.5, 0.05),
+                                new PhotonVisionTarget(9, 0.0, 0.0, 6.5, 0.05)),
+                        Optional.of(new PhotonVisionCameraAdapter.PhotonVisionPoseEstimate(
+                                new PoseSnapshot(1.0, 2.0, 0.0), 1.0, 0.05, 1, 1.5)))));
+        PhotonVisionCameraAdapter adapter = new PhotonVisionCameraAdapter(device, client, result -> Optional.empty());
+
+        PoseMeasurementSample pose = (PoseMeasurementSample) adapter.poseSignal().measurements().get(0);
+
+        assertEquals(1.5, pose.averageTargetDistanceMeters(), 1.0e-9);
     }
 
     private record FakePhotonClient(List<PhotonVisionCameraAdapter.PhotonVisionResult> results)

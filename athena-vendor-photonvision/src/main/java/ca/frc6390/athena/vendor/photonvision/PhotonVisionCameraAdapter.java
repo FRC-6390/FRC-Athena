@@ -1,5 +1,6 @@
 package ca.frc6390.athena.vendor.photonvision;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -242,7 +243,9 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 result.latencySeconds(),
                 pose.ambiguity(),
                 pose.targetCount(),
-                averageTargetDistance(result.targets()),
+                Double.isFinite(pose.averageTargetDistanceMeters())
+                        ? pose.averageTargetDistanceMeters()
+                        : averageTargetDistance(result.targets()),
                 MeasurementStdDevs.of(Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
                 source));
     }
@@ -344,9 +347,15 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         @Override
         public List<PhotonVisionResult> unreadResults(PhotonPoseClient poseClient) {
+            // Every unread frame is kept: at high frame rates several arrive per robot cycle, and dropping all
+            // but the newest would discard most of the camera's measurements.
             List<PhotonPipelineResult> results = camera.getAllUnreadResults();
             if (results.isEmpty()) return List.of();
-            return List.of(PhotonVisionResult.fromPhoton(results.get(results.size() - 1), poseClient));
+            List<PhotonVisionResult> converted = new ArrayList<>(results.size());
+            for (PhotonPipelineResult result : results) {
+                converted.add(PhotonVisionResult.fromPhoton(result, poseClient));
+            }
+            return converted;
         }
 
         @Override
@@ -392,7 +401,8 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                         new PoseSnapshot(pose2d.getX(), pose2d.getY(), pose2d.getRotation().getRadians()),
                         estimate.timestampSeconds,
                         ambiguity(estimate.targetsUsed),
-                        estimate.targetsUsed == null ? 0 : estimate.targetsUsed.size());
+                        estimate.targetsUsed == null ? 0 : estimate.targetsUsed.size(),
+                        averageDistance(estimate.targetsUsed));
             });
         }
 
@@ -411,6 +421,19 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
                 default -> estimator.estimateCoprocMultiTagPose(result)
                         .or(() -> estimator.estimateLowestAmbiguityPose(result));
             };
+        }
+
+        /** Average camera-to-tag distance over the tags the estimate was solved from. */
+        private static double averageDistance(List<PhotonTrackedTarget> targets) {
+            if (targets == null || targets.isEmpty()) {
+                return Double.NaN;
+            }
+            return targets.stream()
+                    .filter(Objects::nonNull)
+                    .mapToDouble(target -> target.getBestCameraToTarget().getTranslation().getNorm())
+                    .filter(Double::isFinite)
+                    .average()
+                    .orElse(Double.NaN);
         }
 
         private static double ambiguity(List<PhotonTrackedTarget> targets) {
@@ -481,16 +504,28 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         }
     }
 
+    /**
+     * One pose estimate. {@code averageTargetDistanceMeters} covers only the tags the estimate used; it is NaN
+     * when unknown, and the distance then falls back to every detected target.
+     */
     static record PhotonVisionPoseEstimate(
             PoseSnapshot pose,
             double timestampSeconds,
             double ambiguity,
-            int targetCount) {
+            int targetCount,
+            double averageTargetDistanceMeters) {
         PhotonVisionPoseEstimate {
             pose = Objects.requireNonNull(pose, "pose");
             timestampSeconds = finiteOrZero(timestampSeconds);
             ambiguity = Math.max(0.0, finiteOrZero(ambiguity));
             targetCount = Math.max(0, targetCount);
+            averageTargetDistanceMeters = Double.isFinite(averageTargetDistanceMeters)
+                    ? Math.max(0.0, averageTargetDistanceMeters)
+                    : Double.NaN;
+        }
+
+        PhotonVisionPoseEstimate(PoseSnapshot pose, double timestampSeconds, double ambiguity, int targetCount) {
+            this(pose, timestampSeconds, ambiguity, targetCount, Double.NaN);
         }
     }
 
@@ -498,7 +533,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
         private final Object source;
         private final PhotonClient client;
         private final PhotonPoseClient poseClient;
-        private PhotonVisionResult latest = new PhotonVisionResult(0.0, 0.0, List.of(), Optional.empty());
+        private List<PhotonVisionResult> latest = List.of();
 
         private PhotonVisionMeasurementBuffer(Object source, PhotonClient client, PhotonPoseClient poseClient) {
             this.source = source;
@@ -508,12 +543,21 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
 
         private List<Measurement> targetMeasurements() {
             refresh();
-            return targetMeasurementsFromResult(latest, source);
+            return latest.isEmpty()
+                    ? List.of()
+                    : targetMeasurementsFromResult(latest.get(latest.size() - 1), source);
         }
 
         private List<Measurement> poseMeasurements() {
             refresh();
-            return poseMeasurementsFromResult(latest, source);
+            if (latest.size() == 1) {
+                return poseMeasurementsFromResult(latest.get(0), source);
+            }
+            List<Measurement> poses = new ArrayList<>();
+            for (PhotonVisionResult result : latest) {
+                poses.addAll(poseMeasurementsFromResult(result, source));
+            }
+            return poses.isEmpty() ? List.of() : List.copyOf(poses);
         }
 
         private void refresh() {
@@ -522,7 +566,7 @@ public final class PhotonVisionCameraAdapter implements CameraAdapter, AutoClose
             }
             List<PhotonVisionResult> results = client.unreadResults(poseClient);
             if (!results.isEmpty()) {
-                latest = results.get(results.size() - 1);
+                latest = List.copyOf(results);
             }
         }
     }

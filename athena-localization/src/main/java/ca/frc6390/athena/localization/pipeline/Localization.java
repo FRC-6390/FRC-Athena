@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /** One inspectable pose-processing node in a localization graph. */
 public final class Localization implements PoseSignal {
@@ -58,6 +59,7 @@ public final class Localization implements PoseSignal {
     private final double innovationGate;
     private final MeasurementStdDevs stateStdDevs;
     private final MeasurementStdDevs defaultVisionStdDevs;
+    private final BooleanSupplier seedWhileDisabled;
     private final State state;
 
     Localization(Strategy strategy) {
@@ -74,6 +76,7 @@ public final class Localization implements PoseSignal {
                 Double.POSITIVE_INFINITY,
                 DEFAULT_STATE_STD_DEVS,
                 DEFAULT_VISION_STD_DEVS,
+                null,
                 new State());
     }
 
@@ -90,6 +93,7 @@ public final class Localization implements PoseSignal {
             double innovationGate,
             MeasurementStdDevs stateStdDevs,
             MeasurementStdDevs defaultVisionStdDevs,
+            BooleanSupplier seedWhileDisabled,
             State state) {
         this.strategy = Objects.requireNonNull(strategy, "strategy");
         this.inputs = List.copyOf(inputs);
@@ -103,6 +107,7 @@ public final class Localization implements PoseSignal {
         this.innovationGate = innovationGate;
         this.stateStdDevs = Objects.requireNonNull(stateStdDevs, "stateStdDevs");
         this.defaultVisionStdDevs = Objects.requireNonNull(defaultVisionStdDevs, "defaultVisionStdDevs");
+        this.seedWhileDisabled = seedWhileDisabled;
         this.state = Objects.requireNonNull(state, "state");
     }
 
@@ -167,7 +172,7 @@ public final class Localization implements PoseSignal {
         }
         return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                count, innovationGate, stateStdDevs, defaultVisionStdDevs, state);
+                count, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled, state);
     }
 
     /** Rejects vision whose squared residual divided by measurement variance exceeds this value. */
@@ -187,6 +192,50 @@ public final class Localization implements PoseSignal {
         return configured(debugName, publishNetworkTables, groupWindowSeconds,
                 maxTranslationDisagreementMeters, maxHeadingDisagreementRadians, innovationGate,
                 stateStdDevs, MeasurementStdDevs.of(translationMeters, translationMeters, headingRadians));
+    }
+
+    /**
+     * Keeps re-seeding the estimate from vision while {@code disabled} reads true, for example
+     * {@code DriverStation::isDisabled}. Kalman nodes only.
+     *
+     * <p>A Kalman node always seeds itself once from the first consistent vision frames when it has not
+     * been reset yet. With this option it also moves straight to newer consistent vision while disabled, at
+     * most once per 0.25 s, so a robot that is carried or pushed into place before the match starts from
+     * where it really is. Once enabled the usual gates and blending apply.</p>
+     *
+     * @param disabled true while the robot is disabled
+     * @return configured node
+     */
+    public Localization seedFromVisionWhileDisabled(BooleanSupplier disabled) {
+        Objects.requireNonNull(disabled, "disabled");
+        if (strategy != Strategy.KALMAN) {
+            throw new IllegalStateException("seedFromVisionWhileDisabled applies to Kalman localization only.");
+        }
+        return new Localization(strategy, inputs, filters, debugName, publishNetworkTables,
+                groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, disabled, new State());
+    }
+
+    /**
+     * Returns whether this Kalman estimate has a real field position: a {@link #reset(PoseSnapshot)} was
+     * applied, or the estimate was seeded from vision. False for other strategies.
+     *
+     * @return true once the field position is known
+     */
+    public boolean seeded() {
+        synchronized (state) {
+            if (strategy != Strategy.KALMAN) {
+                return false;
+            }
+            return state.kalman != null ? state.kalman.translationSeeded : state.pendingReset != null;
+        }
+    }
+
+    /** Runtime timestamp of the cycle being evaluated, or NaN outside a runtime refresh. */
+    double cycleTimestampSeconds() {
+        synchronized (state) {
+            return state.evaluatingTimestamp;
+        }
     }
 
     /** Refreshes this node and all of its inputs exactly once for the runtime timestamp. */
@@ -294,6 +343,7 @@ public final class Localization implements PoseSignal {
     }
 
     private void evaluate(double timestampSeconds) {
+        state.evaluatingTimestamp = timestampSeconds;
         List<Measurement> accepted = new ArrayList<>();
         List<Measurement> rejected = new ArrayList<>();
         SwerveOdometry odometry = null;
@@ -358,13 +408,15 @@ public final class Localization implements PoseSignal {
         if (state.kalman == null) {
             state.kalman = new KalmanEngine(odometry, stateStdDevs, defaultVisionStdDevs);
         }
+        boolean seeding = seedWhileDisabled != null && seedWhileDisabled.getAsBoolean();
         PoseSnapshot estimated = state.kalman.update(
                 odometry,
                 vision,
                 timestampSeconds,
                 innovationGate,
                 maxHeadingDisagreementRadians,
-                state.pendingReset);
+                state.pendingReset,
+                seeding);
         state.pendingReset = null;
         return List.of(outputMeasurement(
                 estimated,
@@ -471,10 +523,28 @@ public final class Localization implements PoseSignal {
             return List.of();
         }
 
+        // One sample per source: frames from the same camera are not independent estimates, and a
+        // high-frame-rate camera delivers several per cycle. Keeping only its newest frame stops it from
+        // outweighing other cameras and from counting its tags several times.
+        Map<Object, PoseMeasurementSample> newestBySource = new IdentityHashMap<>();
         List<PoseMeasurementSample> recent = new ArrayList<>();
         for (Measurement measurement : measurements) {
             if (measurement instanceof PoseMeasurementSample sample
                     && newestTimestamp - sample.timestampSeconds() <= groupWindowSeconds) {
+                if (sample.source() == null) {
+                    recent.add(sample);
+                    continue;
+                }
+                PoseMeasurementSample previous = newestBySource.get(sample.source());
+                if (previous == null || sample.timestampSeconds() > previous.timestampSeconds()) {
+                    newestBySource.put(sample.source(), sample);
+                }
+            }
+        }
+        for (Measurement measurement : measurements) {
+            if (measurement instanceof PoseMeasurementSample sample
+                    && sample.source() != null
+                    && newestBySource.get(sample.source()) == sample) {
                 recent.add(sample);
             }
         }
@@ -556,7 +626,8 @@ public final class Localization implements PoseSignal {
     private Localization copy(List<PoseSignal> nextInputs, List<LocalizationFilter> nextFilters) {
         return new Localization(strategy, nextInputs, nextFilters, debugName, publishNetworkTables,
                 groupWindowSeconds, maxTranslationDisagreementMeters, maxHeadingDisagreementRadians,
-                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, new State());
+                minimumSourceCount, innovationGate, stateStdDevs, defaultVisionStdDevs, seedWhileDisabled,
+                new State());
     }
 
     private Localization configured(
@@ -570,7 +641,7 @@ public final class Localization implements PoseSignal {
             MeasurementStdDevs visionStdDevs) {
         return new Localization(strategy, inputs, filters, name, publish, groupWindow,
                 translationDisagreement, headingDisagreement, minimumSourceCount,
-                gate, processStdDevs, visionStdDevs, new State());
+                gate, processStdDevs, visionStdDevs, seedWhileDisabled, new State());
     }
 
     private static PoseSnapshot pose(Measurement measurement) {
@@ -640,6 +711,7 @@ public final class Localization implements PoseSignal {
         private boolean runtimeOwned;
         private KalmanEngine kalman;
         private StructPublisher<Pose2d> posePublisher;
+        private double evaluatingTimestamp = Double.NaN;
     }
 
     private static final class CycleResult implements PoseSignal, MeasurementSnapshot.CycleView {
@@ -759,12 +831,27 @@ public final class Localization implements PoseSignal {
         private static final double RECOVERY_MAX_INTERVAL_SECONDS = 0.25;
         private static final double RECOVERY_TRANSLATION_METERS = 0.75;
         private static final double RECOVERY_HEADING_RADIANS = Math.toRadians(25.0);
+        /** Consistent frames needed to seed the pose from vision: multi-tag, then single-tag. */
+        private static final int SEED_SAMPLE_COUNT = 2;
+        private static final int SINGLE_TAG_SEED_SAMPLE_COUNT = 4;
+        private static final double SEED_MAX_INTERVAL_SECONDS = 0.25;
+        private static final double SEED_TRANSLATION_METERS = 0.3;
+        private static final double SEED_HEADING_RADIANS = Math.toRadians(10.0);
+        /** Minimum robot time between two seeds while disabled. */
+        private static final double DISABLED_SEED_PERIOD_SECONDS = 0.25;
         private final SwerveDriveKinematics kinematics;
         private final MeasurementStdDevs stateStdDevs;
         private final MeasurementStdDevs defaultVisionStdDevs;
         private final Map<Object, Double> lastSeenVisionTimestamps = new IdentityHashMap<>();
         private final Map<Object, VisionRecovery> visionRecovery = new IdentityHashMap<>();
+        private final Map<Object, SeedCandidate> seedCandidates = new IdentityHashMap<>();
         private SwerveDrivePoseEstimator estimator;
+        private Rotation2d currentHeading = Rotation2d.kZero;
+        private SwerveModulePosition[] currentPositions;
+        /** Whether the field translation and heading are known (from a reset or from vision). */
+        private boolean translationSeeded;
+        private boolean headingSeeded;
+        private double lastDisabledSeedSeconds = Double.NEGATIVE_INFINITY;
 
         private KalmanEngine(
                 SwerveOdometry odometry,
@@ -783,9 +870,17 @@ public final class Localization implements PoseSignal {
                 double timestampSeconds,
                 double innovationGate,
                 double maxHeadingResidualRadians,
-                PoseSnapshot reset) {
+                PoseSnapshot reset,
+                boolean seedingWhileDisabled) {
             Rotation2d heading = new Rotation2d(odometry.headingRadians());
             SwerveModulePosition[] positions = positions(odometry);
+            currentHeading = heading;
+            currentPositions = positions;
+            if (reset != null) {
+                translationSeeded = true;
+                headingSeeded = true;
+                seedCandidates.clear();
+            }
             if (estimator == null) {
                 PoseSnapshot initial = reset == null ? odometry.pose() : reset;
                 estimator = new SwerveDrivePoseEstimator(
@@ -805,7 +900,8 @@ public final class Localization implements PoseSignal {
                     .filter(PoseMeasurementSample.class::isInstance)
                     .map(PoseMeasurementSample.class::cast)
                     .sorted(Comparator.comparingDouble(PoseMeasurementSample::timestampSeconds))
-                    .forEach(sample -> addVision(sample, timestampSeconds, innovationGate, maxHeadingResidualRadians));
+                    .forEach(sample -> addVision(
+                            sample, timestampSeconds, innovationGate, maxHeadingResidualRadians, seedingWhileDisabled));
             return fromWpilib(estimator.getEstimatedPosition());
         }
 
@@ -813,7 +909,8 @@ public final class Localization implements PoseSignal {
                 PoseMeasurementSample sample,
                 double nowSeconds,
                 double innovationGate,
-                double maxHeadingResidualRadians) {
+                double maxHeadingResidualRadians,
+                boolean seedingWhileDisabled) {
             // A frame from the future means the camera clock is not synced to the robot yet (PhotonVision
             // and Limelight both report robot time only after time sync). Ignore it without remembering
             // its timestamp: one such frame would otherwise make every later, correct frame look old and
@@ -828,6 +925,9 @@ public final class Localization implements PoseSignal {
             }
             lastSeenVisionTimestamps.put(source, sample.timestampSeconds());
             MeasurementStdDevs stdDevs = usable(sample.stdDevs()) ? sample.stdDevs() : defaultVisionStdDevs;
+            if (seed(source, sample, nowSeconds, seedingWhileDisabled)) {
+                return;
+            }
             // Heading-residual and innovation gates share one recovery path: a source whose samples
             // are rejected but stay self-consistent for several frames (e.g. after a gyro slip or a
             // reset to the wrong heading) is re-admitted instead of being locked out forever.
@@ -844,6 +944,75 @@ public final class Localization implements PoseSignal {
                 visionRecovery.remove(source);
             }
             estimator.addVisionMeasurement(toWpilib(sample.pose()), sample.timestampSeconds(), vector(stdDevs));
+        }
+
+        /**
+         * Moves the estimate straight to vision when its field pose is not known yet. The estimate starts at
+         * the odometry pose, usually the origin, and claims to be accurate there; without seeding, the
+         * innovation gate treats the real pose as an outlier and each accepted frame only blends a few
+         * percent of the way, so a robot that boots seeing one tag can take a long time to localize.
+         * Seeding needs a few self-consistent frames from one source and leaves the rest to the normal
+         * path: a frame that does not complete a seed is still gated and blended as usual.
+         *
+         * @return true when the frame seeded the estimate
+         */
+        private boolean seed(
+                Object source,
+                PoseMeasurementSample sample,
+                double nowSeconds,
+                boolean seedingWhileDisabled) {
+            boolean disabledSeed = seedingWhileDisabled
+                    && !(Double.isFinite(nowSeconds)
+                            && nowSeconds - lastDisabledSeedSeconds < DISABLED_SEED_PERIOD_SECONDS);
+            boolean seedTranslation = trustsTranslation(sample) && (!translationSeeded || disabledSeed);
+            boolean seedHeading = trustsHeading(sample) && (!headingSeeded || disabledSeed);
+            if (!seedTranslation && !seedHeading) {
+                seedCandidates.remove(source);
+                return false;
+            }
+            SeedCandidate candidate = seedCandidates.computeIfAbsent(source, ignored -> new SeedCandidate());
+            if (!candidate.accepts(sample)) {
+                return false;
+            }
+            seedCandidates.clear();
+            Pose2d current = estimator.getEstimatedPosition();
+            Pose2d atCapture = estimator.sampleAt(sample.timestampSeconds()).orElse(current);
+            Pose2d visionAtCapture = new Pose2d(
+                    seedTranslation ? sample.pose().xMeters() : atCapture.getX(),
+                    seedTranslation ? sample.pose().yMeters() : atCapture.getY(),
+                    seedHeading ? new Rotation2d(sample.pose().headingRadians()) : atCapture.getRotation());
+            // Carry the motion since the frame was captured, so latency does not pull the seed backwards.
+            Pose2d seeded = visionAtCapture.plus(current.minus(atCapture));
+            estimator.resetPosition(currentHeading, currentPositions, seeded);
+            translationSeeded |= seedTranslation;
+            headingSeeded |= seedHeading;
+            visionRecovery.clear();
+            if (seedingWhileDisabled && Double.isFinite(nowSeconds)) {
+                lastDisabledSeedSeconds = nowSeconds;
+            }
+            return true;
+        }
+
+        private static final class SeedCandidate {
+            private PoseSnapshot previousPose;
+            private double previousTimestamp = Double.NEGATIVE_INFINITY;
+            private int consistentSamples;
+
+            private boolean accepts(PoseMeasurementSample sample) {
+                boolean continuous = previousPose != null
+                        && sample.timestampSeconds() - previousTimestamp <= SEED_MAX_INTERVAL_SECONDS
+                        && (!trustsTranslation(sample)
+                                || translationDistance(previousPose, sample.pose()) <= SEED_TRANSLATION_METERS)
+                        && (!trustsHeading(sample)
+                                || Math.abs(wrapRadians(
+                                        previousPose.headingRadians() - sample.pose().headingRadians()))
+                                        <= SEED_HEADING_RADIANS);
+                consistentSamples = continuous ? consistentSamples + 1 : 1;
+                previousPose = sample.pose();
+                previousTimestamp = sample.timestampSeconds();
+                int required = sample.targetCount() >= 2 ? SEED_SAMPLE_COUNT : SINGLE_TAG_SEED_SAMPLE_COUNT;
+                return consistentSamples >= required;
+            }
         }
 
         private static final class VisionRecovery {

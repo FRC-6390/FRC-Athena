@@ -1,6 +1,7 @@
 package ca.frc6390.athena.localization.pipeline;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ca.frc6390.athena.api.hardware.EncoderKinds;
@@ -82,6 +83,8 @@ class WpilibLocalizationParityTest {
     @Test
     void innovationGateAcquiresAConsistentFieldPoseAwayFromOdometryOrigin() {
         ParityRig rig = new ParityRig(9.0);
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00,
@@ -130,6 +133,8 @@ class WpilibLocalizationParityTest {
                 Double.POSITIVE_INFINITY,
                 false,
                 Math.toRadians(35.0));
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 0.0, Math.PI / 2.0, 0.00,
@@ -151,6 +156,8 @@ class WpilibLocalizationParityTest {
                 false,
                 true,
                 Double.POSITIVE_INFINITY);
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object cameras = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 1.0, Math.toRadians(90.0), 0.00,
@@ -163,6 +170,139 @@ class WpilibLocalizationParityTest {
                 MeasurementStdDevs.of(0.2, 0.2, 0.1), cameras));
 
         assertTrue(rig.athena.pose().headingRadians() > Math.toRadians(10.0));
+    }
+
+
+    @Test
+    void unseededEstimateMovesStraightToConsistentVision() {
+        ParityRig rig = new ParityRig(9.0);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        assertFalse(rig.athena.seeded());
+
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, multiTag, camera));
+        assertEquals(0.0, rig.athena.pose().xMeters(), 1.0e-9, "one frame does not seed");
+        rig.stepAthenaOnly(0.02, vision(5.02, 2.01, 0.2, 0.02, multiTag, camera));
+
+        assertTrue(rig.athena.seeded());
+        assertEquals(5.02, rig.athena.pose().xMeters(), 1.0e-6);
+        assertEquals(2.01, rig.athena.pose().yMeters(), 1.0e-6);
+        assertEquals(0.2, rig.athena.pose().headingRadians(), 1.0e-6);
+    }
+
+    @Test
+    void inconsistentFramesDoNotSeed() {
+        ParityRig rig = new ParityRig(9.0);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, multiTag, camera));
+        rig.stepAthenaOnly(0.02, vision(6.0, 2.0, 0.2, 0.02, multiTag, camera));
+
+        assertFalse(rig.athena.seeded());
+        assertEquals(0.0, rig.athena.pose().xMeters(), 1.0e-9);
+    }
+
+    @Test
+    void resetPoseIsNotOverriddenBySeeding() {
+        ParityRig rig = new ParityRig(9.0);
+        rig.reset(new PoseSnapshot(1.0, 1.0, 0.0));
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+
+        assertTrue(rig.athena.seeded());
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, multiTag, camera));
+        rig.stepAthenaOnly(0.02, vision(5.0, 2.0, 0.2, 0.02, multiTag, camera));
+
+        assertEquals(1.0, rig.athena.pose().xMeters(), 1.0e-9, "far frames stay gated after a reset");
+    }
+
+    /**
+     * The robot pipeline: one camera sees one tag, translation and heading fused separately, gyro at 0 while
+     * the robot faces red, 120 fps frames with 10 ms latency and realistic single-tag noise.
+     */
+    @Test
+    void robotPipelineLocalizesWithinAFewCyclesOfSeeingOneTag() {
+        ParityRig rig = new ParityRig();
+        MutablePoseSignal raw = new MutablePoseSignal();
+        PoseSignal camera = raw.multiTagStdDevs(0.25, 0.25, Math.toRadians(5.0))
+                .singleTagStdDevs(0.6, 0.6, Math.toRadians(12.0))
+                .distanceStdDevScaling(2.0, 2.0);
+        Localization filtered = Localizations.filter().input(camera)
+                .filter(VisionFilters.finitePoseAndTimestamp())
+                .filter(VisionFilters.maxLatencySeconds(0.15))
+                .filter(VisionFilters.maxAmbiguity(0.20))
+                .filter(VisionFilters.maxAverageTagDistanceMeters(2.0));
+        Localization fusedVision = Localizations.covarianceIntersection()
+                .input(filtered.translationOnly())
+                .groupWithinSeconds(0.10)
+                .maxTranslationDisagreementMeters(0.75);
+        Localization fusedHeading = Localizations.covarianceIntersection()
+                .input(Localizations.filter().input(filtered).headingOnly())
+                .groupWithinSeconds(0.10)
+                .maxHeadingDisagreementRadians(Math.toRadians(20.0));
+        Localization estimate = Localizations.kalman()
+                .input(rig.odometry, fusedVision, fusedHeading)
+                .stateStdDevs(0.08, Math.toRadians(8.0))
+                .defaultVisionStdDevs(0.9, Math.toRadians(25.0))
+                .maxNormalizedVisionResidual(9.0);
+        java.util.Random noise = new java.util.Random(6390);
+        Object source = new Object();
+        double frameTime = 0.0;
+        double converged = Double.NaN;
+        for (int cycle = 0; cycle < 100 && Double.isNaN(converged); cycle++) {
+            double now = cycle * 0.02;
+            List<Measurement> frames = new java.util.ArrayList<>();
+            for (; frameTime <= now; frameTime += 1.0 / 120.0) {
+                frames.add(new VisionSample(
+                        new PoseSnapshot(
+                                3.0 + noise.nextGaussian() * 0.04,
+                                4.0 + noise.nextGaussian() * 0.04,
+                                Math.PI + noise.nextGaussian() * Math.toRadians(1.5)),
+                        RobotVelocity.zero(), frameTime - 0.01, 0.01, 0.08, 1, 1.6,
+                        MeasurementStdDevs.of(
+                                Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY),
+                        source));
+            }
+            raw.measurements = frames;
+            rig.setModuleInputs(distances(0.0, 0.0, 0.0, 0.0), angles(0.0, 0.0, 0.0, 0.0));
+            rig.imu.yawDegrees = 0.0;
+            estimate.refresh(rig.context, now, 0.02);
+            PoseSnapshot pose = estimate.pose();
+            if (Math.hypot(pose.xMeters() - 3.0, pose.yMeters() - 4.0) < 0.15
+                    && Math.abs(Math.cos(pose.headingRadians()) + 1.0) < 0.01) {
+                converged = now;
+            }
+        }
+        assertTrue(converged <= 0.2, "localized after " + converged + " s");
+    }
+
+    @Test
+    void seedingWhileDisabledFollowsVisionUntilEnabled() {
+        ParityRig rig = new ParityRig();
+        java.util.concurrent.atomic.AtomicBoolean disabled = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Localization estimate = Localizations.kalman()
+                .input(rig.odometry, rig.visionStage)
+                .maxNormalizedVisionResidual(9.0)
+                .seedFromVisionWhileDisabled(disabled::get);
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        double t = 0.0;
+        for (double x : new double[] {2.0, 2.0, 2.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0}) {
+            rig.visionSource.measurements = List.of(vision(x, 1.0, 0.0, t, multiTag, camera));
+            estimate.refresh(rig.context, t, 0.02);
+            t += 0.05;
+        }
+        assertEquals(6.0, estimate.pose().xMeters(), 1.0e-6, "re-seeded after being moved while disabled");
+
+        disabled.set(false);
+        // Two consistent frames would seed while disabled; enabled, the innovation gate holds them back.
+        for (int i = 0; i < 2; i++) {
+            rig.visionSource.measurements = List.of(vision(9.0, 1.0, 0.0, t, multiTag, camera));
+            estimate.refresh(rig.context, t, 0.02);
+            t += 0.05;
+        }
+        assertEquals(6.0, estimate.pose().xMeters(), 1.0e-6, "enabled: no jump, gates and blending apply");
     }
 
     private static double[] distances(double frontLeft, double frontRight, double backLeft, double backRight) {

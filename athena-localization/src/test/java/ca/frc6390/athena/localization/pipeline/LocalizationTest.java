@@ -302,6 +302,45 @@ class LocalizationTest {
         assertSame(multiCamera, multi.source());
     }
 
+    @Test
+    void latencyAndAgeFiltersRejectStaleAndFutureFrames() {
+        Sample current = sample(1.0, 2.0, 0.0, 1.0, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        // Captured at t=40 while the robot clock reads 1.0: the camera clock is not synced yet.
+        Sample unsynced = sample(1.0, 2.0, 0.0, 40.0, 0.0, 2, 1.0,
+                MeasurementStdDevs.of(0.2, 0.2, 0.1), new Object());
+        Localization latency = Localizations.filter()
+                .input(signal(current, unsynced))
+                .filter(VisionFilters.maxLatencySeconds(0.1));
+        Localization age = Localizations.filter()
+                .input(signal(current, unsynced))
+                .filter(VisionFilters.maxAgeSeconds(0.1));
+
+        assertEquals(List.of(current), latency.refresh(null, 1.05, 0.02).measurements());
+        assertTrue(latency.refresh(null, 1.5, 0.02).measurements().isEmpty(), "re-reported stale frame");
+        assertEquals(List.of(current), age.refresh(null, 1.05, 0.02).measurements());
+        assertTrue(age.refresh(null, 1.5, 0.02).measurements().isEmpty());
+    }
+
+    @Test
+    void covarianceIntersectionUsesOnlyTheNewestFrameOfEachCamera() {
+        Object left = new Object();
+        Object right = new Object();
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(0.2, 0.2, 0.1);
+        Localization fused = Localizations.covarianceIntersection()
+                .input(signal(
+                        sample(1.0, 0.0, 0.0, 1.000, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.1, 0.0, 0.0, 1.008, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.2, 0.0, 0.0, 1.016, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.2, 0.0, 0.0, 1.016, 0.0, 1, 1.0, stdDevs, right)))
+                .groupWithinSeconds(0.1);
+
+        PoseMeasurementSample result = (PoseMeasurementSample) fused.measurements().get(0);
+
+        assertEquals(1.2, result.pose().xMeters(), 1.0e-9);
+        assertEquals(2, result.targetCount(), "one tag from each camera, not one per frame");
+    }
+
     private static PoseSignal signal(Measurement... measurements) {
         List<Measurement> values = List.of(measurements);
         return () -> values;
