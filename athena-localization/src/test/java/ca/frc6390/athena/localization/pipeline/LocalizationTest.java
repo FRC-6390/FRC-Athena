@@ -366,6 +366,25 @@ class LocalizationTest {
         assertEquals(List.of(slightSkew), age.refresh(null, 1.0, 0.02).measurements());
     }
 
+    @Test
+    void covarianceIntersectionUsesOnlyTheNewestFrameOfEachCamera() {
+        Object left = new Object();
+        Object right = new Object();
+        MeasurementStdDevs stdDevs = MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1));
+        Localization fused = Localizations.covarianceIntersection()
+                .input(signal(
+                        sample(1.0, 0.0, 0.0, 1.000, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.1, 0.0, 0.0, 1.008, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.2, 0.0, 0.0, 1.016, 0.0, 1, 1.0, stdDevs, left),
+                        sample(1.2, 0.0, 0.0, 1.016, 0.0, 1, 1.0, stdDevs, right)))
+                .groupWithin(Seconds.of(0.1));
+
+        PoseMeasurementSample result = (PoseMeasurementSample) fused.measurements().get(0);
+
+        assertEquals(1.2, result.pose().xMeters(), 1.0e-9);
+        assertEquals(2, result.targetCount(), "one tag from each camera, not one per frame");
+    }
+
     private static PoseSignal signal(Measurement... measurements) {
         List<Measurement> values = List.of(measurements);
         return () -> values;

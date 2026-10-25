@@ -72,7 +72,9 @@ public final class LocalizationExamples implements Mechanism {
         heliosStage = cameraStage(vision.heliosPose, "heliosStage");
         // Recommended setup: each camera is its own Kalman input, so independent cameras add their information
         // instead of being averaged first. Speed scaling trusts frames less while driving; the spin gate drops frames
-        // taken while rotating fast; seeding snaps to a multi-tag pose while disabled, so auto starts from a good pose.
+        // taken while rotating fast; seeding snaps to a multi-tag pose while disabled, so auto starts from a good pose;
+        // camera heading is used only while disabled, so paths and aiming follow the gyro instead of a heading that
+        // is a few degrees off.
         estimatedFieldPose = Localizations.kalman()
                 .input(odometry, limelightStage, photonStage, heliosStage)
                 .stateStdDevs(Meters.of(0.08), Degrees.of(3.0))
@@ -81,6 +83,7 @@ public final class LocalizationExamples implements Mechanism {
                 .maxVisionAngularVelocity(RadiansPerSecond.of(3.0))
                 .maxNormalizedVisionResidual(9.0)
                 .seedFromVisionWhileDisabled(DriverStation::isDisabled)
+                .visionHeadingWhile(DriverStation::isDisabled)
                 .publishNetworkTables()
                 .name("estimatedFieldPose");
     }

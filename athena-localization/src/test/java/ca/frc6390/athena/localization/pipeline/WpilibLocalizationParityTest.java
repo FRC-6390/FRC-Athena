@@ -91,6 +91,8 @@ class WpilibLocalizationParityTest {
     @Test
     void innovationGateAcquiresAConsistentFieldPoseAwayFromOdometryOrigin() {
         ParityRig rig = new ParityRig(9.0);
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00,
@@ -139,6 +141,8 @@ class WpilibLocalizationParityTest {
                 Double.POSITIVE_INFINITY,
                 false,
                 Math.toRadians(35.0));
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object camera = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 0.0, Math.PI / 2.0, 0.00,
@@ -160,6 +164,8 @@ class WpilibLocalizationParityTest {
                 false,
                 true,
                 Double.POSITIVE_INFINITY);
+        // Already localized at the origin: this exercises recovery, not start-up seeding.
+        rig.reset(new PoseSnapshot(0.0, 0.0, 0.0));
         Object cameras = new Object();
 
         rig.stepAthenaOnly(0.00, vision(1.0, 1.0, Math.toRadians(90.0), 0.00,
@@ -525,6 +531,81 @@ class WpilibLocalizationParityTest {
 
         assertEquals(rig.athena.poseSnapshot().headingRadians(), camera.reportedRobotHeading().in(Radians), 1.0e-12);
         assertTrue(camera.reportedRobotHeading().in(Radians) > 0.0);
+    }
+
+    @Test
+    void unseededEstimateMovesStraightToConsistentVision() {
+        ParityRig rig = new ParityRig(9.0);
+        Object camera = new Object();
+
+        rig.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        assertEquals(0.0, rig.athena.pose().getX(), 1.0e-9, "one frame does not seed");
+        rig.stepAthenaOnly(0.02, vision(5.02, 2.01, 0.2, 0.02, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+
+        assertEquals(5.02, rig.athena.pose().getX(), 1.0e-6);
+        assertEquals(2.01, rig.athena.pose().getY(), 1.0e-6);
+        assertEquals(0.2, rig.athena.poseSnapshot().headingRadians(), 1.0e-6);
+    }
+
+    @Test
+    void inconsistentFramesDoNotSeedAndAResetIsNotOverridden() {
+        ParityRig jumpy = new ParityRig(9.0);
+        Object camera = new Object();
+        jumpy.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        jumpy.stepAthenaOnly(0.02, vision(6.0, 2.0, 0.2, 0.02, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        assertEquals(0.0, jumpy.athena.pose().getX(), 1.0e-9, "frames 1 m apart do not seed");
+
+        ParityRig reset = new ParityRig(9.0);
+        reset.reset(new PoseSnapshot(1.0, 1.0, 0.0));
+        reset.stepAthenaOnly(0.00, vision(5.0, 2.0, 0.2, 0.00, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        reset.stepAthenaOnly(0.02, vision(5.0, 2.0, 0.2, 0.02, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        assertEquals(1.0, reset.athena.pose().getX(), 1.0e-9, "far frames stay gated after a reset");
+    }
+
+    @Test
+    void visionHeadingWhileLetsTheGyroHoldHeadingButKeepsTranslationCorrections() {
+        boolean[] disabled = {false};
+        ParityRig rig = new ParityRig(kalman -> kalman.visionHeadingWhile(() -> disabled[0]));
+        rig.reset(new PoseSnapshot(3.0, 4.0, Math.PI));
+        Object camera = new Object();
+        MeasurementStdDevs multiTag = MeasurementStdDevs.of(Meters.of(0.25), Meters.of(0.25), Radians.of(Math.toRadians(5.0)));
+        double t = 0.02;
+        for (int i = 0; i < 100; i++, t += 0.02) {
+            rig.stepAthenaOnly(t, vision(3.5, 4.0, Math.PI + Math.toRadians(4.0), t - 0.01, multiTag, camera));
+        }
+        assertEquals(Math.PI, Math.abs(rig.athena.poseSnapshot().headingRadians()), 1.0e-6, "gyro holds heading");
+        assertEquals(3.5, rig.athena.pose().getX(), 0.05, "translation still corrected");
+
+        disabled[0] = true;
+        for (int i = 0; i < 50; i++, t += 0.02) {
+            rig.stepAthenaOnly(t, vision(3.5, 4.0, Math.PI + Math.toRadians(4.0), t - 0.01, multiTag, camera));
+        }
+        assertEquals(4.0, Math.toDegrees(Math.PI - Math.abs(rig.athena.poseSnapshot().headingRadians())), 0.5,
+                "camera heading used while the condition holds");
+    }
+
+    @Test
+    void visionHeadingWhileStillSeedsAnUnknownHeading() {
+        ParityRig rig = new ParityRig(kalman -> kalman.maxNormalizedVisionResidual(9.0).visionHeadingWhile(() -> false));
+        Object camera = new Object();
+        for (int i = 0; i < 3; i++) {
+            rig.stepAthenaOnly(i * 0.02, vision(5.0, 2.0, 2.0, i * 0.02, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), camera));
+        }
+        assertEquals(2.0, rig.athena.poseSnapshot().headingRadians(), 1.0e-6);
+        assertEquals(5.0, rig.athena.pose().getX(), 1.0e-6);
+    }
+
+    @Test
+    void disabledSeedingKeepsHeadingForTranslationOnlyFrames() {
+        ParityRig rig = new ParityRig(9.0, true);
+        Localization seeding = rig.athena.seedFromVisionWhileDisabled(() -> true);
+        rig.reset(new PoseSnapshot(0.0, 0.0, 1.0));
+        seeding.reset(new PoseSnapshot(0.0, 0.0, 1.0)).apply(rig.context);
+        rig.visionSource.measurements = List.of(vision(5.0, 2.0, -2.0, 0.0, MeasurementStdDevs.of(Meters.of(0.2), Meters.of(0.2), Radians.of(0.1)), new Object()));
+        seeding.refresh(rig.context, 0.0, 0.02);
+
+        assertEquals(5.0, seeding.pose().getX(), 1.0e-6);
+        assertEquals(1.0, seeding.poseSnapshot().headingRadians(), 1.0e-6, "a translation-only frame keeps heading");
     }
 
     private static VisionSample vision(

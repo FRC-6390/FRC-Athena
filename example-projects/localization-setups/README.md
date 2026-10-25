@@ -40,6 +40,7 @@ estimatedFieldPose = Localizations.kalman()
         .visionStdDevSpeedScaling(0.5, 0.25)            // trust frames less while driving or turning
         .maxVisionAngularVelocity(RadiansPerSecond.of(3.0))   // drop frames taken while spinning faster than 3 rad/s
         .seedFromVisionWhileDisabled(DriverStation::isDisabled)   // multi-tag pose snaps in while disabled
+        .visionHeadingWhile(DriverStation::isDisabled)            // gyro owns heading while enabled
         .publishNetworkTables()
         .name("estimatedFieldPose");
 ```
@@ -47,9 +48,16 @@ estimatedFieldPose = Localizations.kalman()
 - **Speed scaling** multiplies a frame's standard deviations by `1 + a*|v| + b*|omega|`, using the frame's own speeds
   when the camera reports them and odometry otherwise.
 - **Spin gate** rejects frames taken above the rotation limit. The reason reads `spinning 4.1 rad/s > 3.0`.
-- **Seeding while disabled** resets the estimate to a multi-tag frame, translation and heading, at most once per 0.25 s.
-  Single-tag frames still take the normal update. The node has no mode of its own, so pass the supplier that tells it the
-  robot is disabled.
+- **Seeding while disabled** resets the estimate to a multi-tag frame, the parts it trusts (translation and heading), at
+  most once per 0.25 s. Single-tag frames still take the normal update. The node has no mode of its own, so pass the
+  supplier that tells it the robot is disabled.
+- **Start-up seeding** happens without any option: until the node is reset, the first few self-consistent frames (two
+  multi-tag or four single-tag) move the estimate straight to the vision pose instead of being gated as outliers of the
+  boot pose and blended in slowly.
+- **Vision heading while** keeps camera heading out of the estimate when the condition is false. Camera heading is often
+  a few degrees off (mount yaw, single-tag solves) and the estimate follows it within a fraction of a second, so paths
+  and aiming turn the robot to a wrong heading. Translation is still corrected, and an unknown heading is still taken
+  from vision.
 
 ## Camera diagnostics
 
