@@ -27,11 +27,11 @@ class PidHoldDeadbandTest {
         return gains.bind(new ControlLoopBinding(binding, ActionContext.empty()));
     }
 
-    private static ControlLoopContext at(double target, double position, double referenceVelocity) {
+    private static ControlLoopContext at(double target, double position) {
         return new ControlLoopContext() {
             @Override public Output request() { return (Output.Position) () -> target; }
             @Override public double position() { return position; }
-            @Override public MotionReference reference() { return new MotionReference(target, referenceVelocity, 0.0); }
+            @Override public MotionReference reference() { return MotionReference.stationary(target); }
         };
     }
 
@@ -40,17 +40,25 @@ class PidHoldDeadbandTest {
     }
 
     @Test
-    void arrivedWithinTheBandHoldsWithoutCorrections() {
+    void errorsInsideTheBandDrawNoCorrection() {
         ControlLoopRuntime pid = runtime(PidGains.of(0.5, 0.0, 0.0).holdDeadband(1.0));
-        assertEquals(0.0, volts(pid.calculate(at(30.0, 29.4, 0.0))), 1e-12, "0.6 deg inside the 1 deg band");
-        assertEquals(1.5, volts(pid.calculate(at(30.0, 27.0, 0.0))), 1e-9, "3 deg out: proportional as usual");
-        assertTrue(volts(pid.calculate(at(30.0, 29.4, 5.0))) > 0.0, "still moving along the profile: corrects");
+        assertEquals(0.0, volts(pid.calculate(at(30.0, 29.4))), 1e-12, "0.6 deg inside the 1 deg band");
+        assertEquals(0.0, volts(pid.calculate(at(30.0, 30.9))), 1e-12, "either side");
+    }
+
+    @Test
+    void correctionGrowsSmoothlyFromTheEdgeWithoutAKick() {
+        ControlLoopRuntime pid = runtime(PidGains.of(0.5, 0.0, 0.0).holdDeadband(1.0));
+        assertEquals(0.5 * 2.0, volts(pid.calculate(at(30.0, 27.0))), 1e-9, "3 deg out: P acts on the 2 deg beyond");
+        double justInside = volts(pid.calculate(at(30.0, 29.001)));
+        double justOutside = volts(pid.calculate(at(30.0, 28.999)));
+        assertTrue(Math.abs(justOutside - justInside) < 0.001, "continuous at the edge: " + justInside + " vs " + justOutside);
     }
 
     @Test
     void withoutABandItIsUnchangedAndOffloadable() {
         ControlLoopRuntime pid = runtime(PidGains.of(0.5, 0.0, 0.0));
-        assertEquals(0.3, volts(pid.calculate(at(30.0, 29.4, 0.0))), 1e-9);
+        assertEquals(0.3, volts(pid.calculate(at(30.0, 29.4))), 1e-9);
         assertEquals(ControlLoopRole.DEVICE_CONFIGURABLE, PidGains.of(0.5, 0.0, 0.0).role());
         assertEquals(ControlLoopRole.SOFTWARE_OUTPUT, PidGains.of(0.5, 0.0, 0.0).holdDeadband(1.0).role(),
                 "a motor controller cannot apply the band, so the loop stays in Athena");

@@ -51,12 +51,14 @@ public final class PidGains implements ControlLoop, TelemetrySource {
     public PidGains iZone(double value) { return new PidGains(p, i, d, value, holdDeadband); }
 
     /**
-     * Returns these gains with a hold deadband, in the control's unit: once a position control has arrived (its
-     * motion reference is no longer moving) and the error is within the band, the proportional and derivative
-     * terms are left out and only the integral term holds. A mechanism parked at its goal then stops dithering
-     * current into corrections smaller than it can meaningfully make, which saves power and heat and quiets
-     * buzzing; feedforward (such as a gravity hold) still applies. Gains with a deadband run in Athena rather than
-     * on the motor controller, which cannot apply it. Use 0 to turn it off (the default).
+     * Returns these gains with a hold deadband, in the control's unit, for position controls: the proportional and
+     * integral terms act on the error beyond the band ({@code sign(e) * max(0, |e| - band)}), so errors inside it
+     * draw no correction and corrections grow smoothly from zero past its edge, with no kick at the edge to make
+     * a parked mechanism chatter. The derivative term (on the measurement) still damps motion, and feedforward
+     * (such as a gravity hold) still applies. A mechanism parked at its goal then stops dithering current into
+     * corrections smaller than it can meaningfully make, which saves power and heat and quiets buzzing. Gains with
+     * a deadband run in Athena rather than on the motor controller, which cannot apply it. Use 0 to turn it off
+     * (the default).
      *
      * @param band error band, non-negative, in the control's unit
      * @return gains with the hold deadband
@@ -150,23 +152,21 @@ public final class PidGains implements ControlLoop, TelemetrySource {
             if (!Double.isFinite(measurement) || !Double.isFinite(context.target())) {
                 return ControlOutput.neutral();
             }
-            if (holding(context, measurement)) {
-                // Arrived and within the band: hold with the integral alone, without corrections.
-                return ControlOutput.voltage(controller.integralOutput());
-            }
             return ControlOutput.voltage(controller.calculate(
-                    measurement, context.target(), context.dtSeconds()));
+                    measurement, bandedTarget(context, measurement), context.dtSeconds()));
         }
 
-        private boolean holding(ControlLoopContext context, double measurement) {
+        /** The target the controller sees: shifted so its error is the error beyond the hold band. */
+        private double bandedTarget(ControlLoopContext context, double measurement) {
             double band = holdDeadband;
-            if (!(band > 0.0) || !(context.request() instanceof Output.Position)) return false;
-            if (Math.abs(context.reference().velocity()) > 1.0e-9) return false;
-            double error = context.target() - measurement;
+            double target = context.target();
+            if (!(band > 0.0) || !(context.request() instanceof Output.Position)) return target;
+            double error = target - measurement;
             if (Double.isFinite(wrapSpan) && wrapSpan > 0.0) {
                 error -= wrapSpan * Math.floor(error / wrapSpan + 0.5);
             }
-            return Math.abs(error) <= band;
+            double beyond = Math.max(0.0, Math.abs(error) - band);
+            return measurement + Math.copySign(beyond, error);
         }
 
         @Override public ControlLoopTrace trace() {
