@@ -14,6 +14,10 @@ import java.util.List;
  * @param demandAmps total battery-side supply load, excluding regeneration
  * @param shedding whether the budget is currently shedding current
  * @param motors per-motor entries
+ * @param supplyWatts electrical power drawn from the battery by all motors (negative while they regenerate)
+ * @param consumedJoules energy drawn from the battery by all motors since boot
+ * @param regeneratedJoules energy returned to the battery by all motors since boot
+ * @param windingLossJoules energy lost as heat in all motor windings since boot (I squared R)
  */
 public record PowerSnapshot(
         double busVolts,
@@ -24,10 +28,21 @@ public record PowerSnapshot(
         double budgetAmps,
         double demandAmps,
         boolean shedding,
-        List<Motor> motors) {
+        List<Motor> motors,
+        double supplyWatts,
+        double consumedJoules,
+        double regeneratedJoules,
+        double windingLossJoules) {
 
     public PowerSnapshot {
         motors = List.copyOf(motors);
+    }
+
+    /** Snapshot without energy totals; they read zero. */
+    public PowerSnapshot(double busVolts, double openCircuitVolts, double batteryOhms, double floorVolts,
+            double predictedVolts, double budgetAmps, double demandAmps, boolean shedding, List<Motor> motors) {
+        this(busVolts, openCircuitVolts, batteryOhms, floorVolts, predictedVolts, budgetAmps, demandAmps, shedding,
+                motors, 0.0, 0.0, 0.0, 0.0);
     }
 
     /** Empty snapshot before the first cycle. */
@@ -48,6 +63,10 @@ public record PowerSnapshot(
      * @param sustainedAmps declared sustained cap of the profile, zero when none
      * @param status applied status text
      * @param supplyDemandAmps battery-side supply load, excluding regeneration
+     * @param supplyWatts electrical power drawn from the battery (negative while regenerating), NaN when unknown
+     * @param consumedJoules energy drawn from the battery since boot
+     * @param regeneratedJoules energy returned to the battery since boot
+     * @param windingLossJoules energy lost as heat in the winding since boot (I squared R), zero without a model
      */
     public record Motor(
             String name,
@@ -58,7 +77,19 @@ public record PowerSnapshot(
             double shareWeight,
             double sustainedAmps,
             String status,
-            double supplyDemandAmps) {
+            double supplyDemandAmps,
+            double supplyWatts,
+            double consumedJoules,
+            double regeneratedJoules,
+            double windingLossJoules) {
+        /** Entry without energy accounting; energy reads zero and power NaN. */
+        public Motor(String name, double demandAmps, double capAmps, double derateFraction,
+                double temperatureCelsius, double shareWeight, double sustainedAmps, String status,
+                double supplyDemandAmps) {
+            this(name, demandAmps, capAmps, derateFraction, temperatureCelsius, shareWeight, sustainedAmps, status,
+                    supplyDemandAmps, Double.NaN, 0.0, 0.0, 0.0);
+        }
+
         /** Compatibility constructor for telemetry sources that assume unity winding/supply conversion. */
         public Motor(String name, double demandAmps, double capAmps, double derateFraction,
                 double temperatureCelsius, double shareWeight, double sustainedAmps, String status) {

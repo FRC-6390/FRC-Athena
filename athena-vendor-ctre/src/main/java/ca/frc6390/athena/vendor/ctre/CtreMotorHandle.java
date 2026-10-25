@@ -504,6 +504,7 @@ public final class CtreMotorHandle implements MotorHandle, AutoCloseable {
                     talon.getStatorCurrent(),
                     talon.getDeviceTemp(),
                     talon.getFault_Hardware());
+            signals.optimize(talon, talon.getDutyCycle(), talon.getTorqueCurrent());
         }
 
         @Override public boolean isConnected() { return signals.freshness.connected(); }
@@ -649,6 +650,7 @@ public final class CtreMotorHandle implements MotorHandle, AutoCloseable {
                     talon.getFault_BridgeShort(),
                     talon.getFault_DriveDisabledHallSensor(),
                     talon.getFault_MotorArrangementNotSelected());
+            signals.optimize(talon, talon.getDutyCycle(), talon.getTorqueCurrent());
         }
 
         @Override public boolean isConnected() { return signals.freshness.connected(); }
@@ -844,6 +846,28 @@ public final class CtreMotorHandle implements MotorHandle, AutoCloseable {
             all = java.util.Arrays.copyOf(inputs, inputs.length + fatalFaults.length);
             System.arraycopy(fatalFaults, 0, all, inputs.length, fatalFaults.length);
             freshness = new SignalFreshness(position);
+        }
+
+        /** Rate of the inputs read every robot cycle; the robot loop runs at 50 Hz. */
+        private static final double INPUT_HZ = 50.0;
+        /** Rate of slow-changing signals: temperature and faults. */
+        private static final double SLOW_HZ = 4.0;
+        /** Rate of the signals hardware followers track their leader by. */
+        private static final double FOLLOWER_HZ = 100.0;
+
+        /**
+         * Broadcasts only what Athena reads, at the rate it reads it, and turns every other status signal off.
+         * By default a Talon sends many signals Athena never uses, which costs CAN bandwidth and roboRIO time
+         * decoding them. (Phoenix Tuner can still plot any signal while it is open.) A hardware follower tracks its
+         * leader by the leader's duty-cycle (or torque-current) signal, so those stay on at their usual rate on
+         * every Talon: turning them off would leave a follower without a command.
+         */
+        private void optimize(com.ctre.phoenix6.hardware.ParentDevice device, BaseStatusSignal... followerSignals) {
+            BaseStatusSignal.setUpdateFrequencyForAll(INPUT_HZ, position, velocity, voltage, supplyCurrent, statorCurrent);
+            BaseStatusSignal.setUpdateFrequencyForAll(FOLLOWER_HZ, followerSignals);
+            BaseStatusSignal.setUpdateFrequencyForAll(SLOW_HZ, deviceTemp);
+            BaseStatusSignal.setUpdateFrequencyForAll(SLOW_HZ, fatalFaults);
+            device.optimizeBusUtilization();
         }
 
         private boolean fatalFault() {

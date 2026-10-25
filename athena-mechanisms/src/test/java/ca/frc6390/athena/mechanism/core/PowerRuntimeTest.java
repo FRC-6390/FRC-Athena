@@ -109,6 +109,41 @@ class PowerRuntimeTest {
     }
 
     @Test
+    void energyIsIntegratedPerMotorAndInTotalWithRegenerationAndWindingHeatApart() {
+        MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 76);
+        Hardware hardware = new Hardware();
+        PowerMotor handle = hardware.motor(motor);
+        RuntimeOverrides overrides = new RuntimeOverrides();
+        PowerRuntime power = runtime(12.0, PowerPolicy.defaults().estimateBatteryResistance(false));
+        List<MotorDevice> motors = List.of(motor);
+        double ohms = MotorConstants.forKind(MotorKinds.KRAKEN_X60).orElseThrow().resistance().in(Units.Ohms);
+
+        // First cycle has no elapsed time; then 50 cycles drawing 10 A from a 12 V bus with 40 A in the winding.
+        handle.appliedVolts = 6.0;
+        handle.supplyAmps = 10.0;
+        handle.statorAmps = 40.0;
+        handle.rotorRps = 20.0; // back-EMF about 2.4 V, well below the 6 V applied: motoring
+        double now = 0.0;
+        for (int i = 0; i <= 50; i++, now += DT) power.cycle(motors, hardware, overrides, now);
+        PowerSnapshot drawing = power.snapshot();
+        assertEquals(120.0, drawing.supplyWatts(), 1e-9);
+        assertEquals(120.0, drawing.motors().get(0).supplyWatts(), 1e-9);
+        assertEquals(120.0 * 50 * DT, drawing.consumedJoules(), 1e-6, "12 V * 10 A for 1 s");
+        assertEquals(40.0 * 40.0 * ohms * 50 * DT, drawing.windingLossJoules(), 1e-6);
+        assertEquals(0.0, drawing.regeneratedJoules(), 0.0);
+
+        // Braking: faster than the 2 V applied can drive, so current flows back into the battery for half a second.
+        handle.rotorRps = 50.0;
+        handle.appliedVolts = 2.0;
+        handle.supplyAmps = -5.0;
+        for (int i = 0; i < 25; i++, now += DT) power.cycle(motors, hardware, overrides, now);
+        PowerSnapshot braking = power.snapshot();
+        assertEquals(60.0 * 25 * DT, braking.regeneratedJoules(), 1e-6, "12 V * 5 A for 0.5 s");
+        assertEquals(drawing.consumedJoules(), braking.consumedJoules(), 1e-9, "regeneration is not subtracted");
+        assertTrue(braking.windingLossJoules() > drawing.windingLossJoules(), "braking still heats the winding");
+    }
+
+    @Test
     void snapshotIsBuiltOncePerCycleAndRefreshedByTheNextCycle() {
         MotorDevice motor = MotorDevice.of(MotorKinds.KRAKEN_X60, 75).currentLimit(Units.Amps.of(400));
         Hardware hardware = new Hardware();

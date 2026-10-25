@@ -30,7 +30,8 @@ public final class PowerTelemetryPublisher implements AutoCloseable {
     public static final String ROOT = "/Athena/Power";
     private static final String[] BUS_FIELDS = {
         "Bus/Volts", "Bus/OpenCircuitVolts", "Bus/BatteryOhms", "Bus/FloorVolts",
-        "Bus/PredictedVolts", "Bus/BudgetAmps", "Bus/DemandAmps", "Bus/Shedding"
+        "Bus/PredictedVolts", "Bus/BudgetAmps", "Bus/DemandAmps", "Bus/Shedding",
+        "Energy/Watts", "Energy/ConsumedJoules", "Energy/RegeneratedJoules", "Energy/WindingLossJoules"
     };
 
     private final NetworkTableInstance instance;
@@ -130,6 +131,10 @@ public final class PowerTelemetryPublisher implements AutoCloseable {
         busField(5).set(snapshot.budgetAmps());
         busField(6).set(snapshot.demandAmps());
         busField(7).set(snapshot.shedding() ? 1.0 : 0.0);
+        busField(8).set(snapshot.supplyWatts());
+        busField(9).set(snapshot.consumedJoules());
+        busField(10).set(snapshot.regeneratedJoules());
+        busField(11).set(snapshot.windingLossJoules());
         List<PowerSnapshot.Motor> motors = snapshot.motors();
         int count = motors.size();
         if (motorSlots.length != count) {
@@ -202,6 +207,10 @@ public final class PowerTelemetryPublisher implements AutoCloseable {
         private final NumberChannel temperature;
         private final NumberChannel share;
         private final NumberChannel sustained;
+        private final NumberChannel watts;
+        private final NumberChannel consumed;
+        private final NumberChannel regenerated;
+        private final NumberChannel windingLoss;
         private final NetworkTableEntry status;
         private String lastStatus;
 
@@ -213,6 +222,10 @@ public final class PowerTelemetryPublisher implements AutoCloseable {
             temperature = new NumberChannel(instance.getEntry(prefix + "TemperatureCelsius"));
             share = new NumberChannel(instance.getEntry(prefix + "Share"));
             sustained = new NumberChannel(instance.getEntry(prefix + "SustainedAmps"));
+            watts = new NumberChannel(instance.getEntry(prefix + "Watts"));
+            consumed = new NumberChannel(instance.getEntry(prefix + "ConsumedJoules"));
+            regenerated = new NumberChannel(instance.getEntry(prefix + "RegeneratedJoules"));
+            windingLoss = new NumberChannel(instance.getEntry(prefix + "WindingLossJoules"));
             status = instance.getEntry(prefix + "Status");
         }
 
@@ -223,6 +236,10 @@ public final class PowerTelemetryPublisher implements AutoCloseable {
             temperature.set(motor.temperatureCelsius());
             share.set(motor.shareWeight());
             sustained.set(motor.sustainedAmps());
+            watts.set(motor.supplyWatts());
+            consumed.set(motor.consumedJoules());
+            regenerated.set(motor.regeneratedJoules());
+            windingLoss.set(motor.windingLossJoules());
             String current = motor.status();
             if (lastStatus == null || !lastStatus.equals(current)) {
                 status.setString(current);

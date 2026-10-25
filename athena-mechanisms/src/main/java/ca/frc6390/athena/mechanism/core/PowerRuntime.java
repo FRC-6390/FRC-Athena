@@ -124,10 +124,24 @@ final class PowerRuntime {
                     state.channel.shareWeight(),
                     state.profileSustainedAmps(),
                     state.status,
-                    state.supplyDemandAmps);
+                    state.supplyDemandAmps,
+                    state.supplyWatts,
+                    state.consumedJoules,
+                    state.regeneratedJoules,
+                    state.windingLossJoules);
+        }
+        double watts = 0.0, consumed = 0.0, regenerated = 0.0, loss = 0.0;
+        for (MotorState state : active) {
+            if (Double.isFinite(state.supplyWatts)) watts += state.supplyWatts;
+        }
+        // Totals cover every motor seen since boot, not only this cycle's.
+        for (MotorState state : states.values()) {
+            consumed += state.consumedJoules;
+            regenerated += state.regeneratedJoules;
+            loss += state.windingLossJoules;
         }
         cached = new PowerSnapshot(measuredVolts, openCircuitVolts, batteryOhms, policy.raw().floorVolts(),
-                predictedVolts, budgetAmps, demandAmps, shedding, List.of(motors));
+                predictedVolts, budgetAmps, demandAmps, shedding, List.of(motors), watts, consumed, regenerated, loss);
         snapshot = cached;
         return cached;
     }
@@ -266,6 +280,7 @@ final class PowerRuntime {
         for (MotorState state : active) {
             ThermalModel model = state.device.thermalModel();
             if (model != null && steppedThermals.add(model)) state.thermalStep(model, dt);
+            state.accumulateEnergy(bus, dt, cycleId);
         }
     }
 
@@ -748,6 +763,33 @@ final class PowerRuntime {
         boolean softwareSupplyLimit;
         double temperatureCelsius = Double.NaN;
         String status = "Declared";
+        /** Electrical power from the battery in the latest cycle, negative while regenerating. */
+        double supplyWatts = Double.NaN;
+        double consumedJoules;
+        double regeneratedJoules;
+        double windingLossJoules;
+        private long energyCycle = Long.MIN_VALUE;
+
+        /**
+         * Integrates the measured electrical power and the winding's I squared R heat over one cycle. Energy drawn
+         * and returned are kept apart: regeneration is not free energy, and a motor that brakes hard to then spin
+         * up again pays twice in winding heat even when its net energy looks small.
+         */
+        void accumulateEnergy(double bus, double dt, long cycle) {
+            if (energyCycle == cycle) return;
+            energyCycle = cycle;
+            double volts = Double.isFinite(bus) && bus > 0.0 ? bus : conversionBusVolts;
+            supplyWatts = Double.isFinite(supplyAmps) && volts > 0.0 ? volts * supplyAmps : Double.NaN;
+            if (!(dt > 0.0) || !Double.isFinite(dt)) return;
+            if (Double.isFinite(supplyWatts)) {
+                double joules = supplyWatts * dt;
+                if (joules >= 0.0) consumedJoules += joules;
+                else regeneratedJoules -= joules;
+            }
+            if (Double.isFinite(measuredWindingAmps) && Double.isFinite(resistanceOhms)) {
+                windingLossJoules += measuredWindingAmps * measuredWindingAmps * resistanceOhms * dt;
+            }
+        }
 
         double profileSustainedAmps() {
             var profile = device.power();
