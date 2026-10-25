@@ -153,7 +153,10 @@ public final class SimMotorHandle implements MotorHandle {
         percentOutput = outputDirection() * clamp(percent, -1.0, 1.0);
         commandKind = CommandKind.PERCENT;
         commandValue = percentOutput;
-        velocityRotationsPerSecond = locked ? 0.0 : percentOutput;
+        // Sensors read like a SPARK's or Talon's: an inverted motor reports its built-in encoder inverted too, so
+        // the fallback shaft moves in the commanded (controller) direction. Raw shaft signs made position loops
+        // on inverted motors run away in simulation only.
+        velocityRotationsPerSecond = locked ? 0.0 : outputDirection() * percentOutput;
     }
 
     @Override
@@ -163,13 +166,16 @@ public final class SimMotorHandle implements MotorHandle {
         percentOutput = clamp(safeVolts / 12.0, -1.0, 1.0);
         commandKind = CommandKind.VOLTAGE;
         commandValue = safeVolts;
-        velocityRotationsPerSecond = locked ? 0.0 : percentOutput;
+        // Sensors read like a SPARK's or Talon's: an inverted motor reports its built-in encoder inverted too, so
+        // the fallback shaft moves in the commanded (controller) direction. Raw shaft signs made position loops
+        // on inverted motors run away in simulation only.
+        velocityRotationsPerSecond = locked ? 0.0 : outputDirection() * percentOutput;
     }
 
     @Override
     public double voltageCommandScale() {
-        // Simulated sensors retain shaft signs; unlike phased controller feedback, they are not inverted.
-        return outputDirection();
+        // Sensors are phased with the inversion, like a SPARK or Talon, so commands share their frame.
+        return 1.0;
     }
 
     @Override

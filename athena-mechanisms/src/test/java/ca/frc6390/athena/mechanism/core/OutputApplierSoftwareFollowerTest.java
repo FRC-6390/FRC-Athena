@@ -310,20 +310,36 @@ class OutputApplierSoftwareFollowerTest {
     }
 
     @Test
-    void simulatedHardwareInversionUsesItsRawShaftFrame() {
+    void simulatedHardwareInversionIsPhasedLikeAController() {
         SimulationSession simulation = SimulationSession.create();
         MotorDevice device = MotorDevice.of(MotorKinds.FALCON_500, 31).inverted();
+        // Simulated sensor state reads as the controller reports it (phased with the inversion): -50 rps.
         var motor = simulation.motor(device).state(0.0, -50.0);
         try (HardwareGraph graph = simulation.hardwareGraph()) {
+            assertEquals(-50.0, motor.integratedVelocityRotationsPerSecond(), 1e-12);
             Output output = new LimitedVoltage(12.0, 40.0);
             OutputApplier.using(graph).apply(new ResolvedOutput(OutputRequest.of(device, output), output));
             var constants = MotorConstants.forKind(MotorKinds.FALCON_500).orElseThrow();
             double backEmf = -50.0 * 2.0 * Math.PI / constants.raw().speedConstantRadPerSecPerVolt();
-            assertEquals(-1.0, motor.voltageCommandScale());
-            assertEquals(-40.0, (motor.appliedVoltage() - backEmf) / constants.resistance().in(Units.Ohms), 1e-8);
-            assertTrue(motor.appliedVoltage() < 0.0);
+            assertEquals(1.0, motor.voltageCommandScale());
+            // appliedVoltage is the shaft's; the controller-frame voltage is its negative.
+            assertEquals(40.0, (-motor.appliedVoltage() - backEmf) / constants.resistance().in(Units.Ohms), 1e-8);
+            // The commanded current is positive (controller frame); the inverted shaft sees the opposite voltage.
+            assertTrue(-motor.appliedVoltage() > backEmf);
             assertTrue(device.isInverted());
         }
+    }
+
+    @Test
+    void simulatedPositionLoopOnAnInvertedMotorMovesTowardItsTarget() {
+        SimulationSession simulation = SimulationSession.create();
+        MotorDevice device = MotorDevice.of(MotorKinds.NEO, 40).inverted();
+        var motor = simulation.motor(device);
+        // A positive command must make the reported position grow, as on a real inverted SPARK.
+        motor.setVoltage(6.0);
+        motor.step(0.1);
+        assertTrue(motor.integratedPositionRotations() > 0.0, "position " + motor.integratedPositionRotations());
+        assertTrue(motor.appliedVoltage() < 0.0, "the shaft itself turns the other way");
     }
 
     @Test

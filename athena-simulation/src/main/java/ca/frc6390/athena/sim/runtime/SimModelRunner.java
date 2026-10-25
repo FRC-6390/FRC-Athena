@@ -74,13 +74,17 @@ final class SimModelRunner implements SimPhysicsEngine {
         integrate(state, drives, motorPerMechanism, inertia, simulation.range(), dtSeconds);
 
         for (MotorDevice motor : simulation.motors()) {
+            // Like a SPARK or Talon, an inverted motor reports its built-in sensor inverted.
+            double frame = motor.isInverted() ? -1.0 : 1.0;
             session.motor(motor).state(
-                    state.position * motorPerMechanism,
-                    state.velocity * motorPerMechanism);
+                    frame * state.position * motorPerMechanism,
+                    frame * state.velocity * motorPerMechanism);
         }
         for (EncoderDevice encoderDevice : linkedEncoders) {
             // Motor encoders count motor rotations; declared mechanism encoders count mechanism rotations.
-            double scale = motorSide(encoderDevice, simulation) ? motorPerMechanism : 1.0;
+            double scale = motorSide(encoderDevice, simulation)
+                    ? sensorFrame(encoderDevice, simulation) * motorPerMechanism
+                    : 1.0;
             session.encoder(encoderDevice)
                     .positionRotations(state.position * scale)
                     .absolutePositionRotations(state.position * scale)
@@ -142,7 +146,9 @@ final class SimModelRunner implements SimPhysicsEngine {
             double motorPerMechanism) {
         for (EncoderDevice encoderDevice : linkedEncoders) {
             SimEncoderHandle encoder = session.encoder(encoderDevice);
-            double scale = motorSide(encoderDevice, simulation) ? 1.0 / motorPerMechanism : 1.0;
+            double scale = motorSide(encoderDevice, simulation)
+                    ? sensorFrame(encoderDevice, simulation) / motorPerMechanism
+                    : 1.0;
             return new ModelState(
                     encoder.positionRotations() * scale,
                     encoder.velocityRotationsPerSecond() * scale);
@@ -156,7 +162,8 @@ final class SimModelRunner implements SimPhysicsEngine {
             Mode mode,
             double volts,
             double currentLimitAmps,
-            MotorCommand closedLoop) {
+            MotorCommand closedLoop,
+            double closedLoopFrame) {
 
         enum Mode {
             /** Voltage applied to the terminals. */
@@ -185,9 +192,12 @@ final class SimModelRunner implements SimPhysicsEngine {
                 return volts;
             }
             double nominal = DcMotorModel.NOMINAL_VOLTAGE;
+            // Closed-loop targets are in the controller's frame, phased with its inversion like the sensors; the
+            // motor state here is the shaft's.
+            double frame = closedLoopFrame;
             double output = switch (closedLoop.kind()) {
-                case POSITION -> (closedLoop.value() - motorRotations) * POSITION_VOLTS_PER_ROTATION;
-                case VELOCITY -> (closedLoop.value() - motorRps) * nominal
+                case POSITION -> frame * (closedLoop.value() - frame * motorRotations) * POSITION_VOLTS_PER_ROTATION;
+                case VELOCITY -> frame * (closedLoop.value() - frame * motorRps) * nominal
                         / (model.freeSpeedRadPerSecond() / TWO_PI);
                 default -> volts;
             };
@@ -202,16 +212,18 @@ final class SimModelRunner implements SimPhysicsEngine {
         int limit = runtime.runtimeConfiguration().statorCurrentLimitAmps();
         boolean brake = runtime.runtimeConfiguration().neutralMode() == MotorNeutralMode.BRAKE;
         if (command == null || isZeroOutput(command)) {
-            return new MotorDrive(model, brake ? MotorDrive.Mode.SHORT : MotorDrive.Mode.OPEN, 0.0, limit, null);
+            return new MotorDrive(model, brake ? MotorDrive.Mode.SHORT : MotorDrive.Mode.OPEN, 0.0, limit, null, 1.0);
         }
         return switch (command.kind()) {
             case PERCENT -> new MotorDrive(model, MotorDrive.Mode.DRIVE,
-                    clamp(command.value(), -1.0, 1.0) * DcMotorModel.NOMINAL_VOLTAGE, limit, null);
+                    clamp(command.value(), -1.0, 1.0) * DcMotorModel.NOMINAL_VOLTAGE, limit, null, 1.0);
             case VOLTAGE -> new MotorDrive(model, MotorDrive.Mode.DRIVE,
                     clamp(command.value(), -DcMotorModel.NOMINAL_VOLTAGE, DcMotorModel.NOMINAL_VOLTAGE),
-                    limit, null);
-            case POSITION, VELOCITY -> new MotorDrive(model, MotorDrive.Mode.DRIVE, 0.0, limit, command);
-            case NEUTRAL -> new MotorDrive(model, brake ? MotorDrive.Mode.SHORT : MotorDrive.Mode.OPEN, 0.0, limit, null);
+                    limit, null, 1.0);
+            case POSITION, VELOCITY -> new MotorDrive(model, MotorDrive.Mode.DRIVE, 0.0, limit, command,
+                    runtime != null && runtime.commandKind() != SimMotorHandle.CommandKind.NEUTRAL && motor.isInverted()
+                            ? -1.0 : 1.0);
+            case NEUTRAL -> new MotorDrive(model, brake ? MotorDrive.Mode.SHORT : MotorDrive.Mode.OPEN, 0.0, limit, null, 1.0);
         };
     }
 
@@ -281,6 +293,14 @@ final class SimModelRunner implements SimPhysicsEngine {
     }
 
     /** Whether an encoder is the integrated encoder of one of the model's motors (counts motor rotations). */
+    /** -1 when the encoder is the built-in sensor of an inverted motor, which reports it inverted. */
+    private static double sensorFrame(EncoderDevice encoder, SimModel simulation) {
+        for (MotorDevice motor : simulation.motors()) {
+            if (encoder.source().equals(motor.encoder().source())) return motor.isInverted() ? -1.0 : 1.0;
+        }
+        return 1.0;
+    }
+
     private static boolean motorSide(EncoderDevice encoder, SimModel simulation) {
         for (MotorDevice motor : simulation.motors()) {
             if (encoder.source().equals(motor.encoder().source())) {

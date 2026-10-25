@@ -109,17 +109,24 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         int count = 0;
         List<MotorDevice> motors = model.motors();
         for (int index = 0; index < motors.size(); index++) {
-            MotorCommand command = command(motors.get(index), session);
+            MotorDevice motor = motors.get(index);
+            MotorCommand command = command(motor, session);
             if (command == null) continue;
             if (command.kind() == SimMotorHandle.CommandKind.VELOCITY && Double.isNaN(velocity)) {
                 velocity = averageVelocity(model, session);
             }
+            // Percent and voltage commands are already applied to the shaft. Position and velocity targets are in
+            // the controller's frame, phased with its inversion like the sensors, so compare them there and turn
+            // the result onto the shaft. A follower without its own command keeps its leader's handling.
+            boolean own = session.motor(motor).commandKind() != SimMotorHandle.CommandKind.NEUTRAL
+                    || motor.follower() == null;
+            double frame = own && motor.isInverted() ? -1.0 : 1.0;
             volts += switch (command.kind()) {
                 case NEUTRAL -> 0.0;
                 case PERCENT -> command.value() * 12.0;
                 case VOLTAGE -> command.value();
-                case POSITION -> (command.value() - position) * 12.0;
-                case VELOCITY -> (command.value() - velocity) * 6.0;
+                case POSITION -> frame * (command.value() - frame * position) * 12.0;
+                case VELOCITY -> frame * (command.value() - frame * velocity) * 6.0;
             };
             count++;
         }
@@ -151,7 +158,8 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         double sum = 0.0;
         int count = 0;
         for (MotorDevice motor : model.motors()) {
-            sum += session.motor(motor).integratedVelocityRotationsPerSecond();
+            // Sensors are phased with the inversion; the plant runs on the shaft.
+            sum += (motor.isInverted() ? -1.0 : 1.0) * session.motor(motor).integratedVelocityRotationsPerSecond();
             count++;
         }
         return count == 0 ? 0.0 : sum / count;
@@ -220,6 +228,9 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
         private final List<MotorDevice> motors;
         private final List<EncoderDevice> encoders;
         private final boolean[] integratedEncoders;
+        /** Sensor frame of each motor (-1 inverted) and of each integrated encoder (its motor's). */
+        private final double[] motorFrames;
+        private final double[] encoderFrames;
         private final List<SimLimit> limits;
         private final double gearing;
 
@@ -229,8 +240,17 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             integratedEncoders = new boolean[encoders.size()];
             Set<EncoderDevice> integrated = new LinkedHashSet<>();
             for (MotorDevice motor : motors) integrated.add(motor.encoder());
+            motorFrames = new double[motors.size()];
+            for (int index = 0; index < motors.size(); index++) {
+                motorFrames[index] = motors.get(index).isInverted() ? -1.0 : 1.0;
+            }
+            encoderFrames = new double[encoders.size()];
             for (int index = 0; index < encoders.size(); index++) {
                 integratedEncoders[index] = integrated.contains(encoders.get(index));
+                encoderFrames[index] = 1.0;
+                for (int motor = 0; motor < motors.size(); motor++) {
+                    if (motors.get(motor).encoder().equals(encoders.get(index))) encoderFrames[index] = motorFrames[motor];
+                }
             }
             limits = limits(model);
             gearing = gearing(model);
@@ -240,15 +260,17 @@ public final class WpilibSimPhysicsEngine implements SimPhysicsEngine {
             double motorPosition = position * gearing;
             double motorVelocity = velocity * gearing;
             for (int index = 0; index < motors.size(); index++) {
-                session.motor(motors.get(index)).state(motorPosition, motorVelocity);
+                // Like a SPARK or Talon, an inverted motor reports its built-in sensor inverted.
+                session.motor(motors.get(index)).state(
+                        motorFrames[index] * motorPosition, motorFrames[index] * motorVelocity);
             }
             for (int index = 0; index < encoders.size(); index++) {
                 boolean integrated = integratedEncoders[index];
                 SimEncoderHandle encoder = session.encoder(encoders.get(index));
-                double encoderPosition = integrated ? motorPosition : position;
+                double encoderPosition = integrated ? encoderFrames[index] * motorPosition : position;
                 encoder.positionRotations(encoderPosition)
                         .absolutePositionRotations(encoderPosition)
-                        .velocityRotationsPerSecond(integrated ? motorVelocity : velocity);
+                        .velocityRotationsPerSecond(integrated ? encoderFrames[index] * motorVelocity : velocity);
             }
             for (int index = 0; index < limits.size(); index++) {
                 SimLimit limit = limits.get(index);
